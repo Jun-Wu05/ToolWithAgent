@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Optional
 
 # 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # 加载.env文件
 from dotenv import load_dotenv
