@@ -59,15 +59,32 @@ def init_session_state():
         st.session_state.messages = st.session_state.get("messages", [])
 
 
-def process_agent_request(user_input: str, task_description: str = ""):
+def process_agent_request(user_input: str, task_description: str = "", timeout: int = 120):
     """
-    处理Agent请求（带日志）
+    处理Agent请求（带超时控制和详细日志）
+    
+    Args:
+        user_input: 用户输入
+        task_description: 任务描述
+        timeout: 超时时间（秒）
     
     Returns:
         tuple: (success: bool, response: str or error_message)
     """
+    import signal
+    import threading
+    
     start_time = datetime.now()
     logger.info(f"📥 收到请求: {user_input[:100]}...")
+    
+    # 超时处理类
+    class TimeoutException(Exception):
+        pass
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutException(f"请求超时（{timeout}秒）")
+    
+    result = {"response": None, "error": None, "success": False}
     
     try:
         # 组合输入
@@ -75,31 +92,65 @@ def process_agent_request(user_input: str, task_description: str = ""):
         if task_description:
             full_input = f"{user_input}\n\n任务：{task_description}"
         
-        logger.info(f"📝 完整输入: {full_input[:200]}...")
+        logger.info(f"📝 完整输入长度: {len(full_input)} 字符")
         
         # 调用Agent
         agent = st.session_state.agent
         logger.info("🤖 Agent开始处理...")
+        logger.info(f"⏱️  超时设置: {timeout}秒")
         
-        response = agent.run(full_input)
+        # 使用线程执行，避免阻塞
+        def run_agent():
+            try:
+                response = agent.run(full_input)
+                
+                # 提取响应内容
+                if hasattr(response, 'content'):
+                    result["response"] = response.content
+                else:
+                    result["response"] = str(response)
+                result["success"] = True
+                logger.info(f"✅ Agent处理成功")
+                
+            except Exception as e:
+                result["error"] = str(e)
+                logger.error(f"❌ Agent执行错误: {str(e)}")
+                import traceback
+                logger.error(f"堆栈: {traceback.format_exc()}")
         
-        # 提取响应内容
-        if hasattr(response, 'content'):
-            response_text = response.content
-        else:
-            response_text = str(response)
+        # 启动线程
+        thread = threading.Thread(target=run_agent)
+        thread.daemon = True
+        thread.start()
+        
+        # 等待线程完成或超时
+        thread.join(timeout=timeout)
         
         elapsed = (datetime.now() - start_time).total_seconds()
-        logger.info(f"✅ Agent处理完成，耗时: {elapsed:.2f}秒")
-        logger.debug(f"📤 响应内容: {response_text[:500]}...")
         
-        return True, response_text
+        if thread.is_alive():
+            # 线程还在运行，表示超时
+            logger.error(f"⏰ 请求超时（{elapsed:.2f}秒）")
+            return False, f"请求超时（{timeout}秒），可能是API响应慢或网络问题"
+        
+        if result["success"]:
+            logger.info(f"⏱️  处理完成，耗时: {elapsed:.2f}秒")
+            logger.debug(f"📤 响应预览: {result['response'][:200] if result['response'] else 'None'}...")
+            return True, result["response"]
+        else:
+            logger.error(f"❌ 处理失败: {result['error']}")
+            return False, result["error"] or "未知错误"
+        
+    except TimeoutException as e:
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.error(f"⏰ 超时异常: {str(e)}")
+        return False, str(e)
         
     except Exception as e:
         elapsed = (datetime.now() - start_time).total_seconds()
-        logger.error(f"❌ Agent处理失败 ({elapsed:.2f}秒): {str(e)}")
+        logger.error(f"❌ 处理异常 ({elapsed:.2f}秒): {str(e)}")
         import traceback
-        logger.error(f"详细错误: {traceback.format_exc()}")
+        logger.error(f"详细堆栈: {traceback.format_exc()}")
         return False, str(e)
 
 
