@@ -16,6 +16,10 @@ import sys
 import json
 import base64
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 自动加载 .env 文件
+load_dotenv()
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -451,12 +455,10 @@ def main():
     # 检查API Key
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     if not api_key:
-        print("⚠️ 警告：未设置 SILICONFLOW_API_KEY 环境变量")
-        print("请在 .env 文件或环境变量中设置 API Key")
+        print("⚠️ 警告：未找到 SILICONFLOW_API_KEY")
+        print("请确保 .env 文件中已设置 SILICONFLOW_API_KEY")
     
     # 创建并启动应用
-    demo = create_gradio_app()
-    
     print("\n🚀 启动数据映射智能助手...")
     print("📍 访问地址: http://localhost:7860")
     print("🔑 按 Ctrl+C 停止服务\n")
