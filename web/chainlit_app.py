@@ -25,7 +25,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import chainlit as cl
-from chainlit.types import Message
 
 # 初始化日志
 from src.logger import get_logger
