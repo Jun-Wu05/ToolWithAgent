@@ -2,7 +2,7 @@
 Agent主入口
 
 基于Agno的智能Agent实现
-整合会话管理、历史记录、多模型策略
+整合会话管理、历史记录、多模型策略、业务工具
 """
 
 import os
@@ -14,6 +14,12 @@ from agno.models.siliconflow import Siliconflow
 
 from agent.core.model_config import ModelConfig
 from agent.core.prompts import load_system_prompt
+
+# 导入业务工具
+from agent.tools.base64_tool import base64_decode_tool, base64_encode_tool
+from agent.tools.standard_mapper import field_mapping_tool, generate_mapping_table_tool
+from agent.tools.threat_type_tool import threat_type_tool, apply_threat_mapping_tool
+from agent.tools.enum_field_tool import enum_field_tool, apply_enum_mapping_tool
 
 
 def create_agent(
@@ -32,6 +38,7 @@ def create_agent(
     - 任务规划
     - 工具调用
     - 状态管理
+    - 业务工具整合
     
     Args:
         user_id: 用户ID，用于区分不同用户
@@ -54,7 +61,7 @@ def create_agent(
     # 加载系统提示词
     instructions = load_system_prompt()
     
-    # 创建Agent
+    # 创建Agent，配置所有业务工具
     agent = Agent(
         # 模型配置
         model=Siliconflow(
@@ -82,8 +89,24 @@ def create_agent(
         markdown=True,
         debug_mode=debug_mode,
         
-        # 工具列表（稍后填充）
-        tools=[],
+        # 业务工具 ⭐
+        tools=[
+            # Base64工具
+            base64_decode_tool,
+            base64_encode_tool,
+            
+            # 字段映射工具
+            field_mapping_tool,
+            generate_mapping_table_tool,
+            
+            # 威胁类型工具
+            threat_type_tool,
+            apply_threat_mapping_tool,
+            
+            # 枚举字段工具
+            enum_field_tool,
+            apply_enum_mapping_tool,
+        ],
     )
     
     return agent

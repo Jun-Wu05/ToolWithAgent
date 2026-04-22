@@ -1,15 +1,17 @@
 """
 Base64 解码 + 字段提取工具
 
-复用 auto/phase1/index.py 的核心逻辑
+Agno Tool版本
 """
 import base64
 import json
 import re
-from typing import Any
+from typing import Any, Optional
+
+from agno.tools import tool
 
 
-def decode_base64_text(text: str) -> str:
+def _decode_base64_text(text: str) -> str:
     """解码单个 Base64 文本内容"""
     cleaned = "".join(text.split())
     if not cleaned:
@@ -23,7 +25,7 @@ def decode_base64_text(text: str) -> str:
     return decoded_bytes.decode("utf-8", errors="replace")
 
 
-def extract_normalize_indexes(text: str) -> list[Any]:
+def _extract_normalize_indexes(text: str) -> list[Any]:
     """从解码后的文本中提取 normalize 下所有的 index 值"""
     indexes: list[Any] = []
 
@@ -68,14 +70,12 @@ def _extract_indexes_from_obj(obj: Any) -> list[Any]:
     return indexes
 
 
-def extract_original_log_result(text: str) -> Any:
-    """
-    找到整个对象中 index == "original_log" 的项，直接返回它的 result 数组
-    """
+def _extract_original_log_result(text: str) -> Any:
+    """找到整个对象中 index == "original_log" 的项，直接返回它的 result 数组"""
     try:
         payload = json.loads(text)
         return _find_original_log_result(payload)
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -98,33 +98,33 @@ def _find_original_log_result(obj: Any) -> Any:
     return None
 
 
-def base64_decode_and_extract(b64_text: str) -> dict:
+@tool(name="base64_decode", description="解码Base64文本并提取字段信息")
+def base64_decode_tool(b64_text: str) -> str:
     """
-    Agno Tool: 解码 Base64 文本并提取字段信息
+    解码 Base64 文本并提取字段信息
+    
+    当用户提供 Base64 编码的数据时使用此工具：
+    1. 接收 Base64 文本
+    2. 解码为原始文本
+    3. 提取 normalize indexes
+    4. 提取 original_log result
+    5. 返回解码结果和提取的字段
     
     Args:
         b64_text: Base64 编码的文本内容
-        
-    Returns:
-        dict: 包含解码结果和提取字段的字典
-            - decoded_json: 解码后的 JSON 对象
-            - decoded_text: 解码后的文本
-            - fields: 提取的 normalize indexes 数组
-            - original_log: original_log 对应的 result
-            - status: "success" 或 "error"
-            - error_message: 如果失败，错误信息
-    """
-    from agno.tools import tool
     
+    Returns:
+        解码结果，包含字段信息和JSON对象
+    """
     try:
         # 清理空白字符
         cleaned = "".join(b64_text.split())
         
         if not cleaned:
-            return {
+            return json.dumps({
                 "status": "error",
                 "error_message": "输入为空"
-            }
+            }, ensure_ascii=False)
         
         # 补齐 padding
         missing_padding = len(cleaned) % 4
@@ -136,8 +136,8 @@ def base64_decode_and_extract(b64_text: str) -> dict:
         decoded_text = decoded_bytes.decode("utf-8", errors="replace")
         
         # 提取字段
-        fields = extract_normalize_indexes(decoded_text)
-        original_log = extract_original_log_result(decoded_text)
+        fields = _extract_normalize_indexes(decoded_text)
+        original_log = _extract_original_log_result(decoded_text)
         
         # 尝试解析 JSON
         try:
@@ -145,22 +145,58 @@ def base64_decode_and_extract(b64_text: str) -> dict:
         except json.JSONDecodeError:
             decoded_json = {"raw_text": decoded_text[:1000]}
         
-        return {
+        result = {
             "status": "success",
             "decoded_json": decoded_json,
-            "decoded_text": decoded_text,
+            "decoded_text": decoded_text[:500] + "..." if len(decoded_text) > 500 else decoded_text,
             "fields": fields,
             "original_log": original_log,
-            "field_count": len(fields) if fields else 0
+            "field_count": len(fields) if fields else 0,
+            "message": f"成功解码，提取到 {len(fields) if fields else 0} 个字段"
         }
         
-    except binascii.Error as e:
-        return {
+        return json.dumps(result, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        return json.dumps({
             "status": "error",
             "error_message": f"Base64 解码失败: {str(e)}"
-        }
+        }, ensure_ascii=False)
+
+
+@tool(name="base64_encode", description="将JSON对象编码为Base64")
+def base64_encode_tool(json_data: Any) -> str:
+    """
+    将 JSON 对象编码为 Base64
+    
+    在处理完成后，使用此工具将结果编码为 Base64：
+    1. 接收 JSON 对象或文本
+    2. 编码为 Base64
+    3. 返回 Base64 文本
+    
+    Args:
+        json_data: JSON 对象或文本
+    
+    Returns:
+        Base64 编码的文本
+    """
+    try:
+        # 如果是字符串，先尝试解析为 JSON
+        if isinstance(json_data, str):
+            try:
+                json_obj = json.loads(json_data)
+            except json.JSONDecodeError:
+                json_obj = json_data
+        else:
+            json_obj = json_data
+        
+        # 序列化为 JSON 字符串
+        json_text = json.dumps(json_obj, ensure_ascii=False)
+        
+        # 编码为 Base64
+        encoded = base64.b64encode(json_text.encode('utf-8')).decode('utf-8')
+        
+        return encoded
+        
     except Exception as e:
-        return {
-            "status": "error",
-            "error_message": f"处理失败: {str(e)}"
-        }
+        return f"编码失败: {str(e)}"
