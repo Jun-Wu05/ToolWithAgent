@@ -358,10 +358,6 @@ def create_gradio_app():
     
     with gr.Blocks(
         title="数据映射智能助手",
-        theme=gr.themes.Soft(),
-        css="""
-        .container { max-width: 1200px; margin: auto; }
-        """
     ) as demo:
         gr.Markdown("""
         # 💬 数据映射智能助手
@@ -382,7 +378,6 @@ def create_gradio_app():
                 chatbot = gr.Chatbot(
                     label="对话历史",
                     height=500,
-                    show_copy_button=True,
                 )
                 
                 with gr.Row():
