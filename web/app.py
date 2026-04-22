@@ -61,7 +61,7 @@ def init_session_state():
 
 def process_agent_request(user_input: str, task_description: str = "", timeout: int = 120):
     """
-    处理Agent请求（带超时控制和详细日志）
+    处理Agent请求（带超时控制）
     
     Args:
         user_input: 用户输入
@@ -71,18 +71,10 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
     Returns:
         tuple: (success: bool, response: str or error_message)
     """
-    import signal
     import threading
     
     start_time = datetime.now()
     logger.info(f"📥 收到请求: {user_input[:100]}...")
-    
-    # 超时处理类
-    class TimeoutException(Exception):
-        pass
-    
-    def timeout_handler(signum, frame):
-        raise TimeoutException(f"请求超时（{timeout}秒）")
     
     result = {"response": None, "error": None, "success": False}
     
@@ -131,20 +123,14 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
         if thread.is_alive():
             # 线程还在运行，表示超时
             logger.error(f"⏰ 请求超时（{elapsed:.2f}秒）")
-            return False, f"请求超时（{timeout}秒），可能是API响应慢或网络问题"
+            return False, f"请求超时（{timeout}秒），可能是API响应慢"
         
         if result["success"]:
-            logger.info(f"⏱️  处理完成，耗时: {elapsed:.2f}秒")
-            logger.debug(f"📤 响应预览: {result['response'][:200] if result['response'] else 'None'}...")
+            logger.info(f"✅ 处理完成，耗时: {elapsed:.2f}秒")
             return True, result["response"]
         else:
             logger.error(f"❌ 处理失败: {result['error']}")
             return False, result["error"] or "未知错误"
-        
-    except TimeoutException as e:
-        elapsed = (datetime.now() - start_time).total_seconds()
-        logger.error(f"⏰ 超时异常: {str(e)}")
-        return False, str(e)
         
     except Exception as e:
         elapsed = (datetime.now() - start_time).total_seconds()
