@@ -7,13 +7,21 @@ Agent主入口
 
 import os
 from typing import Optional
+import logging
 
 from agno.agent import Agent
-from agno.db.sqlite import SqliteDb
 from agno.models.siliconflow import Siliconflow
 
 from agent.core.model_config import ModelConfig
 from agent.core.prompts import load_system_prompt
+
+# 初始化日志
+logger = logging.getLogger("agent")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(message)s'))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 # 导入业务工具
 from agent.tools.base64_tool import base64_decode_tool, base64_encode_tool
@@ -32,14 +40,13 @@ def create_agent(
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
     enable_memory: bool = False,
-    debug_mode: bool = False
+    debug_mode: bool = False,
+    use_session_db: bool = False  # 新增参数：是否使用SqliteDb会话管理
 ) -> Agent:
     """
     创建主Agent实例
     
     这是项目的核心Agent，具备以下能力：
-    - 会话持久化（SqliteDb）
-    - 历史记录（add_history_to_context）
     - 意图理解
     - 任务规划
     - 工具调用
@@ -51,52 +58,44 @@ def create_agent(
         session_id: 会话ID，不提供则自动创建
         enable_memory: 是否启用记忆系统（后续功能）
         debug_mode: 是否启用调试模式
+        use_session_db: 是否使用SqliteDb持久化（Web应用建议关闭）
     
     Returns:
         Agent实例
     """
-    # 数据库配置
-    db_path = os.path.join(os.getcwd(), "tmp", "agents.db")
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    logger.info("创建Agent实例...")
     
     # 获取API Key
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     if not api_key:
         raise ValueError("请设置环境变量 SILICONFLOW_API_KEY")
+    logger.info(f"API Key已加载: {api_key[:10]}...")
     
     # 加载系统提示词
     instructions = load_system_prompt()
+    logger.info("系统提示词已加载")
     
-    # 创建Agent，配置所有业务工具
-    agent = Agent(
+    # Agent基础配置
+    agent_config = {
         # 模型配置
-        model=Siliconflow(
+        "model": Siliconflow(
             id=ModelConfig.MAIN_MODEL,
             api_key=api_key
         ),
         
         # 基本信息
-        name="数据映射助手",
-        description="安全设备配置规则字段映射智能助手",
-        
-        # 会话管理 ⭐
-        db=SqliteDb(db_file=db_path),
-        user_id=user_id,
-        session_id=session_id,
-        
-        # 历史记录 ⭐
-        add_history_to_context=True,
-        num_history_runs=5,
+        "name": "数据映射助手",
+        "description": "安全设备配置规则字段映射智能助手",
         
         # 指令
-        instructions=instructions,
+        "instructions": instructions,
         
         # 输出格式
-        markdown=True,
-        debug_mode=debug_mode,
+        "markdown": True,
+        "debug_mode": debug_mode,
         
         # 业务工具 ⭐
-        tools=[
+        "tools": [
             # Base64工具
             base64_decode_tool,
             base64_encode_tool,
@@ -119,7 +118,25 @@ def create_agent(
             confirm_output,
             request_modification,
         ],
-    )
+    }
+    
+    # 可选：会话持久化（Web应用建议关闭，避免数据库锁）
+    if use_session_db:
+        from agno.db.sqlite import SqliteDb
+        db_path = os.path.join(os.getcwd(), "tmp", "agents.db")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        agent_config["db"] = SqliteDb(db_file=db_path)
+        agent_config["user_id"] = user_id
+        agent_config["session_id"] = session_id
+        agent_config["add_history_to_context"] = True
+        agent_config["num_history_runs"] = 5
+        logger.info(f"启用SqliteDb会话管理: {db_path}")
+    else:
+        logger.info("不使用SqliteDb会话管理（推荐用于Web应用）")
+    
+    # 创建Agent
+    agent = Agent(**agent_config)
+    logger.info(f"Agent创建成功: {agent.name}")
     
     return agent
 
