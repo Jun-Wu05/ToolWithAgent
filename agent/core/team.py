@@ -18,6 +18,18 @@ from agno.team.team import Team
 from agno.team.mode import TeamMode
 
 from agent.core.model_config import ModelConfig
+from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt
+
+
+# ============= 加载原始提示词 =============
+
+def _load_prompts() -> dict:
+    """加载所有提示词"""
+    return {
+        "field": load_field_weak_prompt(),
+        "threat": load_threat_type_prompt(),
+        "enum": load_enum_field_prompt(),
+    }
 
 
 # ============= 路由指令 =============
@@ -40,80 +52,47 @@ ROUTER_INSTRUCTIONS = """你是任务路由专家。
 
 # ============= FieldMappingAgent =============
 
-FIELD_MAPPING_INSTRUCTIONS = """你是字段映射专家。
+def _get_field_mapping_instructions() -> str:
+    """获取字段映射Agent指令"""
+    prompts = _load_prompts()
+    return f"""你是网络安全日志标准化专家。
 
-你的职责是将原始日志字段映射到标准字段表。
-
-输入数据：
-- decoded_json: 解码后的 JSON 对象
-- fields: 提取的字段列表
-
-处理流程：
-1. 分析原始字段名
-2. 根据标准字段表（config/对象.xlsx）进行匹配
-3. 生成映射表（Markdown表格格式）
-
-输出格式：
-| 原始字段 | 标准字段 | 匹配度 | 说明 |
-|---------|---------|-------|------|
-| xxx | xxx | 高/中/低 | - |
+{prompts['field']}
 
 注意：
-- 匹配度根据字段名相似度判断
-- 只输出映射表，不要其他解释
+- 必须严格按照上述规则输出
+- 只输出Markdown表格，不输出其他内容
 - 标准字段参考 config/对象.xlsx
 """
 
 
 # ============= ThreatAgent =============
 
-THREAT_INSTRUCTIONS = """你是威胁类型专家。
+def _get_threat_instructions() -> str:
+    """获取威胁类型Agent指令"""
+    prompts = _load_prompts()
+    return f"""You are a threat alert to standard classification mapper.
 
-你的职责是识别和标准化日志中的威胁类型。
+{prompts['threat']}
 
-输入数据：
-- decoded_json: 解码后的 JSON 对象
-
-处理流程：
-1. 识别所有威胁相关字段
-2. 匹配标准威胁类型（参考 config/threat_type_config.json）
-3. 生成威胁映射表
-
-输出格式：
-| 原始字段 | 原始值 | 标准威胁类型 | 说明 |
-|---------|--------|-------------|------|
-| xxx | xxx | xxx | - |
-
-标准威胁类型：
-- 网络攻击类：SQL注入、XSS、CSRF、webshell等
-- 恶意软件类：病毒、木马、蠕虫、勒索等
-- 异常行为类：暴力破解、扫描探测、权限提升等
+注意：
+- 必须严格按照上述规则输出
+- 只输出Markdown表格，不输出其他内容
 """
 
 
 # ============= EnumAgent =============
 
-ENUM_INSTRUCTIONS = """你是枚举字段专家。
+def _get_enum_instructions() -> str:
+    """获取枚举Agent指令"""
+    prompts = _load_prompts()
+    return f"""你是网络安全设备配置规则枚举字段处理专家。
 
-你的职责是处理和标准化字段枚举值。
-
-输入数据：
-- decoded_json: 解码后的 JSON 对象
-- fields: 字段列表
-
-处理流程：
-1. 识别枚举类型字段
-2. 提取枚举值
-3. 生成枚举映射表
-
-输出格式：
-| 字段名 | 原始枚举值 | 标准枚举值 | 说明 |
-|--------|-----------|-----------|------|
-| xxx | xxx | xxx | - |
+{prompts['enum']}
 
 注意：
+- 必须严格按照上述规则执行
 - 枚举值必须精确匹配
-- 不确定时标记为"待确认"
 """
 
 
@@ -127,7 +106,7 @@ def create_field_mapping_agent() -> Agent:
         name="FieldMappingAgent",
         role="字段映射专家",
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
-        instructions=FIELD_MAPPING_INSTRUCTIONS,
+        instructions=_get_field_mapping_instructions(),
         markdown=True,
         debug_mode=False,
     )
@@ -141,7 +120,7 @@ def create_threat_agent() -> Agent:
         name="ThreatAgent",
         role="威胁类型专家",
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
-        instructions=THREAT_INSTRUCTIONS,
+        instructions=_get_threat_instructions(),
         markdown=True,
         debug_mode=False,
     )
@@ -155,7 +134,7 @@ def create_enum_agent() -> Agent:
         name="EnumAgent",
         role="枚举字段专家",
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
-        instructions=ENUM_INSTRUCTIONS,
+        instructions=_get_enum_instructions(),
         markdown=True,
         debug_mode=False,
     )
