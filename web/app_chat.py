@@ -262,26 +262,52 @@ def build_mapping_prompt() -> str:
     decoded_json = st.session_state.decoded_data
     fields = st.session_state.decoded_fields
     
-    fields_str = ", ".join(str(f) for f in fields) if fields else "无"
+    # 检查是否有有效数据
+    if not decoded_json and not fields:
+        return "错误：没有可用的解码数据。请先上传并解码Base64数据。"
     
-    prompt = f"""根据以下已解码的数据完成字段映射：
+    # 获取标准字段表
+    from agent.prompts import load_standard_fields
+    standard_fields = load_standard_fields()
+    
+    fields_str = ", ".join(str(f) for f in fields) if fields else "无"
+    json_content = json.dumps(decoded_json, ensure_ascii=False, indent=2)[:3000] if decoded_json else "无"
+    
+    prompt = f"""你是一个字段映射专家。请根据以下信息，生成字段映射表：
+
+## 任务
+将原始日志中的字段映射到标准字段表中的中文系统属性名称。
+
+## 输入数据
 
 **原始日志 JSON：**
 ```json
-{json.dumps(decoded_json, ensure_ascii=False, indent=2)[:3000]}
+{json_content}
 ```
 
-**提取的字段列表：**
+**提取的原始字段列表：**
 {fields_str}
 
-请严格按照标准字段表要求，输出标准字段映射表（Markdown表格格式）。
+## 标准字段表（只能使用以下中文名称）
+```
+{standard_fields}
+```
 
-输出格式：
-| 原始字段 | 标准字段 | 匹配度 | 说明 |
-|---------|---------|-------|------|
-| xxx | xxx | 高/中/低 | - |
+## 映射规则
+1. 只能使用标准字段表中的中文系统属性名称
+2. 禁止自造字段名、禁止翻译字段名
+3. 优先利用标准字段表中的"对象"列缩小匹配范围
 
-只输出映射表，不要其他解释。"""
+## 输出要求
+只输出以下格式的Markdown表格，不输出其他内容：
+
+| 原始字段名 | 系统属性名称 | 匹配状态/说明 |
+|-----------|-------------|--------------|
+| 原始字段1 | 标准字段1 | 匹配成功 |
+| 原始字段2 | 未匹配 | 未匹配 |
+| ... | ... | ... |
+
+请生成映射表："""
     
     return prompt
 
