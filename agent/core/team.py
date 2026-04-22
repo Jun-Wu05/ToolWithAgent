@@ -19,6 +19,7 @@ from agno.team.mode import TeamMode
 
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt
+from agent.prompts import load_standard_fields
 
 
 # ============= 加载原始提示词 =============
@@ -30,6 +31,11 @@ def _load_prompts() -> dict:
         "threat": load_threat_type_prompt(),
         "enum": load_enum_field_prompt(),
     }
+
+
+def _load_standard_fields_list() -> str:
+    """加载标准字段表"""
+    return load_standard_fields()
 
 
 # ============= 路由指令 =============
@@ -55,14 +61,21 @@ ROUTER_INSTRUCTIONS = """你是任务路由专家。
 def _get_field_mapping_instructions() -> str:
     """获取字段映射Agent指令"""
     prompts = _load_prompts()
+    standard_fields = _load_standard_fields_list()
+    
     return f"""你是网络安全日志标准化专家。
 
 {prompts['field']}
 
+## 标准字段表（必须严格使用以下中文名称）
+```
+{standard_fields}
+```
+
 注意：
 - 必须严格按照上述规则输出
 - 只输出Markdown表格，不输出其他内容
-- 标准字段参考 config/对象.xlsx
+- 只能使用标准字段表中的中文系统属性名称
 """
 
 
