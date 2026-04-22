@@ -29,3 +29,8 @@ Thumbs.db
 
 # 子项目目录（避免嵌套 git 仓库问题）
 ToolWithAgent/
+
+
+.github/
+.trae/
+.Ai_context/
