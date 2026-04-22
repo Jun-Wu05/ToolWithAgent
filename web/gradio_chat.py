@@ -459,6 +459,8 @@ def main():
         print("请确保 .env 文件中已设置 SILICONFLOW_API_KEY")
     
     # 创建并启动应用
+    demo = create_gradio_app()
+    
     print("\n🚀 启动数据映射智能助手...")
     print("📍 访问地址: http://localhost:7860")
     print("🔑 按 Ctrl+C 停止服务\n")
