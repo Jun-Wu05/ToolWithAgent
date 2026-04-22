@@ -59,23 +59,100 @@ def init_session_state():
         st.session_state.messages = st.session_state.get("messages", [])
 
 
+def is_base64(text: str) -> bool:
+    """检测文本是否是Base64编码"""
+    import re
+    # 清理空白
+    cleaned = "".join(text.split())
+    if not cleaned:
+        return False
+    # Base64字符集
+    if not re.match(r'^[A-Za-z0-9+/]*={0,2}$', cleaned):
+        return False
+    # 长度至少4个字符
+    if len(cleaned) < 4:
+        return False
+    return True
+
+
+def auto_decode_base64(b64_text: str) -> dict:
+    """
+    前端自动解码Base64
+    
+    Returns:
+        dict: {"success": bool, "data": str or error}
+    """
+    import base64
+    import json
+    
+    try:
+        # 清理空白
+        cleaned = "".join(b64_text.split())
+        
+        # 补齐padding
+        missing = len(cleaned) % 4
+        if missing:
+            cleaned += "=" * (4 - missing)
+        
+        # 解码
+        decoded_bytes = base64.b64decode(cleaned)
+        decoded_text = decoded_bytes.decode("utf-8", errors="replace")
+        
+        # 尝试解析JSON
+        try:
+            json_obj = json.loads(decoded_text)
+            return {
+                "success": True,
+                "is_json": True,
+                "data": json_obj,
+                "raw_text": decoded_text,
+                "message": f"✅ Base64解码成功，解析为JSON（共{len(json_obj)}个顶层字段）"
+            }
+        except json.JSONDecodeError:
+            return {
+                "success": True,
+                "is_json": False,
+                "data": decoded_text,
+                "raw_text": decoded_text,
+                "message": "✅ Base64解码成功（非JSON格式）"
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Base64解码失败: {str(e)}",
+            "data": None
+        }
+
+
 def process_agent_request(user_input: str, task_description: str = "", timeout: int = 120):
     """
     处理Agent请求（带超时控制）
-    
-    Args:
-        user_input: 用户输入
-        task_description: 任务描述
-        timeout: 超时时间（秒）
-    
-    Returns:
-        tuple: (success: bool, response: str or error_message)
+    如果输入是Base64，先尝试前端解码
     """
     import threading
     
     start_time = datetime.now()
     logger.info(f"📥 收到请求: {user_input[:100]}...")
     
+    # 1. 检测是否是Base64（如果是纯Base64数据，自动解码）
+    if is_base64(user_input) and not task_description:
+        logger.info("🔍 检测到Base64数据，尝试前端解码...")
+        decode_result = auto_decode_base64(user_input)
+        
+        if decode_result["success"]:
+            elapsed = (datetime.now() - start_time).total_seconds()
+            logger.info(f"✅ 前端解码成功，耗时: {elapsed:.3f}秒")
+            
+            # 保存解码结果到会话
+            st.session_state.decoded_data = decode_result["data"]
+            st.session_state.decoded_raw = decode_result["raw_text"]
+            
+            return True, decode_result["message"] + f"\n\n**解码结果：**\n```json\n{json.dumps(decode_result['data'], ensure_ascii=False, indent=2) if decode_result['is_json'] else decode_result['data']}\n```"
+        else:
+            logger.warning(f"⚠️ 前端解码失败: {decode_result['error']}，尝试Agent处理")
+    
+    # 2. 非Base64或解码失败，使用Agent处理
     result = {"response": None, "error": None, "success": False}
     
     try:
@@ -89,7 +166,6 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
         # 调用Agent
         agent = st.session_state.agent
         logger.info("🤖 Agent开始处理...")
-        logger.info(f"⏱️  超时设置: {timeout}秒")
         
         # 使用线程执行，避免阻塞
         def run_agent():
@@ -107,8 +183,6 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
             except Exception as e:
                 result["error"] = str(e)
                 logger.error(f"❌ Agent执行错误: {str(e)}")
-                import traceback
-                logger.error(f"堆栈: {traceback.format_exc()}")
         
         # 启动线程
         thread = threading.Thread(target=run_agent)
@@ -121,9 +195,8 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
         elapsed = (datetime.now() - start_time).total_seconds()
         
         if thread.is_alive():
-            # 线程还在运行，表示超时
             logger.error(f"⏰ 请求超时（{elapsed:.2f}秒）")
-            return False, f"请求超时（{timeout}秒），可能是API响应慢"
+            return False, f"请求超时（{timeout}秒）"
         
         if result["success"]:
             logger.info(f"✅ 处理完成，耗时: {elapsed:.2f}秒")
@@ -134,9 +207,7 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
         
     except Exception as e:
         elapsed = (datetime.now() - start_time).total_seconds()
-        logger.error(f"❌ 处理异常 ({elapsed:.2f}秒): {str(e)}")
-        import traceback
-        logger.error(f"详细堆栈: {traceback.format_exc()}")
+        logger.error(f"❌ 处理异常: {str(e)}")
         return False, str(e)
 
 
