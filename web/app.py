@@ -39,16 +39,16 @@ st.set_page_config(
 
 def init_session_state():
     """初始化会话状态"""
-    if "agent" not in st.session_state:
+    if "team_manager" not in st.session_state:
         try:
-            from agent.core.agent import create_agent
-            st.session_state.agent = create_agent(user_id="web_user")
+            from agent.core.team_web import get_team_manager
+            st.session_state.team_manager = get_team_manager()
             st.session_state.messages = []
             st.session_state.log_messages = []
-            logger.info("✅ Agent初始化成功")
-            st.success("✅ Agent初始化成功！")
+            logger.info("✅ Team初始化成功")
+            st.success("✅ Team初始化成功！\n- FieldMappingAgent\n- ThreatAgent\n- EnumAgent")
         except ValueError as e:
-            logger.error(f"❌ Agent初始化失败: {str(e)}")
+            logger.error(f"❌ Team初始化失败: {str(e)}")
             st.error(f"❌ {str(e)}")
             st.info("请设置环境变量 SILICONFLOW_API_KEY 或在.env文件中配置")
             st.stop()
@@ -128,11 +128,9 @@ def auto_decode_base64(b64_text: str) -> dict:
 
 def process_agent_request(user_input: str, task_description: str = "", timeout: int = 300):
     """
-    处理Agent请求（带超时控制）
+    处理Team请求（带超时控制）
     如果输入是Base64，使用simple_decode提取字段信息
     """
-    import threading
-    
     start_time = datetime.now()
     logger.info(f"📥 收到请求: {user_input[:100]}...")
     
@@ -172,9 +170,9 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
             if decode_result.get("original_log"):
                 response_text += f"\n**原始日志结果**: {len(decode_result['original_log'])} 条"
             
-            # 如果有任务描述，继续发给Agent处理
+            # 如果有任务描述，继续发给Team处理
             if task_description:
-                logger.info(f"📝 有任务描述，继续Agent处理...")
+                logger.info(f"📝 有任务描述，继续Team处理...")
                 # 构建提示词
                 prompt = f"""根据以下已解码的数据完成字段映射：
 
@@ -191,48 +189,26 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
 
 请严格按照标准字段表要求，输出标准字段映射表。"""
                 
-                # 调用Agent处理
-                agent = st.session_state.agent
-                logger.info("🤖 Agent开始处理字段映射...")
+                # 调用Team处理
+                team_manager = st.session_state.team_manager
+                logger.info("🤖 Team开始处理字段映射...")
                 
-                result = {"response": None, "error": None, "success": False}
-                
-                def run_agent():
-                    try:
-                        response = agent.run(prompt)
-                        if hasattr(response, 'content'):
-                            result["response"] = response.content
-                        else:
-                            result["response"] = str(response)
-                        result["success"] = True
-                        logger.info("✅ Agent处理成功")
-                    except Exception as e:
-                        result["error"] = str(e)
-                        logger.error(f"❌ Agent错误: {str(e)}")
-                
-                thread = threading.Thread(target=run_agent)
-                thread.daemon = True
-                thread.start()
-                thread.join(timeout=timeout)
+                team_result = team_manager.run_task(prompt, timeout)
                 
                 elapsed = (datetime.now() - start_time).total_seconds()
+                logger.info(f"⏱️ Team处理耗时: {elapsed:.3f}秒")
                 
-                if thread.is_alive():
-                    return False, f"请求超时（{timeout}秒）"
-                
-                if result["success"]:
-                    return True, response_text + f"\n\n---\n\n**Agent处理结果:**\n\n{result['response']}"
+                if team_result["success"]:
+                    return True, response_text + f"\n\n---\n\n**Team处理结果:**\n\n{team_result['response']}"
                 else:
-                    return True, response_text + f"\n\n---\n\n**⚠️ Agent处理失败:** {result['error']}"
+                    return True, response_text + f"\n\n---\n\n**⚠️ Team处理失败:** {team_result['error']}"
             
             return True, response_text
         else:
             logger.warning(f"⚠️ 解码失败: {decode_result.get('error_message', '未知错误')}")
             return False, f"解码失败: {decode_result.get('error_message', '未知错误')}"
     
-    # 2. 非Base64，使用Agent处理
-    result = {"response": None, "error": None, "success": False}
-    
+    # 2. 非Base64，使用Team处理
     try:
         full_input = user_input
         if task_description:
@@ -240,36 +216,18 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
         
         logger.info(f"📝 输入长度: {len(full_input)} 字符")
         
-        agent = st.session_state.agent
-        logger.info("🤖 Agent开始处理...")
+        team_manager = st.session_state.team_manager
+        logger.info("🤖 Team开始处理...")
         
-        def run_agent():
-            try:
-                response = agent.run(full_input)
-                if hasattr(response, 'content'):
-                    result["response"] = response.content
-                else:
-                    result["response"] = str(response)
-                result["success"] = True
-                logger.info("✅ Agent处理成功")
-            except Exception as e:
-                result["error"] = str(e)
-                logger.error(f"❌ Agent错误: {str(e)}")
-        
-        thread = threading.Thread(target=run_agent)
-        thread.daemon = True
-        thread.start()
-        thread.join(timeout=timeout)
+        team_result = team_manager.run_task(full_input, timeout)
         
         elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"⏱️ Team处理耗时: {elapsed:.3f}秒")
         
-        if thread.is_alive():
-            return False, f"请求超时（{timeout}秒）"
-        
-        if result["success"]:
-            return True, result["response"]
+        if team_result["success"]:
+            return True, team_result["response"]
         else:
-            return False, result["error"] or "未知错误"
+            return False, team_result["error"] or "未知错误"
         
     except Exception as e:
         logger.error(f"❌ 处理异常: {str(e)}")
@@ -442,20 +400,14 @@ def main():
     col3, col4, col5 = st.columns(3)
     
     with col3:
-        status = "就绪"
-        if st.session_state.agent.session_state:
-            status = st.session_state.agent.session_state.get("processing_status", "就绪")
-        st.metric("会话状态", status)
+        stats = st.session_state.team_manager.get_stats()
+        st.metric("请求次数", stats.get("request_count", 0))
     
     with col4:
         st.metric("对话轮次", len(st.session_state.messages) // 2)
     
     with col5:
-        if st.session_state.agent.session_state:
-            decoded = st.session_state.agent.session_state.get("decoded_data")
-            st.metric("解码数据", "有" if decoded else "无")
-        else:
-            st.metric("解码数据", "无")
+        st.metric("解码数据", "有" if st.session_state.get("decoded_data") else "无")
     
     # 调试信息
     with st.expander("🔍 调试信息"):

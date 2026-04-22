@@ -53,13 +53,29 @@ class ProcessingState:
 
 def init_session_state():
     """初始化会话状态"""
-    if "agent" not in st.session_state:
+    if "team_manager" not in st.session_state:
         try:
-            from agent.core.agent import create_agent
-            st.session_state.agent = create_agent(user_id="chat_user")
-            logger.info("✅ Agent初始化成功")
+            from agent.core.team_web import get_team_manager
+            st.session_state.team_manager = get_team_manager()
+            logger.info("✅ Team初始化成功")
+            # 初始化聊天状态
+            st.session_state.messages = []
+            # 欢迎消息
+            welcome_msg = """👋 你好！我是数据映射智能助手（Team模式）。
+
+我可以帮你处理以下任务：
+- **字段映射** - FieldMappingAgent 将原始字段映射到标准字段
+- **威胁类型标准化** - ThreatAgent 统一威胁类型格式
+- **枚举处理** - EnumAgent 处理字段枚举值
+
+请上传Base64数据或直接描述你的需求！"""
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": welcome_msg
+            })
+            logger.info("💬 初始化欢迎消息")
         except ValueError as e:
-            logger.error(f"❌ Agent初始化失败: {str(e)}")
+            logger.error(f"❌ Team初始化失败: {str(e)}")
             st.error(f"❌ {str(e)}")
             st.info("请设置环境变量 SILICONFLOW_API_KEY")
             st.stop()
@@ -67,25 +83,6 @@ def init_session_state():
             logger.error(f"❌ 未知错误: {str(e)}")
             st.error(f"❌ 初始化失败: {str(e)}")
             st.stop()
-    
-    # 初始化聊天状态
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-        # 欢迎消息
-        welcome_msg = """👋 你好！我是数据映射智能助手。
-
-我可以帮你处理以下任务：
-- **Base64解码** - 上传或输入Base64数据，我会自动解码
-- **字段映射** - 将原始字段映射到标准字段
-- **威胁类型标准化** - 统一威胁类型格式
-- **枚举处理** - 处理字段枚举值
-
-请上传Base64数据或直接描述你的需求！"""
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": welcome_msg
-        })
-        logger.info("💬 初始化欢迎消息")
     
     # 初始化处理状态
     if "processing_state" not in st.session_state:
@@ -424,54 +421,25 @@ def show_decoded_data() -> str:
 
 
 def call_agent(user_input: str, timeout: int = 300) -> str:
-    """调用Agent处理用户输入"""
-    import threading
-    from datetime import datetime
+    """调用Team处理用户输入"""
+    team_manager = st.session_state.team_manager
     
-    result = {"response": None, "error": None, "success": False}
+    logger.info("🤖 Team开始处理...")
     
-    def background_task():
-        try:
-            agent = st.session_state.agent
-            response = agent.run(user_input)
-            if hasattr(response, 'content'):
-                result["response"] = response.content
-            else:
-                result["response"] = str(response)
-            result["success"] = True
-            logger.info("✅ Agent响应成功")
-        except Exception as e:
-            result["error"] = str(e)
-            logger.error(f"❌ Agent错误: {str(e)}")
+    team_result = team_manager.run_task(user_input, timeout)
     
-    thread = threading.Thread(target=background_task)
-    thread.daemon = True
-    thread.start()
-    
-    # 等待响应（带超时）
-    with st.spinner("🤔 思考中（可能需要几分钟）..."):
-        thread.join(timeout=timeout)
-    
-    if result["success"]:
-        return result["response"]
-    elif thread.is_alive():
-        return "⏰ 请求超时，请稍后重试。"
+    if team_result["success"]:
+        logger.info("✅ Team响应成功")
+        return team_result["response"]
     else:
-        return f"❌ 处理失败：{result['error'] or '未知错误'}"
+        logger.error(f"❌ Team错误: {team_result['error']}")
+        return f"❌ 处理失败：{team_result['error'] or '未知错误'}"
 
 
 def call_agent_sync(prompt: str, timeout: int = 120) -> dict:
-    """同步调用Agent（用于后台任务）"""
-    try:
-        agent = st.session_state.agent
-        response = agent.run(prompt)
-        if hasattr(response, 'content'):
-            return {"success": True, "response": response.content}
-        else:
-            return {"success": True, "response": str(response)}
-    except Exception as e:
-        logger.error(f"❌ Agent错误: {str(e)}")
-        return {"success": False, "error": str(e)}
+    """同步调用Team（用于后台任务）"""
+    team_manager = st.session_state.team_manager
+    return team_manager.run_task(prompt, timeout)
 
 
 def call_agent_with_context(user_input: str) -> str:
