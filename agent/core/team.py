@@ -20,6 +20,16 @@ from agno.team.mode import TeamMode
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt
 from agent.prompts import load_standard_fields
+import json
+
+
+def _load_threat_config() -> str:
+    """加载威胁类型配置"""
+    from pathlib import Path
+    config_path = Path(__file__).parent.parent.parent / "config" / "threat_type_config.json"
+    if config_path.exists():
+        return config_path.read_text(encoding='utf-8')
+    return ""
 
 
 # ============= 加载原始提示词 =============
@@ -84,12 +94,29 @@ def _get_field_mapping_instructions() -> str:
 def _get_threat_instructions() -> str:
     """获取威胁类型Agent指令"""
     prompts = _load_prompts()
+    threat_config = _load_threat_config()
+    
+    # 提取威胁类型名称列表
+    threat_names = []
+    if threat_config:
+        try:
+            config = json.loads(threat_config)
+            threat_names = [t["name"] for t in config.get("threat_types", [])]
+        except Exception:
+            pass
+    
+    threat_list = "、".join(threat_names) if threat_names else "见配置文件"
+    
     return f"""You are a threat alert to standard classification mapper.
 
 {prompts['threat']}
 
+## 威胁类型配置（完整）
+{threat_config[:8000] if threat_config else "配置加载失败"}
+
 注意：
 - 必须严格按照上述规则输出
+- mappingValue必须从配置中的threat_types列表选择
 - 只输出Markdown表格，不输出其他内容
 """
 

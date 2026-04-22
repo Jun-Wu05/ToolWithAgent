@@ -1,11 +1,3 @@
 mappingType	orgValue	mappingValue
 REGULAR	traffic	
-REGULAR	policy	
-REGULAR	forward	
-REGULAR	Router/NAT Device	
-REGULAR	signature	
-REGULAR	ips	
 REGULAR	utm	
-REGULAR	0x08	
-REGULAR	anomaly	
-REGULAR	DoS-policy	
