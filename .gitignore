@@ -10,6 +10,12 @@ __pycache__/
 
 # 日志文件
 *.log
+logs/
+
+# 构建输出
+build/
+dist/
+*.egg-info/
 
 # 操作系统生成的文件
 .DS_Store
@@ -20,3 +26,6 @@ Thumbs.db
 .idea/
 *.swo
 *.swp
+
+# 子项目目录（避免嵌套 git 仓库问题）
+ToolWithAgent/
