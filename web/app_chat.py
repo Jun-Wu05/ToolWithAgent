@@ -186,7 +186,11 @@ def handle_user_message(user_input: str) -> str:
         if is_base64(user_input):
             return handle_base64_input(user_input)["response"]
         else:
-            # 非Base64，发给Agent处理
+            # 检查是否是映射相关请求
+            user_lower = user_input.lower().strip()
+            if any(k in user_lower for k in ["映射", "map", "字段"]):
+                return "📋 字段映射需要先上传Base64数据。\n\n请先上传数据文件，然后告诉我'映射'来生成字段映射表。"
+            # 其他非Base64请求，发给Agent处理
             return call_agent(user_input)
     
     # 2. 已解码状态 - 处理用户指令
@@ -205,6 +209,10 @@ def handle_user_message(user_input: str) -> str:
 def handle_decoded_state(user_input: str) -> str:
     """处理已解码状态的用户输入"""
     user_lower = user_input.lower().strip()
+    
+    # 检查是否有解码数据
+    if not st.session_state.decoded_data and not st.session_state.decoded_fields:
+        return "⚠️ 没有可用的解码数据。请先上传Base64数据文件。"
     
     # 检查用户意图
     if any(k in user_lower for k in ["映射", "map", "字段"]):
