@@ -233,6 +233,14 @@ def handle_decoded_state(user_input: str) -> str:
 def start_field_mapping() -> str:
     """开始字段映射"""
     logger.info("🗺️ 开始字段映射...")
+    
+    # 检查是否有解码数据
+    decoded_data = st.session_state.decoded_data
+    decoded_fields = st.session_state.decoded_fields
+    
+    if not decoded_data and not decoded_fields:
+        return "⚠️ 没有可用的解码数据。请先上传Base64数据文件。"
+    
     st.session_state.processing_state = ProcessingState.MAPPING
     
     response = """🔄 **正在分析字段，准备生成映射表...**
@@ -244,7 +252,16 @@ def start_field_mapping() -> str:
     
     def background_task():
         try:
-            prompt = build_mapping_prompt()
+            # 在线程中重新获取session_state（有时能访问有时不能）
+            decoded_json = st.session_state.get("decoded_data")
+            fields = st.session_state.get("decoded_fields")
+            
+            if not decoded_json and not fields:
+                st.session_state.error_message = "没有可用的解码数据"
+                st.rerun()
+                return
+                
+            prompt = build_mapping_prompt_static(decoded_json, fields)
             result = call_agent_sync(prompt)
             if result["success"]:
                 st.session_state.pending_mapping = result["response"]
@@ -255,8 +272,11 @@ def start_field_mapping() -> str:
                 st.rerun()
         except Exception as e:
             logger.error(f"映射处理异常: {str(e)}")
-            st.session_state.error_message = str(e)
-            st.rerun()
+            try:
+                st.session_state.error_message = str(e)
+                st.rerun()
+            except:
+                pass
     
     thread = threading.Thread(target=background_task)
     thread.daemon = True
@@ -265,11 +285,8 @@ def start_field_mapping() -> str:
     return response
 
 
-def build_mapping_prompt() -> str:
-    """构建字段映射提示词"""
-    decoded_json = st.session_state.decoded_data
-    fields = st.session_state.decoded_fields
-    
+def build_mapping_prompt_static(decoded_json, fields) -> str:
+    """构建字段映射提示词（静态版本，接受参数）"""
     # 检查是否有有效数据
     if not decoded_json and not fields:
         return "错误：没有可用的解码数据。请先上传并解码Base64数据。"
@@ -318,6 +335,13 @@ def build_mapping_prompt() -> str:
 请生成映射表："""
     
     return prompt
+
+
+def build_mapping_prompt() -> str:
+    """构建字段映射提示词（兼容版本，使用session_state）"""
+    decoded_json = st.session_state.decoded_data
+    fields = st.session_state.decoded_fields
+    return build_mapping_prompt_static(decoded_json, fields)
 
 
 def handle_mapping_confirm(user_input: str) -> str:
