@@ -118,12 +118,17 @@ async def main(message: cl.Message):
         for element in message.elements:
             if hasattr(element, 'type') and element.type == "file":
                 try:
-                    # 下载文件内容
-                    file_content = await element.download()
-                    
-                    # 解码Base64内容
-                    if isinstance(file_content, bytes):
-                        file_content = file_content.decode('utf-8', errors='ignore')
+                    # 获取文件路径并读取内容
+                    if hasattr(element, 'path') and element.path:
+                        with open(element.path, 'r', encoding='utf-8', errors='ignore') as f:
+                            file_content = f.read()
+                    elif hasattr(element, 'content'):
+                        file_content = element.content
+                        if isinstance(file_content, bytes):
+                            file_content = file_content.decode('utf-8', errors='ignore')
+                    else:
+                        # 尝试作为文本处理
+                        file_content = str(element)
                     
                     result = decode_base64_content(file_content)
                     
