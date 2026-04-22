@@ -568,7 +568,10 @@ def main():
     st.divider()
     st.subheader("📁 或者上传文件")
     
-    uploaded_file = st.file_uploader("选择Base64文件", type=['txt', 'b64', 'log'])
+    uploaded_file = st.file_uploader(
+        "选择文件（支持Base64、TXT、JSON、Excel）",
+        type=['txt', 'b64', 'log', 'json', 'xlsx', 'xls']
+    )
     
     if uploaded_file:
         try:
