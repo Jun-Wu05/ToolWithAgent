@@ -160,3 +160,22 @@ def _get_default_enum_field_prompt() -> str:
 | REGULAR     | sql注入  | SQL注入攻击  |
 | REGULAR     | xss攻击  | XSS攻击      |
 """
+
+
+def load_standard_fields() -> str:
+    """加载标准字段表"""
+    # 优先从 agent/data/ 加载
+    data_path = Path(__file__).parent.parent / "data" / "标准字段.txt"
+    if not data_path.exists():
+        # 从 auto/phase2/data/ 加载
+        data_path = Path(__file__).parent.parent.parent / "auto" / "phase2" / "data" / "标准字段.txt"
+    
+    if data_path.exists():
+        content = data_path.read_text(encoding='utf-8')
+        # 如果太长，截取前100行
+        lines = content.split('\n')
+        if len(lines) > 100:
+            return '\n'.join(lines[:100]) + f"\n...（共 {len(lines)} 行）"
+        return content
+    
+    return "标准字段表加载失败"
