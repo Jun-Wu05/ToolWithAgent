@@ -136,23 +136,30 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
     start_time = datetime.now()
     logger.info(f"📥 收到请求: {user_input[:100]}...")
     
-    # 1. 检测是否是Base64（优先前端解码）
+    # 1. 检测是否是Base64
     if is_base64(user_input):
-        logger.info("🔍 检测到Base64数据，尝试前端解码...")
+        logger.info("🔍 检测到Base64数据，先进行前端解码...")
         decode_result = auto_decode_base64(user_input)
         
         if decode_result["success"]:
-            elapsed = (datetime.now() - start_time).total_seconds()
-            logger.info(f"✅ 前端解码成功，耗时: {elapsed:.3f}秒")
-            
             # 保存解码结果到会话
             st.session_state.decoded_data = decode_result["data"]
             st.session_state.decoded_raw = decode_result["raw_text"]
             
-            return True, decode_result["message"] + f"\n\n**解码结果：**\n```json\n{json.dumps(decode_result['data'], ensure_ascii=False, indent=2) if decode_result['is_json'] else decode_result['data']}\n```"
+            # 如果没有任务描述，直接返回解码结果
+            if not task_description:
+                elapsed = (datetime.now() - start_time).total_seconds()
+                logger.info(f"✅ 前端解码成功，耗时: {elapsed:.3f}秒")
+                return True, decode_result["message"] + f"\n\n**解码结果：**\n```json\n{json.dumps(decode_result['data'], ensure_ascii=False, indent=2) if decode_result['is_json'] else decode_result['data']}\n```"
+            
+            # 如果有任务描述，把解码结果发给Agent处理
+            logger.info(f"✅ 前端解码成功，有任务描述，继续Agent处理...")
+            # 构建输入：解码结果 + 任务描述
+            decoded_str = json.dumps(decode_result['data'], ensure_ascii=False, indent=2) if decode_result['is_json'] else decode_result['data']
+            user_input = f"【已解码的数据】：\n{decoded_str}\n\n【任务】：{task_description}"
         else:
             logger.warning(f"⚠️ 前端解码失败: {decode_result['error']}")
-            # 解码失败才尝试Agent处理
+            # 解码失败才尝试Agent处理（用原始输入）
     
     # 2. 非Base64或解码失败，使用Agent处理
     result = {"response": None, "error": None, "success": False}
