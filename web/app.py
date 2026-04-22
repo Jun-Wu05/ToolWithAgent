@@ -135,8 +135,8 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
     start_time = datetime.now()
     logger.info(f"📥 收到请求: {user_input[:100]}...")
     
-    # 1. 检测是否是Base64（如果是纯Base64数据，自动解码）
-    if is_base64(user_input) and not task_description:
+    # 1. 检测是否是Base64（优先前端解码）
+    if is_base64(user_input):
         logger.info("🔍 检测到Base64数据，尝试前端解码...")
         decode_result = auto_decode_base64(user_input)
         
@@ -150,7 +150,8 @@ def process_agent_request(user_input: str, task_description: str = "", timeout: 
             
             return True, decode_result["message"] + f"\n\n**解码结果：**\n```json\n{json.dumps(decode_result['data'], ensure_ascii=False, indent=2) if decode_result['is_json'] else decode_result['data']}\n```"
         else:
-            logger.warning(f"⚠️ 前端解码失败: {decode_result['error']}，尝试Agent处理")
+            logger.warning(f"⚠️ 前端解码失败: {decode_result['error']}")
+            # 解码失败才尝试Agent处理
     
     # 2. 非Base64或解码失败，使用Agent处理
     result = {"response": None, "error": None, "success": False}
