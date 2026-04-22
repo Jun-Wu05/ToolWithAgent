@@ -20,6 +20,12 @@ from agent.tools.base64_tool import base64_decode_tool, base64_encode_tool
 from agent.tools.standard_mapper import field_mapping_tool, generate_mapping_table_tool
 from agent.tools.threat_type_tool import threat_type_tool, apply_threat_mapping_tool
 from agent.tools.enum_field_tool import enum_field_tool, apply_enum_mapping_tool
+from agent.tools.confirmation_tool import (
+    confirm_mapping_table,
+    confirm_threat_mapping,
+    confirm_output,
+    request_modification
+)
 
 
 def create_agent(
@@ -106,6 +112,12 @@ def create_agent(
             # 枚举字段工具
             enum_field_tool,
             apply_enum_mapping_tool,
+            
+            # HITL确认工具 ⭐
+            confirm_mapping_table,
+            confirm_threat_mapping,
+            confirm_output,
+            request_modification,
         ],
     )
     
