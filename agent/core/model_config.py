@@ -2,12 +2,17 @@
 多模型配置
 
 支持不同任务使用不同模型，节省Token成本
+支持从.env文件自动读取API Key
 """
 
 import os
 from typing import Optional
 
 from agno.models.siliconflow import Siliconflow
+
+# 自动加载.env文件
+from dotenv import load_dotenv
+load_dotenv()
 
 
 class ModelConfig:
@@ -24,7 +29,7 @@ class ModelConfig:
     
     @staticmethod
     def get_api_key() -> str:
-        """从环境变量获取API Key"""
+        """从环境变量获取API Key（自动从.env文件加载）"""
         return os.getenv("SILICONFLOW_API_KEY", "")
     
     @staticmethod
