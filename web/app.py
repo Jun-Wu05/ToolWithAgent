@@ -126,7 +126,7 @@ def auto_decode_base64(b64_text: str) -> dict:
         }
 
 
-def process_agent_request(user_input: str, task_description: str = "", timeout: int = 120):
+def process_agent_request(user_input: str, task_description: str = "", timeout: int = 300):
     """
     处理Agent请求（带超时控制）
     如果输入是Base64，使用simple_decode提取字段信息

@@ -423,7 +423,7 @@ def show_decoded_data() -> str:
 ```"""
 
 
-def call_agent(user_input: str) -> str:
+def call_agent(user_input: str, timeout: int = 300) -> str:
     """调用Agent处理用户输入"""
     import threading
     from datetime import datetime
@@ -449,8 +449,8 @@ def call_agent(user_input: str) -> str:
     thread.start()
     
     # 等待响应（带超时）
-    with st.spinner("🤔 思考中..."):
-        thread.join(timeout=60)
+    with st.spinner("🤔 思考中（可能需要几分钟）..."):
+        thread.join(timeout=timeout)
     
     if result["success"]:
         return result["response"]
