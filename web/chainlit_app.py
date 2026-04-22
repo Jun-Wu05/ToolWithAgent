@@ -11,16 +11,23 @@
 2. 运行: chainlit run web/chainlit_app.py
 """
 
-import os
+# === CRITICAL: 这必须在所有其他导入之前 ===
 import sys
-import json
-from pathlib import Path
-from typing import Optional
+import os
 
-# 添加项目根目录到路径
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# 获取项目根目录（web的父目录）
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_current_dir)
+
+# 确保项目根目录在sys.path的最前面
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+# 验证路径
+print(f"[DEBUG] 项目根目录: {_project_root}")
+print(f"[DEBUG] agent目录存在: {os.path.exists(os.path.join(_project_root, 'agent'))}")
+print(f"[DEBUG] sys.path[0]: {sys.path[0]}")
+# =========================================
 
 # 加载.env文件
 from dotenv import load_dotenv
@@ -177,6 +184,7 @@ async def main(message: cl.Message):
 
 async def generate_field_mapping(user_session: dict) -> str:
     """生成字段映射"""
+    import json
     from agent.prompts import load_standard_fields
     
     decoded_json = user_session.get("decoded_data")
@@ -239,6 +247,7 @@ async def generate_field_mapping(user_session: dict) -> str:
 
 async def generate_threat_mapping(user_session: dict) -> str:
     """生成威胁类型映射"""
+    import json
     decoded_json = user_session.get("decoded_data")
     
     if not decoded_json:
@@ -271,6 +280,7 @@ async def generate_threat_mapping(user_session: dict) -> str:
 
 async def generate_enum_mapping(user_session: dict) -> str:
     """生成枚举映射"""
+    import json
     decoded_json = user_session.get("decoded_data")
     fields = user_session.get("decoded_fields")
     
@@ -304,6 +314,7 @@ async def generate_enum_mapping(user_session: dict) -> str:
 
 def show_decoded_data(user_session: dict) -> str:
     """显示解码数据"""
+    import json
     decoded_fields = user_session.get("decoded_fields")
     decoded_data = user_session.get("decoded_data")
     
@@ -327,6 +338,7 @@ def show_decoded_data(user_session: dict) -> str:
 
 async def call_agent_with_context(user_session: dict, user_message: str) -> str:
     """带上下文的Agent调用"""
+    import json
     decoded_json = user_session.get("decoded_data")
     fields = user_session.get("decoded_fields")
     
@@ -352,17 +364,3 @@ async def call_agent_with_context(user_session: dict, user_message: str) -> str:
     except Exception as e:
         logger.error(f"Agent调用异常: {str(e)}")
         return f"❌ 处理异常：{str(e)}"
-
-
-# ============= 启动 =============
-
-if __name__ == "__main__":
-    # 检查API Key
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    if not api_key:
-        print("⚠️ 警告：未找到 SILICONFLOW_API_KEY")
-        print("请确保 .env 文件中已设置 SILICONFLOW_API_KEY")
-    
-    print("\n🚀 启动数据映射智能助手...")
-    print("📍 访问地址: http://localhost:8000")
-    print("🔑 按 Ctrl+C 停止服务\n")
