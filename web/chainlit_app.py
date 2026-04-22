@@ -88,6 +88,12 @@ async def main(message: cl.Message):
     Args:
         message: 用户消息，包含文本和可能上传的文件
     """
+    # 重新设置sys.path（Chainlit可能在不同线程中运行）
+    import sys, os
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+    
     user_session = cl.user_session.get("user_session")
     
     # 初始化Team
@@ -184,6 +190,10 @@ async def main(message: cl.Message):
 
 async def generate_field_mapping(user_session: dict) -> str:
     """生成字段映射"""
+    import sys, os
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
     import json
     from agent.prompts import load_standard_fields
     
@@ -247,6 +257,10 @@ async def generate_field_mapping(user_session: dict) -> str:
 
 async def generate_threat_mapping(user_session: dict) -> str:
     """生成威胁类型映射"""
+    import sys, os
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
     import json
     decoded_json = user_session.get("decoded_data")
     
@@ -280,6 +294,10 @@ async def generate_threat_mapping(user_session: dict) -> str:
 
 async def generate_enum_mapping(user_session: dict) -> str:
     """生成枚举映射"""
+    import sys, os
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
     import json
     decoded_json = user_session.get("decoded_data")
     fields = user_session.get("decoded_fields")
@@ -338,6 +356,10 @@ def show_decoded_data(user_session: dict) -> str:
 
 async def call_agent_with_context(user_session: dict, user_message: str) -> str:
     """带上下文的Agent调用"""
+    import sys, os
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
     import json
     decoded_json = user_session.get("decoded_data")
     fields = user_session.get("decoded_fields")
