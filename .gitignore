@@ -33,4 +33,4 @@ ToolWithAgent/
 
 .github/
 .trae/
-.Ai_context/
+.Ai_context/logs/  
