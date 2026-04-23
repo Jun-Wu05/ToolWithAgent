@@ -126,6 +126,81 @@ def parse_json_mapping_result(content: str) -> list:
     return []
 
 
+def parse_json_threat_result(content: str) -> list:
+    """
+    解析威胁类型映射结果
+    只提取3列格式：mappingType, orgValue, mappingValue
+    
+    Args:
+        content: Agent返回的内容
+    
+    Returns:
+        list: 映射结果列表，解析失败返回空列表
+    """
+    # 威胁类型只有3列
+    VALID_COLUMNS = {"mappingType", "orgValue", "mappingValue"}
+    
+    def validate_item(item: dict) -> bool:
+        """验证单条记录是否符合格式要求"""
+        if not isinstance(item, dict):
+            return False
+        keys = set(item.keys())
+        if keys != VALID_COLUMNS:
+            # 过滤多余列，只保留需要的
+            filtered = {k: v for k, v in item.items() if k in VALID_COLUMNS}
+            if len(filtered) == 3:
+                item.clear()
+                item.update(filtered)
+                return True
+            return False
+        return True
+    
+    # 方法1：去除前后空白后直接尝试解析
+    content = content.strip()
+    try:
+        result = json.loads(content)
+        if isinstance(result, list):
+            valid_result = [item for item in result if validate_item(item)]
+            if valid_result:
+                logger.info(f"[THREAT_PARSER] 方法1解析成功，获得 {len(valid_result)} 条有效记录")
+                return valid_result
+    except json.JSONDecodeError:
+        pass
+    
+    # 方法2：查找第一个 [ 到最后一个 ] 之间的内容
+    first_bracket = content.find('[')
+    last_bracket = content.rfind(']')
+    
+    if first_bracket != -1 and last_bracket > first_bracket:
+        json_candidate = content[first_bracket:last_bracket + 1]
+        try:
+            result = json.loads(json_candidate)
+            if isinstance(result, list) and len(result) > 0:
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[THREAT_PARSER] 方法2解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
+        except json.JSONDecodeError:
+            pass
+    
+    # 方法3：尝试提取代码块中的JSON
+    code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
+    matches = re.findall(code_block_pattern, content)
+    for match in matches:
+        try:
+            result = json.loads(match.strip())
+            if isinstance(result, list):
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[THREAT_PARSER] 方法3解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
+        except json.JSONDecodeError:
+            continue
+    
+    logger.warning(f"[THREAT_PARSER] 解析失败，无法提取有效的威胁映射结果")
+    return []
+
+
 def create_dataframe_elements(mapping_data: list) -> list:
     """
     根据映射数据创建 Chainlit Dataframe 元素
@@ -491,8 +566,8 @@ async def handle_user_message(user_session: dict, team, user_text: str):
             is_threat_request = any(keyword in user_lower for keyword in ["威胁", "threat"])
             
             if is_threat_request:
-                # 尝试解析JSON威胁映射结果
-                threat_data = parse_json_mapping_result(result_content)
+                # 尝试解析JSON威胁映射结果（使用专门的威胁类型解析函数）
+                threat_data = parse_json_threat_result(result_content)
                 
                 if threat_data:
                     # 保存威胁映射结果
