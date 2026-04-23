@@ -364,6 +364,7 @@ async def on_confirm_fill(action: cl.Action):
         base64_file = cl.File(
             name="filled_config.txt",
             content=file_content,
+            mime="text/plain",
         )
         
         logger.info("[confirm_fill] 发送文件消息")
