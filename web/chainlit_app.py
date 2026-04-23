@@ -4,7 +4,7 @@
 核心特点：
 1. 对话式交互，Agent通过聊天与用户沟通
 2. 支持在聊天中拖拽上传文件
-3. 与Agno Team无缝集成
+3. 与Agno Team无缝集成（纯UI层）
 
 使用方法：
 1. 设置环境变量 SILICONFLOW_API_KEY 或在.env文件
@@ -26,7 +26,6 @@ if _project_root not in sys.path:
 # 验证路径
 print(f"[DEBUG] 项目根目录: {_project_root}")
 print(f"[DEBUG] agent目录存在: {os.path.exists(os.path.join(_project_root, 'agent'))}")
-print(f"[DEBUG] sys.path[0]: {sys.path[0]}")
 # =========================================
 
 # 加载.env文件
@@ -43,14 +42,6 @@ logger.info("Chainlit聊天式Web应用启动")
 logger.info("=" * 60)
 
 
-# ============= 辅助函数 =============
-
-def decode_base64_content(content: str) -> dict:
-    """解码Base64内容"""
-    from agent.core.agent import simple_decode
-    return simple_decode(content)
-
-
 # ============= Chainlit 事件处理 =============
 
 @cl.on_chat_start
@@ -62,7 +53,6 @@ async def start():
         "decoded_data": None,
         "decoded_fields": None,
         "original_log": None,
-        "pending_mapping": None,
     }
     cl.user_session.set("user_session", user_session)
     
@@ -83,7 +73,7 @@ async def start():
 @cl.on_message
 async def main(message: cl.Message):
     """
-    处理用户消息
+    处理用户消息 - 纯UI层
     
     Args:
         message: 用户消息，包含文本和可能上传的文件
@@ -111,294 +101,113 @@ async def main(message: cl.Message):
             return
     
     team = user_session["team"]
-    response_parts = []
     
     # 处理上传的文件
     if message.elements:
         for element in message.elements:
             if hasattr(element, 'type') and element.type == "file":
-                try:
-                    # 获取文件路径并读取内容
-                    if hasattr(element, 'path') and element.path:
-                        with open(element.path, 'r', encoding='utf-8', errors='ignore') as f:
-                            file_content = f.read()
-                    elif hasattr(element, 'content'):
-                        file_content = element.content
-                        if isinstance(file_content, bytes):
-                            file_content = file_content.decode('utf-8', errors='ignore')
-                    else:
-                        # 尝试作为文本处理
-                        file_content = str(element)
-                    
-                    result = decode_base64_content(file_content)
-                    
-                    if result["status"] == "success":
-                        user_session["decoded_data"] = result["decoded_json"]
-                        user_session["decoded_fields"] = result["fields"]
-                        user_session["original_log"] = result["original_log"]
-                        
-                        field_count = result["field_count"]
-                        response_parts.append(f"""✅ **文件解码成功！**
+                await handle_file_upload(user_session, element)
+    
+    # 处理文本消息 - 纯UI，直接传递给Team
+    user_text = message.content.strip()
+    if user_text:
+        await handle_user_message(user_session, team, user_text)
+
+
+# ============= 文件处理 =============
+
+async def handle_file_upload(user_session: dict, element):
+    """处理文件上传"""
+    try:
+        # 获取文件路径并读取内容
+        if hasattr(element, 'path') and element.path:
+            with open(element.path, 'r', encoding='utf-8', errors='ignore') as f:
+                file_content = f.read()
+        elif hasattr(element, 'content'):
+            file_content = element.content
+            if isinstance(file_content, bytes):
+                file_content = file_content.decode('utf-8', errors='ignore')
+        else:
+            file_content = str(element)
+        
+        # 解码Base64内容
+        from agent.core.agent import simple_decode
+        result = simple_decode(file_content)
+        
+        if result["status"] == "success":
+            user_session["decoded_data"] = result["decoded_json"]
+            user_session["decoded_fields"] = result["fields"]
+            user_session["original_log"] = result["original_log"]
+            
+            field_count = result["field_count"]
+            await cl.Message(
+                content=f"""✅ **文件解码成功！**
 
 📊 **解码结果：**
 - 字段数量：{field_count} 个
 - JSON结构：{len(result['decoded_json'])} 个顶层字段
 
-现在可以直接发送消息进行字段映射、威胁类型处理等操作。""")
-                    else:
-                        response_parts.append(f"❌ 解码失败：{result.get('error_message', '未知错误')}")
-                        
-                except Exception as e:
-                    logger.error(f"文件处理异常: {str(e)}")
-                    response_parts.append(f"❌ 文件处理失败：{str(e)}")
-    
-    # 处理文本消息
-    user_text = message.content.strip()
-    if user_text:
-        user_lower = user_text.lower()
-        
-        # 检查是否有解码数据
-        has_data = user_session["decoded_data"] or user_session["decoded_fields"]
-        
-        if any(k in user_lower for k in ["映射", "map", "字段"]):
-            # 字段映射
-            response_parts.append(await generate_field_mapping(user_session))
-            
-        elif any(k in user_lower for k in ["威胁", "threat", "攻击"]):
-            # 威胁类型
-            response_parts.append(await generate_threat_mapping(user_session))
-            
-        elif any(k in user_lower for k in ["枚举", "enum"]):
-            # 枚举处理
-            response_parts.append(await generate_enum_mapping(user_session))
-            
-        elif any(k in user_lower for k in ["查看", "显示", "show"]):
-            # 查看数据
-            response_parts.append(show_decoded_data(user_session))
-            
-        elif has_data:
-            # 带上下文调用Agent
-            response_parts.append(await call_agent_with_context(user_session, user_text))
+现在可以直接发送消息进行字段映射、威胁类型处理等操作。"""
+            ).send()
         else:
-            # 无数据时的通用处理
-            response_parts.append("📋 暂无数据。请先上传Base64数据文件，然后告诉我需要执行什么操作（映射/威胁/枚举）。")
-    
-    # 发送响应
-    final_response = "\n\n".join(filter(None, response_parts))
-    if not final_response:
-        final_response = "请上传文件或发送消息。"
-    
-    await cl.Message(content=final_response).send()
+            await cl.Message(content=f"❌ 解码失败：{result.get('error_message', '未知错误')}").send()
+            
+    except Exception as e:
+        logger.error(f"文件处理异常: {str(e)}")
+        await cl.Message(content=f"❌ 文件处理失败：{str(e)}").send()
 
 
-# ============= 功能函数 =============
+# ============= 用户消息处理 =============
 
-async def generate_field_mapping(user_session: dict) -> str:
-    """生成字段映射"""
-    import sys, os
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    if _root not in sys.path:
-        sys.path.insert(0, _root)
-    import json
-    from agent.prompts import load_standard_fields
+async def handle_user_message(user_session: dict, team, user_text: str):
+    """处理用户消息 - 纯UI层，传递给Team处理"""
+    user_lower = user_text.lower()
     
-    decoded_json = user_session.get("decoded_data")
-    fields = user_session.get("decoded_fields")
+    # 检查是否有解码数据
+    has_data = user_session.get("decoded_data") or user_session.get("decoded_fields")
     
-    if not decoded_json and not fields:
-        return "⚠️ 没有可用的解码数据"
-    
-    try:
-        standard_fields = load_standard_fields()
-        fields_str = ", ".join(str(f) for f in fields) if fields else "无"
-        json_content = json.dumps(decoded_json, ensure_ascii=False, indent=2)[:3000] if decoded_json else "无"
+    # 构建用户输入
+    if has_data:
+        # 有数据时，附带上下文
+        import json
+        decoded_json = user_session.get("decoded_data")
+        fields = user_session.get("decoded_fields")
         
-        prompt = f"""你是一个字段映射专家。请根据以下信息，生成字段映射表：
+        fields_str = ", ".join(str(f) for f in fields) if fields else "无"
+        json_preview = json.dumps(decoded_json, ensure_ascii=False, indent=2)[:2000] if decoded_json else "无"
+        
+        full_input = f"""用户请求：{user_text}
 
-## 任务
-将原始日志中的字段映射到标准字段表中的中文系统属性名称。
-
-## 输入数据
-
-**原始日志 JSON：**
-```json
-{json_content}
-```
-
-**提取的原始字段列表：**
+已上传数据的字段列表：
 {fields_str}
 
-## 标准字段表（只能使用以下中文名称）
-```
-{standard_fields}
-```
+数据预览：
+{json_preview}
 
-## 映射规则
-1. 只能使用标准字段表中的中文系统属性名称
-2. 禁止自造字段名、禁止翻译字段名
-3. 优先利用标准字段表中的"对象"列缩小匹配范围
-
-## 输出要求
-只输出以下格式的Markdown表格，不输出其他内容：
-
-| 原始字段名 | 系统属性名称 | 匹配状态/说明 |
-|-----------|-------------|--------------|
-| 原始字段1 | 标准字段1 | 匹配成功 |
-| 原始字段2 | 未匹配 | 未匹配 |
-
-请生成映射表："""
-        
-        team = user_session["team"]
-        result = await team.arun(prompt)
-        
-        # 提取实际内容
-        result_content = result.content if hasattr(result, 'content') else str(result)
-        user_session["pending_mapping"] = result_content
-        
-        return f"📋 **字段映射表已生成：**\n\n{result_content}\n\n---\n请确认映射表是否正确，或告诉我需要修改。"
-        
-    except Exception as e:
-        logger.error(f"字段映射异常: {str(e)}")
-        return f"❌ 生成映射表异常：{str(e)}"
-
-
-async def generate_threat_mapping(user_session: dict) -> str:
-    """生成威胁类型映射"""
-    import sys, os
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    if _root not in sys.path:
-        sys.path.insert(0, _root)
-    import json
-    decoded_json = user_session.get("decoded_data")
+请根据用户请求处理。"""
+    else:
+        # 无数据时，直接传递用户输入
+        full_input = user_text
     
-    if not decoded_json:
-        return "⚠️ 没有可用的解码数据"
+    # 调用Team处理（创建流式消息）
+    msg = cl.Message(content="")
+    await msg.send()
     
     try:
-        prompt = f"""分析以下数据中的威胁类型，并进行标准化：
-
-**数据：**
-```json
-{json.dumps(decoded_json, ensure_ascii=False, indent=2)[:3000]}
-```
-
-请识别所有威胁相关字段，并按照标准威胁类型进行映射。
-
-输出格式：
-| 原始字段 | 原始值 | 标准威胁类型 | 说明 |
-|---------|--------|-------------|------|
-| xxx | xxx | xxx | - |"""
+        # 使用Team处理
+        import asyncio
+        result = await asyncio.to_thread(team.run, full_input)
         
-        team = user_session["team"]
-        result = await asyncio.to_thread(team.run, prompt)
-        
-        # 提取实际内容
+        # 提取内容并流式输出
         result_content = result.content if hasattr(result, 'content') else str(result)
         
-        return f"🛡️ **威胁类型映射结果：**\n\n{result_content}"
+        # 逐字符/逐块输出（模拟流式）
+        for i in range(0, len(result_content), 50):
+            chunk = result_content[i:i+50]
+            await msg.stream_token(chunk)
+        
+        await msg.update()
         
     except Exception as e:
-        logger.error(f"威胁类型处理异常: {str(e)}")
-        return f"❌ 威胁类型处理异常：{str(e)}"
-
-
-async def generate_enum_mapping(user_session: dict) -> str:
-    """生成枚举映射"""
-    import sys, os
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    if _root not in sys.path:
-        sys.path.insert(0, _root)
-    import json
-    decoded_json = user_session.get("decoded_data")
-    fields = user_session.get("decoded_fields")
-    
-    if not decoded_json and not fields:
-        return "⚠️ 没有可用的解码数据"
-    
-    try:
-        fields_str = ", ".join(str(f) for f in fields) if fields else "无"
-        
-        prompt = f"""处理枚举字段的标准化：
-
-**数据：**
-```json
-{json.dumps(decoded_json, ensure_ascii=False, indent=2)[:3000] if decoded_json else '无'}
-```
-
-**字段列表：**
-{fields_str}
-
-请识别枚举类型字段，并标准化其值。"""
-        
-        team = user_session["team"]
-        result = await asyncio.to_thread(team.run, prompt)
-        
-        # 提取实际内容
-        result_content = result.content if hasattr(result, 'content') else str(result)
-        
-        return f"🔢 **枚举字段处理结果：**\n\n{result_content}"
-        
-    except Exception as e:
-        logger.error(f"枚举处理异常: {str(e)}")
-        return f"❌ 枚举处理异常：{str(e)}"
-
-
-def show_decoded_data(user_session: dict) -> str:
-    """显示解码数据"""
-    import json
-    decoded_fields = user_session.get("decoded_fields")
-    decoded_data = user_session.get("decoded_data")
-    
-    if not decoded_data and not decoded_fields:
-        return "⚠️ 没有解码数据"
-    
-    parts = []
-    
-    if decoded_fields:
-        parts.append(f"**字段列表（共 {len(decoded_fields)} 个）：**\n")
-        for i, field in enumerate(decoded_fields[:20], 1):
-            parts.append(f"{i}. `{field}`")
-        if len(decoded_fields) > 20:
-            parts.append(f"... 还有 {len(decoded_fields) - 20} 个字段")
-    
-    if decoded_data:
-        parts.append(f"\n**JSON数据（前2000字符）：**\n```json\n{json.dumps(decoded_data, ensure_ascii=False, indent=2)[:2000]}\n```")
-    
-    return "\n".join(parts)
-
-
-async def call_agent_with_context(user_session: dict, user_message: str) -> str:
-    """带上下文的Agent调用"""
-    import sys, os
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    if _root not in sys.path:
-        sys.path.insert(0, _root)
-    import json
-    decoded_json = user_session.get("decoded_data")
-    fields = user_session.get("decoded_fields")
-    
-    prompt = f"""当前已解码数据：
-
-**字段列表：**
-{', '.join(str(f) for f in fields) if fields else '无'}
-
-**JSON数据：**
-```json
-{json.dumps(decoded_json, ensure_ascii=False, indent=2)[:2000] if decoded_json else '无'}
-```
-
-**用户请求：**
-{user_message}
-
-请根据以上上下文，处理用户的请求。"""
-    
-    try:
-        team = user_session["team"]
-        result = await asyncio.to_thread(team.run, prompt)
-        
-        # 提取实际内容
-        result_content = result.content if hasattr(result, 'content') else str(result)
-        return result_content
-    except Exception as e:
-        logger.error(f"Agent调用异常: {str(e)}")
-        return f"❌ 处理异常：{str(e)}"
+        logger.error(f"Team调用异常: {str(e)}")
+        await cl.Message(content=f"❌ 处理异常：{str(e)}").send()

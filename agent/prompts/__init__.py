@@ -172,10 +172,10 @@ def load_standard_fields() -> str:
     
     if data_path.exists():
         content = data_path.read_text(encoding='utf-8')
-        # 如果太长，截取前100行
+        # 如果太长，截取前200行（确保字段映射有足够的选择）
         lines = content.split('\n')
-        if len(lines) > 100:
-            return '\n'.join(lines[:100]) + f"\n...（共 {len(lines)} 行）"
+        if len(lines) > 200:
+            return '\n'.join(lines[:200]) + f"\n...（共 {len(lines)} 行）"
         return content
     
     return "标准字段表加载失败"
