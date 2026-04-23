@@ -251,9 +251,11 @@ async def generate_field_mapping(user_session: dict) -> str:
         team = user_session["team"]
         result = await team.arun(prompt)
         
-        user_session["pending_mapping"] = str(result)
+        # 提取实际内容
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        user_session["pending_mapping"] = result_content
         
-        return f"📋 **字段映射表已生成：**\n\n{result}\n\n---\n请确认映射表是否正确，或告诉我需要修改。"
+        return f"📋 **字段映射表已生成：**\n\n{result_content}\n\n---\n请确认映射表是否正确，或告诉我需要修改。"
         
     except Exception as e:
         logger.error(f"字段映射异常: {str(e)}")
@@ -290,7 +292,10 @@ async def generate_threat_mapping(user_session: dict) -> str:
         team = user_session["team"]
         result = await asyncio.to_thread(team.run, prompt)
         
-        return f"🛡️ **威胁类型映射结果：**\n\n{result}"
+        # 提取实际内容
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        
+        return f"🛡️ **威胁类型映射结果：**\n\n{result_content}"
         
     except Exception as e:
         logger.error(f"威胁类型处理异常: {str(e)}")
@@ -328,7 +333,10 @@ async def generate_enum_mapping(user_session: dict) -> str:
         team = user_session["team"]
         result = await asyncio.to_thread(team.run, prompt)
         
-        return f"🔢 **枚举字段处理结果：**\n\n{result}"
+        # 提取实际内容
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        
+        return f"🔢 **枚举字段处理结果：**\n\n{result_content}"
         
     except Exception as e:
         logger.error(f"枚举处理异常: {str(e)}")
@@ -387,7 +395,10 @@ async def call_agent_with_context(user_session: dict, user_message: str) -> str:
     try:
         team = user_session["team"]
         result = await asyncio.to_thread(team.run, prompt)
-        return str(result)
+        
+        # 提取实际内容
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        return result_content
     except Exception as e:
         logger.error(f"Agent调用异常: {str(e)}")
         return f"❌ 处理异常：{str(e)}"
