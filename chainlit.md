@@ -1,14 +1,17 @@
-# Welcome to Chainlit! 🚀🤖
+# 数据映射智能助手
 
-Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
+👋 欢迎使用数据映射智能助手！
 
-## Useful Links 🔗
+## 功能说明
 
-- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
-- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
+- **上传文件**：支持拖拽或点击上传 Base64/TXT/JSON/Excel 文件
+- **字段映射**：发送"映射"生成字段映射表
+- **威胁类型**：发送"威胁"进行威胁类型标准化
+- **枚举处理**：发送"枚举"处理枚举字段
 
-We can't wait to see what you create with Chainlit! Happy coding! 💻😊
+## 表格特性
 
-## Welcome screen
-
-To modify the welcome screen, edit the `chainlit.md` file at the root of your project. If you do not want a welcome screen, just leave this file empty.
+- 支持排序（点击列标题）
+- 支持筛选
+- 支持一键复制
+- 支持Excel导出
