@@ -486,6 +486,51 @@ async def handle_user_message(user_session: dict, team, user_text: str):
                     await table_msg.send()
                 
                 return
+            
+            # 检查是否是威胁类型请求
+            is_threat_request = any(keyword in user_lower for keyword in ["威胁", "threat"])
+            
+            if is_threat_request:
+                # 尝试解析JSON威胁映射结果
+                threat_data = parse_json_mapping_result(result_content)
+                
+                if threat_data:
+                    # 保存威胁映射结果
+                    user_session["last_threat_data"] = threat_data
+                    
+                    # 统计信息
+                    threat_count = len(threat_data)
+                    
+                    # 准备摘要
+                    summary = f"""✅ **威胁类型映射完成！**
+
+📊 **映射统计：**
+- 映射数量：{threat_count} 条
+
+✨ **表格功能：**
+- 📌 点击列标题排序
+- 🔍 使用搜索框筛选
+- 📥 导出CSV文件"""
+
+                    # 流式输出摘要
+                    for i in range(0, len(summary), 50):
+                        chunk = summary[i:i+50]
+                        await msg.stream_token(chunk)
+                    
+                    await msg.update()
+                    
+                    # 创建Dataframe表格元素
+                    elements = create_dataframe_elements(threat_data)
+                    
+                    # 发送Dataframe表格
+                    if elements:
+                        table_msg = cl.Message(
+                            content="**📋 威胁类型映射表：**",
+                            elements=elements
+                        )
+                        await table_msg.send()
+                    
+                    return
         
         # 非映射请求，直接流式输出
         for i in range(0, len(result_content), 50):
