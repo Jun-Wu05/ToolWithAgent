@@ -163,7 +163,7 @@ def _get_default_enum_field_prompt() -> str:
 
 
 def load_standard_fields() -> str:
-    """加载标准字段表"""
+    """加载标准字段表（全量返回）"""
     # 优先从 agent/data/ 加载
     data_path = Path(__file__).parent.parent / "data" / "标准字段.txt"
     if not data_path.exists():
@@ -172,10 +172,6 @@ def load_standard_fields() -> str:
     
     if data_path.exists():
         content = data_path.read_text(encoding='utf-8')
-        # 如果太长，截取前200行（确保字段映射有足够的选择）
-        lines = content.split('\n')
-        if len(lines) > 200:
-            return '\n'.join(lines[:200]) + f"\n...（共 {len(lines)} 行）"
         return content
     
     return "标准字段表加载失败"
