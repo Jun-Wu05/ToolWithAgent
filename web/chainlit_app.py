@@ -55,7 +55,7 @@ logger.info("=" * 60)
 def parse_json_mapping_result(content: str) -> list:
     """
     解析Agent返回的JSON映射结果
-    支持包含前缀文字的JSON输出
+    只提取正确的3列格式：原始字段名、系统属性名称、匹配状态
     
     Args:
         content: Agent返回的内容（可能是纯JSON或包含在其他文本中）
@@ -63,17 +63,38 @@ def parse_json_mapping_result(content: str) -> list:
     Returns:
         list: 映射结果列表，解析失败返回空列表
     """
+    # 定义正确的列名
+    VALID_COLUMNS = {"原始字段名", "系统属性名称", "匹配状态"}
+    
+    def validate_item(item: dict) -> bool:
+        """验证单条记录是否符合格式要求"""
+        if not isinstance(item, dict):
+            return False
+        # 检查是否只有3个键
+        keys = set(item.keys())
+        if keys != VALID_COLUMNS:
+            # 过滤多余列，只保留需要的
+            filtered = {k: v for k, v in item.items() if k in VALID_COLUMNS}
+            if len(filtered) == 3:
+                item.clear()
+                item.update(filtered)
+                return True
+            return False
+        return True
+    
     # 方法1：去除前后空白后直接尝试解析
     content = content.strip()
     try:
         result = json.loads(content)
         if isinstance(result, list):
-            return result
+            valid_result = [item for item in result if validate_item(item)]
+            if valid_result:
+                logger.info(f"[PARSER] 方法1解析成功，获得 {len(valid_result)} 条有效记录")
+                return valid_result
     except json.JSONDecodeError:
         pass
     
     # 方法2：查找第一个 [ 到最后一个 ] 之间的内容
-    # 这可以处理类似 "文字...[JSON]...文字" 的情况
     first_bracket = content.find('[')
     last_bracket = content.rfind(']')
     
@@ -82,7 +103,10 @@ def parse_json_mapping_result(content: str) -> list:
         try:
             result = json.loads(json_candidate)
             if isinstance(result, list) and len(result) > 0:
-                return result
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[PARSER] 方法2解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
         except json.JSONDecodeError:
             pass
     
@@ -93,10 +117,14 @@ def parse_json_mapping_result(content: str) -> list:
         try:
             result = json.loads(match.strip())
             if isinstance(result, list):
-                return result
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[PARSER] 方法3解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
         except json.JSONDecodeError:
             continue
     
+    logger.warning(f"[PARSER] 解析失败，无法提取有效的映射结果")
     return []
 
 
