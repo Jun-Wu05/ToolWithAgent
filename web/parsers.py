@@ -1,74 +1,208 @@
 """
-解析器模块 - Markdown 表格解析
+JSON 解析器和数据处理工具
+
+提供通用的 JSON 解析和表格创建功能，供 Chainlit UI 层调用
 """
-import pandas as pd
+
+import json
+import re
+from src.logger import get_logger
+
+logger = get_logger("parsers")
 
 
-def parse_markdown_to_dataframe(markdown_table: str) -> pd.DataFrame:
+def parse_json_mapping_result(content: str) -> list:
     """
-    解析标准字段的 Markdown 表格
+    解析Agent返回的JSON映射结果
+    只提取正确的3列格式：原始字段名、系统属性名称、匹配状态
     
     Args:
-        markdown_table: Markdown 格式的表格字符串
-        
+        content: Agent返回的内容（可能是纯JSON或包含在其他文本中）
+    
     Returns:
-        pd.DataFrame: 包含三列的 DataFrame (原始字段名, 系统属性名称, 匹配状态/说明)
+        list: 映射结果列表，解析失败返回空列表
     """
-    rows = []
-    lines = markdown_table.strip().split('\n')
+    # 定义正确的列名
+    VALID_COLUMNS = {"原始字段名", "系统属性名称", "匹配状态"}
     
-    for line in lines:
-        line = line.strip()
-        if not line or '---' in line:
+    def validate_item(item: dict) -> bool:
+        """验证单条记录是否符合格式要求"""
+        if not isinstance(item, dict):
+            return False
+        # 检查是否只有3个键
+        keys = set(item.keys())
+        if keys != VALID_COLUMNS:
+            # 过滤多余列，只保留需要的
+            filtered = {k: v for k, v in item.items() if k in VALID_COLUMNS}
+            if len(filtered) == 3:
+                item.clear()
+                item.update(filtered)
+                return True
+            return False
+        return True
+    
+    # 记录原始内容前100字符用于调试
+    logger.info(f"[PARSER] 收到内容，前100字符: {content[:100]}...")
+    
+    # 方法1：去除前后空白后直接尝试解析
+    content = content.strip()
+    try:
+        result = json.loads(content)
+        if isinstance(result, list):
+            valid_result = [item for item in result if validate_item(item)]
+            if valid_result:
+                logger.info(f"[PARSER] 方法1解析成功，获得 {len(valid_result)} 条有效记录")
+                return valid_result
+    except json.JSONDecodeError:
+        pass
+    
+    # 方法2：查找第一个 [ 到最后一个 ] 之间的内容
+    first_bracket = content.find('[')
+    last_bracket = content.rfind(']')
+    
+    if first_bracket != -1 and last_bracket > first_bracket:
+        json_candidate = content[first_bracket:last_bracket + 1]
+        logger.info(f"[PARSER] 方法2找到JSON候选，长度: {len(json_candidate)}")
+        try:
+            result = json.loads(json_candidate)
+            if isinstance(result, list) and len(result) > 0:
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[PARSER] 方法2解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
+        except json.JSONDecodeError as e:
+            logger.warning(f"[PARSER] 方法2 JSON解析失败: {e}")
+            pass
+    
+    # 方法3：尝试提取代码块中的JSON
+    code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
+    matches = re.findall(code_block_pattern, content)
+    logger.info(f"[PARSER] 方法3找到 {len(matches)} 个代码块")
+    for match in matches:
+        try:
+            result = json.loads(match.strip())
+            if isinstance(result, list):
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[PARSER] 方法3解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
+        except json.JSONDecodeError:
             continue
-        if line.startswith('|'):
-            cells = [cell.strip() for cell in line.split('|')[1:-1]]
-            if len(cells) >= 2:
-                while len(cells) < 3:
-                    cells.append("")
-                rows.append(cells)
     
-    if rows:
-        return pd.DataFrame(rows, columns=["原始字段名", "系统属性名称", "匹配状态/说明"])
-    return pd.DataFrame(columns=["原始字段名", "系统属性名称", "匹配状态/说明"])
+    logger.warning(f"[PARSER] 解析失败，无法提取有效的映射结果")
+    return []
 
 
-def parse_threat_markdown_to_dataframe(markdown_table: str) -> pd.DataFrame:
+def parse_json_threat_result(content: str) -> list:
     """
-    解析威胁类型的 Markdown 表格（三列格式：mappingType, orgValue, mappingValue）
+    解析威胁类型映射结果
+    只提取3列格式：mappingType, orgValue, mappingValue
     
     Args:
-        markdown_table: Markdown 格式的表格字符串
-        
+        content: Agent返回的内容
+    
     Returns:
-        pd.DataFrame: 包含三列的 DataFrame (mappingType, orgValue, mappingValue)
+        list: 映射结果列表，解析失败返回空列表
     """
-    rows = []
-    lines = markdown_table.strip().split('\n')
+    # 威胁类型只有3列
+    VALID_COLUMNS = {"mappingType", "orgValue", "mappingValue"}
     
-    for line in lines:
-        line = line.strip()
-        if not line or '---' in line:
+    def validate_item(item: dict) -> bool:
+        """验证单条记录是否符合格式要求"""
+        if not isinstance(item, dict):
+            return False
+        keys = set(item.keys())
+        if keys != VALID_COLUMNS:
+            # 过滤多余列，只保留需要的
+            filtered = {k: v for k, v in item.items() if k in VALID_COLUMNS}
+            if len(filtered) == 3:
+                item.clear()
+                item.update(filtered)
+                return True
+            return False
+        return True
+    
+    # 记录原始内容前200字符用于调试
+    logger.info(f"[THREAT_PARSER] 收到内容，前200字符: {content[:200]}...")
+    
+    # 方法1：去除前后空白后直接尝试解析
+    content = content.strip()
+    try:
+        result = json.loads(content)
+        if isinstance(result, list):
+            valid_result = [item for item in result if validate_item(item)]
+            if valid_result:
+                logger.info(f"[THREAT_PARSER] 方法1解析成功，获得 {len(valid_result)} 条有效记录")
+                return valid_result
+    except json.JSONDecodeError:
+        pass
+    
+    # 方法2：查找第一个 [ 到最后一个 ] 之间的内容
+    # 这是最宽松的匹配，处理 LLM 输出带有前缀文字的情况
+    first_bracket = content.find('[')
+    last_bracket = content.rfind(']')
+    
+    if first_bracket != -1 and last_bracket > first_bracket:
+        json_candidate = content[first_bracket:last_bracket + 1]
+        logger.info(f"[THREAT_PARSER] 方法2找到JSON候选，长度: {len(json_candidate)}, 前50字符: {json_candidate[:50]}...")
+        try:
+            result = json.loads(json_candidate)
+            if isinstance(result, list) and len(result) > 0:
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[THREAT_PARSER] 方法2解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
+        except json.JSONDecodeError as e:
+            logger.warning(f"[THREAT_PARSER] 方法2 JSON解析失败: {e}")
+            pass
+    
+    # 方法3：尝试提取代码块中的JSON
+    code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
+    matches = re.findall(code_block_pattern, content)
+    logger.info(f"[THREAT_PARSER] 方法3找到 {len(matches)} 个代码块")
+    for match in matches:
+        try:
+            result = json.loads(match.strip())
+            if isinstance(result, list):
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[THREAT_PARSER] 方法3解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
+        except json.JSONDecodeError:
             continue
-        if line.startswith('|'):
-            cells = [cell.strip() for cell in line.split('|')[1:-1]]
-            if len(cells) >= 3:
-                # 跳过表头
-                if 'mappingType' in cells[0] or 'orgValue' in cells[0]:
-                    continue
-                # 只取前三列
-                mapping_type = cells[0]
-                org_value = cells[1]
-                mapping_value = cells[2]
-                
-                if mapping_type == "REGULAR" and org_value and mapping_value:
-                    rows.append({
-                        "mappingType": mapping_type,
-                        "orgValue": org_value,
-                        "mappingValue": mapping_value
-                    })
     
-    if rows:
-        df = pd.DataFrame(rows)
-        return df
-    return None
+    logger.warning(f"[THREAT_PARSER] 解析失败，无法提取有效的威胁映射结果")
+    return []
+
+
+def create_dataframe_elements(mapping_data: list) -> list:
+    """
+    根据映射数据创建 Chainlit Dataframe 元素
+    
+    Args:
+        mapping_data: 映射结果列表
+    
+    Returns:
+        list: Chainlit 元素列表
+    """
+    import pandas as pd
+    
+    if not mapping_data:
+        return []
+    
+    # 将列表转换为 pandas.DataFrame
+    df = pd.DataFrame(mapping_data)
+    
+    # 使用 cl.Dataframe 展示数据
+    # pagination=0 禁用分页，一次性展示所有行
+    import chainlit as cl
+    elements = [
+        cl.Dataframe(
+            data=df,
+            display="inline",
+            title="📊 映射结果",
+            pagination=0,  # 设为0禁用分页
+        )
+    ]
+    
+    return elements
