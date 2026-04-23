@@ -249,7 +249,7 @@ async def generate_field_mapping(user_session: dict) -> str:
 请生成映射表："""
         
         team = user_session["team"]
-        result = team.run(prompt)
+        result = await team.arun(prompt)
         
         user_session["pending_mapping"] = str(result)
         
@@ -288,7 +288,7 @@ async def generate_threat_mapping(user_session: dict) -> str:
 | xxx | xxx | xxx | - |"""
         
         team = user_session["team"]
-        result = team.run(prompt)
+        result = await asyncio.to_thread(team.run, prompt)
         
         return f"🛡️ **威胁类型映射结果：**\n\n{result}"
         
@@ -326,7 +326,7 @@ async def generate_enum_mapping(user_session: dict) -> str:
 请识别枚举类型字段，并标准化其值。"""
         
         team = user_session["team"]
-        result = team.run(prompt)
+        result = await asyncio.to_thread(team.run, prompt)
         
         return f"🔢 **枚举字段处理结果：**\n\n{result}"
         
@@ -386,7 +386,7 @@ async def call_agent_with_context(user_session: dict, user_message: str) -> str:
     
     try:
         team = user_session["team"]
-        result = team.run(prompt)
+        result = await asyncio.to_thread(team.run, prompt)
         return str(result)
     except Exception as e:
         logger.error(f"Agent调用异常: {str(e)}")
