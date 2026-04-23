@@ -27,9 +27,7 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-# 验证路径
-print(f"[DEBUG] 项目根目录: {_project_root}")
-print(f"[DEBUG] agent目录存在: {os.path.exists(os.path.join(_project_root, 'agent'))}")
+# 验证路径（使用 logger 而不是 print，避免 stdout 句柄问题）
 # =========================================
 
 # 加载.env文件
