@@ -53,6 +53,9 @@ logger.info("=" * 60)
 # 从 parsers 模块导入解析函数
 from web.parsers import parse_json_mapping_result, parse_json_threat_result, create_dataframe_elements
 
+# 从 threat_fill_handler 导入填充函数
+from src.threat_fill_handler import apply_threat_mapping, export_to_base64, find_normalize_item
+
 
 # ============= Chainlit 事件处理 =============
 
@@ -191,6 +194,38 @@ async def handle_file_upload(user_session: dict, element):
 
 
 # ============= Action 回调处理 =============
+
+@cl.action_callback("fill_threat_with_field")
+async def on_fill_threat_with_field(action: cl.Action):
+    """处理威胁类型带字段填充按钮点击"""
+    logger.info("[fill_threat_with_field] 收到带字段填充回调")
+    user_session = cl.user_session.get("user_session")
+    
+    # 获取威胁映射结果
+    threat_data = user_session.get("last_threat_data")
+    
+    if not threat_data:
+        logger.warning("[fill_threat_with_field] 没有威胁映射结果")
+        await cl.Message(content="❌ 没有可用的威胁映射结果，请先执行威胁类型映射").send()
+        return
+    
+    # 发送提示消息
+    await cl.Message(
+        content="""📥 **威胁类型填充**
+
+请在下方输入：
+1. **目标字段名**（如：original_log, threat_type）
+2. **上传Base64配置文件**
+
+格式：字段名 + 上传文件
+
+例如：
+```
+original_log
+[上传Base64文件]
+```"""
+    ).send()
+
 
 @cl.action_callback("confirm_fill")
 async def on_confirm_fill(action: cl.Action):
@@ -427,8 +462,11 @@ async def handle_user_message(user_session: dict, team, user_text: str):
                 # 发送Dataframe表格
                 if elements:
                     table_msg = cl.Message(
-                        content="**📋 威胁类型映射表：**",
-                        elements=elements
+                        content="**📋 威胁类型映射表：**\n\n请先输入目标字段名并上传Base64文件，然后点击下方按钮进行填充。",
+                        elements=elements,
+                        actions=[
+                            cl.Action(name="fill_threat_with_field", label="📥 带字段填充", description="输入目标字段并上传Base64文件进行填充", payload={})
+                        ]
                     )
                     await table_msg.send()
                 

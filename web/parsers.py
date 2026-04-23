@@ -41,13 +41,13 @@ def parse_json_mapping_result(content: str) -> list:
             return False
         return True
     
-    # 记录原始内容前100字符用于调试
-    logger.info(f"[PARSER] 收到内容，前100字符: {content[:100]}...")
+    # 记录原始内容（完整输出）
+    logger.info(f"[PARSER] 收到内容:\n{content}")
     
     # 方法1：去除前后空白后直接尝试解析
-    content = content.strip()
+    content_stripped = content.strip()
     try:
-        result = json.loads(content)
+        result = json.loads(content_stripped)
         if isinstance(result, list):
             valid_result = [item for item in result if validate_item(item)]
             if valid_result:
@@ -57,11 +57,11 @@ def parse_json_mapping_result(content: str) -> list:
         pass
     
     # 方法2：查找第一个 [ 到最后一个 ] 之间的内容
-    first_bracket = content.find('[')
-    last_bracket = content.rfind(']')
+    first_bracket = content_stripped.find('[')
+    last_bracket = content_stripped.rfind(']')
     
     if first_bracket != -1 and last_bracket > first_bracket:
-        json_candidate = content[first_bracket:last_bracket + 1]
+        json_candidate = content_stripped[first_bracket:last_bracket + 1]
         logger.info(f"[PARSER] 方法2找到JSON候选，长度: {len(json_candidate)}")
         try:
             result = json.loads(json_candidate)
@@ -76,7 +76,7 @@ def parse_json_mapping_result(content: str) -> list:
     
     # 方法3：尝试提取代码块中的JSON
     code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
-    matches = re.findall(code_block_pattern, content)
+    matches = re.findall(code_block_pattern, content_stripped)
     logger.info(f"[PARSER] 方法3找到 {len(matches)} 个代码块")
     for match in matches:
         try:
@@ -122,13 +122,13 @@ def parse_json_threat_result(content: str) -> list:
             return False
         return True
     
-    # 记录原始内容前200字符用于调试
-    logger.info(f"[THREAT_PARSER] 收到内容，前200字符: {content[:200]}...")
+    # 记录原始内容（完整输出）
+    logger.info(f"[THREAT_PARSER] 收到内容:\n{content}")
     
     # 方法1：去除前后空白后直接尝试解析
-    content = content.strip()
+    content_stripped = content.strip()
     try:
-        result = json.loads(content)
+        result = json.loads(content_stripped)
         if isinstance(result, list):
             valid_result = [item for item in result if validate_item(item)]
             if valid_result:
@@ -139,12 +139,12 @@ def parse_json_threat_result(content: str) -> list:
     
     # 方法2：查找第一个 [ 到最后一个 ] 之间的内容
     # 这是最宽松的匹配，处理 LLM 输出带有前缀文字的情况
-    first_bracket = content.find('[')
-    last_bracket = content.rfind(']')
+    first_bracket = content_stripped.find('[')
+    last_bracket = content_stripped.rfind(']')
     
     if first_bracket != -1 and last_bracket > first_bracket:
-        json_candidate = content[first_bracket:last_bracket + 1]
-        logger.info(f"[THREAT_PARSER] 方法2找到JSON候选，长度: {len(json_candidate)}, 前50字符: {json_candidate[:50]}...")
+        json_candidate = content_stripped[first_bracket:last_bracket + 1]
+        logger.info(f"[THREAT_PARSER] 方法2找到JSON候选，长度: {len(json_candidate)}")
         try:
             result = json.loads(json_candidate)
             if isinstance(result, list) and len(result) > 0:
@@ -158,7 +158,7 @@ def parse_json_threat_result(content: str) -> list:
     
     # 方法3：尝试提取代码块中的JSON
     code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
-    matches = re.findall(code_block_pattern, content)
+    matches = re.findall(code_block_pattern, content_stripped)
     logger.info(f"[THREAT_PARSER] 方法3找到 {len(matches)} 个代码块")
     for match in matches:
         try:
