@@ -69,6 +69,11 @@ async def start():
         "decoded_fields": None,
         "original_log": None,
         "last_mapping_data": None,  # 保存最后一次映射结果
+        # 威胁填充模式相关
+        "threat_fill_mode": False,  # 威胁填充模式标志
+        "threat_target_field": None,  # 用户输入的目标字段名
+        "threat_mapping_table": None,  # 威胁映射表格
+        "pending_base64": None,  # 待处理的Base64内容
     }
     cl.user_session.set("user_session", user_session)
     
@@ -152,7 +157,112 @@ async def handle_file_upload(user_session: dict, element):
         else:
             file_content = str(element)
         
-        # 解码Base64内容
+        # ========== 威胁填充模式状态隔离 ==========
+        # 如果处于威胁填充模式，优先处理威胁填充逻辑
+        if user_session.get("threat_fill_mode"):
+            target_field = user_session.get("threat_target_field")
+            mapping_table = user_session.get("threat_mapping_table")
+            
+            if not target_field:
+                await cl.Message(content="❌ 请先输入目标字段名后再上传文件").send()
+                return
+            
+            if not mapping_table:
+                await cl.Message(content="❌ 威胁映射表格丢失，请重新执行威胁类型映射").send()
+                user_session["threat_fill_mode"] = False
+                return
+            
+            logger.info(f"[FILE_UPLOAD] 威胁填充模式，上传文件，执行填充")
+            logger.info(f"[FILE_UPLOAD] 目标字段: {target_field}, 映射数量: {len(mapping_table)}")
+            
+            # 尝试解析 Base64 文件内容
+            from agent.core.agent import simple_decode
+            result = simple_decode(file_content)
+            
+            if result["status"] == "success":
+                decoded_data = result["decoded_json"]
+                logger.info(f"[FILE_UPLOAD] Base64 解码成功")
+            else:
+                # 如果解码失败，尝试直接使用文件内容作为 JSON
+                logger.info(f"[FILE_UPLOAD] Base64解码失败，尝试直接解析")
+                try:
+                    import json as json_module
+                    decoded_data = json_module.loads(file_content)
+                except:
+                    await cl.Message(content=f"❌ 文件解析失败：{result.get('error_message', '未知错误')}").send()
+                    return
+            
+            # 执行威胁映射填充
+            try:
+                # 转换 mapping_table 格式（从 Dataframe 格式转换为 threat_fill_handler 格式）
+                # Dataframe格式: {mappingType, orgValue, mappingValue}
+                formatted_mapping = []
+                for item in mapping_table:
+                    if isinstance(item, dict):
+                        formatted_mapping.append({
+                            "mappingType": item.get("mappingType", "REGULAR"),
+                            "orgValue": item.get("orgValue", ""),
+                            "mappingValue": item.get("mappingValue", "")
+                        })
+                    else:
+                        # 可能是 pandas Series，尝试转换
+                        formatted_mapping.append({
+                            "mappingType": str(item.get("mappingType", "REGULAR")),
+                            "orgValue": str(item.get("orgValue", "")),
+                            "mappingValue": str(item.get("mappingValue", ""))
+                        })
+                
+                logger.info(f"[FILE_UPLOAD] 格式化映射数量: {len(formatted_mapping)}")
+                
+                # 应用映射
+                updated_data = apply_threat_mapping(decoded_data, formatted_mapping, target_field)
+                logger.info("[FILE_UPLOAD] 映射应用成功")
+                
+                # 导出 Base64
+                base64_result = export_to_base64(updated_data)
+                logger.info(f"[FILE_UPLOAD] Base64导出成功，长度: {len(base64_result)}")
+                
+                # 重置威胁填充模式
+                user_session["threat_fill_mode"] = False
+                user_session["threat_target_field"] = None
+                user_session["threat_mapping_table"] = None
+                
+                # 发送成功消息
+                await cl.Message(
+                    content=f"""✅ **威胁类型填充完成！**
+
+📊 **填充统计：**
+- 目标字段：{target_field}
+- 映射数量：{len(formatted_mapping)} 条
+
+💾 点击下方按钮下载填充后的配置文件。"""
+                ).send()
+                
+                # 发送可下载的 Base64 文件
+                base64_file = cl.File(
+                    name="threat_filled_config.txt",
+                    content=base64_result.encode('utf-8'),
+                    mime="text/plain",
+                )
+                
+                await cl.Message(
+                    content="**📥 点击下载填充后的配置：**",
+                    elements=[base64_file]
+                ).send()
+                
+            except ValueError as e:
+                logger.error(f"[FILE_UPLOAD] 填充失败: {e}")
+                await cl.Message(content=f"❌ 填充失败：{str(e)}").send()
+            except Exception as e:
+                logger.error(f"[FILE_UPLOAD] 填充异常: {str(e)}")
+                import traceback
+                logger.error(f"[FILE_UPLOAD] 详细错误: {traceback.format_exc()}")
+                await cl.Message(content=f"❌ 填充异常：{str(e)}").send()
+            
+            return
+        # ========== 威胁填充模式结束 ==========
+        
+        # 正常模式：解码 Base64 内容
         from agent.core.agent import simple_decode
         result = simple_decode(file_content)
         
@@ -209,21 +319,21 @@ async def on_fill_threat_with_field(action: cl.Action):
         await cl.Message(content="❌ 没有可用的威胁映射结果，请先执行威胁类型映射").send()
         return
     
+    # 保存映射表格到会话
+    user_session["threat_mapping_table"] = threat_data
+    
+    # 设置威胁填充模式
+    user_session["threat_fill_mode"] = True
+    user_session["threat_target_field"] = None
+    logger.info(f"[fill_threat_with_field] 开启威胁填充模式，保存映射表格 {len(threat_data)} 条")
+    
     # 发送提示消息
     await cl.Message(
-        content="""📥 **威胁类型填充**
+        content="""📥 **威胁类型填充模式已开启**
 
-请在下方输入：
-1. **目标字段名**（如：original_log, threat_type）
-2. **上传Base64配置文件**
+请输入**目标字段名**（如：original_log）
 
-格式：字段名 + 上传文件
-
-例如：
-```
-original_log
-[上传Base64文件]
-```"""
+输入字段名后，系统会等待您上传 Base64 配置文件，然后执行填充。"""
     ).send()
 
 
@@ -316,6 +426,40 @@ async def on_confirm_fill(action: cl.Action):
 async def handle_user_message(user_session: dict, team, user_text: str):
     """处理用户消息 - 纯UI层，传递给Team处理"""
     user_lower = user_text.lower()
+    
+    # ========== 威胁填充模式状态隔离 ==========
+    # 如果处于威胁填充模式，优先处理威胁填充逻辑
+    if user_session.get("threat_fill_mode"):
+        logger.info(f"[HANDLE] 威胁填充模式，检查用户输入: {user_text}")
+        
+        # 获取映射表格
+        mapping_table = user_session.get("threat_mapping_table")
+        if not mapping_table:
+            await cl.Message(content="❌ 威胁映射表格丢失，请重新执行威胁类型映射").send()
+            user_session["threat_fill_mode"] = False
+            return
+        
+        # 检查用户输入的是否是目标字段名
+        target_field = user_text.strip()
+        if not user_session.get("threat_target_field"):
+            # 记录目标字段名
+            user_session["threat_target_field"] = target_field
+            logger.info(f"[HANDLE] 已记录目标字段: {target_field}")
+            await cl.Message(
+                content=f"""✅ **目标字段已记录：{target_field}**
+
+请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
+            ).send()
+            return
+        
+        # 用户已输入字段名，等待文件上传
+        # 这里不做处理，等待文件上传回调
+        logger.info("[HANDLE] 等待用户上传Base64文件")
+        await cl.Message(
+            content=f"📋 当前状态：\n- 目标字段：{user_session.get('threat_target_field')}\n- 映射数量：{len(mapping_table)} 条\n\n请上传 Base64 配置文件"
+        ).send()
+        return
+    # ========== 威胁填充模式结束 ==========
     
     # 检查是否有解码数据
     has_data = user_session.get("decoded_data") or user_session.get("decoded_fields")
