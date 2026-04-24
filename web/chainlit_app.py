@@ -57,6 +57,29 @@ from web.parsers import parse_json_mapping_result, parse_json_threat_result, cre
 from src.threat_fill_handler import apply_threat_mapping, export_to_base64, find_normalize_item
 
 
+# ============= 路由关键词库 ==========
+
+# 字段映射关键词（扩展自 ROUTER_INSTRUCTIONS）
+MAPPING_KEYWORDS = [
+    "映射", "字段", "标准字段", "字段处理", "字段标准化",
+    "字段映射", "字段对应", "字段归一化", "标准化字段", "统一字段",
+    "匹配字段", "对齐字段", "转换字段",
+    "帮我映射", "做字段映射", "生成映射表", "标准字段处理",
+]
+
+# 威胁类型关键词（精确匹配，忽略大小写）
+THREAT_KEYWORDS = [
+    "威胁类型", "threat_type", "威胁类型标准化", "威胁类型映射",
+]
+
+# 枚举关键词
+ENUM_KEYWORDS = [
+    "枚举", "枚举字段", "enum",
+    "值映射", "字段值映射", "值转换",
+    "枚举值映射", "枚举转换",
+]
+
+
 # ============= Chainlit 事件处理 =============
 
 @cl.on_chat_start
@@ -452,6 +475,19 @@ async def on_confirm_fill(action: cl.Action):
 async def handle_user_message(user_session: dict, team, user_text: str):
     """处理用户消息 - 纯UI层，传递给Team处理"""
     user_lower = user_text.lower()
+    
+    # ========== 硬路由（优先级最高）==========
+    # 优先级：映射 > 威胁 > 枚举
+    if any(kw in user_lower for kw in MAPPING_KEYWORDS):
+        logger.info("[HARD_ROUTE] 命中字段映射关键词")
+        user_text = f"[字段映射] {user_text}"
+    elif any(kw in user_lower for kw in THREAT_KEYWORDS):
+        logger.info("[HARD_ROUTE] 命中威胁类型关键词")
+        user_text = f"[威胁类型] {user_text}"
+    elif any(kw in user_lower for kw in ENUM_KEYWORDS):
+        logger.info("[HARD_ROUTE] 命中枚举关键词")
+        user_text = f"[枚举处理] {user_text}"
+    # ========== 硬路由结束 ==========
     
     # ========== 威胁填充模式状态隔离 ==========
     # 如果处于威胁填充模式，优先处理威胁填充逻辑
