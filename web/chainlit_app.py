@@ -77,6 +77,23 @@ async def start():
     }
     cl.user_session.set("user_session", user_session)
     
+    # 初始化Team并预热
+    try:
+        from agent.core.team import create_data_mapping_team
+        user_session["team"] = create_data_mapping_team()
+        logger.info("[START] Team初始化成功，开始预热...")
+        
+        # 执行一次空操作预热（避免首次调用延迟）
+        import asyncio
+        warmup_result = await asyncio.to_thread(user_session["team"].run, "你好")
+        logger.info("[START] Team预热完成")
+    except ValueError as e:
+        logger.error(f"[START] Team初始化失败: {e}")
+        await cl.Message(content=f"⚠️ Team初始化失败: {str(e)}").send()
+    except Exception as e:
+        logger.error(f"[START] Team初始化异常: {e}")
+        await cl.Message(content=f"⚠️ Team初始化异常: {str(e)}").send()
+    
     # 发送欢迎消息
     await cl.Message(
         content="""👋 **数据映射智能助手已就绪！**
@@ -105,29 +122,12 @@ async def main(message: cl.Message):
     Args:
         message: 用户消息，包含文本和可能上传的文件
     """
-    # 重新设置sys.path（Chainlit可能在不同线程中运行）
-    import sys, os
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    if _root not in sys.path:
-        sys.path.insert(0, _root)
-    
     user_session = cl.user_session.get("user_session")
+    team = user_session.get("team")
     
-    # 初始化Team
-    if user_session["team"] is None:
-        try:
-            from agent.core.team import create_data_mapping_team
-            user_session["team"] = create_data_mapping_team()
-            logger.info("✅ Team初始化成功")
-        except ValueError as e:
-            await cl.Message(content=f"❌ Team初始化失败: {str(e)}").send()
-            return
-        except Exception as e:
-            logger.error(f"❌ Team初始化失败: {str(e)}")
-            await cl.Message(content=f"❌ Team初始化失败: {str(e)}").send()
-            return
-    
-    team = user_session["team"]
+    if team is None:
+        await cl.Message(content="⚠️ Team未初始化，请刷新页面重新开始").send()
+        return
     
     # 处理上传的文件
     if message.elements:
