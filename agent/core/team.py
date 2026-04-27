@@ -18,7 +18,7 @@ from agno.team.team import Team
 from agno.team.mode import TeamMode
 
 from agent.core.model_config import ModelConfig
-from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt
+from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
 from agent.prompts import load_standard_fields
 
 
@@ -38,37 +38,11 @@ def _load_standard_fields_list() -> str:
     return load_standard_fields()
 
 
-# ============= 路由指令 =============
+# ============= 路由指令（从 router.md 加载）=============
 
-ROUTER_INSTRUCTIONS = """你是数据映射智能助手。
-
-你可以处理以下任务：
-1. 字段映射 - 用户说"映射"、"字段"、"标准字段"、"字段处理"、"字段标准化"时
-2. 威胁类型处理 - 用户说"威胁类型"、"threat_type"时
-3. 枚举处理 - 用户说"枚举"、"enum"时
-
-当用户输入以以下标签开头时，直接路由到对应Agent：
-- [字段映射] → FieldMappingAgent
-- [威胁类型] → ThreatAgent  
-- [枚举处理] → EnumAgent
-
-当用户发送以下内容时，都应路由到字段映射：
-- "标准字段处理"、"字段标准化"、"字段标准化处理"
-- "帮我进行标准字段处理"
-- "进行字段映射"
-
-当用户发送"映射"、"威胁"、"枚举"等关键词时：
-- 直接调用对应的专业Agent执行任务
-- **必须将用户消息中的上下文数据（字段列表、原始日志样本）完整原样传递给专业Agent**
-- **严禁截断、总结、省略或改写任何数据内容**
-- **字段列表是专业Agent执行任务的唯一数据源，丢失将导致任务失败**
-- 返回Agent的处理结果
-
-注意：
-- 不要只做路由，要实际执行任务
-- 使用Agent的工具和提示词处理
-- 返回完整的处理结果
-"""
+def _load_router_instructions() -> str:
+    """加载 Team Router 路由指令"""
+    return load_router_prompt()
 
 
 # ============= FieldMappingAgent =============
@@ -205,7 +179,7 @@ def create_data_mapping_team() -> Team:
             threat_agent,
             enum_agent,
         ],
-        instructions=ROUTER_INSTRUCTIONS,
+        instructions=_load_router_instructions(),
         markdown=True,
         debug_mode=True,  # 启用 debug 模式
         show_members_responses=True,  # 显示MemberAgent的响应

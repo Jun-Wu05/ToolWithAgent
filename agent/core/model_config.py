@@ -19,13 +19,13 @@ class ModelConfig:
     """多模型配置"""
     
     # 简单任务模型（低成本）- Base64解码、字段提取等
-    SIMPLE_MODEL = "deepseek-ai/DeepSeek-V3"
+    SIMPLE_MODEL = "deepseek-ai/DeepSeek-V3.1-Terminus"
     
     # 复杂推理模型（高成本）- 字段映射、意图理解等
-    COMPLEX_MODEL = "deepseek-ai/DeepSeek-R1"
+    COMPLEX_MODEL = "deepseek-ai/DeepSeek-R1-0528"
     
     # 主控模型（平衡）- 意图理解、任务协调
-    MAIN_MODEL = "deepseek-ai/DeepSeek-V3.2"
+    MAIN_MODEL = "deepseek-ai/DeepSeek-V3.1-Terminus"
     
     @staticmethod
     def get_api_key() -> str:

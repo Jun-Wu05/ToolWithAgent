@@ -475,165 +475,206 @@ async def on_confirm_fill(action: cl.Action):
         await cl.Message(content=f"❌ 填充失败：{str(e)}").send()
 
 
-# ============= 用户消息处理 =============
+# ============= 用户消息处理（子函数）=============
 
-async def handle_user_message(user_session: dict, team, user_text: str):
-    """处理用户消息 - 纯UI层，传递给Team处理"""
-    user_lower = user_text.lower()
-    
-    # ========== 硬路由（优先级最高）==========
-    # 优先级：映射 > 威胁 > 枚举
+def _route_request(user_lower: str, user_text: str):
+    """
+    硬路由匹配：根据关键词判断请求类型并添加前缀标签
+
+    Returns:
+        (routed_text: str, is_mapping: bool, is_threat: bool, is_enum: bool)
+    """
+    is_mapping = False
+    is_threat = False
+    is_enum = False
+
     if any(kw in user_lower for kw in MAPPING_KEYWORDS):
         logger.info("[HARD_ROUTE] 命中字段映射关键词")
         user_text = f"[字段映射] {user_text}"
+        is_mapping = True
     elif any(kw in user_lower for kw in THREAT_KEYWORDS):
         logger.info("[HARD_ROUTE] 命中威胁类型关键词")
         user_text = f"[威胁类型] {user_text}"
+        is_threat = True
     elif any(kw in user_lower for kw in ENUM_KEYWORDS):
         logger.info("[HARD_ROUTE] 命中枚举关键词")
         user_text = f"[枚举处理] {user_text}"
-    # ========== 硬路由结束 ==========
-    
-    # ========== 威胁填充模式状态隔离 ==========
-    # 如果处于威胁填充模式，优先处理威胁填充逻辑
-    if user_session.get("threat_fill_mode"):
-        logger.info(f"[HANDLE] 威胁填充模式，检查用户输入: {user_text}")
-        
-        # 获取映射表格
-        mapping_table = user_session.get("threat_mapping_table")
-        if not mapping_table:
-            await cl.Message(content="❌ 威胁映射表格丢失，请重新执行威胁类型映射").send()
-            user_session["threat_fill_mode"] = False
-            return
-        
-        # 检查用户输入的是否是目标字段名
-        target_field = user_text.strip()
-        
-        # 如果有待处理的 Base64 文件，直接执行填充
-        pending_base64 = user_session.get("pending_base64")
-        if pending_base64 and not user_session.get("threat_target_field"):
-            # 有待处理文件 + 没有记录字段名
-            # 从消息中提取字段名并执行填充
-            user_session["threat_target_field"] = target_field
-            logger.info(f"[HANDLE] 已记录目标字段: {target_field}，有 pending_base64，执行填充")
-            await execute_threat_fill(user_session, pending_base64)
-            return
-        
-        if not user_session.get("threat_target_field"):
-            # 记录目标字段名（没有待处理文件，需要用户上传）
-            user_session["threat_target_field"] = target_field
-            logger.info(f"[HANDLE] 已记录目标字段: {target_field}，等待文件上传")
-            await cl.Message(
-                content=f"""✅ **目标字段已记录：{target_field}**
+        is_enum = True
 
-请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
-            ).send()
-            return
-        
-        # 用户已输入字段名，等待文件上传
-        logger.info("[HANDLE] 等待用户上传Base64文件")
-        await cl.Message(
-            content=f"📋 当前状态：\n- 目标字段：{user_session.get('threat_target_field')}\n- 映射数量：{len(mapping_table)} 条\n\n请上传 Base64 配置文件"
-        ).send()
-        return
-    # ========== 威胁填充模式结束 ==========
-    
-    # 检查是否有解码数据
+    return user_text, is_mapping, is_threat, is_enum
+
+
+def _build_llm_input(user_text: str, user_session: dict, is_mapping: bool) -> str:
+    """
+    构建发送给 LLM / Team 的完整输入
+
+    - 字段映射请求：拼接字段列表 JSON + 原始日志样本
+    - 威胁类型 / 枚举 / 无数据请求：仅传用户原始文本
+    """
     has_data = user_session.get("decoded_data") or user_session.get("decoded_fields")
-    
-    # 构建用户输入
-    if has_data:
-        # 分离 fields 和 original_log_sample，避免 LLM 混淆
+
+    if has_data and is_mapping:
         simplified_data = user_session.get("simplified_data", {})
         fields_list = simplified_data.get("fields", [])
         original_log_sample = simplified_data.get("original_log_sample", "")
-        
-        # 只用 fields 数组构建输入，original_log_sample 单独放在后面作为参考
+
         fields_json_str = json.dumps(fields_list, ensure_ascii=False)
-        
+
         full_input = f"""用户请求：{user_text}
 
 ⚠️ 需要映射的字段列表（严格只处理以下字段，每个字段名必须精确匹配，不得增减任何字段）：
 {fields_json_str}
 
 请根据以上字段列表进行标准字段映射处理。"""
-        
-        # 原始日志样本作为可选的语义参考（不是字段来源）
+
         if original_log_sample:
-            # 截断过长的日志样本，避免占用过多 token
             sample_str = original_log_sample if len(original_log_sample) <= 2000 else original_log_sample[:2000] + "...(已截断)"
             full_input += f"""
 
 ---
 📋 原始日志样本（仅用于理解字段语义，字段列表以上方 JSON 数组为准）：
 {sample_str}"""
-        
-        # 记录发送给 LLM 的数据
+
         logger.info(f"[LLM_INPUT] 发送给LLM的字段列表: {fields_json_str[:500]}...")
     else:
-        # 无数据时，直接传递用户输入
         full_input = user_text
-    
-    # 调用Team处理（创建loading提示消息）
-    loading_msg = cl.Message(content="⏳ **AI正在处理中，请稍候...**\n\n💭 正在分析您的请求...")
-    await loading_msg.send()
-    
+
+    return full_input
+
+
+async def _handle_threat_fill_flow(user_session: dict, user_text: str) -> bool:
+    """
+    威胁填充模式专属流程
+
+    Returns:
+        True 表示已处理（调用方应直接 return），False 表示未命中威胁填充模式
+    """
+    if not user_session.get("threat_fill_mode"):
+        return False
+
+    logger.info(f"[HANDLE] 威胁填充模式，检查用户输入: {user_text}")
+
+    mapping_table = user_session.get("threat_mapping_table")
+    if not mapping_table:
+        await cl.Message(content="❌ 威胁映射表格丢失，请重新执行威胁类型映射").send()
+        user_session["threat_fill_mode"] = False
+        return True
+
+    target_field = user_text.strip()
+
+    pending_base64 = user_session.get("pending_base64")
+    if pending_base64 and not user_session.get("threat_target_field"):
+        user_session["threat_target_field"] = target_field
+        logger.info(f"[HANDLE] 已记录目标字段: {target_field}，有 pending_base64，执行填充")
+        await execute_threat_fill(user_session, pending_base64)
+        return True
+
+    if not user_session.get("threat_target_field"):
+        user_session["threat_target_field"] = target_field
+        logger.info(f"[HANDLE] 已记录目标字段: {target_field}，等待文件上传")
+        await cl.Message(
+            content=f"""✅ **目标字段已记录：{target_field}**
+
+请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
+        ).send()
+        return True
+
+    logger.info("[HANDLE] 等待用户上传Base64文件")
+    await cl.Message(
+        content=f"📋 当前状态：\n- 目标字段：{user_session.get('threat_target_field')}\n- 映射数量：{len(mapping_table)} 条\n\n请上传 Base64 配置文件"
+    ).send()
+    return True
+
+
+async def _call_team_with_retry(team, full_input: str, loading_msg) -> object:
+    """
+    调用 Team.run，带指数退避重试（最多 3 次）
+
+    Returns:
+        Team.run 的返回结果
+    """
+    import asyncio as asyncio_mod
+    import time
+
+    last_exception = None
+    for attempt in range(1, 4):
+        try:
+            api_start_time = time.time()
+            logger.info(f"[API] 开始调用 Team.run (尝试 {attempt}/3)，输入长度: {len(full_input)}")
+
+            result = await asyncio_mod.to_thread(team.run, full_input)
+
+            api_duration = time.time() - api_start_time
+            logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
+
+            # 记录 LLM 输出
+            result_content = result.content if hasattr(result, 'content') else str(result)
+            logger.info(f"[API] LLM输出长度: {len(result_content)} 字符")
+
+            # 记录 Token 用量
+            _log_token_usage(result)
+            return result
+
+        except Exception as e:
+            last_exception = e
+            if attempt < 3:
+                wait_sec = 2 ** (attempt - 1)
+                logger.warning(f"[API] Team.run 失败 (尝试 {attempt}/3): {e}，{wait_sec}秒后重试...")
+                await asyncio_mod.sleep(wait_sec)
+            else:
+                logger.error(f"[API] Team.run 3次尝试全部失败: {e}")
+
+    raise last_exception
+
+
+def _log_token_usage(result):
+    """记录 LLM Token 用量"""
     try:
-        # 使用Team处理（记录API响应时间）
-        import asyncio
-        import time
-        api_start_time = time.time()
-        logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
-        
-        result = await asyncio.to_thread(team.run, full_input)
-        
-        api_end_time = time.time()
-        api_duration = api_end_time - api_start_time
-        logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
-        
-        # === 记录 LLM 输出 ===
-        result_content = result.content if hasattr(result, 'content') else str(result)
-        logger.info(f"[API] LLM输出长度: {len(result_content)} 字符")
-        
-        # === 记录 Tokens ===
         if hasattr(result, 'usage') and result.usage:
             usage = result.usage
-            input_tokens = getattr(usage, 'input_tokens', 'N/A')
-            output_tokens = getattr(usage, 'output_tokens', 'N/A')
-            logger.info(f"[API] Tokens - 输入: {input_tokens}, 输出: {output_tokens}")
-        
-        # 删除loading消息
-        await loading_msg.remove()
-        
-        # 创建流式消息显示结果
-        msg = cl.Message(content="")
-        await msg.send()
-        
-        # 提取内容
-        result_content = result.content if hasattr(result, 'content') else str(result)
-        
-        # 检查是否是字段映射请求
-        is_mapping_request = any(keyword in user_lower for keyword in ["映射", "字段", "map"])
-        
-        # 检查是否是威胁类型请求
-        is_threat_request = any(keyword in user_lower for keyword in ["威胁", "threat"])
-        
-        logger.info(f"[HANDLE] is_mapping_request: {is_mapping_request}, is_threat_request: {is_threat_request}")
-        
-        if is_mapping_request:
-            # 尝试解析JSON映射结果
-            mapping_data = parse_json_mapping_result(result_content)
-            
-            if mapping_data:
-                # 保存映射结果
-                user_session["last_mapping_data"] = mapping_data
-                
-                # 统计信息
-                matched_count = sum(1 for item in mapping_data if item.get("匹配状态") == "匹配成功")
-                unmatched_count = len(mapping_data) - matched_count
-                
-                # 准备摘要
-                summary = f"""✅ **字段映射完成！**
+            input_tokens = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', 'N/A')
+            output_tokens = getattr(usage, 'output_tokens', None) or getattr(usage, 'completion_tokens', 'N/A')
+            total_tokens = getattr(usage, 'total_tokens', 'N/A')
+            logger.info(f"[API] Tokens - 输入: {input_tokens}, 输出: {output_tokens}, 总计: {total_tokens}")
+
+        if hasattr(result, 'metrics') and result.metrics:
+            metrics = result.metrics
+            for attr in dir(metrics):
+                if 'token' in attr.lower() or 'usage' in attr.lower():
+                    logger.info(f"[API] Metrics.{attr}: {getattr(metrics, attr, 'N/A')}")
+    except Exception:
+        pass  # Token 记录失败不影响主流程
+
+
+async def _process_team_response(
+    result,
+    user_lower: str,
+    user_session: dict,
+    loading_msg,
+    msg
+) -> bool:
+    """
+    解析 Team 返回结果：识别映射/威胁类型并渲染表格，或流式输出原文
+
+    Returns:
+        True 表示已处理为表格（调用方可 return），False 表示需要继续流式输出
+    """
+    result_content = result.content if hasattr(result, 'content') else str(result)
+
+    is_mapping_request = any(keyword in user_lower for keyword in ["映射", "字段", "map"])
+    is_threat_request = any(keyword in user_lower for keyword in ["威胁", "threat"])
+
+    logger.info(f"[HANDLE] is_mapping_request: {is_mapping_request}, is_threat_request: {is_threat_request}")
+
+    # 字段映射结果处理
+    if is_mapping_request:
+        mapping_data = parse_json_mapping_result(result_content)
+        if mapping_data:
+            user_session["last_mapping_data"] = mapping_data
+            matched_count = sum(1 for item in mapping_data if item.get("匹配状态") == "匹配成功")
+            unmatched_count = len(mapping_data) - matched_count
+
+            summary = f"""✅ **字段映射完成！**
 
 📊 **映射统计：**
 - 总字段数：{len(mapping_data)}
@@ -646,46 +687,32 @@ async def handle_user_message(user_session: dict, team, user_text: str):
 - ✏️ 点击单元格编辑系统属性名称
 - 📥 导出CSV文件"""
 
-                # 流式输出摘要
-                for i in range(0, len(summary), 50):
-                    chunk = summary[i:i+50]
-                    await msg.stream_token(chunk)
-                
-                await msg.update()
-                
-                # 创建Dataframe表格元素
-                elements = create_dataframe_elements(mapping_data)
-                
-                # 发送Dataframe表格
-                if elements:
-                    table_msg = cl.Message(
-                        content="**📋 字段映射表：**\n\n请确认映射结果，点击下方按钮填充到原始数据中。",
-                        elements=elements,
-                        actions=[
-                            cl.Action(name="confirm_fill", label="✅ 确认填充", description="确认后将映射结果填充到原始数据", payload={})
-                        ]
-                    )
-                    await table_msg.send()
-                
-                return
-        
-        # 单独检查威胁类型请求（不依赖于字段映射解析失败）
-        if is_threat_request:
-            logger.info("[HANDLE] 进入威胁类型处理分支")
-            # 尝试解析JSON威胁映射结果（使用专门的威胁类型解析函数）
-            threat_data = parse_json_threat_result(result_content)
-            
-            logger.info(f"[HANDLE] threat_data解析结果: {type(threat_data)}, 长度: {len(threat_data) if threat_data else 0}")
-            
-            if threat_data:
-                # 保存威胁映射结果
-                user_session["last_threat_data"] = threat_data
-                
-                # 统计信息
-                threat_count = len(threat_data)
-                
-                # 准备摘要
-                summary = f"""✅ **威胁类型映射完成！**
+            for i in range(0, len(summary), 50):
+                await msg.stream_token(summary[i:i+50])
+            await msg.update()
+
+            elements = create_dataframe_elements(mapping_data)
+            if elements:
+                await cl.Message(
+                    content="**📋 字段映射表：**\n\n请确认映射结果，点击下方按钮填充到原始数据中。",
+                    elements=elements,
+                    actions=[
+                        cl.Action(name="confirm_fill", label="✅ 确认填充", description="确认后将映射结果填充到原始数据", payload={})
+                    ]
+                ).send()
+            return True
+
+    # 威胁类型结果处理
+    if is_threat_request:
+        logger.info("[HANDLE] 进入威胁类型处理分支")
+        threat_data = parse_json_threat_result(result_content)
+        logger.info(f"[HANDLE] threat_data解析结果: {type(threat_data)}, 长度: {len(threat_data) if threat_data else 0}")
+
+        if threat_data:
+            user_session["last_threat_data"] = threat_data
+            threat_count = len(threat_data)
+
+            summary = f"""✅ **威胁类型映射完成！**
 
 📊 **映射统计：**
 - 映射数量：{threat_count} 条
@@ -695,42 +722,70 @@ async def handle_user_message(user_session: dict, team, user_text: str):
 - 🔍 使用搜索框筛选
 - 📥 导出CSV文件"""
 
-                # 流式输出摘要
-                for i in range(0, len(summary), 50):
-                    chunk = summary[i:i+50]
-                    await msg.stream_token(chunk)
-                
-                await msg.update()
-                
-                # 创建Dataframe表格元素
-                elements = create_dataframe_elements(threat_data)
-                
-                # 发送Dataframe表格
-                if elements:
-                    table_msg = cl.Message(
-                        content="**📋 威胁类型映射表：**\n\n请先输入目标字段名并上传Base64文件，然后点击下方按钮进行填充。",
-                        elements=elements,
-                        actions=[
-                            cl.Action(name="fill_threat_with_field", label="📥 带字段填充", description="输入目标字段并上传Base64文件进行填充", payload={})
-                        ]
-                    )
-                    await table_msg.send()
-                
-                return
-        
-        # 非映射请求，直接流式输出
-        for i in range(0, len(result_content), 50):
-            chunk = result_content[i:i+50]
-            await msg.stream_token(chunk)
-        
-        await msg.update()
-        
+            for i in range(0, len(summary), 50):
+                await msg.stream_token(summary[i:i+50])
+            await msg.update()
+
+            elements = create_dataframe_elements(threat_data)
+            if elements:
+                await cl.Message(
+                    content="**📋 威胁类型映射表：**\n\n请先输入目标字段名并上传Base64文件，然后点击下方按钮进行填充。",
+                    elements=elements,
+                    actions=[
+                        cl.Action(name="fill_threat_with_field", label="📥 带字段填充", description="输入目标字段并上传Base64文件进行填充", payload={})
+                    ]
+                ).send()
+            return True
+
+    # 流式输出原文
+    for i in range(0, len(result_content), 50):
+        await msg.stream_token(result_content[i:i+50])
+    await msg.update()
+    return True
+
+
+# ============= 用户消息处理（主编排）=============
+
+async def handle_user_message(user_session: dict, team, user_text: str):
+    """处理用户消息 - 主编排函数，将工作拆分为子函数"""
+    import asyncio as asyncio_mod
+    import time
+
+    user_lower = user_text.lower()
+
+    # 1. 硬路由
+    user_text, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
+
+    # 2. 威胁填充模式分流
+    if await _handle_threat_fill_flow(user_session, user_text):
+        return
+
+    # 3. 构建 LLM 输入
+    full_input = _build_llm_input(user_text, user_session, is_mapping)
+
+    # 4. 发送 loading 消息
+    loading_msg = cl.Message(content="⏳ **AI正在处理中，请稍候...**\n\n💭 正在分析您的请求...")
+    await loading_msg.send()
+
+    try:
+        # 5. 调用 Team（带重试）
+        result = await _call_team_with_retry(team, full_input, loading_msg)
+
+        # 6. 删除 loading 消息
+        await loading_msg.remove()
+
+        # 7. 创建流式消息显示结果
+        msg = cl.Message(content="")
+        await msg.send()
+
+        # 8. 解析响应
+        await _process_team_response(result, user_lower, user_session, loading_msg, msg)
+
     except Exception as e:
         logger.error(f"Team调用异常: {str(e)}")
-        # 删除loading消息
         try:
             await loading_msg.remove()
-        except:
+        except Exception:
             pass
         await cl.Message(content=f"❌ 处理异常：{str(e)}").send()
 
