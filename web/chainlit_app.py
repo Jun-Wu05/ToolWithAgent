@@ -65,6 +65,32 @@ from agent.tools.enum_field_tool import (
     apply_enum_with_base64,
 )
 
+# 从 enum_extract_tool 导入枚举提取函数
+from agent.tools.enum_extract_tool import (
+    sample_logs,
+    validate_regex,
+    extract_enum_with_field,
+    format_mapping_table,
+    generate_output_json,
+    generate_mapping_content,
+)
+
+
+# ============= 枚举提取提示词加载 =============
+
+def _load_enum_extract_prompt() -> str:
+    """加载枚举提取提示词"""
+    _prompt_path = os.path.join(_project_root, "agent", "prompts", "enum_extract.md")
+    try:
+        with open(_prompt_path, "r", encoding="utf-8") as _f:
+            return _f.read()
+    except Exception as _e:
+        logger.warning(f"[CONFIG] 加载 enum_extract.md 失败: {_e}，使用默认提示词")
+        return "请分析日志格式，为指定字段生成正则表达式提取枚举值。"
+
+
+ENUM_EXTRACT_PROMPT = _load_enum_extract_prompt()
+
 
 # ============= 路由关键词库（从配置文件加载）=============
 
@@ -76,6 +102,7 @@ def _load_route_keywords():
         "mapping_keywords": ["映射", "字段", "标准字段", "字段映射"],
         "threat_keywords": ["威胁类型", "threat_type", "威胁类型标准化", "威胁类型映射"],
         "enum_keywords": ["枚举", "枚举字段", "enum"],
+        "enum_extract_keywords": ["提取枚举", "枚举值", "列举枚举", "列出枚举"],
     }
     try:
         with open(_config_path, "r", encoding="utf-8") as _f:
@@ -84,6 +111,7 @@ def _load_route_keywords():
             _data.get("mapping_keywords", _defaults["mapping_keywords"]),
             _data.get("threat_keywords", _defaults["threat_keywords"]),
             _data.get("enum_keywords", _defaults["enum_keywords"]),
+            _data.get("enum_extract_keywords", _defaults["enum_extract_keywords"]),
         )
     except Exception as _e:
         logger.warning(f"[CONFIG] 加载 route_keywords.json 失败: {_e}，使用默认关键词")
@@ -91,9 +119,10 @@ def _load_route_keywords():
             _defaults["mapping_keywords"],
             _defaults["threat_keywords"],
             _defaults["enum_keywords"],
+            _defaults["enum_extract_keywords"],
         )
 
-MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS = _load_route_keywords()
+MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS = _load_route_keywords()
 
 
 # ============= Chainlit 事件处理 =============
@@ -617,6 +646,189 @@ async def _handle_enum_fill_flow(user_session: dict, user_text: str) -> bool:
     return True
 
 
+async def _handle_enum_extract_flow(user_session: dict, team, user_text: str):
+    """
+    枚举提取模式专属流程
+    从日志中提取指定字段的枚举值
+    """
+    logger.info(f"[ENUM_EXTRACT] 开始枚举提取流程: {user_text}")
+
+    # 检查是否有原始日志数据
+    original_log = user_session.get("original_log")
+    if not original_log:
+        await cl.Message(
+            content="""❌ **没有找到原始日志数据**
+
+请先上传包含日志的配置文件（如 Base64/TXT），然后再提取枚举值。"""
+        ).send()
+        return
+
+    # 从用户消息中提取目标字段名
+    # 格式可能是："提取 xxx 字段的枚举值" 或 "列举 xxx 的枚举"
+    user_lower = user_text.lower()
+
+    # 尝试从消息中提取字段名
+    # 常见模式：提取xxx字段、xxx的枚举、枚举xxx
+    field_name = None
+
+    # 模式1: 提取XXX字段/值
+    patterns = [
+        r'提取"?(.+?)"?[字字段]*(?:的|的?)枚举',
+        r'列举"?(.+?)"?的枚举',
+        r'枚举"?(.+?)"?',
+        r'提取"?(.+?)"?的值',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, user_lower)
+        if match:
+            field_name = match.group(1).strip()
+            break
+
+    # 如果没找到字段名，尝试使用 decoded_fields 中的第一个字段
+    if not field_name:
+        decoded_fields = user_session.get("decoded_fields")
+        if decoded_fields and len(decoded_fields) > 0:
+            field_name = decoded_fields[0]
+            logger.info(f"[ENUM_EXTRACT] 未识别字段名，使用第一个字段: {field_name}")
+        else:
+            await cl.Message(
+                content="""❌ **无法确定目标字段**
+
+请在消息中明确指定要提取枚举的字段，例如：
+- "提取 status 字段的枚举值"
+- "列举 action 的枚举" """
+            ).send()
+            return
+
+    logger.info(f"[ENUM_EXTRACT] 目标字段: {field_name}")
+
+    # 发送 loading 消息
+    loading_msg = cl.Message(content="⏳ **正在提取枚举值...**\n\n💭 分析日志格式并生成正则表达式...")
+    await loading_msg.send()
+
+    try:
+        # 1. 从原始日志中采样
+        logs_str = '\n'.join(original_log)
+        sampled_logs = sample_logs(logs_str, sample_size=20)
+        logger.info(f"[ENUM_EXTRACT] 采样日志行数: {sampled_logs.count(chr(10)) + 1}")
+
+        # 2. 构建 LLM 输入
+        llm_input = f"""{ENUM_EXTRACT_PROMPT}
+
+目标字段名：{field_name}
+
+采样日志（20行）：
+{sampled_logs}
+
+请分析以上日志格式，为 "{field_name}" 字段生成提取正则表达式。只输出 JSON 格式结果，不要输出其他内容。"""
+
+        # 3. 调用 LLM 生成正则表达式
+        import asyncio
+        result = await asyncio.to_thread(team.run, llm_input)
+
+        # 删除 loading 消息
+        await loading_msg.remove()
+
+        # 4. 解析 LLM 输出
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        logger.info(f"[ENUM_EXTRACT] LLM输出: {result_content[:500]}...")
+
+        # 尝试解析 JSON
+        regex_result = None
+        try:
+            # 提取 JSON
+            json_match = re.search(r'\{[^}]+\}', result_content, re.DOTALL)
+            if json_match:
+                regex_data = json.loads(json_match.group())
+                regex_result = regex_data.get("regex", "")
+                logger.info(f"[ENUM_EXTRACT] 提取到正则: {regex_result}")
+        except json.JSONDecodeError:
+            logger.warning(f"[ENUM_EXTRACT] JSON解析失败，尝试直接使用输出")
+
+        # 如果没有解析到正则，使用默认正则
+        if not regex_result:
+            # 使用简单的正则尝试匹配
+            regex_result = f'(?<="{field_name}"[:=])"?([^",}}\\s]+)"?'
+            logger.info(f"[ENUM_EXTRACT] 使用默认正则: {regex_result}")
+
+        # 5. 验证正则
+        validation = validate_regex(regex_result, sampled_logs)
+        logger.info(f"[ENUM_EXTRACT] 正则验证结果: {validation}")
+
+        if not validation.get("valid"):
+            await cl.Message(
+                content=f"""❌ **正则验证失败**
+
+正则表达式：`{regex_result}`
+错误信息：{validation.get("error", "未知错误")}
+
+请调整正则表达式后重试。"""
+            ).send()
+            return
+
+        # 6. 用正则扫描全量日志提取枚举值
+        enum_result = extract_enum_with_field(logs_str, field_name, regex_result)
+        logger.info(f"[ENUM_EXTRACT] 提取结果: {enum_result.get('unique_count')} 个唯一枚举值")
+
+        # 7. 展示结果
+        enum_values = enum_result.get("value", [])
+        unique_count = enum_result.get("unique_count", 0)
+        total_count = enum_result.get("total_count", 0)
+
+        if not enum_values:
+            await cl.Message(
+                content=f"""❌ **未提取到枚举值**
+
+正则表达式：`{regex_result}`
+错误信息：正则未匹配到任何值
+
+请检查日志格式是否正确，或尝试其他字段。"""
+            ).send()
+            return
+
+        # 构建结果消息
+        top_values = enum_values[:10]  # 只显示前10个
+        values_display = '\n'.join([f"- `{v}`" for v in top_values])
+
+        if unique_count > 10:
+            values_display += f"\n- ... 还有 {unique_count - 10} 个"
+
+        summary = f"""✅ **枚举提取完成！**
+
+📊 **提取统计：**
+- 目标字段：{field_name}
+- 唯一枚举值：{unique_count} 个
+- 总匹配行数：{total_count} 条
+
+🔍 **正则表达式：**
+```
+{regex_result}
+```
+
+📋 **枚举值列表（前10个）：**
+{values_display}
+
+💡 **下一步操作：**
+- 可以基于这些枚举值生成映射表
+- 点击上方"枚举处理"上传 Excel 映射表进行填充"""
+
+        await cl.Message(content=summary).send()
+
+        # 保存枚举提取结果到会话
+        user_session["last_enum_extract_result"] = enum_result
+
+    except Exception as e:
+        logger.error(f"[ENUM_EXTRACT] 枚举提取异常: {str(e)}")
+        import traceback
+        logger.error(f"[ENUM_EXTRACT] 详细错误: {traceback.format_exc()}")
+        try:
+            await loading_msg.remove()
+        except Exception:
+            pass
+        await cl.Message(content=f"❌ 枚举提取失败：{str(e)}").send()
+
+
 # ============= Action 回调处理 =============
 
 @cl.action_callback("fill_threat_with_field")
@@ -768,11 +980,12 @@ def _route_request(user_lower: str, user_text: str):
     硬路由匹配：根据关键词判断请求类型并添加前缀标签
 
     Returns:
-        (routed_text: str, is_mapping: bool, is_threat: bool, is_enum: bool)
+        (routed_text: str, is_mapping: bool, is_threat: bool, is_enum: bool, is_enum_extract: bool)
     """
     is_mapping = False
     is_threat = False
     is_enum = False
+    is_enum_extract = False
 
     if any(kw in user_lower for kw in THREAT_KEYWORDS):
         logger.info("[HARD_ROUTE] 命中威胁类型关键词")
@@ -782,12 +995,16 @@ def _route_request(user_lower: str, user_text: str):
         logger.info("[HARD_ROUTE] 命中枚举关键词")
         user_text = f"[枚举处理] {user_text}"
         is_enum = True
+    elif any(kw in user_lower for kw in ENUM_EXTRACT_KEYWORDS):
+        logger.info("[HARD_ROUTE] 命中枚举提取关键词")
+        user_text = f"[枚举提取] {user_text}"
+        is_enum_extract = True
     elif any(kw in user_lower for kw in MAPPING_KEYWORDS):
         logger.info("[HARD_ROUTE] 命中字段映射关键词")
         user_text = f"[字段映射] {user_text}"
         is_mapping = True
 
-    return user_text, is_mapping, is_threat, is_enum
+    return user_text, is_mapping, is_threat, is_enum, is_enum_extract
 
 
 def _build_llm_input(user_text: str, user_session: dict, is_mapping: bool) -> str:
@@ -1257,7 +1474,7 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     user_lower = user_text.lower()
 
     # 1. 硬路由
-    user_text, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
+    user_text, is_mapping, is_threat, is_enum, is_enum_extract = _route_request(user_lower, user_text)
 
     # 2. 威胁填充模式分流
     if await _handle_threat_fill_flow(user_session, user_text):
@@ -1280,7 +1497,12 @@ Excel 格式说明：
         ).send()
         return
 
-    # 4. 构建 LLM 输入
+    # 4. 枚举提取分流（当检测到枚举提取关键词时）
+    if is_enum_extract:
+        await _handle_enum_extract_flow(user_session, team, user_text)
+        return
+
+    # 5. 构建 LLM 输入
     full_input = _build_llm_input(user_text, user_session, is_mapping)
 
     # 5. 发送 loading 消息
