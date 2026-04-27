@@ -89,9 +89,18 @@ MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS = _load_route_keywords()
 
 # ============= Chainlit 事件处理 =============
 
+_agno_bridge_installed: bool = False
+
+
 @cl.on_chat_start
 async def start():
     """聊天开始时初始化"""
+    # 安装 Agno 日志拦截器（仅一次）
+    global _agno_bridge_installed
+    if not _agno_bridge_installed:
+        _setup_agno_logging_bridge()
+        _agno_bridge_installed = True
+
     # 创建用户会话状态
     user_session = {
         "team": None,
@@ -635,22 +644,227 @@ async def _call_team_with_retry(team, full_input: str, loading_msg) -> object:
 
 
 def _log_token_usage(result):
-    """记录 LLM Token 用量"""
+    """记录 LLM Token 用量（深度探测 RunResponse 上所有可能存放 token/metrics 的属性）"""
     try:
-        if hasattr(result, 'usage') and result.usage:
-            usage = result.usage
-            input_tokens = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', 'N/A')
-            output_tokens = getattr(usage, 'output_tokens', None) or getattr(usage, 'completion_tokens', 'N/A')
-            total_tokens = getattr(usage, 'total_tokens', 'N/A')
-            logger.info(f"[API] Tokens - 输入: {input_tokens}, 输出: {output_tokens}, 总计: {total_tokens}")
+        from agent.core.model_config import ModelConfig
+        model_name = ModelConfig.MAIN_MODEL
 
-        if hasattr(result, 'metrics') and result.metrics:
-            metrics = result.metrics
-            for attr in dir(metrics):
-                if 'token' in attr.lower() or 'usage' in attr.lower():
-                    logger.info(f"[API] Metrics.{attr}: {getattr(metrics, attr, 'N/A')}")
+        # ---- 格式化的 token 日志（单行）----
+        def _emit(label: str, input_tokens, output_tokens, total_tokens, cached_tokens=None, extra_info: str = ""):
+            parts = [
+                f"模型: {model_name}",
+                f"Tokens - 输入: {input_tokens}, 输出: {output_tokens}, 总计: {total_tokens}",
+            ]
+            if cached_tokens is not None:
+                parts.append(f"缓存: {cached_tokens}")
+            if extra_info:
+                parts.append(extra_info)
+            logger.info(f"[API] {label}，" + "，".join(parts))
+
+        found_any = False
+
+        # 1) result.usage（最常见）
+        usage = getattr(result, 'usage', None)
+        if usage:
+            inp = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', None)
+            out = getattr(usage, 'output_tokens', None) or getattr(usage, 'completion_tokens', None)
+            total = getattr(usage, 'total_tokens', None)
+            cached = getattr(usage, 'cached_tokens', None)
+            if inp is not None or out is not None:
+                _emit("主调用", inp, out, total, cached)
+                found_any = True
+
+        # 2) result.metrics（Agno v1 可能放这里）
+        metrics = getattr(result, 'metrics', None)
+        if metrics is not None:
+            if isinstance(metrics, dict):
+                _inp = metrics.get('input_tokens') or metrics.get('prompt_tokens')
+                _out = metrics.get('output_tokens') or metrics.get('completion_tokens')
+                _tot = metrics.get('total_tokens')
+                _cache = metrics.get('cached_tokens')
+                if _inp is not None or _out is not None:
+                    _emit("主调用(metrics)", _inp, _out, _tot, _cache)
+                    found_any = True
+            else:
+                # 对象形式
+                for attr in dir(metrics):
+                    if not attr.startswith('_') and ('token' in attr.lower() or 'usage' in attr.lower()):
+                        logger.info(f"[API] Metrics.{attr}: {getattr(metrics, attr, 'N/A')}")
+                        found_any = True
+
+        # 3) result.run_data / result.extra（Agno 有时会把 member-agent 的 metrics 放在这里）
+        for attr_name in ('run_data', 'extra', 'run_response'):
+            container = getattr(result, attr_name, None)
+            if container is None:
+                continue
+            if isinstance(container, dict):
+                for key, val in container.items():
+                    _probe_nested(key, val, model_name, _emit)
+                    found_any = True
+            elif hasattr(container, '__dict__'):
+                for key, val in container.__dict__.items():
+                    if 'token' in key.lower() or 'usage' in key.lower() or 'metric' in key.lower():
+                        logger.info(f"[API] {attr_name}.{key}: {val}")
+                        found_any = True
+
+        # 4) result.members / result.member_responses（Team Route 模式下子 agent 的响应）
+        for attr_name in ('members', 'member_responses'):
+            val = getattr(result, attr_name, None)
+            if val is None:
+                continue
+            if isinstance(val, list):
+                for idx, item in enumerate(val):
+                    _probe_nested(f"Member[{idx}]", item, model_name, _emit)
+                    found_any = True
+            elif isinstance(val, dict):
+                for key, item in val.items():
+                    _probe_nested(f"Member[{key}]", item, model_name, _emit)
+                    found_any = True
+
+        # 5) 对 result 自身的 __dict__ 做通用扫描
+        if hasattr(result, '__dict__'):
+            for key, val in result.__dict__.items():
+                if key.startswith('_'):
+                    continue
+                if any(kw in key.lower() for kw in ('usage', 'token', 'metric', 'response', 'run')):
+                    if isinstance(val, (dict, list)):
+                        _probe_nested(key, val, model_name, _emit)
+                        found_any = True
+                    elif not isinstance(val, str) and hasattr(val, '__dict__'):
+                        _probe_nested(key, val, model_name, _emit)
+                        found_any = True
+
+        if not found_any:
+            logger.info(f"[API] 模型: {model_name}，Token 用量未获取到（RunResponse 上无 usage/metrics 属性，请依赖 Agno logging bridge）")
     except Exception:
         pass  # Token 记录失败不影响主流程
+
+
+def _probe_nested(label: str, obj, model_name: str, emit_fn):
+    """递归探测嵌套对象上的 token 信息"""
+    if obj is None:
+        return
+    if isinstance(obj, dict):
+        inp = obj.get('input_tokens') or obj.get('prompt_tokens')
+        out = obj.get('output_tokens') or obj.get('completion_tokens')
+        total = obj.get('total_tokens')
+        cached = obj.get('cached_tokens')
+        if inp is not None or out is not None:
+            emit_fn(label, inp, out, total, cached)
+        # 子字典
+        for k, v in obj.items():
+            if k in ('usage', 'metrics', 'response', 'run_response') and isinstance(v, dict):
+                _probe_nested(f"{label}/{k}", v, model_name, emit_fn)
+    elif hasattr(obj, '__dict__'):
+        usage = getattr(obj, 'usage', None)
+        if usage is not None:
+            inp = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', None)
+            out = getattr(usage, 'output_tokens', None) or getattr(usage, 'completion_tokens', None)
+            total = getattr(usage, 'total_tokens', None)
+            cached = getattr(usage, 'cached_tokens', None)
+            if inp is not None or out is not None:
+                emit_fn(label, inp, out, total, cached)
+        metrics = getattr(obj, 'metrics', None)
+        if metrics is not None and isinstance(metrics, dict):
+            _probe_nested(f"{label}/metrics", metrics, model_name, emit_fn)
+
+
+def _setup_agno_logging_bridge():
+    """
+    拦截 Agno 框架内部的 DEBUG/INFO logger，提取 Token 用量信息。
+
+    Agno 在 debug_mode=True 时会通过 `agno` / `agno.agent` 等 logger
+    输出如下格式的日志：
+        DEBUG * Tokens: input=20707, output=1419, total=22126, cached=20224
+        DEBUG * Duration: 63.9110s
+
+    本函数给 logging 根节点挂一个 handler，识别这些行并转成应用级 INFO 日志。
+    """
+    import logging as _logging
+    import re as _re
+
+    # 预编译正则
+    _TOKEN_RE = _re.compile(
+        r'Tokens:\s*input=(?P<input>\d+),\s*output=(?P<output>\d+),\s*total=(?P<total>\d+)(?:,\s*cached=(?P<cached>\d+))?'
+    )
+    _DURATION_RE = _re.compile(r'Duration:\s*(?P<duration>[\d.]+)s')
+
+    # 用一个闭包记录最近的 member 名称（Agno 日志中可能包含 agent name）
+    # 同时用一个栈来跟踪当前正在执行的 agent
+    from agent.core.model_config import ModelConfig
+    model_name = ModelConfig.MAIN_MODEL
+
+    class _AgnoTokenHandler(_logging.Handler):
+        """捕获 agno.* logger 的 token 信息并写入应用日志"""
+
+        def __init__(self):
+            super().__init__(level=_logging.DEBUG)
+            self._last_duration_s: float | None = None
+            self._last_member_name: str = ""
+            # 用于跟踪 member agent 名称（从日志行提取）
+            self._name_pattern = _re.compile(r'\[(\w+Agent)\]|Member:\s*(\w+)')
+
+        def emit(self, record: _logging.LogRecord):
+            msg = str(record.msg) if record.msg else ""
+            args = record.args if record.args else ()
+
+            # 尝试格式化消息（处理 %s 占位符）
+            try:
+                if args:
+                    msg = msg % args
+            except Exception:
+                pass
+
+            # 1) 提取 member agent 名称
+            name_match = self._name_pattern.search(msg)
+            if name_match:
+                self._last_member_name = name_match.group(1) or name_match.group(2) or ""
+
+            # 2) 提取 Duration
+            dur_match = _DURATION_RE.search(msg)
+            if dur_match:
+                self._last_duration_s = float(dur_match.group('duration'))
+
+            # 3) 提取 Tokens
+            token_match = _TOKEN_RE.search(msg)
+            if not token_match:
+                return  # 不是 token 日志，忽略
+
+            input_t = token_match.group('input')
+            output_t = token_match.group('output')
+            total_t = token_match.group('total')
+            cached_t = token_match.group('cached')
+
+            # 确定 label
+            if self._last_member_name:
+                label = f"MemberAgent({self._last_member_name})"
+            else:
+                label = "Team Leader 路由"
+
+            parts = [
+                f"模型: {model_name}",
+                f"Tokens - 输入: {input_t}, 输出: {output_t}, 总计: {total_t}",
+            ]
+            if cached_t:
+                parts.append(f"缓存: {cached_t}")
+            if self._last_duration_s is not None:
+                parts.append(f"耗时: {self._last_duration_s:.1f}s")
+                self._last_duration_s = None  # 只用一次，避免跨调用污染
+
+            logger.info(f"[API] {label}，" + "，".join(parts))
+
+    # ---- 安装 handler ----
+    handler = _AgnoTokenHandler()
+
+    # 拦截 agno 相关的 logger（覆盖 agno、agno.agent、agno.team 等）
+    for name in ('agno', 'agno.agent', 'agno.team', 'agno.models', ''):
+        logger_obj = _logging.getLogger(name)
+        logger_obj.addHandler(handler)
+        logger_obj.setLevel(_logging.DEBUG)
+
+    logger.info("[LOGGING_BRIDGE] Agno 日志拦截器已安装，将捕获 Token 用量信息")
+
+    return handler  # 返回 handler 引用，防止被 GC
 
 
 async def _process_team_response(
