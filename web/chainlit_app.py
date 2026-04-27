@@ -359,8 +359,13 @@ async def handle_file_upload(user_session: dict, element):
             enum_excel_path = user_session.get("enum_excel_path")
             enum_preview = user_session.get("enum_preview")
             
+            logger.info(f"[FILE_UPLOAD] Base64解码成功，检查枚举状态: enum_excel_path={enum_excel_path is not None}, enum_preview={enum_preview is not None}")
+            
             if enum_excel_path and enum_preview:
                 logger.info(f"[FILE_UPLOAD] 检测到已有枚举 Excel + 新上传 Base64，执行一站式填充")
+                
+                # 保存到 pending_base64 以防枚举填充失败时可以恢复
+                user_session["pending_base64"] = file_content
                 
                 # 设置枚举填充模式
                 user_session["enum_fill_mode"] = True
