@@ -183,11 +183,7 @@ def create_data_mapping_team() -> Team:
     Returns:
         Team实例
     """
-    import time
-    from src.logger import get_logger
-    
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    logger = get_logger("team")
     
     if not api_key:
         raise ValueError("请设置环境变量 SILICONFLOW_API_KEY")
@@ -212,33 +208,6 @@ def create_data_mapping_team() -> Team:
         debug_mode=True,  # 启用 debug 模式
         show_members_responses=True,  # 显示MemberAgent的响应
     )
-    
-    # 包装 run 方法添加日志
-    original_run = team.run
-    
-    async def logged_run(message: str):
-        logger.info(f"[TEAM] 开始处理消息，长度: {len(message)}")
-        start_time = time.time()
-        
-        result = await original_run(message)
-        
-        duration = time.time() - start_time
-        logger.info(f"[TEAM] 处理完成，耗时: {duration:.2f}秒")
-        
-        # 记录输出
-        content = result.content if hasattr(result, 'content') else str(result)
-        logger.info(f"[TEAM] 输出长度: {len(content)} 字符")
-        
-        # 记录 tokens
-        if hasattr(result, 'usage') and result.usage:
-            usage = result.usage
-            input_tokens = getattr(usage, 'input_tokens', 'N/A')
-            output_tokens = getattr(usage, 'output_tokens', 'N/A')
-            logger.info(f"[TEAM] Tokens - 输入: {input_tokens}, 输出: {output_tokens}")
-        
-        return result
-    
-    team.run = logged_run
     
     return team
 

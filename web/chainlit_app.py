@@ -577,6 +577,17 @@ async def handle_user_message(user_session: dict, team, user_text: str):
         api_duration = api_end_time - api_start_time
         logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
         
+        # === 记录 LLM 输出 ===
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        logger.info(f"[API] LLM输出长度: {len(result_content)} 字符")
+        
+        # === 记录 Tokens ===
+        if hasattr(result, 'usage') and result.usage:
+            usage = result.usage
+            input_tokens = getattr(usage, 'input_tokens', 'N/A')
+            output_tokens = getattr(usage, 'output_tokens', 'N/A')
+            logger.info(f"[API] Tokens - 输入: {input_tokens}, 输出: {output_tokens}")
+        
         # 删除loading消息
         await loading_msg.remove()
         
