@@ -57,27 +57,34 @@ from web.parsers import parse_json_mapping_result, parse_json_threat_result, cre
 from src.threat_fill_handler import apply_threat_mapping, export_to_base64, find_normalize_item
 
 
-# ============= 路由关键词库 ==========
+# ============= 路由关键词库（从配置文件加载）=============
 
-# 字段映射关键词（扩展自 ROUTER_INSTRUCTIONS）
-MAPPING_KEYWORDS = [
-    "映射", "字段", "标准字段", "字段处理", "字段标准化",
-    "字段映射", "字段对应", "字段归一化", "标准化字段", "统一字段",
-    "匹配字段", "对齐字段", "转换字段",
-    "帮我映射", "做字段映射", "生成映射表", "标准字段处理",
-]
+def _load_route_keywords():
+    """从 config/route_keywords.json 加载路由关键词"""
+    import json as _json
+    _config_path = os.path.join(_project_root, "config", "route_keywords.json")
+    _defaults = {
+        "mapping_keywords": ["映射", "字段", "标准字段", "字段映射"],
+        "threat_keywords": ["威胁类型", "threat_type", "威胁类型标准化", "威胁类型映射"],
+        "enum_keywords": ["枚举", "枚举字段", "enum"],
+    }
+    try:
+        with open(_config_path, "r", encoding="utf-8") as _f:
+            _data = _json.load(_f)
+        return (
+            _data.get("mapping_keywords", _defaults["mapping_keywords"]),
+            _data.get("threat_keywords", _defaults["threat_keywords"]),
+            _data.get("enum_keywords", _defaults["enum_keywords"]),
+        )
+    except Exception as _e:
+        logger.warning(f"[CONFIG] 加载 route_keywords.json 失败: {_e}，使用默认关键词")
+        return (
+            _defaults["mapping_keywords"],
+            _defaults["threat_keywords"],
+            _defaults["enum_keywords"],
+        )
 
-# 威胁类型关键词（精确匹配，忽略大小写）
-THREAT_KEYWORDS = [
-    "威胁类型", "threat_type", "威胁类型标准化", "威胁类型映射",
-]
-
-# 枚举关键词
-ENUM_KEYWORDS = [
-    "枚举", "枚举字段", "enum",
-    "值映射", "字段值映射", "值转换",
-    "枚举值映射", "枚举转换",
-]
+MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS = _load_route_keywords()
 
 
 # ============= Chainlit 事件处理 =============
@@ -488,11 +495,7 @@ def _route_request(user_lower: str, user_text: str):
     is_threat = False
     is_enum = False
 
-    if any(kw in user_lower for kw in MAPPING_KEYWORDS):
-        logger.info("[HARD_ROUTE] 命中字段映射关键词")
-        user_text = f"[字段映射] {user_text}"
-        is_mapping = True
-    elif any(kw in user_lower for kw in THREAT_KEYWORDS):
+    if any(kw in user_lower for kw in THREAT_KEYWORDS):
         logger.info("[HARD_ROUTE] 命中威胁类型关键词")
         user_text = f"[威胁类型] {user_text}"
         is_threat = True
@@ -500,6 +503,10 @@ def _route_request(user_lower: str, user_text: str):
         logger.info("[HARD_ROUTE] 命中枚举关键词")
         user_text = f"[枚举处理] {user_text}"
         is_enum = True
+    elif any(kw in user_lower for kw in MAPPING_KEYWORDS):
+        logger.info("[HARD_ROUTE] 命中字段映射关键词")
+        user_text = f"[字段映射] {user_text}"
+        is_mapping = True
 
     return user_text, is_mapping, is_threat, is_enum
 

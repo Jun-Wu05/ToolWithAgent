@@ -21,6 +21,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Chainlit 临时文件目录
+.files/
+
 # IDE 配置文件
 .vscode/
 .idea/
