@@ -543,19 +543,33 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     
     # 构建用户输入
     if has_data:
-        # 使用简化 JSON 而不是完整 JSON
+        # 分离 fields 和 original_log_sample，避免 LLM 混淆
         simplified_data = user_session.get("simplified_data", {})
-        simplified_json_str = json.dumps(simplified_data, ensure_ascii=False)
+        fields_list = simplified_data.get("fields", [])
+        original_log_sample = simplified_data.get("original_log_sample", "")
+        
+        # 只用 fields 数组构建输入，original_log_sample 单独放在后面作为参考
+        fields_json_str = json.dumps(fields_list, ensure_ascii=False)
         
         full_input = f"""用户请求：{user_text}
 
-字段列表（简化JSON）：
-{simplified_json_str}
+⚠️ 需要映射的字段列表（严格只处理以下字段，每个字段名必须精确匹配，不得增减任何字段）：
+{fields_json_str}
 
-请根据用户请求处理。"""
+请根据以上字段列表进行标准字段映射处理。"""
+        
+        # 原始日志样本作为可选的语义参考（不是字段来源）
+        if original_log_sample:
+            # 截断过长的日志样本，避免占用过多 token
+            sample_str = original_log_sample if len(original_log_sample) <= 2000 else original_log_sample[:2000] + "...(已截断)"
+            full_input += f"""
+
+---
+📋 原始日志样本（仅用于理解字段语义，字段列表以上方 JSON 数组为准）：
+{sample_str}"""
         
         # 记录发送给 LLM 的数据
-        logger.info(f"[LLM_INPUT] 发送给LLM的数据: {simplified_json_str[:500]}...")
+        logger.info(f"[LLM_INPUT] 发送给LLM的字段列表: {fields_json_str[:500]}...")
     else:
         # 无数据时，直接传递用户输入
         full_input = user_text
