@@ -1,0 +1,46 @@
+# ToolWithAgent 智能体系统 — 项目总结
+
+## 目标
+构建一个基于 LLM 的智能体系统，通过 Chainlit Web 界面帮助安全分析人员完成日志数据字段映射、威胁类型分类和威胁数据填充等任务。
+
+## 技术栈
+- **语言**: Python 3.10+
+- **前端**: Chainlit Web 框架
+- **LLM**: 通过 `agent/core/team.py` 编排的智能体 Team
+- **提示词管理**: Markdown 文件（`agent/prompts/` 目录），动态加载
+- **会话状态**: `cl.user_session` 管理请求间状态
+
+## 已完成功能
+
+1. **文件上传与解析** — 上传 JSON 日志文件，自动解析字段列表并存储到 session
+2. **硬路由分发** — 基于关键词匹配（`MAPPING_KEYWORDS`、`THREAT_KEYWORDS`），请求到达 LLM 前先判定类型（`is_mapping` / `is_threat` / `is_enum`）
+3. **条件化 LLM 输入构建** — `_build_llm_input(user_text, user_session, is_mapping)` 仅在 `is_mapping=True` 时拼接字段列表 JSON；威胁类型请求只传用户原始文本
+4. **威胁填充分流** — `_handle_threat_fill_flow()` 独立处理威胁填充逻辑，避免污染其他流程
+5. **Team.run 指数退避重试** — `_call_team_with_retry()` 最多重试 3 次
+6. **Token 用量日志** — 每次 LLM 调用后记录 token 消耗
+7. **提示词模块重构** — 删除所有硬编码回退函数，统一从 `.md` 文件加载；新增 `router.md`
+
+## 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `web/chainlit_app.py` | 主应用入口，包含路由、输入构建、响应处理等全部编排逻辑 |
+| `web/parsers.py` | LLM 响应解析器 |
+| `agent/core/team.py` | Team 编排，动态加载 Router 指令 |
+| `agent/prompts/router.md` | Router 提示词 |
+| `agent/prompts/__init__.py` | 提示词加载器，无硬编码回退 |
+| `src/threat_type_manager.py` | 威胁类型管理 |
+| `src/threat_fill_handler.py` | 威胁填充处理 |
+| `src/field_mapping_handler.py` | 字段映射处理 |
+
+## 已知问题
+
+1. `_route_request()` 中 `is_mapping` 优先于 `is_threat` 匹配。用户输入「威胁类型映射」会因命中「映射」关键词而被路由为字段映射请求，而非威胁类型请求。
+2. 远程存在未跟踪的 `.files/` 目录变更（已删除的临时文件），未纳入版本控制。
+
+## 接下来需要完成的工作
+
+1. 解决路由优先级问题：将 `is_threat` 检查置于 `is_mapping` 之前，或在关键词中添加互斥逻辑。
+2. 清理 `.files/` 目录或将其加入 `.gitignore`。
+3. 为 `_route_request()` 和 `_build_llm_input()` 添加单元测试，覆盖字段映射、威胁类型和无数据三种路径。
+4. 考虑将硬路由关键词提取到配置文件，便于维护。

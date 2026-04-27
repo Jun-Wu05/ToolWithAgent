@@ -56,6 +56,15 @@ from web.parsers import parse_json_mapping_result, parse_json_threat_result, cre
 # 从 threat_fill_handler 导入填充函数
 from src.threat_fill_handler import apply_threat_mapping, export_to_base64, find_normalize_item
 
+# 从 enum_field_tool 导入枚举填充函数（纯函数版本）
+from agent.tools.enum_field_tool import (
+    read_enum_mappings_from_excel,
+    get_enum_preview,
+    apply_enum_fill,
+    export_enum_to_base64,
+    apply_enum_with_base64,
+)
+
 
 # ============= 路由关键词库（从配置文件加载）=============
 
@@ -113,6 +122,11 @@ async def start():
         "threat_target_field": None,  # 用户输入的目标字段名
         "threat_mapping_table": None,  # 威胁映射表格
         "pending_base64": None,  # 待处理的Base64内容
+        # 枚举填充模式相关
+        "enum_fill_mode": False,  # 枚举填充模式标志
+        "enum_base64": None,  # 枚举待处理的Base64内容
+        "enum_excel_path": None,  # 枚举映射表Excel路径
+        "enum_preview": None,  # 枚举预览数据
     }
     cl.user_session.set("user_session", user_session)
     
@@ -225,7 +239,81 @@ async def handle_file_upload(user_session: dict, element):
                 await cl.Message(content="📁 **Base64 文件已上传！**\n\n请在下方发送目标字段名（如：original_log）来完成填充。").send()
             
             return
-        # ========== 威胁填充模式结束 ==========
+        # ========== 枚举填充模式状态隔离 ==========
+        # 如果处于枚举填充模式，优先处理枚举填充逻辑
+        if user_session.get("enum_fill_mode"):
+            enum_excel_path = user_session.get("enum_excel_path")
+            
+            if not enum_excel_path:
+                await cl.Message(content="❌ 枚举映射表路径丢失，请重新上传Excel映射表").send()
+                user_session["enum_fill_mode"] = False
+                return
+            
+            logger.info(f"[FILE_UPLOAD] 枚举填充模式，执行枚举填充")
+            await execute_enum_fill(user_session, file_content)
+            return
+        # ========== 枚举填充模式结束 ==========
+        
+        # ========== 检测 Excel 枚举映射表 ==========
+        # 检查是否是 Excel 文件（枚举映射表）
+        file_name = getattr(element, 'name', '') or ''
+        if file_name.lower().endswith(('.xlsx', '.xls')):
+            logger.info(f"[FILE_UPLOAD] 检测到 Excel 文件: {file_name}")
+            
+            # 获取文件路径
+            excel_path = getattr(element, 'path', None)
+            if not excel_path:
+                await cl.Message(content="❌ 无法获取 Excel 文件路径").send()
+                return
+            
+            try:
+                # 读取枚举映射预览
+                enum_preview = get_enum_preview(excel_path)
+                
+                if not enum_preview:
+                    await cl.Message(content="❌ Excel 文件中未找到有效的映射数据").send()
+                    return
+                
+                # 保存到会话
+                user_session["enum_excel_path"] = excel_path
+                user_session["enum_preview"] = enum_preview
+                
+                # 获取目标字段列表
+                target_fields = list(set(item["目标字段"] for item in enum_preview))
+                
+                # 发送预览表格
+                preview_count = len(enum_preview)
+                await cl.Message(
+                    content=f"""📊 **枚举映射预览**
+
+📋 **映射统计：**
+- 目标字段：{', '.join(target_fields)}
+- 映射规则：{preview_count} 条
+
+确认无误后，点击下方按钮开始填充。"""
+                ).send()
+                
+                # 发送预览 DataFrame
+                elements = create_dataframe_elements(enum_preview)
+                if elements:
+                    await cl.Message(
+                        content="**📋 映射预览表：**",
+                        elements=elements,
+                        actions=[
+                            cl.Action(name="start_enum_fill", label="✅ 开始枚举填充", description="上传 Base64 配置文件执行枚举填充", payload={})
+                        ]
+                    ).send()
+                
+                return
+                
+            except FileNotFoundError as e:
+                await cl.Message(content=f"❌ Excel 文件未找到：{str(e)}").send()
+                return
+            except Exception as e:
+                logger.error(f"[FILE_UPLOAD] Excel 处理异常: {str(e)}")
+                await cl.Message(content=f"❌ Excel 文件处理失败：{str(e)}").send()
+                return
+        # ========== Excel 枚举映射表检测结束 ==========
         
         # 正常模式：解码 Base64 内容
         from agent.core.agent import simple_decode
@@ -373,6 +461,128 @@ async def execute_threat_fill(user_session: dict, file_content: str):
         await cl.Message(content=f"❌ 填充异常：{str(e)}").send()
 
 
+# ============= 枚举填充执行函数 =============
+
+async def execute_enum_fill(user_session: dict, file_content: str):
+    """
+    执行枚举字段填充
+    
+    Args:
+        user_session: 用户会话状态
+        file_content: Base64 文件内容
+    """
+    logger.info("[execute_enum_fill] 开始执行枚举填充")
+    
+    enum_excel_path = user_session.get("enum_excel_path")
+    enum_preview = user_session.get("enum_preview")
+    
+    logger.info(f"[execute_enum_fill] Excel路径: {enum_excel_path}")
+    
+    if not enum_excel_path:
+        await cl.Message(content="❌ 枚举映射表路径丢失，请重新上传Excel映射表").send()
+        user_session["enum_fill_mode"] = False
+        return
+    
+    # 尝试解析 Base64 文件内容
+    from agent.core.agent import simple_decode
+    result = simple_decode(file_content)
+    
+    if result["status"] == "success":
+        decoded_data = result["decoded_json"]
+        logger.info("[execute_enum_fill] Base64 解码成功")
+    else:
+        # 如果解码失败，尝试直接使用文件内容作为 JSON
+        logger.info("[execute_enum_fill] Base64解码失败，尝试直接解析")
+        try:
+            decoded_data = json.loads(file_content)
+        except:
+            await cl.Message(content=f"❌ 文件解析失败：{result.get('error_message', '未知错误')}").send()
+            return
+    
+    # 执行枚举填充
+    try:
+        # 应用枚举填充
+        updated_data = apply_enum_fill(decoded_data, enum_excel_path)
+        logger.info("[execute_enum_fill] 枚举填充应用成功")
+        
+        # 导出 Base64
+        base64_result = export_enum_to_base64(updated_data)
+        logger.info(f"[execute_enum_fill] Base64导出成功，长度: {len(base64_result)}")
+        
+        # 重置枚举填充模式
+        user_session["enum_fill_mode"] = False
+        user_session["enum_excel_path"] = None
+        user_session["enum_preview"] = None
+        
+        # 计算填充统计
+        field_count = len(enum_preview) if enum_preview else 0
+        
+        # 发送成功消息
+        await cl.Message(
+            content=f"""✅ **枚举字段填充完成！**
+
+📊 **填充统计：**
+- 映射表：{enum_excel_path}
+- 映射数量：{field_count} 条
+
+💾 点击下方按钮下载填充后的配置文件。"""
+        ).send()
+        
+        # 发送可下载的 Base64 文件
+        base64_file = cl.File(
+            name="enum_filled_config.txt",
+            content=base64_result.encode('utf-8'),
+            mime="text/plain",
+        )
+        
+        await cl.Message(
+            content="**📥 点击下载填充后的配置：**",
+            elements=[base64_file]
+        ).send()
+        
+    except FileNotFoundError as e:
+        logger.error(f"[execute_enum_fill] 文件未找到: {e}")
+        await cl.Message(content=f"❌ Excel 文件未找到：{str(e)}").send()
+    except ValueError as e:
+        logger.error(f"[execute_enum_fill] 填充失败: {e}")
+        await cl.Message(content=f"❌ 填充失败：{str(e)}").send()
+    except Exception as e:
+        logger.error(f"[execute_enum_fill] 填充异常: {str(e)}")
+        import traceback
+        logger.error(f"[execute_enum_fill] 详细错误: {traceback.format_exc()}")
+        await cl.Message(content=f"❌ 填充异常：{str(e)}").send()
+
+
+async def _handle_enum_fill_flow(user_session: dict, user_text: str) -> bool:
+    """
+    枚举填充模式专属流程
+
+    Returns:
+        True 表示已处理（调用方应直接 return），False 表示未命中枚举填充模式
+    """
+    if not user_session.get("enum_fill_mode"):
+        return False
+
+    logger.info(f"[HANDLE] 枚举填充模式，检查用户输入: {user_text}")
+
+    enum_excel_path = user_session.get("enum_excel_path")
+    if not enum_excel_path:
+        await cl.Message(content="❌ 枚举映射表路径丢失，请重新上传Excel映射表").send()
+        user_session["enum_fill_mode"] = False
+        return True
+
+    # 枚举模式需要用户上传 Base64 文件
+    logger.info("[HANDLE] 枚举模式，等待用户上传Base64文件")
+    await cl.Message(
+        content=f"""📋 **枚举填充模式已开启**
+
+已选择映射表：{enum_excel_path}
+
+请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
+    ).send()
+    return True
+
+
 # ============= Action 回调处理 =============
 
 @cl.action_callback("fill_threat_with_field")
@@ -489,6 +699,32 @@ async def on_confirm_fill(action: cl.Action):
         import traceback
         logger.error(f"详细错误: {traceback.format_exc()}")
         await cl.Message(content=f"❌ 填充失败：{str(e)}").send()
+
+
+@cl.action_callback("start_enum_fill")
+async def on_start_enum_fill(action: cl.Action):
+    """处理开始枚举填充按钮点击"""
+    logger.info("[start_enum_fill] 收到开始枚举填充回调")
+    user_session = cl.user_session.get("user_session")
+    
+    # 获取枚举预览数据
+    enum_preview = user_session.get("enum_preview")
+    
+    if not enum_preview:
+        logger.warning("[start_enum_fill] 没有枚举预览数据")
+        await cl.Message(content="❌ 没有可用的枚举映射表预览，请先上传Excel映射表").send()
+        return
+    
+    # 设置枚举填充模式
+    user_session["enum_fill_mode"] = True
+    logger.info(f"[start_enum_fill] 开启枚举填充模式，预览数量: {len(enum_preview)}")
+    
+    # 发送提示消息
+    await cl.Message(
+        content="""📥 **枚举填充模式已开启**
+
+请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
+    ).send()
 
 
 # ============= 用户消息处理（子函数）=============
@@ -993,25 +1229,42 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     if await _handle_threat_fill_flow(user_session, user_text):
         return
 
-    # 3. 构建 LLM 输入
+    # 3. 枚举处理分流（当检测到枚举关键词时）
+    if is_enum:
+        await cl.Message(
+            content="""📋 **枚举字段处理**
+
+请上传 **Excel 映射表** 文件来定义枚举映射规则。
+
+Excel 格式说明：
+- Sheet 名 = 目标字段名
+- 第一列：mappingType（EQUAL 或 REGULAR）
+- 第二列：orgValue（原始值）
+- 第三列：mappingValue（映射值）
+
+上传后将展示映射预览，确认后可执行填充。"""
+        ).send()
+        return
+
+    # 4. 构建 LLM 输入
     full_input = _build_llm_input(user_text, user_session, is_mapping)
 
-    # 4. 发送 loading 消息
+    # 5. 发送 loading 消息
     loading_msg = cl.Message(content="⏳ **AI正在处理中，请稍候...**\n\n💭 正在分析您的请求...")
     await loading_msg.send()
 
     try:
-        # 5. 调用 Team（带重试）
+        # 6. 调用 Team（带重试）
         result = await _call_team_with_retry(team, full_input, loading_msg)
 
-        # 6. 删除 loading 消息
+        # 7. 删除 loading 消息
         await loading_msg.remove()
 
-        # 7. 创建流式消息显示结果
+        # 8. 创建流式消息显示结果
         msg = cl.Message(content="")
         await msg.send()
 
-        # 8. 解析响应
+        # 9. 解析响应
         await _process_team_response(result, user_lower, user_session, loading_msg, msg)
 
     except Exception as e:
