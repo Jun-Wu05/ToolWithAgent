@@ -13,15 +13,8 @@ def get_prompts_dir() -> str:
 def load_field_weak_prompt() -> str:
     """
     加载弱匹配标准字段映射提示词
-    复制自 auto/phase2/标准字段.md
     """
     prompt_path = Path(__file__).parent / "field_weak.md"
-    
-    # 如果文件不存在，尝试从原始位置加载
-    if not prompt_path.exists():
-        original_path = Path(__file__).parent.parent.parent / "auto" / "phase2" / "标准字段.md"
-        if original_path.exists():
-            prompt_path = original_path
     
     if prompt_path.exists():
         return prompt_path.read_text(encoding='utf-8')
@@ -32,15 +25,8 @@ def load_field_weak_prompt() -> str:
 def load_field_strong_prompt() -> str:
     """
     加载强匹配标准字段映射提示词
-    复制自 auto/phase2/提示词-强匹配.md
     """
     prompt_path = Path(__file__).parent / "field_strong.md"
-    
-    # 如果文件不存在，尝试从原始位置加载
-    if not prompt_path.exists():
-        original_path = Path(__file__).parent.parent.parent / "auto" / "phase2" / "提示词-强匹配.md"
-        if original_path.exists():
-            prompt_path = original_path
     
     if prompt_path.exists():
         return prompt_path.read_text(encoding='utf-8')
@@ -51,15 +37,8 @@ def load_field_strong_prompt() -> str:
 def load_threat_type_prompt() -> str:
     """
     加载威胁类型标准化提示词
-    复制自 auto/phase2/威胁类型.md
     """
     prompt_path = Path(__file__).parent / "threat_type.md"
-    
-    # 如果文件不存在，尝试从原始位置加载
-    if not prompt_path.exists():
-        original_path = Path(__file__).parent.parent.parent / "auto" / "phase2" / "威胁类型.md"
-        if original_path.exists():
-            prompt_path = original_path
     
     if prompt_path.exists():
         return prompt_path.read_text(encoding='utf-8')
@@ -164,11 +143,7 @@ def _get_default_enum_field_prompt() -> str:
 
 def load_standard_fields() -> str:
     """加载标准字段表（全量返回）"""
-    # 优先从 agent/data/ 加载
     data_path = Path(__file__).parent.parent / "data" / "标准字段.txt"
-    if not data_path.exists():
-        # 从 auto/phase2/data/ 加载
-        data_path = Path(__file__).parent.parent.parent / "auto" / "phase2" / "data" / "标准字段.txt"
     
     if data_path.exists():
         content = data_path.read_text(encoding='utf-8')

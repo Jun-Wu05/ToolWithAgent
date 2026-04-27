@@ -22,11 +22,7 @@ from agent.prompts import load_field_weak_prompt, load_field_strong_prompt, load
 
 def load_standard_fields_txt() -> str:
     """加载标准字段表"""
-    # 优先从 agent/data/ 加载
     data_path = Path(__file__).parent / "data" / "标准字段.txt"
-    if not data_path.exists():
-        # 从 auto/phase2/data/ 加载
-        data_path = Path(__file__).parent.parent / "auto" / "phase2" / "data" / "标准字段.txt"
     
     if data_path.exists():
         return data_path.read_text(encoding='utf-8')

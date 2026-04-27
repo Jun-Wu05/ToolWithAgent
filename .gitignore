@@ -35,3 +35,4 @@ ToolWithAgent/
 .trae/
 .Ai_context/logs/  
 .测试数据/
+.logs/
