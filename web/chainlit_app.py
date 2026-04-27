@@ -685,12 +685,16 @@ def _log_token_usage(result):
                 if _inp is not None or _out is not None:
                     _emit("主调用(metrics)", _inp, _out, _tot, _cache)
                     found_any = True
-            else:
-                # 对象形式
-                for attr in dir(metrics):
-                    if not attr.startswith('_') and ('token' in attr.lower() or 'usage' in attr.lower()):
-                        logger.info(f"[API] Metrics.{attr}: {getattr(metrics, attr, 'N/A')}")
-                        found_any = True
+            elif hasattr(metrics, 'input_tokens') or hasattr(metrics, 'total_tokens'):
+                # RunMetrics 对象 - 直接提取关键字段，不逐个属性记录
+                _inp = getattr(metrics, 'input_tokens', None)
+                _out = getattr(metrics, 'output_tokens', None)
+                _tot = getattr(metrics, 'total_tokens', None)
+                _dur = getattr(metrics, 'duration', None)
+                _extra = f"耗时: {_dur:.1f}s" if _dur is not None else ""
+                if _inp is not None or _out is not None:
+                    _emit("主调用(metrics)", _inp, _out, _tot, None, _extra)
+                    found_any = True
 
         # 3) result.run_data / result.extra（Agno 有时会把 member-agent 的 metrics 放在这里）
         for attr_name in ('run_data', 'extra', 'run_response'):
@@ -721,18 +725,19 @@ def _log_token_usage(result):
                     _probe_nested(f"Member[{key}]", item, model_name, _emit)
                     found_any = True
 
-        # 5) 对 result 自身的 __dict__ 做通用扫描
-        if hasattr(result, '__dict__'):
-            for key, val in result.__dict__.items():
-                if key.startswith('_'):
-                    continue
-                if any(kw in key.lower() for kw in ('usage', 'token', 'metric', 'response', 'run')):
-                    if isinstance(val, (dict, list)):
-                        _probe_nested(key, val, model_name, _emit)
-                        found_any = True
-                    elif not isinstance(val, str) and hasattr(val, '__dict__'):
-                        _probe_nested(key, val, model_name, _emit)
-                        found_any = True
+        # 5) 对 result 自身的 __dict__ 做通用扫描（已优化：只记录关键信息，不逐个属性输出）
+        # 注意：如果需要更详细的调试信息，可以取消下面注释
+        # if hasattr(result, '__dict__'):
+        #     for key, val in result.__dict__.items():
+        #         if key.startswith('_'):
+        #             continue
+        #         if any(kw in key.lower() for kw in ('usage', 'token', 'metric', 'response', 'run')):
+        #             if isinstance(val, (dict, list)):
+        #                 _probe_nested(key, val, model_name, _emit)
+        #                 found_any = True
+        #             elif not isinstance(val, str) and hasattr(val, '__dict__'):
+        #                 _probe_nested(key, val, model_name, _emit)
+        #                 found_any = True
 
         if not found_any:
             logger.info(f"[API] 模型: {model_name}，Token 用量未获取到（RunResponse 上无 usage/metrics 属性，请依赖 Agno logging bridge）")
@@ -791,6 +796,13 @@ def _setup_agno_logging_bridge():
 
     # 用一个闭包记录最近的 member 名称（Agno 日志中可能包含 agent name）
     # 同时用一个栈来跟踪当前正在执行的 agent
+    
+    # 二次保险：确保项目根目录在sys.path中
+    _current_dir = os.path.dirname(os.path.abspath(__file__))
+    _project_root = os.path.dirname(_current_dir)
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
+    
     from agent.core.model_config import ModelConfig
     model_name = ModelConfig.MAIN_MODEL
 
