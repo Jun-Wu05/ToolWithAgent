@@ -136,8 +136,7 @@ python main.py
 - Sheet名称 = 原始字段名
 - 列结构：mappingType | orgValue | mappingValue
 - mappingType类型说明：
-  - replace：精确匹配替换
-  - add：精确匹配添加
+  - EQUAL:相等
   - REGULAR：正则表达式匹配（自动添加.*前缀和后缀）
 
 ### 威胁类型标准化

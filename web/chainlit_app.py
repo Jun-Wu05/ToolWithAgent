@@ -274,6 +274,9 @@ async def handle_file_upload(user_session: dict, element):
                     await cl.Message(content="❌ Excel 文件中未找到有效的映射数据").send()
                     return
                 
+                # 检查是否有待处理的 Base64 数据（同时上传场景）
+                pending_base64 = user_session.get("pending_base64")
+                
                 # 保存到会话
                 user_session["enum_excel_path"] = excel_path
                 user_session["enum_preview"] = enum_preview
@@ -281,7 +284,19 @@ async def handle_file_upload(user_session: dict, element):
                 # 获取目标字段列表
                 target_fields = list(set(item["目标字段"] for item in enum_preview))
                 
-                # 发送预览表格
+                # 如果有待处理的 Base64，直接执行一站式填充
+                if pending_base64:
+                    logger.info(f"[FILE_UPLOAD] 检测到同时上传 Excel + Base64，执行一站式填充")
+                    
+                    # 清除待处理的 Base64
+                    user_session["pending_base64"] = None
+                    
+                    # 设置枚举填充模式并执行
+                    user_session["enum_fill_mode"] = True
+                    await execute_enum_fill(user_session, pending_base64)
+                    return
+                
+                # 没有同时上传 Base64，按现有逻辑展示预览
                 preview_count = len(enum_preview)
                 await cl.Message(
                     content=f"""📊 **枚举映射预览**
@@ -339,6 +354,20 @@ async def handle_file_upload(user_session: dict, element):
             import json as json_module
             simplified_json_str = json_module.dumps(simplified_data, ensure_ascii=False)
             logger.info(f"[DECODE] 简化JSON（发送给LLM）: {simplified_json_str[:500]}...")
+            
+            # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
+            enum_excel_path = user_session.get("enum_excel_path")
+            enum_preview = user_session.get("enum_preview")
+            
+            if enum_excel_path and enum_preview:
+                logger.info(f"[FILE_UPLOAD] 检测到已有枚举 Excel + 新上传 Base64，执行一站式填充")
+                
+                # 设置枚举填充模式
+                user_session["enum_fill_mode"] = True
+                
+                # 执行填充
+                await execute_enum_fill(user_session, file_content)
+                return
             
             field_count = result["field_count"]
             await cl.Message(
