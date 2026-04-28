@@ -238,7 +238,7 @@ def apply_enum_fill(
     # 如果是 Base64 字符串，先解码
     if isinstance(decoded_data, str):
         try:
-            decoded_data = base64.b64decode(decoded_data)
+            decoded_data = base64.b64decode(decoded_data.encode('ascii'))
             decoded_data = json.loads(decoded_data.decode('utf-8'))
         except Exception as e:
             raise ValueError(f"Base64 解码失败: {str(e)}")
@@ -347,7 +347,7 @@ def apply_enum_with_base64(
         str, 填充后的 Base64 编码字符串
     """
     # 1. 解码
-    decoded = base64.b64decode(base64_data)
+    decoded = base64.b64decode(base64_data.encode('ascii'))
     data = json.loads(decoded.decode('utf-8'))
     
     # 2. 应用填充

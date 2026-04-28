@@ -16,12 +16,17 @@ def _decode_base64_text(text: str) -> str:
     cleaned = "".join(text.split())
     if not cleaned:
         return ""
+    
+    # 验证是否为有效的 Base64 字符
+    if not re.match(r'^[A-Za-z0-9+/=\s]+$', cleaned):
+        raise ValueError("输入包含非Base64字符，可能是原始文本而非Base64编码")
 
     missing_padding = len(cleaned) % 4
     if missing_padding:
         cleaned += "=" * (4 - missing_padding)
 
-    decoded_bytes = base64.b64decode(cleaned)
+    # 使用 ascii 编码确保兼容性
+    decoded_bytes = base64.b64decode(cleaned.encode('ascii'))
     return decoded_bytes.decode("utf-8", errors="replace")
 
 
