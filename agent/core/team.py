@@ -20,6 +20,17 @@ from agno.team.mode import TeamMode
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
 from agent.prompts import load_standard_fields
+from agent.tools import (
+    base64_decode_tool,
+    field_mapping_tool,
+    generate_mapping_table_tool,
+    threat_type_tool,
+    enum_field_tool,
+    extract_enum_from_logs,
+    extract_enum_with_regex,
+    get_enum_as_json_file,
+    get_enum_as_mapping_file,
+)
 
 
 # ============= 加载原始提示词 =============
@@ -104,7 +115,7 @@ def _get_enum_instructions() -> str:
 # ============= 创建专业Agent =============
 
 def create_field_mapping_agent() -> Agent:
-    """创建字段映射Agent"""
+    """创建字段映射Agent（挂载工具：field_mapping, generate_mapping_table, base64_decode）"""
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     
     return Agent(
@@ -112,13 +123,18 @@ def create_field_mapping_agent() -> Agent:
         role="字段映射专家",
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
         instructions=_get_field_mapping_instructions(),
+        tools=[
+            field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
+            generate_mapping_table_tool,   # 批量生成映射表
+            base64_decode_tool,            # Base64 解码（输入常为 Base64 编码）
+        ],
         markdown=True,
         debug_mode=False,
     )
 
 
 def create_threat_agent() -> Agent:
-    """创建威胁类型Agent"""
+    """创建威胁类型Agent（挂载工具：threat_type_tool, base64_decode）"""
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     
     return Agent(
@@ -126,13 +142,17 @@ def create_threat_agent() -> Agent:
         role="威胁类型专家",
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
         instructions=_get_threat_instructions(),
+        tools=[
+            threat_type_tool,     # 威胁类型规则匹配 + 置信度评分
+            base64_decode_tool,   # Base64 解码输入
+        ],
         markdown=True,
         debug_mode=False,
     )
 
 
 def create_enum_agent() -> Agent:
-    """创建枚举Agent"""
+    """创建枚举Agent（挂载工具：enum_field_tool, extract_enum_from_logs, extract_enum_with_regex, get_enum_as_json_file, get_enum_as_mapping_file, base64_decode）"""
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     
     return Agent(
@@ -140,6 +160,14 @@ def create_enum_agent() -> Agent:
         role="枚举字段专家",
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
         instructions=_get_enum_instructions(),
+        tools=[
+            enum_field_tool,              # 提取可枚举字段
+            extract_enum_from_logs,       # 从日志中提取枚举值
+            extract_enum_with_regex,      # 正则提取枚举值
+            get_enum_as_json_file,        # 导出枚举为 JSON 文件
+            get_enum_as_mapping_file,     # 导出枚举为映射表文件
+            base64_decode_tool,           # Base64 解码输入
+        ],
         markdown=True,
         debug_mode=False,
     )
