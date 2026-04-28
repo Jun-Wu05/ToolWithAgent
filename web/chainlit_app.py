@@ -840,6 +840,39 @@ async def _handle_enum_extract_flow(user_session: dict, team, user_text: str):
 
         # 保存枚举提取结果到会话
         user_session["last_enum_extract_result"] = enum_result
+        
+        # 8. 展示 mapping 表格（mappingType | orgValue | mappingValue）
+        mapping_table = format_mapping_table(enum_result)
+        if mapping_table:
+            import pandas as pd
+            df = pd.DataFrame(mapping_table)
+            elements = [
+                cl.Dataframe(data=df, display="inline", title="📋 枚举值映射表", pagination=0)
+            ]
+            await cl.Message(
+                content="**映射表（mappingType | orgValue | mappingValue）**",
+                elements=elements
+            ).send()
+        
+        # 9. 下载 JSON 文件
+        output_json = generate_output_json({
+            "field": field_name,
+            "regex": regex_result,
+            "original_log": enum_result.get("original_log", []),
+            "value": enum_values
+        })
+        
+        safe_name = field_name.replace("/", "_").replace("\\", "_").replace(":", "_")
+        json_file = cl.File(
+            name=f"enum_{safe_name}.json",
+            content=output_json.encode('utf-8'),
+            mime="application/json"
+        )
+        
+        await cl.Message(
+            content=f"**📥 下载枚举值 JSON 文件（{unique_count} 个枚举值）**",
+            elements=[json_file]
+        ).send()
 
     except Exception as e:
         logger.error(f"[ENUM_EXTRACT] 枚举提取异常: {str(e)}")

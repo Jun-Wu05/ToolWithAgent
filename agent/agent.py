@@ -17,7 +17,8 @@ from agent.tools.file_tool import read_file, write_file, list_files, get_project
 from agent.tools.enum_field_tool import decode_enum_config, generate_enum_mapping_template, apply_enum_mapping, load_mapping_from_excel, get_enum_fields_list
 from agent.tools.threat_type_tool import generate_threat_type_mapping_table, apply_threat_type_mapping
 from agent.tools.extract_field_tool import extract_field_values, generate_mapping_table, save_mapping_to_excel
-from agent.prompts import load_field_weak_prompt, load_field_strong_prompt, load_threat_type_prompt, load_enum_field_prompt
+from agent.tools.logs_enum_tool import extract_enum_from_logs, extract_enum_with_regex, get_enum_as_json_file, get_enum_as_mapping_file
+from agent.prompts import load_field_weak_prompt, load_field_strong_prompt, load_threat_type_prompt, load_enum_field_prompt, load_enum_extract_prompt
 
 
 def load_standard_fields_txt() -> str:
@@ -85,6 +86,18 @@ def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None
 |-------------|----------|--------------|-------|
 | REGULAR     | 原始值1  | 映射目标值1  | 目标字段名 |
 | REGULAR     | 原始值2  | 映射目标值2  | 目标字段名 |
+
+### 功能4：日志枚举值提取 ⭐
+当用户上传明文日志并要求提取枚举值时：
+1. 用户上传 txt 格式的明文日志文件
+2. 用户指定目标字段名（如：description、action、status）
+3. 使用 extract_enum_from_logs 工具提取该字段的所有枚举值
+4. 返回枚举值列表、原始样本、映射表供用户确认
+5. 用户确认后可下载 JSON 格式的枚举值文件
+
+**输出格式：**
+- 前端展示：mappingType | orgValue | mappingValue（用户可编辑）
+- 下载 JSON：{ "field": "字段名", "regex": "正则", "original_log": [...], "value": [...] }
 
 ## 标准字段表（必须严格使用以下中文名称）
 ```

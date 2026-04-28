@@ -11,11 +11,21 @@ from agent.tools.standard_mapper import (
 )
 from agent.tools.threat_type_tool import threat_type_tool
 from agent.tools.enum_field_tool import enum_field_tool
+from agent.tools.logs_enum_tool import (
+    extract_enum_from_logs,
+    extract_enum_with_regex,
+    get_enum_as_json_file,
+    get_enum_as_mapping_file,
+)
 
 __all__ = [
     'base64_decode_tool',
     'field_mapping_tool',
     'generate_mapping_table_tool',
     'threat_type_tool',
-    'enum_field_tool'
+    'enum_field_tool',
+    'extract_enum_from_logs',
+    'extract_enum_with_regex',
+    'get_enum_as_json_file',
+    'get_enum_as_mapping_file',
 ]

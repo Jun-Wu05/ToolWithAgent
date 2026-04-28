@@ -54,3 +54,8 @@ def load_standard_fields() -> str:
         return content
     
     return "标准字段表加载失败"
+
+
+def load_enum_extract_prompt() -> str:
+    """加载日志枚举提取提示词"""
+    return _load_md_or_fail("enum_extract.md", "日志枚举提取")
