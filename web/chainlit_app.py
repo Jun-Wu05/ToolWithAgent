@@ -69,6 +69,8 @@ from agent.tools.enum_field_tool import (
 from agent.tools.enum_extract_tool import (
     sample_logs,
     validate_regex,
+    validate_regex_with_stats,
+    validate_and_fix_regex,
     extract_enum_with_field,
     format_mapping_table,
     generate_output_json,
@@ -749,23 +751,44 @@ async def _handle_enum_extract_flow(user_session: dict, team, user_text: str):
         # 如果没有解析到正则，使用默认正则
         if not regex_result:
             # 使用简单的正则尝试匹配
-            regex_result = f'(?<="{field_name}"[:=])"?([^",}}\\s]+)"?'
+            regex_result = f'"{field_name}":"([^"]+)"'
             logger.info(f"[ENUM_EXTRACT] 使用默认正则: {regex_result}")
 
-        # 5. 验证正则
-        validation = validate_regex(regex_result, sampled_logs)
-        logger.info(f"[ENUM_EXTRACT] 正则验证结果: {validation}")
+        # 5. 验证正则（使用增强版验证，支持自动修复）
+        validation = validate_regex_with_stats(regex_result, sampled_logs)
+        logger.info(f"[ENUM_EXTRACT] 正则验证结果: valid={validation.get('valid')}, match_rate={validation.get('match_rate', 0)*100:.1f}%")
 
-        if not validation.get("valid"):
-            await cl.Message(
-                content=f"""❌ **正则验证失败**
+        # 5.1 如果匹配率低，尝试自动修复
+        if not validation.get("valid") or validation.get("match_rate", 0) < 0.5:
+            logger.info("[ENUM_EXTRACT] 正则匹配率低，尝试自动修复...")
+            fixed = validate_and_fix_regex(regex_result, sampled_logs, field_name)
+            
+            if fixed["valid"]:
+                regex_result = fixed["regex"]
+                confidence = fixed["confidence"]
+                source = fixed["source"]
+                fallback_type = fixed.get("fallback_type", "")
+                logger.info(f"[ENUM_EXTRACT] 自动修复成功，来源: {source}, 置信度: {confidence}")
+                
+                if source == "fallback":
+                    await cl.Message(
+                        content=f"⚠️ 原正则匹配率 {validation.get('match_rate', 0)*100:.0f}%，已自动优化为 **{fallback_type}** 格式。\n置信度: {confidence}"
+                    ).send()
+                else:
+                    await cl.Message(
+                        content=f"ℹ️ 正则匹配率 {validation.get('match_rate', 0)*100:.0f}%，已使用优化版本。\n置信度: {confidence}"
+                    ).send()
+            else:
+                await cl.Message(
+                    content=f"""❌ **正则提取失败**
 
-正则表达式：`{regex_result}`
-错误信息：{validation.get("error", "未知错误")}
+原正则: `{regex_result}`
+匹配率: {validation.get('match_rate', 0)*100:.0f}%
 
-请调整正则表达式后重试。"""
-            ).send()
-            return
+建议：
+1. 更换字段名重试
+2. 上传格式更统一的日志""").send()
+                return
 
         # 6. 用正则扫描全量日志提取枚举值
         enum_result = extract_enum_with_field(logs_str, field_name, regex_result)

@@ -88,6 +88,115 @@ def validate_regex(regex: str, sample_logs: str) -> dict:
     return {"valid": True, "matches": unique_matches, "error": None}
 
 
+def validate_regex_with_stats(regex: str, sampled_logs: str) -> dict:
+    """
+    验证正则并返回统计信息
+    
+    Args:
+        regex: 正则表达式
+        sampled_logs: 采样日志
+        
+    Returns:
+        {
+            "valid": bool,
+            "matches": list,
+            "match_rate": float,  # 匹配率 0-1
+            "error": str | None
+        }
+    """
+    lines = [l for l in sampled_logs.strip().split('\n') if l.strip()]
+    total = len(lines)
+    
+    if total == 0:
+        return {"valid": False, "matches": [], "match_rate": 0, "error": "无日志样本"}
+    
+    try:
+        pattern = re.compile(regex)
+    except re.error as e:
+        return {"valid": False, "matches": [], "match_rate": 0, "error": f"正则语法错误: {e}"}
+    
+    matches = []
+    matched_lines = 0
+    
+    for line in lines:
+        match = pattern.search(line)
+        if match:
+            matched_lines += 1
+            if match.lastindex:
+                matches.append(match.group(1))
+            else:
+                matches.append(match.group(0))
+    
+    unique_matches = list(OrderedDict.fromkeys(matches))
+    match_rate = matched_lines / total if total > 0 else 0
+    
+    return {
+        "valid": matched_lines > 0,
+        "matches": unique_matches,
+        "match_rate": match_rate,
+        "error": None if matched_lines > 0 else "无匹配"
+    }
+
+
+def validate_and_fix_regex(regex: str, sampled_logs: str, field_name: str) -> dict:
+    """
+    验证正则，失败时尝试5种常用模式修复
+    
+    Args:
+        regex: LLM 输出的正则表达式
+        sampled_logs: 采样日志
+        field_name: 目标字段名
+        
+    Returns:
+        {
+            "regex": str | None,  # 最终使用的正则
+            "valid": bool,
+            "confidence": "high" | "medium" | "low",
+            "source": "llm" | "fallback" | "failed"
+        }
+    """
+    # 1. 先验证 LLM 生成的正则
+    result = validate_regex_with_stats(regex, sampled_logs)
+    if result["valid"] and result["match_rate"] >= 0.5:
+        return {
+            "regex": regex,
+            "valid": True,
+            "confidence": "high" if result["match_rate"] >= 0.8 else "medium",
+            "source": "llm",
+            "matches": result["matches"]
+        }
+    
+    # 2. 尝试5种备用模式
+    fallback_patterns = [
+        (f'"{field_name}":"([^"]+)"', "JSON带引号"),
+        (f'{field_name}="([^"]+)"', 'key="value"格式'),
+        (f'{field_name}=([^\s]+)', 'key=value格式'),
+        (f'"{field_name}":\\s*"([^"]+)"', "JSON带空格"),
+        (f'{field_name}[=:]\\s*([^,}}\\s]+)', "宽松匹配"),
+    ]
+    
+    for pattern, pattern_type in fallback_patterns:
+        result = validate_regex_with_stats(pattern, sampled_logs)
+        if result["valid"] and result["match_rate"] >= 0.5:
+            return {
+                "regex": pattern,
+                "valid": True,
+                "confidence": "medium",
+                "source": "fallback",
+                "fallback_type": pattern_type,
+                "matches": result["matches"]
+            }
+    
+    # 3. 全部失败
+    return {
+        "regex": None,
+        "valid": False,
+        "confidence": "low",
+        "source": "failed",
+        "original_error": result.get("error")
+    }
+
+
 def extract_enum_values(logs_str: str, regex: str, max_values: int = 100) -> dict:
     """
     用正则扫描全量日志，提取枚举值及原始样本
