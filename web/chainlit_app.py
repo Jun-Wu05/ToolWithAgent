@@ -109,8 +109,8 @@ async def start():
         if _root not in sys.path:
             sys.path.insert(0, _root)
 
-        from agent.core.team import create_data_mapping_team
-        user_session["team"] = create_data_mapping_team()
+        from agent.core.team import get_team_instance
+        user_session["team"] = get_team_instance()
         logger.info("[START] Team初始化成功，开始预热...")
 
         # 执行一次空操作预热（避免首次调用延迟）

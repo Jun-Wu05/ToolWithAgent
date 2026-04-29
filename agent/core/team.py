@@ -216,11 +216,29 @@ def create_data_mapping_team() -> Team:
     return team
 
 
+# ============= Team 单例缓存 =============
+
+_team_instance: Optional[Team] = None
+"""模块级 Team 单例缓存，避免每次调用重建 Agent 和加载指令"""
+
+
 def get_team_instance() -> Team:
     """
-    获取Team单例（用于Web应用）
-    
+    获取 Team 单例（用于 Web 应用），首次调用创建，后续调用返回缓存实例。
+
     Returns:
-        Team实例
+        Team 实例（单例）
     """
-    return create_data_mapping_team()
+    global _team_instance
+    if _team_instance is None:
+        _team_instance = create_data_mapping_team()
+    return _team_instance
+
+
+def reset_team_instance() -> None:
+    """
+    重置 Team 单例（用于测试或需要重建的场景）。
+    注意：调用后下次 get_team_instance() 会重新创建。
+    """
+    global _team_instance
+    _team_instance = None
