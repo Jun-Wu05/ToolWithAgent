@@ -1,7 +1,7 @@
 import os
 import tkinter as tk
-from src.data_processor import DataProcessor
-from src.gui_handler import GUIHandler
+from reference.gui.data_processor import DataProcessor
+from reference.gui.gui_handler import GUIHandler
 
 class MappingApp:
     def __init__(self, root):

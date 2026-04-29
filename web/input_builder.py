@@ -6,7 +6,7 @@ LLM 输入构建 — 将用户请求与上传数据拼接为 Team 的输入文�
 """
 import json
 
-from src.logger import get_logger
+from agent.shared.logger import get_logger
 
 logger = get_logger("input_builder")
 

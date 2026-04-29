@@ -9,8 +9,8 @@ import json
 
 import chainlit as cl
 
-from src.logger import get_logger
-from src.threat_fill_handler import apply_threat_mapping, export_to_base64
+from agent.shared.logger import get_logger
+from agent.shared.threat_fill import apply_threat_mapping, export_to_base64
 
 logger = get_logger("threat_handler")
 

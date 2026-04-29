@@ -43,7 +43,7 @@ import io
 from datetime import datetime
 
 # 初始化日志
-from src.logger import get_logger
+from agent.shared.logger import get_logger
 logger = get_logger("chainlit_app")
 logger.info("=" * 60)
 logger.info("Chainlit聊天式Web应用启动")
@@ -57,7 +57,7 @@ from web.session_state import SessionState
 # 路由与解析
 from web.parsers import parse_json_mapping_result, parse_json_threat_result, create_dataframe_elements
 from web.route_config import MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS
-from web.llm_client import call_team_with_retry, setup_agno_logging_bridge
+from web.llm_client import call_team, setup_agno_logging_bridge
 from agent.core.tracing import trace_request
 from web.input_builder import build_llm_input
 from web.response_handler import process_team_response
@@ -391,7 +391,7 @@ Excel 格式说明：
 
     try:
         # 7. 调用 Team（带重试）→ llm_client
-        result = await call_team_with_retry(team, full_input, loading_msg)
+        result = await call_team(team, full_input, loading_msg)
 
         # 8. 删除 loading 消息
         await loading_msg.remove()
@@ -478,7 +478,7 @@ async def on_confirm_fill(action: cl.Action):
 
     # 执行字段填充
     try:
-        from src.field_mapping_handler import apply_field_mapping
+        from agent.shared.field_mapping import get_field_mapping_handler
         decoded_data = user_session.get("decoded_data")
 
         if not decoded_data:
@@ -487,11 +487,12 @@ async def on_confirm_fill(action: cl.Action):
             return
 
         logger.info("[ACTION] 开始执行字段填充")
-        updated_data = apply_field_mapping(decoded_data, field_mapping)
+        handler = get_field_mapping_handler()
+        updated_data, update_count = handler.apply_field_mapping(decoded_data, field_mapping)
         logger.info("[ACTION] 字段填充完成")
 
         # 导出 Base64
-        from src.threat_fill_handler import export_to_base64
+        from agent.shared.threat_fill import export_to_base64
         base64_result = export_to_base64(updated_data)
 
         # 发送下载

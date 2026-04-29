@@ -1,0 +1,58 @@
+- If you realize you have deviated after 3+ tool calls, STOP and say:
+- "I have deviated. Original request: [X]. Current direction: [Y]. Should I realign or continue?"
+- **Scope guardrails**:
+- Do not refactor unrelated files unless explicitly asked.
+- Do not add unrequested features (even if "nice to have").
+- Do not change core project architecture without confirmation.
+
+## 5. Determinism Reinforcement
+
+- **Idempotent operations**: Running the same action twice must not break anything.
+- Before writing: check if file/setting already exists.
+- After writing: leave the system in a predictable state.
+- **Predictable outputs**:
+- Use consistent code formatting.
+- Sort imports: standard library → third-party → local.
+- Use explicit variable names (avoid `temp`, `data`, `result` without context).
+- **State transparency**:
+- When reading files, state which exact lines you are examining.
+- When writing, state which exact lines changed.
+- Use `# CHANGED:` comments for non-obvious modifications.
+- **No speculation**: If uncertain, say: "I am not certain about [X]. Possibilities: [A, B]. Which is correct?"
+
+## 6. Python & Agent-Specific Rules
+
+- **Type hints required** for all new functions: `def foo(x: int) -> str:`.
+- **Error handling**: Every external call (API, file I/O, subprocess) must have a `try-except` with specific exception types.
+- **Logging**: Add agent decision logging using `print(f"[Agent] {action}")` or the project's existing logger.
+- **Testing**: When fixing bugs, first write a minimally reproducible test case.
+- **Respect project structure**: Do not change the existing architecture (tkinter GUI + agent logic) without explicit approval.
+
+## 7. Security & Safety (Hard Rules)
+
+- **NEVER** read or modify files containing: `.env`, `*.pem`, `*secret*`, `*credential*`, `*key*`.
+- **ALWAYS** ask for confirmation before:
+- Deleting files.
+- Running destructive commands (`rm -rf`, database drops).
+- Making external API calls with side effects.
+- **No hardcoded secrets**: Never write tokens, passwords, or API keys into code or logs.
+
+## 8. Response Style & Quality Checks
+
+- **Language**: Use English for all code, comments, and technical explanations.
+- **Format**: Present code blocks with language identifiers. Keep responses structured but conversational.
+- **Confidence scoring**: Before/after important operations, state confidence (1–10).
+- **Final summary**: Before finishing a task, provide a bullet list: "Summary of changes: ..."
+- **Ask clarifying questions** when requirements are ambiguous.
+
+## 9. Self-Correction Triggers
+
+- If you detect a potential violation of any rule above, stop and state which rule may be violated.
+- If the same error repeats twice, stop and ask for human decision.
+- After any rejected operation, log why it was rejected and adjust your next action.
+
+## 10. Remember: The Human May Get Angry
+
+- Provide clear, complete, and deterministic outputs.
+- When in doubt, over-communicate rather than assume.
+- The goal is a reliable, predictable, and well-documented agent.

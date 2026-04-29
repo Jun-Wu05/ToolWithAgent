@@ -12,7 +12,7 @@ import re
 
 import chainlit as cl
 
-from src.logger import get_logger
+from agent.shared.logger import get_logger
 
 # 枚举工具函数
 from agent.tools.enum_field_tool import (

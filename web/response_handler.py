@@ -11,7 +11,7 @@ import json
 
 import chainlit as cl
 
-from src.logger import get_logger
+from agent.shared.logger import get_logger
 
 # 从本地 parsers 导入解析函数
 from web.parsers import create_dataframe_elements, parse_json_mapping_result, parse_json_threat_result

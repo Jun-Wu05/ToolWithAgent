@@ -6,7 +6,7 @@
 import os
 import json as _json
 
-from src.logger import get_logger
+from agent.shared.logger import get_logger
 
 logger = get_logger("route_config")
 

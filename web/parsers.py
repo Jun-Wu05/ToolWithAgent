@@ -6,7 +6,7 @@ JSON 解析器和数据处理工具
 
 import json
 import re
-from src.logger import get_logger
+from agent.shared.logger import get_logger
 
 logger = get_logger("parsers")
 

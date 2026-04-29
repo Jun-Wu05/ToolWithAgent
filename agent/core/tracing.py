@@ -153,7 +153,7 @@ def trace_request(operation: str = "root"):
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             with TraceContext.new(operation=operation) as ctx:
-                from src.logger import get_logger
+                from agent.shared.logger import get_logger
                 logger = get_logger("tracing")
                 logger.info(f"{ctx.to_log_prefix()} 请求开始")
                 try:
@@ -173,7 +173,7 @@ def trace_request(operation: str = "root"):
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             with TraceContext.new(operation=operation) as ctx:
-                from src.logger import get_logger
+                from agent.shared.logger import get_logger
                 logger = get_logger("tracing")
                 logger.info(f"{ctx.to_log_prefix()} 请求开始")
                 try:
