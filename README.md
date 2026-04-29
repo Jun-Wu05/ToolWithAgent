@@ -1,6 +1,6 @@
 # ToolWithAgent
 
-安全设备配置规则数据映射智能工具，集成了桌面 GUI 应用、AI 智能体（Agent）和 Web 交互界面。
+安全设备日志字段映射与威胁类型分析智能工具，基于 AI 智能体（Agent）+ Web 交互界面（GUI 已归档至 reference/gui/）。
 
 ## 📁 项目结构
 
@@ -19,7 +19,26 @@
 │   ├── data/                    # 标准字段表
 │   └── agent.py                 # Agent 定义入口
 │
-├── src/                         # 🖥️ 桌面应用
+├── agent/shared/                # 🔧 Agent 共享工具（从 GUI 迁移）
+│   ├── __init__.py
+│   ├── logger.py                # 日志模块
+│   ├── field_mapping.py         # 字段映射处理
+│   └── threat_fill.py           # 威胁类型填充
+│
+├── web/                         # 🌐 Web 交互界面（Chainlit）
+│   ├── chainlit_app.py          # Web 应用入口
+│   ├── config.py                # Web 配置
+│   ├── llm_client.py            # LLM 客户端（Team 调用 + 超时保护）
+│   ├── input_builder.py         # 输入构建
+│   ├── enum_handler.py          # 枚举处理
+│   ├── threat_handler.py        # 威胁类型处理
+│   ├── response_handler.py      # 响应处理
+│   ├── route_config.py          # 路由配置（关键词预筛）
+│   ├── session_state.py         # 会话状态管理
+│   ├── parsers.py               # 数据解析
+│   └── utils.py                 # 工具函数
+│
+├── reference/gui/               # 📦 桌面 GUI 归档（仅逻辑参考，不再维护）
 │   ├── handlers/                # 各功能模块处理器
 │   ├── data_processor.py        # 数据处理核心
 │   ├── gui_handler.py           # GUI 界面分发
@@ -27,14 +46,6 @@
 │   ├── threat_fill_handler.py   # 威胁类型填充
 │   ├── threat_type_manager.py   # 威胁类型管理
 │   └── logger.py                # 日志模块
-│
-├── web/                         # 🌐 Web 交互界面（Chainlit）
-│   ├── chainlit_app.py          # Web 应用入口
-│   ├── config.py                # Web 配置
-│   ├── handlers.py              # Web 消息处理
-│   ├── interaction.py           # 交互逻辑
-│   ├── parsers.py               # 数据解析
-│   └── utils.py                 # 工具函数
 │
 ├── config/                      # ⚙️ 共享配置
 │   ├── 对象.xlsx                # 系统属性映射表
@@ -47,12 +58,6 @@
 │   ├── 威胁类型映射与字段处理完整指南.md
 │   └── skill.md
 │
-└── archive/                     # 📦 归档（历史实验代码和文档）
-    ├── auto/                    # 实验脚本（phase1-4 + allinone）
-    ├── plan/                    # 历史设计文档
-    ├── 测试数据/                 # 历史测试数据
-    ├── scripts/                 # 历史辅助脚本
-    └── public/                  # 历史前端组件
 ```
 
 ## 🚀 快速开始
@@ -72,13 +77,23 @@ pip install -r requirements.txt
 
 #### 1. 桌面 GUI 应用
 
+> ⚠️ **已归档**：桌面 GUI 代码已移至 `reference/gui/`，仅供逻辑参考，不再维护。
+
 ```bash
 python main.py
 ```
 
 提供功能：Base64 编解码、字段映射、威胁类型填充、CSV 格式转换、标准字段映射。
 
-#### 2. AI Agent（命令行/API）
+#### 2. Web 交互界面（Chainlit）
+
+```bash
+chainlit run web/chainlit_app.py
+```
+
+启动后访问 `http://localhost:8000` 与 AI Agent 进行对话式交互。
+
+#### 3. 命令行/API
 
 ```python
 from agent import create_agent
@@ -87,13 +102,6 @@ agent = create_agent()
 response = agent.run("解码这个 Base64 数据...")
 ```
 
-#### 3. Web 交互界面（Chainlit）
-
-```bash
-chainlit run web/chainlit_app.py
-```
-
-启动后访问 `http://localhost:8000` 与 AI Agent 进行对话式交互。
 
 ## 🔧 功能概览
 
@@ -103,9 +111,9 @@ chainlit run web/chainlit_app.py
 | 标准字段映射 | ✅ | ✅ | ✅ |
 | 威胁类型标准化 | ✅ | ✅ | ✅ |
 | 枚举字段批量处理 | ✅ | ✅ | ✅ |
-| 字段映射集合（功能5） | ✅ | - | - |
-| Base64 错误检测 | ✅ | - | - |
-| CSV 格式转换 | ✅ | - | - |
+| 字段映射集合（功能5） | 📦 | - | - |
+| Base64 错误检测 | 📦 | - | - |
+| CSV 格式转换 | 📦 | - | - |
 | 对话式交互 | - | ✅ | ✅ |
 | 自主推理与任务规划 | - | ✅ | ✅ |
 
