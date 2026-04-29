@@ -1,4 +1,4 @@
-"""
+r"""
 单元测试：route_config 关键词加载 + input_builder 输入构建
 
 覆盖场景：
