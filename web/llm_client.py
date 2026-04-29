@@ -14,20 +14,37 @@ import sys
 import time
 
 from src.logger import get_logger
+from agent.core.resilience import CircuitBreaker, CircuitBreakerOpenError, ModelFallback, RetryPolicy
+from agent.core.model_config import ModelConfig
 
 logger = get_logger("llm_client")
 
 # 模块级标志：Agno 日志拦截是否已安装
 _agno_bridge_installed: bool = False
 
+# 模块级熔断器（进程生命周期内持续）
+_team_circuit_breaker = CircuitBreaker(
+    failure_threshold=3,
+    recovery_timeout=60.0,
+    name="team_api",
+)
+
 
 # ============= 公共 API =============
 
 async def call_team(team, full_input: str, loading_msg=None) -> object:
-    """调用 Team.run，带指数退避重试（最多 3 次），记录 Token 用量"""
+    """调用 Team.run，带熔断器保护 + 指数退避重试（最多 3 次），记录 Token 用量"""
+    retry_policy = RetryPolicy(max_retries=3, base_delay=1.0, max_delay=10.0)
     last_exception = None
+
     for attempt in range(1, 4):
         try:
+            # 检查熔断器状态
+            if _team_circuit_breaker.state.name == "OPEN":
+                raise CircuitBreakerOpenError(
+                    f"熔断器已开启，请等待 {_team_circuit_breaker.recovery_timeout}s 后重试"
+                )
+
             api_start_time = time.time()
             logger.info(f"[API] 开始调用 Team.run (尝试 {attempt}/3)，输入长度: {len(full_input)}")
 
@@ -40,13 +57,26 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
             logger.info(f"[API] LLM输出长度: {len(result_content)} 字符")
 
             _log_token_usage(result)
+            _team_circuit_breaker._on_success()
             return result
 
         except Exception as e:
             last_exception = e
+            _team_circuit_breaker._on_failure()
+
+            if not retry_policy.should_retry(attempt, e):
+                logger.error(f"[API] Team.run 不可重试错误 (尝试 {attempt}/3): {e}")
+                break
+
             if attempt < 3:
-                wait_sec = 2 ** (attempt - 1)
-                logger.warning(f"[API] Team.run 失败 (尝试 {attempt}/3): {e}，{wait_sec}秒后重试...")
+                wait_sec = retry_policy.get_delay(attempt)
+                logger.warning(f"[API] Team.run 失败 (尝试 {attempt}/3): {e}，{wait_sec:.1f}秒后重试...")
+                if loading_msg:
+                    try:
+                        loading_msg.content = f"⏳ **请求失败，{wait_sec:.0f}秒后重试...**\n\n{str(e)[:100]}"
+                        await loading_msg.update()
+                    except Exception:
+                        pass
                 await asyncio_mod.sleep(wait_sec)
             else:
                 logger.error(f"[API] Team.run 3次尝试全部失败: {e}")
