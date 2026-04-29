@@ -197,6 +197,10 @@ def create_data_mapping_team() -> Team:
     threat_agent = create_threat_agent()
     enum_agent = create_enum_agent()
     
+    # 调试模式通过环境变量控制，默认生产环境关闭
+    _debug = os.getenv("AGNO_DEBUG_MODE", "false").lower() == "true"
+    _show_members = os.getenv("AGNO_SHOW_MEMBERS", "false").lower() == "true"
+
     # 创建Team
     team = Team(
         name="DataMappingTeam",
@@ -209,8 +213,8 @@ def create_data_mapping_team() -> Team:
         ],
         instructions=_load_router_instructions(),
         markdown=True,
-        debug_mode=True,  # 启用 debug 模式
-        show_members_responses=True,  # 显示MemberAgent的响应
+        debug_mode=_debug,
+        show_members_responses=_show_members,
     )
     
     return team

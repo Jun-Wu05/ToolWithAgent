@@ -1,9 +1,9 @@
 """
-单元测试：_route_request() 和 _build_llm_input()
+单元测试：route_config 关键词加载 + input_builder 输入构建
 
 覆盖场景：
-- 路由：威胁类型关键词 > 枚举关键词 > 字段映射关键词 > 无匹配
-- 输入构建：is_mapping=True 有数据 / 无数据、is_mapping=False
+- route_config 关键词加载（JSON 文件或默认值回退）
+- input_builder.build_llm_input 有数据 / 无数据拼接
 
 运行方式：
     cd d:\Agent\agent_design\toolswithagent
@@ -18,80 +18,60 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-# 直接导入被测函数
-from web.chainlit_app import _route_request, _build_llm_input
+
+# ========== route_config 测试 ==========
+
+class TestRouteConfig:
+    """路由关键词配置加载"""
+
+    def test_keywords_are_lists(self):
+        """所有关键词常量应为非空列表"""
+        from web.route_config import (
+            MAPPING_KEYWORDS, THREAT_KEYWORDS,
+            ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS,
+        )
+        assert isinstance(MAPPING_KEYWORDS, list) and len(MAPPING_KEYWORDS) > 0
+        assert isinstance(THREAT_KEYWORDS, list) and len(THREAT_KEYWORDS) > 0
+        assert isinstance(ENUM_KEYWORDS, list) and len(ENUM_KEYWORDS) > 0
+        assert isinstance(ENUM_EXTRACT_KEYWORDS, list) and len(ENUM_EXTRACT_KEYWORDS) > 0
+
+    def test_default_mapping_keywords_contain_expected(self):
+        """默认映射关键词应包含「映射」"""
+        from web.route_config import MAPPING_KEYWORDS
+        assert any("映射" in kw for kw in MAPPING_KEYWORDS)
+
+    def test_default_threat_keywords_contain_expected(self):
+        """默认威胁关键词应包含「威胁类型」"""
+        from web.route_config import THREAT_KEYWORDS
+        assert any("威胁" in kw for kw in THREAT_KEYWORDS)
+
+    def test_enum_keywords_contain_expected(self):
+        """默认枚举关键词应包含「枚举」"""
+        from web.route_config import ENUM_KEYWORDS
+        assert any("枚举" in kw for kw in ENUM_KEYWORDS)
+
+    def test_enum_extract_keywords_contain_expected(self):
+        """默认枚举提取关键词应包含「提取」"""
+        from web.route_config import ENUM_EXTRACT_KEYWORDS
+        assert any("提取" in kw or "枚举值" in kw for kw in ENUM_EXTRACT_KEYWORDS)
+
+    def test_reload_preserves_type(self):
+        """重新导入加载仍为列表（幂等）"""
+        import web.route_config
+        import importlib
+        importlib.reload(web.route_config)
+        assert isinstance(web.route_config.MAPPING_KEYWORDS, list)
+        assert isinstance(web.route_config.THREAT_KEYWORDS, list)
 
 
-# ========== _route_request 测试 ==========
-
-class TestRouteRequest:
-    """_route_request 路由测试"""
-
-    def test_threat_keyword_priority_over_mapping(self):
-        """威胁类型关键词「威胁类型映射」应优先于字段映射关键词「映射」"""
-        user_lower = "威胁类型映射"
-        user_text = "威胁类型映射"
-        _, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
-        assert is_threat is True
-        assert is_mapping is False
-        assert is_enum is False
-
-    def test_threat_keyword_simple(self):
-        """单纯威胁类型关键词命中"""
-        user_lower = "威胁类型"
-        user_text = "威胁类型"
-        text_out, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
-        assert is_threat is True
-        assert is_mapping is False
-        assert is_enum is False
-        assert text_out.startswith("[威胁类型]")
-
-    def test_mapping_keyword(self):
-        """字段映射关键词命中"""
-        user_lower = "帮我映射"
-        user_text = "帮我映射"
-        text_out, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
-        assert is_mapping is True
-        assert is_threat is False
-        assert is_enum is False
-        assert text_out.startswith("[字段映射]")
-
-    def test_enum_keyword(self):
-        """枚举关键词命中"""
-        user_lower = "枚举字段"
-        user_text = "枚举字段"
-        text_out, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
-        assert is_enum is True
-        assert is_mapping is False
-        assert is_threat is False
-        assert text_out.startswith("[枚举处理]")
-
-    def test_no_keyword_match(self):
-        """无关键词命中"""
-        user_lower = "今天天气怎么样"
-        user_text = "今天天气怎么样"
-        text_out, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
-        assert is_mapping is False
-        assert is_threat is False
-        assert is_enum is False
-        assert text_out == "今天天气怎么样"
-
-    def test_threat_keyword_english(self):
-        """英文威胁类型关键词命中"""
-        user_lower = "threat_type"
-        user_text = "threat_type"
-        _, is_mapping, is_threat, is_enum = _route_request(user_lower, user_text)
-        assert is_threat is True
-        assert is_mapping is False
-
-
-# ========== _build_llm_input 测试 ==========
+# ========== input_builder 测试 ==========
 
 class TestBuildLlmInput:
-    """_build_llm_input 输入构建测试"""
+    """build_llm_input 输入构建"""
 
-    def test_mapping_with_data(self):
-        """is_mapping=True 且有数据：拼接字段列表"""
+    def test_with_data_includes_fields(self):
+        """有 decoded_data 且有 simplified_data.fields 时拼接字段列表"""
+        from web.input_builder import build_llm_input
         user_session = {
             "decoded_data": {"key": "value"},
             "decoded_fields": ["field1", "field2"],
@@ -100,15 +80,16 @@ class TestBuildLlmInput:
                 "original_log_sample": '{"src_ip": "1.1.1.1"}',
             },
         }
-        result = _build_llm_input("映射", user_session, is_mapping=True)
+        result = build_llm_input("映射", user_session)
         assert "src_ip" in result
         assert "dst_ip" in result
         assert "event_time" in result
         assert "用户请求" in result
         assert '{"src_ip": "1.1.1.1"}' in result
 
-    def test_mapping_with_data_no_log_sample(self):
-        """is_mapping=True 有数据但无日志样本"""
+    def test_with_data_no_log_sample(self):
+        """有数据但无日志样本：不拼接「原始日志样本」标记"""
+        from web.input_builder import build_llm_input
         user_session = {
             "decoded_data": {"key": "value"},
             "simplified_data": {
@@ -116,29 +97,29 @@ class TestBuildLlmInput:
                 "original_log_sample": "",
             },
         }
-        result = _build_llm_input("字段映射", user_session, is_mapping=True)
+        result = build_llm_input("字段映射", user_session)
         assert "src_ip" in result
-        assert "📋 原始日志样本" not in result
+        assert "原始日志样本" not in result
 
-    def test_mapping_without_data(self):
-        """is_mapping=True 但无数据：仅传用户原始文本"""
+    def test_without_data_returns_raw_text(self):
+        """无 decoded_data 也无 decoded_fields：原样返回用户文本"""
+        from web.input_builder import build_llm_input
         user_session = {}
-        result = _build_llm_input("字段映射", user_session, is_mapping=True)
-        assert result == "字段映射"
-        assert "字段列表" not in result
+        result = build_llm_input("随便聊聊", user_session)
+        assert result == "随便聊聊"
 
-    def test_threat_request(self):
-        """威胁类型请求：仅传用户原始文本（即使有数据）"""
+    def test_long_log_sample_truncated(self):
+        """日志样本超过 2000 字符应截断"""
+        from web.input_builder import build_llm_input
+        long_sample = "A" * 2500
         user_session = {
             "decoded_data": {"key": "value"},
-            "simplified_data": {"fields": ["src_ip"]},
+            "simplified_data": {
+                "fields": ["src_ip"],
+                "original_log_sample": long_sample,
+            },
         }
-        result = _build_llm_input("威胁类型", user_session, is_mapping=False)
-        assert result == "威胁类型"
-        assert "src_ip" not in result
-
-    def test_no_data_no_mapping(self):
-        """无数据且非映射请求：仅传用户原始文本"""
-        user_session = {}
-        result = _build_llm_input("随便聊聊", user_session, is_mapping=False)
-        assert result == "随便聊聊"
+        result = build_llm_input("映射", user_session)
+        assert "...(已截断)" in result
+        assert long_sample not in result
+        assert "A" * 2000 in result

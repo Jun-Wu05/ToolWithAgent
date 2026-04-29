@@ -56,7 +56,7 @@ from web.session_state import SessionState
 
 # 路由与解析
 from web.parsers import parse_json_mapping_result, parse_json_threat_result, create_dataframe_elements
-from web.route_config import load_route_keywords
+from web.route_config import MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS
 from web.llm_client import call_team_with_retry, setup_agno_logging_bridge
 from agent.core.tracing import trace_request
 from web.input_builder import build_llm_input
@@ -68,7 +68,7 @@ from web.enum_handler import handle_enum_fill_flow, execute_enum_fill, handle_en
 from agent.tools.enum_field_tool import get_enum_preview
 
 # 加载路由关键词（枚举提取关键词保留，用于枚举提取流触发）
-MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS = load_route_keywords()
+
 
 
 # ============= Chainlit 事件处理 =============
