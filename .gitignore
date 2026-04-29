@@ -44,3 +44,8 @@ archive/
 # CodeBuddy IDE 本地配置
 .codebuddy/
 
+
+tmp/
+tests/
+
+

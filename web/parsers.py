@@ -11,6 +11,25 @@ from agent.shared.logger import get_logger
 logger = get_logger("parsers")
 
 
+# 拒绝响应检测模式：LLM 索要数据、请求额外输入时的关键词
+_REFUSAL_PATTERNS = [
+    r"(?:请|需要|提供)(?:你|您|给我|输入)?.{0,10}(?:原始日志|日志样本|解码.{0,5}日志|更多数据|文件内容)",
+    r"(?:无法|不能|不可以|没有足够).{0,10}(?:处理|映射|分析|完成|进行)",
+    r"(?:需要先|必须先|必须).{0,15}(?:解码|查看|读取|获得)(?:原.{0,5}日志|样本|数据)",
+    r"(?:缺少|缺失|不足).{0,10}(?:日志|样本|数据|内容|字段)",
+    r"(?:请先|建议先).{0,15}(?:上传|提交|输入|补充)", 
+]
+
+
+def _is_refusal_response(content: str) -> bool:
+    """检测 LLM 响应是否为拒绝对话（索要数据/无法处理等非JSON回复）"""
+    content_lower = content.strip()
+    for pattern in _REFUSAL_PATTERNS:
+        if re.search(pattern, content_lower):
+            return True
+    return False
+
+
 def parse_json_mapping_result(content: str) -> list:
     """
     解析Agent返回的JSON映射结果
@@ -44,8 +63,14 @@ def parse_json_mapping_result(content: str) -> list:
     # 记录原始内容（完整输出）
     logger.info(f"[PARSER] 收到内容:\n{content}")
     
-    # 方法1：去除前后空白后直接尝试解析
     content_stripped = content.strip()
+    
+    # 方法0：拒绝检测 — 检查 LLM 是否在索要数据
+    if _is_refusal_response(content_stripped):
+        logger.warning("[PARSER] 检测到 LLM 拒绝响应（索要数据/无法处理），建议重试")
+        return []  # 返回空列表，由调用方决定是否重试
+    
+    # 方法1：去除前后空白后直接尝试解析
     try:
         result = json.loads(content_stripped)
         if isinstance(result, list):
@@ -89,7 +114,37 @@ def parse_json_mapping_result(content: str) -> list:
         except json.JSONDecodeError:
             continue
     
-    logger.warning(f"[PARSER] 解析失败，无法提取有效的映射结果")
+    # 方法4：尝试替换中文引号/括号后重试 JSON 解析
+    fixed_content = content_stripped
+    fixed_content = fixed_content.replace('\u201c', '"').replace('\u201d', '"')  # 中文双引号
+    fixed_content = fixed_content.replace('\u2018', "'").replace('\u2019', "'")  # 中文单引号
+    fixed_content = fixed_content.replace('\uff08', '(').replace('\uff09', ')')  # 全角括号
+    if fixed_content != content_stripped:
+        logger.info("[PARSER] 方法4：修复中文标点后重试")
+        try:
+            result = json.loads(fixed_content)
+            if isinstance(result, list):
+                valid_result = [item for item in result if validate_item(item)]
+                if valid_result:
+                    logger.info(f"[PARSER] 方法4解析成功，获得 {len(valid_result)} 条有效记录")
+                    return valid_result
+        except json.JSONDecodeError:
+            pass
+    
+    # 方法5：JSON 修复 — 使用 regex 逐项提取，容忍部分损坏
+    item_pattern = r'\{\s*"原始字段名"\s*:\s*"([^"]*)"\s*,\s*"系统属性名称"\s*:\s*"([^"]*)"\s*,\s*"匹配状态"\s*:\s*"([^"]*)"\s*\}'
+    items = re.findall(item_pattern, content_stripped)
+    if items:
+        logger.info(f"[PARSER] 方法5（regex逐项提取）成功，获得 {len(items)} 条记录")
+        result = [
+            {"原始字段名": raw, "系统属性名称": std, "匹配状态": status}
+            for raw, std, status in items
+        ]
+        valid_result = [item for item in result if validate_item(item)]
+        if valid_result:
+            return valid_result
+    
+    logger.warning(f"[PARSER] 所有方法均解析失败，无法提取有效的映射结果")
     return []
 
 

@@ -292,11 +292,25 @@ async def handle_file_upload(user_session: dict, element):
             user_session["decoded_data"] = result["decoded_json"]
             user_session["decoded_fields"] = result["fields"]
             user_session["original_log"] = result["original_log"]
+            user_session["decoded_text"] = result.get("decoded_text", "")  # 保存解码后的原始文本，供 input_builder 后备使用
 
             # 构建简化 JSON（只包含必要的索引和日志示例）
             indexes = result.get("fields", [])
             original_log = result.get("original_log", [])
-            original_log_sample = original_log[0] if original_log else ""
+            # 修复：original_log 可能是 string（JSON字符串）、list 或 dict
+            if isinstance(original_log, list):
+                first_item = original_log[0] if original_log else ""
+                # original_log[0] 可能是 dict/list → 转为 JSON 字符串
+                if isinstance(first_item, (dict, list)):
+                    original_log_sample = json.dumps(first_item, ensure_ascii=False)
+                else:
+                    original_log_sample = str(first_item) if first_item else ""
+            elif isinstance(original_log, str):
+                original_log_sample = original_log
+            elif isinstance(original_log, dict):
+                original_log_sample = json.dumps(original_log, ensure_ascii=False)
+            else:
+                original_log_sample = str(original_log) if original_log else ""
 
             simplified_data = {
                 "fields": indexes,
@@ -389,27 +403,77 @@ Excel 格式说明：
     loading_msg = cl.Message(content="⏳ **AI正在处理中，请稍候...**\n\n💭 正在分析您的请求...")
     await loading_msg.send()
 
-    try:
-        # 7. 调用 Team（带重试）→ llm_client
-        result = await call_team(team, full_input, loading_msg)
-
-        # 8. 删除 loading 消息
-        await loading_msg.remove()
-
-        # 9. 创建流式消息显示结果
-        msg = cl.Message(content="")
-        await msg.send()
-
-        # 10. 解析响应 → response_handler
-        await process_team_response(result, user_lower, user_session, loading_msg, msg)
-
-    except Exception as e:
-        logger.error(f"Team调用异常: {str(e)}")
+    max_retries = 2
+    for retry_attempt in range(max_retries + 1):
         try:
-            await loading_msg.remove()
-        except Exception:
-            pass
-        await cl.Message(content=f"❌ 处理异常：{str(e)}").send()
+            # 7. 调用 Team（带重试）→ llm_client
+            result = await call_team(team, full_input, loading_msg)
+
+            # 8. 删除 loading 消息（重试时不删除，保留状态）
+            if retry_attempt == 0:
+                await loading_msg.remove()
+            else:
+                # 重试前更新 loading 消息
+                try:
+                    loading_msg.content = f"⏳ **AI正在重新分析，请稍候...**\n\n⚠️ 上次未返回有效结果，尝试 {retry_attempt + 1}/{max_retries + 1}"
+                    await loading_msg.update()
+                except Exception:
+                    pass
+
+            # 9. 创建流式消息显示结果
+            msg = cl.Message(content="")
+            await msg.send()
+
+            # 10. 解析响应 → response_handler
+            handled = await process_team_response(result, user_lower, user_session, loading_msg, msg)
+
+            # 11. 如果成功处理，退出重试循环
+            if handled:
+                # 确保 loading 消息被移除
+                try:
+                    await loading_msg.remove()
+                except Exception:
+                    pass
+                return
+
+            # 12. 未成功处理（LLM 拒绝响应），记录并重试
+            if retry_attempt < max_retries:
+                logger.warning(
+                    f"[HANDLE] LLM 未返回有效结果（尝试 {retry_attempt + 1}/{max_retries + 1}），"
+                    f"强制重试，追加禁止索要数据指令"
+                )
+                # 在输入中追加强制指令，让 LLM 知道数据已全部提供
+                full_input = (
+                    f"[SYSTEM NOTE: 所有数据已在上述消息中提供，你不需要也不应该索要任何额外数据。"
+                    f"请现在立即使用提供的数据完成处理。禁止输出任何索取性文字。]\n\n{full_input}"
+                )
+                try:
+                    await msg.remove()
+                except Exception:
+                    pass
+            else:
+                # 最后一次重试也失败，移除 loading
+                try:
+                    await loading_msg.remove()
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    f"LLM 在 {max_retries + 1} 次尝试中均未返回有效的映射/处理结果，"
+                    f"请缩短输入内容或联系管理员。"
+                )
+
+        except Exception as e:
+            if retry_attempt < max_retries:
+                logger.warning(f"Team调用异常 (尝试 {retry_attempt + 1}): {str(e)}，准备重试...")
+                await asyncio_mod.sleep(3)
+            else:
+                logger.error(f"Team调用异常，已达最大重试次数: {str(e)}")
+                try:
+                    await loading_msg.remove()
+                except Exception:
+                    pass
+                await cl.Message(content=f"❌ 处理异常：{str(e)}").send()
+                return
 
 
 # ============= Action 回调（保留在 chainlit_app.py 中）=============

@@ -37,6 +37,20 @@ def build_llm_input(user_text: str, user_session: dict) -> str:
 
 📋 原始日志样本（用于理解字段语义）：
 {sample_str}"""
+        else:
+            # 无日志样本时，提供解码后的原始 JSON 内容作为数据上下文（字段名+值）
+            decoded_text = user_session.get("decoded_text", "")
+            if not decoded_text:
+                # 兜底：从 decoded_data（即 decoded_json）重建
+                decoded_data = user_session.get("decoded_data", {})
+                if decoded_data:
+                    decoded_text = json.dumps(decoded_data, ensure_ascii=False)
+            if decoded_text:
+                context_str = decoded_text if len(decoded_text) <= 3000 else decoded_text[:3000] + "...(已截断)"
+                full_input += f"""
+
+📋 解码后的原始数据（包含字段值，用于理解字段语义）：
+{context_str}"""
 
         logger.info(f"[LLM_INPUT] 发送给LLM的字段列表: {fields_json_str[:500]}...")
     else:

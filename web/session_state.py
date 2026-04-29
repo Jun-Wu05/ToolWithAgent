@@ -36,6 +36,9 @@ class SessionState:
     simplified_data: Optional[Dict[str, Any]] = None
     """简化数据（fields + original_log_sample），用于 LLM 输入构建"""
 
+    decoded_text: Optional[str] = None
+    """解码后的原始文本，供 input_builder 后备使用（解码时保存，映射时作为上下文）"""
+
     # ---- 字段映射结果 ----
     last_mapping_data: Optional[List[Dict[str, Any]]] = None
     """最后一次字段映射的结果列表，供确认填充使用"""
@@ -111,6 +114,7 @@ class SessionState:
         """清除解码后的数据"""
         self.decoded_data = None
         self.decoded_fields = None
+        self.decoded_text = None
         self.original_log = None
         self.simplified_data = None
 

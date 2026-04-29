@@ -1,0 +1,309 @@
+{
+  "enums": [
+    {
+      "enum_name_key": "处理动作",
+      "enum_name_value": "action",
+      "description": "攻击日志中的处理动作，表示对攻击流量的处理方式",
+      "values": {
+        "1": "丢弃",
+        "0": "告警"
+      }
+    },
+    {
+      "enum_name_key": "ADS日志类型",
+      "enum_name_value": "symbol",
+      "description": "标识ADS日志的具体类型，用于区分不同业务场景的日志",
+      "values": {
+        "flow_log": "流量日志",
+        "ads_xflow_stat": "xflow流量统计日志",
+        "attack_log": "攻击日志",
+        "attack_flow_log": "攻击流量日志",
+        "attack_ipgeo_model_log": "源IP地理分布检测日志",
+        "attack_dns_model_log": "DNS资源分布检测日志",
+        "attack_src_topn_model_log": "源流量topn模型检测日志",
+        "cap_log": "抓包日志",
+        "attack_scrp_log": "攻击源日志",
+        "credit_log": "信誉日志",
+        "learn_single_attr_log": "学习阈值日志",
+        "learn_topn_log": "学习topn日志",
+        "dns_query_res_log": "请求资源分布日志",
+        "attack_geo_log": "攻击地理日志",
+        "dns_domain_topn_log": "域名topn日志",
+        "src_geo_log": "源地理分布日志",
+        "lead_log": "牵引日志",
+        "protect_status": "防护状态日志",
+        "alarm_log": "告警日志",
+        "link_flow_log": "链路流量日志"
+      }
+    },
+    {
+      "enum_name_key": "防护目标类型",
+      "enum_name_value": "obj_type",
+      "description": "表示防护目标的类型，区分是地址类型还是业务类型或防护对象组",
+      "values": {
+        "tuple-1": "地址/协议族",
+        "tuple-3": "地址/业务类型",
+        "group": "防护对象"
+      }
+    },
+    {
+      "enum_name_key": "是否正在攻击",
+      "enum_name_value": "is_under_atk",
+      "description": "表示当前防护目标是否正在遭受攻击",
+      "values": {
+        "1": "正在攻击",
+        "0": "无攻击"
+      }
+    },
+    {
+      "enum_name_key": "攻击状态",
+      "enum_name_value": "status",
+      "description": "攻击日志中表示攻击的当前状态",
+      "values": {
+        "active": "攻击中",
+        "inactive": "攻击结束"
+      }
+    },
+    {
+      "enum_name_key": "告警等级",
+      "enum_name_value": "alarm_level",
+      "description": "攻击或告警日志中的严重等级",
+      "values": {
+        "high": "高",
+        "medium": "中",
+        "low": "低"
+      }
+    },
+    {
+      "enum_name_key": "是否是私有攻击",
+      "enum_name_value": "is_private_atk",
+      "description": "表示是否为ADS自己命名的特殊攻击类型",
+      "values": {
+        "1": "私有攻击",
+        "0": "非私有攻击"
+      }
+    },
+    {
+      "enum_name_key": "是否异常",
+      "enum_name_value": "is_abnormal",
+      "description": "检测模型中表示是否检测到异常",
+      "values": {
+        "1": "异常",
+        "0": "非异常"
+      }
+    },
+    {
+      "enum_name_key": "抓包状态",
+      "enum_name_value": "cap_status",
+      "description": "抓包日志中表示抓包的当前状态",
+      "values": {
+        "capturing": "正在抓包",
+        "end": "抓包结束"
+      }
+    },
+    {
+      "enum_name_key": "抓包类型",
+      "enum_name_value": "cap_type",
+      "description": "抓包日志中表示抓包的触发类型",
+      "values": {
+        "abnormal": "异常抓包",
+        "attack": "攻击抓包"
+      }
+    },
+    {
+      "enum_name_key": "信誉类型",
+      "enum_name_value": "credit_type",
+      "description": "信誉日志中表示信誉的类型",
+      "values": {
+        "blacklist": "黑名单",
+        "whitelist": "白名单",
+        "no_auth": "未认证",
+        "cloud_whitelist": "云白名单",
+        "base auth": "基础认证",
+        "app auth": "应用认证",
+        "feature no auth": "特征未认证",
+        "feature whitelist": "特征白名单",
+        "null": "空"
+      }
+    },
+    {
+      "enum_name_key": "是否代理",
+      "enum_name_value": "is_proxy",
+      "description": "信誉日志中表示源IP是否为代理",
+      "values": {
+        "1": "是代理",
+        "0": "不是代理"
+      }
+    },
+    {
+      "enum_name_key": "学习状态",
+      "enum_name_value": "status",
+      "description": "学习阈值日志和学习topn日志中表示学习的状态",
+      "values": {
+        "learning": "学习中"
+      }
+    },
+    {
+      "enum_name_key": "学习结果下发方式",
+      "enum_name_value": "gen_value_merge_method",
+      "description": "学习阈值日志中表示学习结果自动下发的方式",
+      "values": {
+        "max": "取最大值",
+        "min": "取最小值"
+      }
+    },
+    {
+      "enum_name_key": "是否自动下发",
+      "enum_name_value": "is_auto_gen_policy",
+      "description": "学习阈值日志中表示学习结果是否自动下发为策略值",
+      "values": {
+        "1": "自动下发",
+        "0": "手动下发"
+      }
+    },
+    {
+      "enum_name_key": "模块类型",
+      "enum_name_value": "module_type",
+      "description": "学习日志中表示模块的业务类型",
+      "values": {
+        "2": "业务学习",
+        "3": "策略模板学习"
+      }
+    },
+    {
+      "enum_name_key": "牵引动作",
+      "enum_name_value": "lead_action",
+      "description": "牵引日志中表示牵引的动作类型",
+      "values": {
+        "begin": "开始牵引",
+        "end": "取消牵引"
+      }
+    },
+    {
+      "enum_name_key": "操作类型",
+      "enum_name_value": "op",
+      "description": "管理员日志和固件升级等日志中表示操作的类型",
+      "values": {
+        "logout": "登出",
+        "local login": "本地登录",
+        "import-webui": "通过WebUI导入",
+        "delete": "删除",
+        "update": "更新",
+        "up": "接口启用",
+        "down": "接口禁用"
+      }
+    },
+    {
+      "enum_name_key": "登录方法",
+      "enum_name_value": "method",
+      "description": "管理员登录日志中表示登录的方式",
+      "values": {
+        "WEBUI": "Web界面",
+        "Serial": "串口",
+        "ssh": "SSH",
+        "telnet": "Telnet"
+      }
+    },
+    {
+      "enum_name_key": "登录结果",
+      "enum_name_value": "result",
+      "description": "管理员登录日志中表示登录操作的结果码",
+      "values": {
+        "1000": "登录成功",
+        "0": "登出成功",
+        "-3007": "用户名或密码错误"
+      }
+    },
+    {
+      "enum_name_key": "双工模式",
+      "enum_name_value": "duplex",
+      "description": "接口链路状态日志中表示接口的双工模式",
+      "values": {
+        "Full Duplex": "全双工",
+        "Half Duplex": "半双工",
+        "自适应": "自适应"
+      }
+    },
+    {
+      "enum_name_key": "攻击类型",
+      "enum_name_value": "attack_type",
+      "description": "攻击日志中表示具体的攻击类型，从附录中提取",
+      "values": {
+        "ip flood": "ip flood攻击",
+        "ipfrag flood": "ip分片flood攻击",
+        "blackhole route trigger": "引发黑洞路由",
+        "ip geographical distribution": "ip地理分布",
+        "port scan": "端口扫描",
+        "ip scan": "ip扫描",
+        "ip flow control": "ip流量控制",
+        "land attack": "dos land攻击",
+        "tcp misuse": "dos tcp误用",
+        "udp misuse": "dos udp误用",
+        "tcpscan attack": "dos tcp scan攻击",
+        "targa3 attack": "dos targa3攻击",
+        "smurf attack": "dos smurf攻击",
+        "fraggle attack": "dos fragile攻击",
+        "winnuke attack": "dos winnuke攻击",
+        "rr attack": "dos rr攻击",
+        "sr attack": "dos sr攻击",
+        "ip option attack": "dos ip选项攻击",
+        "tracert attack": "dos牵引攻击",
+        "ping of death attack": "dos死亡之ping攻击",
+        "redirect attack": "dos重定向攻击",
+        "unreach attack": "dos不可到达攻击",
+        "icmp large attack": "dos巨大icmp攻击",
+        "protocol null attack": "dos空协议攻击",
+        "session check": "连接检查",
+        "ip abnormal packet attack": "ip异常数据包攻击",
+        "inif limit": "入口限速",
+        "blacklist": "黑名单",
+        "global fingerprint learn": "全局指纹学习",
+        "user defined rule": "用户定义规则",
+        "http host blacklist": "http host黑名单",
+        "source flow model change": "源流量模型改变",
+        "tcp flood": "tcp flood攻击",
+        "tcpfrag flood": "tcp分片攻击",
+        "syn flood": "syn flood攻击",
+        "synack flood": "syn+ack攻击",
+        "ack flood": "ack flood攻击",
+        "fin flood": "fin flood攻击",
+        "rst flood": "rst flood攻击",
+        "tcp abnormal flag flood": "tcp异常标记flood攻击",
+        "tcp total conn flood": "tcp总连接flood攻击",
+        "tcp new conn flood": "tcp新建连接flood攻击",
+        "tcp flow control": "tcp流量控制",
+        "udp flood": "udp flood攻击",
+        "udpfrag flood": "udp分片攻击",
+        "udp reflect flood": "udp反射flood攻击",
+        "cldap attack": "cldap反射攻击",
+        "memcached attack": "memcached反射攻击",
+        "ssdp amplification": "ssdp反射攻击",
+        "udp flow control": "udp流量控制",
+        "icmp flood": "icmp flood攻击",
+        "icmp flow control": "icmp流量控制",
+        "dns abnormal packet attack": "dns异常数据包攻击",
+        "dns query flood": "dns请求flood攻击",
+        "dns reply flood": "dns回应flood攻击",
+        "dns amplification": "dns放大攻击",
+        "dns poison": "dns投毒攻击",
+        "dns reflect": "dns反射攻击",
+        "dns no such name": "dns空解析名攻击",
+        "dns resource distribution": "dns资源分布攻击",
+        "http flood": "http flood攻击",
+        "http uri cc": "http uri字段攻击",
+        "http concur connection flood": "http并发连接flood攻击",
+        "http new connection flood": "http新建连接flood攻击",
+        "http slow attack": "http慢速攻击",
+        "http source model change": "http源模型变化",
+        "https flood": "https flood攻击",
+        "https concur connection flood": "https并发连接flood攻击",
+        "https new connection flood": "https新建连接flood攻击",
+        "sip flood": "sip flood攻击",
+        "sip register flood": "sip注册flood攻击",
+        "ntp request flood": "sip请求攻击",
+        "ntp reply flood": "ntp回应攻击",
+        "ntp amplification": "ntp放大攻击"
+      }
+    }
+  ]
+}

@@ -39,6 +39,21 @@ async def process_team_response(
 
     # 先尝试字段映射解析
     mapping_data = parse_json_mapping_result(result_content)
+    
+    # 检测是否返回空列表（可能是解析失败或 LLM 拒绝响应）
+    if not mapping_data:
+        # 检查 result_content 是否包含拒绝特征
+        lowered = result_content.lower()
+        refusal_signatures = [
+            ("请提供", "provide"), ("需要", "need"), ("无法", "cannot"),
+            ("原始日志", "original log"), ("解码", "decode"), ("更多数据", "more data"),
+            ("日志样本", "log sample"), ("缺少", "missing"), ("不足", "insufficient"),
+        ]
+        is_refusal = any(sig[0] in result_content for sig in refusal_signatures)
+        if is_refusal:
+            logger.warning("[HANDLE] 检测到 LLM 拒绝/索要数据响应，标记为重试候选")
+            return False  # 返回 False 表示未成功处理，需要重试
+    
     if mapping_data:
         user_session["last_mapping_data"] = mapping_data
         matched_count = sum(1 for item in mapping_data if item.get("匹配状态") == "匹配成功")

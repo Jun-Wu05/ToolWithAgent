@@ -90,7 +90,6 @@ python main.py
 ```bash
 chainlit run web/chainlit_app.py
 ```
-
 启动后访问 `http://localhost:8000` 与 AI Agent 进行对话式交互。
 
 #### 3. 命令行/API
