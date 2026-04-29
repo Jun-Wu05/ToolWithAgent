@@ -36,6 +36,11 @@ ToolWithAgent/
 
 .github/
 .trae/
-.Ai_context/logs/  
-.logs/
-.archive/
+archive/
+
+# pytest 缓存
+.pytest_cache/
+
+# CodeBuddy IDE 本地配置
+.codebuddy/
+
