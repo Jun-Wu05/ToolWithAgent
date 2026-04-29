@@ -49,6 +49,8 @@ logger.info("=" * 60)
 logger.info("Chainlit聊天式Web应用启动")
 logger.info("=" * 60)
 
+# 会话状态管理
+from web.session_state import SessionState
 
 # ============= 从拆分模块导入业务函数 =============
 
@@ -82,24 +84,8 @@ async def start():
         setup_agno_logging_bridge()
         _agno_bridge_installed = True
 
-    # 创建用户会话状态
-    user_session = {
-        "team": None,
-        "decoded_data": None,
-        "decoded_fields": None,
-        "original_log": None,
-        "last_mapping_data": None,  # 保存最后一次映射结果
-        # 威胁填充模式相关
-        "threat_fill_mode": False,  # 威胁填充模式标志
-        "threat_target_field": None,  # 用户输入的目标字段名
-        "threat_mapping_table": None,  # 威胁映射表格
-        "pending_base64": None,  # 待处理的Base64内容
-        # 枚举填充模式相关
-        "enum_fill_mode": False,  # 枚举填充模式标志
-        "enum_base64": None,  # 枚举待处理的Base64内容
-        "enum_excel_path": None,  # 枚举映射表Excel路径
-        "enum_preview": None,  # 枚举预览数据
-    }
+    # 创建用户会话状态（使用结构化 SessionState）
+    user_session = SessionState.create_default()
     cl.user_session.set("user_session", user_session)
 
     # 初始化Team并预热
@@ -110,12 +96,12 @@ async def start():
             sys.path.insert(0, _root)
 
         from agent.core.team import get_team_instance
-        user_session["team"] = get_team_instance()
+        user_session.team = get_team_instance()
         logger.info("[START] Team初始化成功，开始预热...")
 
         # 执行一次空操作预热（避免首次调用延迟）
         import asyncio
-        warmup_result = await asyncio.to_thread(user_session["team"].run, "你好")
+        warmup_result = await asyncio.to_thread(user_session.team.run, "你好")
         logger.info("[START] Team预热完成")
     except ValueError as e:
         logger.error(f"[START] Team初始化失败: {e}")
