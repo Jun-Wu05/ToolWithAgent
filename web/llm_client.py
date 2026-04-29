@@ -34,7 +34,7 @@ _team_circuit_breaker = CircuitBreaker(
 # ============= 公共 API =============
 
 async def call_team(team, full_input: str, loading_msg=None) -> object:
-    """调用 Team.run，带熔断器保护 + 指数退避重试（最多 3 次）+ 120s 超时保护，记录 Token 用量"""
+    """调用 Team.run，带熔断器保护 + 指数退避重试（最多 3 次），记录 Token 用量"""
     retry_policy = RetryPolicy(max_retries=3, base_delay=1.0, max_delay=10.0)
     last_exception = None
 
@@ -56,17 +56,8 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
             api_start_time = time.time()
             logger.info(f"[API] 开始调用 Team.run (尝试 {attempt}/3)，输入长度: {len(full_input)}")
 
-            # 120s 超时保护
-            try:
-                result = await asyncio_mod.wait_for(
-                    asyncio_mod.to_thread(team.run, full_input),
-                    timeout=120.0
-                )
-            except asyncio_mod.TimeoutError:
-                logger.error("[llm_client] Team run 超时（120s），返回降级响应")
-                return type('FallbackResult', (), {
-                    'content': '[System] 请求处理超时，请稍后重试或简化输入内容。'
-                })()
+            # 直接调用 Team.run，不设超时限制（由 API 自身超时控制）
+            result = await asyncio_mod.to_thread(team.run, full_input)
 
             api_duration = time.time() - api_start_time
             logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
