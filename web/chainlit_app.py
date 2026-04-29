@@ -58,6 +58,7 @@ from web.session_state import SessionState
 from web.parsers import parse_json_mapping_result, parse_json_threat_result, create_dataframe_elements
 from web.route_config import load_route_keywords
 from web.llm_client import call_team_with_retry, setup_agno_logging_bridge
+from agent.core.tracing import trace_request
 from web.input_builder import build_llm_input
 from web.response_handler import process_team_response
 from web.threat_handler import handle_threat_fill_flow, execute_threat_fill
@@ -131,6 +132,7 @@ async def start():
 
 
 @cl.on_message
+@trace_request("user_request")
 async def main(message: cl.Message):
     """
     处理用户消息 - 纯UI层
