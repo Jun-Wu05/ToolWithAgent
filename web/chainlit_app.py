@@ -48,10 +48,12 @@ from agent.shared.logger import get_logger
 logger = get_logger("chainlit_app")
 
 # 隐藏第三方库的 DEBUG 日志
-ALLOWED_LOGGER_PREFIXES = ("agent.", "web.", "__main__")
-for name in logging.root.manager.loggerDict:
-    if not name.startswith(ALLOWED_LOGGER_PREFIXES):
-        logging.getLogger(name).setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)	 
+logging.getLogger("httpcore").setLevel(logging.WARNING)	 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("hpack").setLevel(logging.WARNING)
+ 
+
 logger.info("=" * 60)
 logger.info("Chainlit聊天式Web应用启动")
 logger.info("=" * 60)
@@ -369,9 +371,11 @@ async def handle_user_message(user_session: dict, team, user_text: str):
 
     user_lower = user_text.lower()
 
-    # [Step2 改造] 去掉 _route_request 硬路由，枚举/提取关键词匹配保留（UI工作流触发）
+    # 意图检测（关键词匹配）
     is_enum = any(kw in user_lower for kw in ENUM_KEYWORDS)
     is_enum_extract = any(kw in user_lower for kw in ENUM_EXTRACT_KEYWORDS)
+    is_threat = any(kw in user_lower for kw in THREAT_KEYWORDS)
+    is_mapping = any(kw in user_lower for kw in MAPPING_KEYWORDS)
 
     # 1. 威胁填充模式分流 → threat_handler
     if await handle_threat_fill_flow(user_session, user_text):
@@ -403,8 +407,16 @@ Excel 格式说明：
         await handle_enum_extract_flow(user_session, team, user_text)
         return
 
-    # 5. 构建 LLM 输入（始终拼接数据，由 RouterAgent 做路由判断）
-    full_input = build_llm_input(user_text, user_session)
+    # 5. 构建 LLM 输入（按意图隔离上下文）
+    # 威胁路由：只传文本，不拼接字段数据（避免旧缓存污染威胁处理）
+    # 映射路由：拼接字段数据，供 LLM 做字段映射
+    # 通用路由：由 RouterAgent 自己判断
+    detected_intent = "general"
+    if is_threat:
+        detected_intent = "threat"
+    elif is_mapping:
+        detected_intent = "mapping"
+    full_input = build_llm_input(user_text, user_session, intent=detected_intent)
 
     # 6. 发送 loading 消息
     loading_msg = cl.Message(content="⏳ **AI正在处理中，请稍候...**\n\n💭 正在分析您的请求...")

@@ -2,7 +2,7 @@
 LLM 输入构建 — 将用户请求与上传数据拼接为 Team 的输入文本
 
 提供:
-- build_llm_input(user_text, user_session) → str
+- build_llm_input(user_text, user_session, intent) → str
 """
 import json
 
@@ -11,12 +11,26 @@ from agent.shared.logger import get_logger
 logger = get_logger("input_builder")
 
 
-def build_llm_input(user_text: str, user_session: dict) -> str:
+def build_llm_input(user_text: str, user_session: dict, intent: str = "general") -> str:
     """
     构建发送给 LLM / Team 的完整输入。
 
-    只要有数据就拼接字段列表，由 RouterAgent 自己判断任务类型。
+    Args:
+        user_text: 用户输入的文本
+        user_session: 用户会话状态
+        intent: 意图类型 — "threat"（威胁类型处理）/ "mapping"（字段映射）/ "general"（通用路由）
+
+    上下文隔离原则：
+    - intent="threat"：只传用户文本，不拼接字段数据（避免旧缓存污染威胁处理）
+    - intent="mapping"：拼接字段数据 + 日志样本，供 LLM 做字段映射
+    - intent="general"：由 RouterAgent 自己判断
     """
+    # 威胁类型处理：上下文隔离 — 只传用户文本，不拼接任何字段数据
+    if intent == "threat":
+        logger.info(f"[LLM_INPUT] 威胁路由：仅传递用户文本（长度: {len(user_text)}）")
+        return user_text
+
+    # 映射 / 通用路由：拼接字段数据
     has_data = user_session.get("decoded_data") or user_session.get("decoded_fields")
 
     if has_data:
