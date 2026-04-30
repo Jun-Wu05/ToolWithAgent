@@ -33,8 +33,17 @@ _team_circuit_breaker = CircuitBreaker(
 
 # ============= 公共 API =============
 
-async def call_team(team, full_input: str, loading_msg=None) -> object:
-    """调用 Team.run，带熔断器保护，记录 Token 用量"""
+async def call_team(team, full_input: str, loading_msg=None, intent: str = "general") -> object:
+    """
+    调用 Team 或直接路由到 MemberAgent，带熔断器保护，记录 Token 用量。
+
+    Args:
+        team: Agno Team 实例
+        full_input: 完整输入文本
+        loading_msg: Chainlit 加载消息对象
+        intent: 意图类型（"mapping" | "threat" | "enum" | "general"）
+               明确意图时直接调用对应 MemberAgent，跳过 RouterAgent 推理（省 40-60s）
+    """
     # 关键词预筛：命中枚举/威胁则加入路由提示，减少 RouterAgent 推理时间
     lower_input = full_input.lower()
     if any(kw in lower_input for kw in ENUM_KEYWORDS):
@@ -50,13 +59,37 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
             )
 
         api_start_time = time.time()
-        logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
 
-        # 带超时保护：120s，Route 模式含 2 次串行 LLM + 工具调用
-        result = await asyncio_mod.wait_for(
-            asyncio_mod.to_thread(team.run, full_input),
-            timeout=120.0,
-        )
+        # 意图明确时直接调用 MemberAgent，跳过 RouterAgent（省一次 LLM 调用）
+        intent_agent_map = {
+            "mapping": "FieldMappingAgent",
+            "threat": "ThreatAgent",
+            "enum": "EnumAgent",
+        }
+        target_member = None
+        if intent in intent_agent_map:
+            target_name = intent_agent_map[intent]
+            target_member = next(
+                (m for m in team.members if getattr(m, 'name', '') == target_name),
+                None,
+            )
+
+        if target_member is not None:
+            logger.info(
+                f"[API] 直接调用 MemberAgent({target_name})，跳过 RouterAgent，输入长度: {len(full_input)}"
+            )
+            # 直接调用 MemberAgent.run()，和 team.run() 返回相同的 RunResponse 格式
+            result = await asyncio_mod.wait_for(
+                asyncio_mod.to_thread(target_member.run, full_input),
+                timeout=120.0,
+            )
+        else:
+            logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
+            # 带超时保护：120s，Route 模式含 2 次串行 LLM + 工具调用
+            result = await asyncio_mod.wait_for(
+                asyncio_mod.to_thread(team.run, full_input),
+                timeout=120.0,
+            )
 
         api_duration = time.time() - api_start_time
         logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")

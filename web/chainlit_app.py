@@ -421,8 +421,8 @@ Excel 格式说明：
     max_retries = 2
     for retry_attempt in range(max_retries + 1):
         try:
-            # 7. 调用 Team → llm_client
-            result = await call_team(team, full_input, loading_msg)
+            # 7. 调用 Team → llm_client（传递 intent 跳过 RouterAgent）
+            result = await call_team(team, full_input, loading_msg, intent=detected_intent)
 
             # 8. 删除 loading 消息（重试时不删除，保留状态）
             if retry_attempt == 0:
