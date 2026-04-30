@@ -7,8 +7,32 @@ LLM 输入构建 — 将用户请求与上传数据拼接为 Team 的输入文�
 import json
 
 from agent.shared.logger import get_logger
+from agent.tools.standard_mapper import batch_lookup_standard_fields_tool
 
 logger = get_logger("input_builder")
+
+
+def _pre_query_field_candidates(fields_list: list) -> dict:
+    """
+    在 Python 侧预查询所有字段的标准字段候选，避免 LLM 调用工具增加延迟。
+    
+    Args:
+        fields_list: 原始字段名列表
+    
+    Returns:
+        dict: 字段名 → 候选列表的映射
+    """
+    if not fields_list:
+        return {}
+    try:
+        # Agno tool 是 Function 对象，通过 .entrypoint 调用原始函数
+        result_json = batch_lookup_standard_fields_tool.entrypoint(field_names=json.dumps(fields_list, ensure_ascii=False), limit=5)
+        candidates = json.loads(result_json)
+        logger.info(f"[PRE_QUERY] 预查询完成，共 {len(candidates)} 个字段的候选")
+        return candidates
+    except Exception as e:
+        logger.warning(f"[PRE_QUERY] 预查询失败: {e}，LLM 将自行调用工具")
+        return {}
 
 
 def build_llm_input(user_text: str, user_session: dict, intent: str = "general") -> str:
@@ -40,10 +64,21 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
 
         fields_json_str = json.dumps(fields_list, ensure_ascii=False)
 
+        # 在 Python 侧预查询标准字段候选，注入 LLM 输入（消除 tool call 延迟）
+        pre_query_candidates = _pre_query_field_candidates(fields_list)
+
         full_input = f"""用户请求：{user_text}
 
 📋 可用数据字段列表：
 {fields_json_str}"""
+
+        # 注入预查询的候选字段数据
+        if pre_query_candidates:
+            candidates_json_str = json.dumps(pre_query_candidates, ensure_ascii=False)
+            full_input += f"""
+
+📋 [系统已预查询] 标准字段候选（每个字段 top-5，已去重排序）：
+{candidates_json_str}"""
 
         if original_log_sample:
             sample_str = original_log_sample if len(original_log_sample) <= 2000 else original_log_sample[:2000] + "...(已截断)"

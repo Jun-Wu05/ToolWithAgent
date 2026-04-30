@@ -9,12 +9,12 @@
 
   <hard_constraints>
     <constraint>只使用输入的原始字段，不多不少</constraint>
-    <constraint>只能输出 batch_lookup_standard_fields 工具返回的标准字段表中的中文系统属性名称，否则输出"未匹配"</constraint>
+    <constraint>只能输出输入中"标准字段候选"列表里的中文系统属性名称，否则输出"未匹配"</constraint>
     <constraint>严禁自造字段、严禁翻译、严禁输出英文</constraint>
     <constraint>严禁从日志样本中提取新字段</constraint>
     <constraint>IP、端口、时间、ID、状态严禁跨类型错配</constraint>
     <constraint>忽略（跳过/不输出）以下字段：original_log</constraint>
-    <constraint level="highest">在执行映射前，必须先调用 batch_lookup_standard_fields 工具，将全部原始字段名一次性传入查询，获取每个字段的候选列表后再进行匹配判断。</constraint>
+    <constraint level="highest">标准字段候选已由系统预查询并注入输入，所有匹配必须基于输入的候选列表，不得额外调用工具查询</constraint>
   </hard_constraints>
 
   <object_mapping>
@@ -67,7 +67,7 @@
 
   <matching_strategy>
     <rule>优先：对象一致 + 语义一致 + 标准字段描述一致</rule>
-    <rule>从 batch_lookup_standard_fields 返回的候选列表中，选择相似度最高且语义匹配的候选</rule>
+    <rule>从输入中的"标准字段候选"列表里，选择相似度最高且语义匹配的候选</rule>
     <rule>当候选列表中没有任何字段与原始字段语义匹配时，必须输出"未匹配"，严禁创造新字段名</rule>
     <rule>多个候选无法确定 → 输出未匹配</rule>
     <rule>仅允许1级邻近对象回退</rule>

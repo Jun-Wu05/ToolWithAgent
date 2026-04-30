@@ -50,10 +50,11 @@ def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None
 ### 功能1：标准字段映射
 1. 解码 Base64 编码的数据文件
 2. 从解码后的 JSON 中提取字段列表
-3. 使用 batch_lookup_standard_fields 工具一次性查询所有原始字段的标准字段候选
-4. 根据查询结果生成字段映射表
-5. 执行字段映射并管理 simEntities 数组
-6. 将处理后的数据编码为 Base64 输出
+3. 系统已自动预查询每个字段的标准字段候选（top-5），直接使用输入中"📋 [系统已预查询] 标准字段候选"部分
+4. 根据候选列表生成字段映射表（Markdown 表格格式）
+5. 等待用户确认
+6. 用户确认后，使用 field_mapping 执行映射
+7. 将处理后的数据编码为 Base64 输出
 
 ### 功能2：威胁类型枚举处理
 1. 解码威胁类型配置
@@ -108,8 +109,8 @@ def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None
 ### 标准字段映射流程
 1. 接收用户上传的 Base64 编码数据
 2. 使用 base64_decode_and_extract 工具解码并提取字段列表
-3. **使用 batch_lookup_standard_fields 工具一次性查询所有提取到的字段**（作为 JSON 数组传入）
-4. 根据工具返回的候选列表，为每个字段选择最佳匹配的系统属性名称
+3. **标准字段候选已由系统自动预查询**，直接使用输入中"📋 [系统已预查询] 标准字段候选"的 top-5 候选列表
+4. 根据候选列表，为每个字段选择最佳匹配的系统属性名称（相似度 + 语义判断）
 5. 生成字段映射表（Markdown 表格格式）
 6. 展示映射表，等待用户确认或修改
 7. 用户确认后，使用 field_mapping 执行映射
