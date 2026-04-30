@@ -81,14 +81,14 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
             # 直接调用 MemberAgent.run()，和 team.run() 返回相同的 RunResponse 格式
             result = await asyncio_mod.wait_for(
                 asyncio_mod.to_thread(target_member.run, full_input),
-                timeout=120.0,
+                timeout=360.0,
             )
         else:
             logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
             # 带超时保护：120s，Route 模式含 2 次串行 LLM + 工具调用
             result = await asyncio_mod.wait_for(
                 asyncio_mod.to_thread(team.run, full_input),
-                timeout=120.0,
+                timeout=360.0,
             )
 
         api_duration = time.time() - api_start_time
