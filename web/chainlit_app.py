@@ -110,13 +110,22 @@ async def start():
         user_session.team = get_team_instance()
         logger.info("[START] Team初始化成功")
 
-        # 异步初始化语义检索 embedding 缓存（有缓存时 ~50ms，无缓存时调 API ~2s）
+        # 后台线程初始化语义检索 embedding 缓存，不阻塞 Chat 启动
+        # 有缓存时 ~50ms 即完成，无缓存时在后台生成（首个请求降级为无候选模式）
+        import threading
         from agent.core.field_retriever import init_field_cache
-        cache_ready = init_field_cache()
-        if cache_ready:
-            logger.info("[START] 语义检索缓存就绪")
-        else:
-            logger.info("[START] 语义检索缓存未就绪，将降级为无候选模式")
+
+        def _background_init_cache() -> None:
+            try:
+                cache_ready = init_field_cache()
+                if cache_ready:
+                    logger.info("[START] 后台：语义检索缓存就绪")
+                else:
+                    logger.info("[START] 后台：语义检索缓存未就绪，将降级为无候选模式")
+            except Exception as bg_e:
+                logger.error(f"[START] 后台缓存初始化异常: {bg_e}")
+
+        threading.Thread(target=_background_init_cache, daemon=True, name="cache_init").start()
     except ValueError as e:
         logger.error(f"[START] Team初始化失败: {e}")
         await cl.Message(content=f"⚠️ Team初始化失败: {str(e)}").send()

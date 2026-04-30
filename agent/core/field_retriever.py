@@ -12,6 +12,7 @@
 依赖项：numpy（版本 >= 1.21），SiliconFlow API Key（环境变量）
 """
 
+import hashlib
 import json
 import os
 import time
@@ -24,21 +25,29 @@ from agent.shared.logger import get_logger
 
 logger = get_logger("field_retriever")
 
+# 缓存 schema 版本：标准字段表格式变更时递增，触发自动刷新
+CACHE_SCHEMA_VERSION = "1"
+
 # Embedding 模型配置
 EMBEDDING_MODEL = "BAAI/bge-m3"
 EMBEDDING_DIM = 1024
 EMBEDDING_API_URL = "https://api.siliconflow.cn/v1/embeddings"
 EMBEDDING_BATCH_SIZE = 100  # 每次 API 调用最多嵌入 100 个文本
+EMBEDDING_BATCH_SLEEP = 0.3  # 每批请求间隔（秒），防止 API 429 限流
 EMBEDDING_TIMEOUT = 10.0  # 单次 API 调用超时（秒）
 EMBEDDING_MAX_RETRIES = 2  # 最多重试次数
 
 # 相似度阈值：低于此值的候选不返回
 SIMILARITY_THRESHOLD = 0.25
 
+# 单条复合文本的最大字段描述长度（字符），防止超长文本溢出模型上下文
+MAX_DESCRIPTION_LENGTH = 200
+
 # 缓存文件路径
 _STANDARD_FIELDS_PATH = Path(__file__).parent.parent / "data" / "标准字段.txt"
 _CACHE_EMBEDDINGS_PATH = Path(__file__).parent.parent / "data" / "标准字段_embeddings.npy"
 _CACHE_RECORDS_PATH = Path(__file__).parent.parent / "data" / "标准字段_records.json"
+_CACHE_META_PATH = Path(__file__).parent.parent / "data" / "标准字段_cache_meta.json"
 
 
 def _load_standard_fields() -> list[dict]:
@@ -75,6 +84,9 @@ def _load_standard_fields() -> list[dict]:
         system_name = entry.get("系统属性名称", "")
         field_name = entry.get("字段名称", "")
         description = entry.get("描述", "")
+        # 截断超长描述，防止 embedding 模型输入溢出
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+            description = description[:MAX_DESCRIPTION_LENGTH] + "..."
         obj = entry.get("对象", "")
         data_type = entry.get("属性类型", "")
         entry["_composite_text"] = f"{system_name} ({field_name})：{description}，对象：{obj}，数据类型：{data_type}"
@@ -164,28 +176,109 @@ def _cosine_similarity(query_vec: np.ndarray, corpus_mat: np.ndarray) -> np.ndar
     return np.dot(corpus_mat, query_vec)
 
 
+def _compute_file_md5(file_path: Path) -> str:
+    """
+    计算文件的 MD5 哈希值。
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        MD5 十六进制字符串，文件不存在时返回空字符串
+    """
+    try:
+        if not file_path.exists():
+            return ""
+        content = file_path.read_bytes()
+        return hashlib.md5(content).hexdigest()
+    except OSError as e:
+        logger.warning(f"[META] 计算 MD5 失败 ({file_path}): {e}")
+        return ""
+
+
+def _get_cache_meta() -> Optional[dict]:
+    """
+    读取缓存元数据 JSON。
+
+    Returns:
+        dict 或 None（元数据文件不存在或损坏）
+    """
+    try:
+        if not _CACHE_META_PATH.exists():
+            return None
+        return json.loads(_CACHE_META_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"[META] 缓存元数据读取失败: {e}")
+        return None
+
+
+def _save_cache_meta(file_md5: str, record_count: int) -> None:
+    """
+    保存缓存元数据。
+    """
+    meta = {
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "standard_fields_md5": file_md5,
+        "record_count": record_count,
+        "embedding_model": EMBEDDING_MODEL,
+        "embedding_dim": EMBEDDING_DIM,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    _CACHE_META_PATH.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    logger.info(f"[META] 缓存元数据已保存: schema={CACHE_SCHEMA_VERSION}, md5={file_md5}")
+
+
 def _build_cache(texts: list[str], records: list[dict]) -> None:
     """
     构建并持久化 embedding 缓存。
+
+    分批调用 embedding API，每批间隔 EMBEDDING_BATCH_SLEEP 秒防止 429 限流。
 
     Args:
         texts: 标准字段的复合文本列表
         records: 标准字段原始记录列表
     """
-    vectors = _call_embedding_api(texts)
-    if vectors is None:
+    # 确保 data 目录存在（跨平台兼容）
+    _CACHE_EMBEDDINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # 分批嵌入，每批后休眠
+    all_vectors: list[np.ndarray] = []
+    for batch_start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+        batch = texts[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
+        vectors = _call_embedding_api(batch)
+        if vectors is None:
+            logger.error(f"[CACHE] 第 {batch_start // EMBEDDING_BATCH_SIZE + 1} 批 embedding 失败，中断构建")
+            return
+        all_vectors.append(vectors)
+        # 批次间休眠，防止 API 429 限流（最后一批不睡）
+        if batch_start + EMBEDDING_BATCH_SIZE < len(texts):
+            time.sleep(EMBEDDING_BATCH_SLEEP)
+
+    if not all_vectors:
         return
 
-    # 对语料矩阵作 L2 归一化（方便后续快速余弦相似度计算）
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    norms = np.maximum(norms, 1e-10)  # 防除零
-    normalized = vectors / norms
+    # 拼接所有批次
+    concatenated = np.concatenate(all_vectors, axis=0)
 
+    # 对语料矩阵作 L2 归一化（方便后续快速余弦相似度计算）
+    norms = np.linalg.norm(concatenated, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-10)  # 防除零
+    normalized = concatenated / norms
+
+    # 持久化
     np.save(str(_CACHE_EMBEDDINGS_PATH), normalized)
     _CACHE_RECORDS_PATH.write_text(
         json.dumps(records, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+    # 保存缓存元数据（含标准字段文件 MD5）
+    file_md5 = _compute_file_md5(_STANDARD_FIELDS_PATH)
+    _save_cache_meta(file_md5, len(records))
+
     logger.info(f"[CACHE] Embedding 缓存已保存：{len(records)} 条记录，维度 {normalized.shape[1]}")
 
 
@@ -193,8 +286,9 @@ def init_field_cache(force_refresh: bool = False) -> bool:
     """
     初始化标准字段 embedding 缓存。
 
-    如果缓存已存在且 force_refresh=False，直接返回，不做额外工作。
-    调用时机：Web 应用启动时（约 50ms，有缓存时）
+    自动版本/MD5 校验：标准字段表变更时自动触发 force_refresh。
+    无缓存或 stale 缓存时调用 SiliconFlow Embedding API 重新生成。
+    调用时机：Web 应用启动时（有缓存时 ~50ms，无缓存时 ~2-10s 取决于字段数量）
 
     Args:
         force_refresh: 强制重新生成缓存（标准字段表更新后调用）
@@ -203,8 +297,25 @@ def init_field_cache(force_refresh: bool = False) -> bool:
         bool: 缓存是否就绪（可用）
     """
     if not force_refresh and _CACHE_EMBEDDINGS_PATH.exists() and _CACHE_RECORDS_PATH.exists():
-        logger.info("[CACHE] Embedding 缓存已存在，跳过初始化")
-        return True
+        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 是否匹配
+        meta = _get_cache_meta()
+        if meta:
+            meta_version = meta.get("schema_version", "")
+            meta_md5 = meta.get("standard_fields_md5", "")
+            current_md5 = _compute_file_md5(_STANDARD_FIELDS_PATH)
+
+            if meta_version == CACHE_SCHEMA_VERSION and meta_md5 == current_md5:
+                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5），跳过初始化")
+                return True
+            else:
+                differ: list[str] = []
+                if meta_version != CACHE_SCHEMA_VERSION:
+                    differ.append(f"版本: {meta_version} → {CACHE_SCHEMA_VERSION}")
+                if meta_md5 != current_md5:
+                    differ.append(f"MD5: {meta_md5[:8]}... → {current_md5[:8]}...")
+                logger.info(f"[CACHE] 标准字段表已变更 ({', '.join(differ)})，自动触发缓存刷新")
+        else:
+            logger.info("[CACHE] 缓存元数据缺失，触发缓存刷新")
 
     # 检查 API Key
     if not _get_api_key():
@@ -322,4 +433,38 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
         return ""
 
     header = f"## 标准字段候选（语义检索 top-{top_k}，按相似度降序）："
-    return header + "\n" + "\n".join(lines)
+    raw_output = header + "\n" + "\n".join(lines)
+
+    # 转义特殊字符防止污染提示词格式（冒号、方括号、花括号不会破坏 Markdown 但做保守转义）
+    for old, new in [
+        ("{", "&#123;"),
+        ("}", "&#125;"),
+        ("[", "&#91;"),
+        ("]", "&#93;"),
+    ]:
+        raw_output = raw_output.replace(old, new)
+
+    return raw_output
+
+
+def _debug_lookup(keyword: str, top_k: int = 5) -> str:
+    """
+    运维调试入口：根据关键词在标准字段表中做语义检索，返回人类可读结果。
+
+    仅供终端运维调试使用，不暴露给 Agent LLM（避免 tool call 回流）。
+
+    Args:
+        keyword: 查询关键词（如 "srcAddress"）
+        top_k: 返回候选数（默认 5）
+
+    Returns:
+        紧凑格式的匹配结果字符串，无匹配时返回提示信息
+    """
+    if not keyword or not keyword.strip():
+        return "[DEBUG] 关键词为空"
+
+    _STANDARD_FIELDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not init_field_cache():
+        return "[DEBUG] 缓存未就绪，无法执行语义检索"
+
+    return batch_retrieve_candidates([keyword.strip()], top_k=top_k)
