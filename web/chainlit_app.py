@@ -109,6 +109,14 @@ async def start():
         from agent.core.team import get_team_instance
         user_session.team = get_team_instance()
         logger.info("[START] Team初始化成功")
+
+        # 异步初始化语义检索 embedding 缓存（有缓存时 ~50ms，无缓存时调 API ~2s）
+        from agent.core.field_retriever import init_field_cache
+        cache_ready = init_field_cache()
+        if cache_ready:
+            logger.info("[START] 语义检索缓存就绪")
+        else:
+            logger.info("[START] 语义检索缓存未就绪，将降级为无候选模式")
     except ValueError as e:
         logger.error(f"[START] Team初始化失败: {e}")
         await cl.Message(content=f"⚠️ Team初始化失败: {str(e)}").send()

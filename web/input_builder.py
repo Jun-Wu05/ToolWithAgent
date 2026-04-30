@@ -7,32 +7,34 @@ LLM 输入构建 — 将用户请求与上传数据拼接为 Team 的输入文�
 import json
 
 from agent.shared.logger import get_logger
-from agent.tools.standard_mapper import batch_lookup_standard_fields_tool
+from agent.core.field_retriever import batch_retrieve_candidates
 
 logger = get_logger("input_builder")
 
 
-def _pre_query_field_candidates(fields_list: list) -> dict:
+def _pre_query_field_candidates(fields_list: list) -> str:
     """
-    在 Python 侧预查询所有字段的标准字段候选，避免 LLM 调用工具增加延迟。
+    语义检索候选，返回紧凑格式字符串（空字符串表示无候选）。
+
+    不会抛出异常，所有错误降级为空字符串。
     
     Args:
         fields_list: 原始字段名列表
     
     Returns:
-        dict: 字段名 → 候选列表的映射
+        紧凑格式候选字符串（LLM 可读），无候选时返回 ""
     """
     if not fields_list:
-        return {}
+        return ""
     try:
-        # Agno tool 是 Function 对象，通过 .entrypoint 调用原始函数
-        result_json = batch_lookup_standard_fields_tool.entrypoint(field_names=json.dumps(fields_list, ensure_ascii=False), limit=5)
-        candidates = json.loads(result_json)
-        logger.info(f"[PRE_QUERY] 预查询完成，共 {len(candidates)} 个字段的候选")
-        return candidates
+        result = batch_retrieve_candidates(fields_list, top_k=3)
+        if result and result.strip():
+            logger.info(f"[PRE_QUERY] 语义检索完成，{len(fields_list)} 个字段")
+            return result
+        return ""
     except Exception as e:
-        logger.warning(f"[PRE_QUERY] 预查询失败: {e}，LLM 将自行调用工具")
-        return {}
+        logger.warning(f"[PRE_QUERY] 语义检索失败: {e}，降级处理")
+        return ""
 
 
 def build_llm_input(user_text: str, user_session: dict, intent: str = "general") -> str:
@@ -74,11 +76,7 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
 
         # 注入预查询的候选字段数据
         if pre_query_candidates:
-            candidates_json_str = json.dumps(pre_query_candidates, ensure_ascii=False)
-            full_input += f"""
-
-📋 [系统已预查询] 标准字段候选（每个字段 top-5，已去重排序）：
-{candidates_json_str}"""
+            full_input += f"\n\n{pre_query_candidates}\n"
 
         if original_log_sample:
             sample_str = original_log_sample if len(original_log_sample) <= 2000 else original_log_sample[:2000] + "...(已截断)"

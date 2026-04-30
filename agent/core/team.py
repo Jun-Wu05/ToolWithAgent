@@ -23,7 +23,6 @@ from agent.tools import (
     base64_decode_tool,
     field_mapping_tool,
     generate_mapping_table_tool,
-    lookup_standard_field_tool,
     threat_type_tool,
     enum_field_tool,
     extract_enum_from_logs,
@@ -54,7 +53,7 @@ def _load_router_instructions() -> str:
 # ============= FieldMappingAgent =============
 
 def _get_field_mapping_instructions() -> str:
-    """获取字段映射Agent指令（标准字段表通过 lookup_standard_field 工具按需查询）"""
+    """获取字段映射Agent指令（标准字段候选已由系统预检索注入，Agent 无需调用查询工具）"""
     prompts = _load_prompts()
     
     return f"""你是网络安全日志标准化专家。
@@ -62,16 +61,18 @@ def _get_field_mapping_instructions() -> str:
 {prompts['field']}
 
 ## 字段匹配策略
-- **按需查询标准字段表**：使用 `lookup_standard_field` 工具按字段名关键词查询标准字段表，获取匹配候选列表
-- **禁止尝试记忆或猜测全量标准字段表**，每次匹配字段时调用工具查询
-- 匹配方式：将用户字段名传入工具的 `keyword` 参数，从返回的候选列表中选取最匹配的中文系统属性名称
+- **标准字段候选已由系统预检索并注入到输入中**（"## 标准字段候选"部分），直接使用
+- 无需调用任何标准字段查询工具，候选已在输入中提供
+- 匹配方式：对每个原始字段，在候选列表中按相似度排序选取最佳匹配的系统属性名称
+- 若某字段无候选或候选不匹配，根据字段名的英文语义直接映射（如 srcAddress→源地址, destPort→目的端口）
 
 ## 工作原则
-- **用户消息中已包含所有可用数据**（字段列表 + 日志样本/解码数据），请直接使用，不要向用户索取更多数据
+- **用户消息中已包含所有可用数据**（字段列表 + 候选 + 日志样本/解码数据），请直接使用
 - 当日志样本或解码数据包含字段值时，优先根据字段值和字段名语义进行匹配
-- 当仅有字段名时，根据字段名（如 srcAddress→源地址, destPort→目的端口）的英文语义直接映射
+- 当仅有字段名时，根据候选相似度排序选择最佳匹配
 - **禁止**输出"请提供原始日志"、"需要更多数据"等索取性回复
 - **必须使用工具** `generate_mapping_table` 或 `field_mapping` 完成映射
+- **严禁调用任何标准字段查询函数**
 
 注意：
 - 必须严格按照上述规则输出
@@ -125,7 +126,6 @@ def create_field_mapping_agent() -> Agent:
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
         instructions=_get_field_mapping_instructions(),
         tools=[
-            lookup_standard_field_tool,     # 按字段名查询标准字段表（替代全量注入）
             field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
             generate_mapping_table_tool,   # 批量生成映射表
             base64_decode_tool,            # Base64 解码（输入常为 Base64 编码）

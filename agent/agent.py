@@ -11,7 +11,7 @@ from agno.agent import Agent
 from agno.models.siliconflow import Siliconflow
 
 from agent.tools.base64_tool import base64_decode_and_extract, decode_base64_text, extract_normalize_indexes, extract_original_log_result
-from agent.tools.standard_mapper import field_mapping_tool, generate_mapping_table_tool, lookup_standard_field_tool, batch_lookup_standard_fields_tool
+from agent.tools.standard_mapper import field_mapping_tool, generate_mapping_table_tool, lookup_standard_field_tool
 from agent.tools.base64_encoder import base64_encode, json_to_base64
 from agent.tools.file_tool import read_file, write_file, list_files, get_project_root, get_standard_fields_path, get_config_path
 from agent.tools.enum_field_tool import decode_enum_config, generate_enum_mapping_template, apply_enum_mapping, load_mapping_from_excel, get_enum_fields_list
