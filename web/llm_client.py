@@ -52,10 +52,10 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
         api_start_time = time.time()
         logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
 
-        # 带超时保护：60s，添加 max_iterations/tool_call_limit 后不会死循环
+        # 带超时保护：120s，Route 模式含 2 次串行 LLM + 工具调用
         result = await asyncio_mod.wait_for(
             asyncio_mod.to_thread(team.run, full_input),
-            timeout=60.0,
+            timeout=120.0,
         )
 
         api_duration = time.time() - api_start_time
@@ -71,8 +71,8 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
     except asyncio_mod.TimeoutError:
         api_duration = time.time() - api_start_time
         _team_circuit_breaker._on_failure()
-        logger.error(f"[API] Team.run 超时，60s 内未返回，耗时: {api_duration:.2f}秒")
-        raise asyncio_mod.TimeoutError("Team.run 超时（60s），请检查 Agent 配置或重试")
+        logger.error(f"[API] Team.run 超时，120s 内未返回，耗时: {api_duration:.2f}秒")
+        raise asyncio_mod.TimeoutError("Team.run 超时（120s），请检查 Agent 配置或重试")
 
     except Exception as e:
         _team_circuit_breaker._on_failure()

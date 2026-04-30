@@ -477,18 +477,26 @@ Excel 格式说明：
                     f"请缩短输入内容或联系管理员。"
                 )
 
+        except asyncio_mod.TimeoutError as e:
+            logger.error(f"Team调用超时: {e}")
+            try:
+                await loading_msg.remove()
+            except Exception:
+                pass
+            await cl.Message(
+                content=f"⏰ **请求超时**\n\nLLM 在 120 秒内未返回结果，请稍后重试。\n\n"
+                        f"建议：减少上传数据量或检查网络连接。"
+            ).send()
+            return
+
         except Exception as e:
-            if retry_attempt < max_retries:
-                logger.warning(f"Team调用异常 (尝试 {retry_attempt + 1}): {str(e)}，准备重试...")
-                await asyncio_mod.sleep(3)
-            else:
-                logger.error(f"Team调用异常，已达最大重试次数: {str(e)}")
-                try:
-                    await loading_msg.remove()
-                except Exception:
-                    pass
-                await cl.Message(content=f"❌ 处理异常：{str(e)}").send()
-                return
+            logger.error(f"Team调用异常: {e}")
+            try:
+                await loading_msg.remove()
+            except Exception:
+                pass
+            await cl.Message(content=f"❌ 处理异常：{str(e)}").send()
+            return
 
 
 # ============= Action 回调（保留在 chainlit_app.py 中）=============
