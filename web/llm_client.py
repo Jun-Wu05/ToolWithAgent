@@ -2,7 +2,7 @@
 LLM 客户端 — Team 调用、Token 统计、Agno 日志拦截
 
 提供:
-- call_team(team, full_input, loading_msg) → result   (带重试)
+- call_team(team, full_input, loading_msg) → result   (带熔断器)
 - setup_agno_logging_bridge() → handler            (安装 Agno 日志拦截)
 - 模块级状态: _agno_bridge_installed
 """
@@ -14,7 +14,7 @@ import sys
 import time
 
 from agent.shared.logger import get_logger
-from agent.core.resilience import CircuitBreaker, CircuitBreakerOpenError, ModelFallback, RetryPolicy
+from agent.core.resilience import CircuitBreaker, CircuitBreakerOpenError
 from agent.core.model_config import ModelConfig
 from web.route_config import ENUM_KEYWORDS, THREAT_KEYWORDS
 
@@ -34,10 +34,7 @@ _team_circuit_breaker = CircuitBreaker(
 # ============= 公共 API =============
 
 async def call_team(team, full_input: str, loading_msg=None) -> object:
-    """调用 Team.run，带熔断器保护 + 指数退避重试（最多 3 次），记录 Token 用量"""
-    retry_policy = RetryPolicy(max_retries=3, base_delay=1.0, max_delay=10.0)
-    last_exception = None
-
+    """调用 Team.run，带熔断器保护，记录 Token 用量"""
     # 关键词预筛：命中枚举/威胁则加入路由提示，减少 RouterAgent 推理时间
     lower_input = full_input.lower()
     if any(kw in lower_input for kw in ENUM_KEYWORDS):
@@ -45,73 +42,42 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
     elif any(kw in lower_input for kw in THREAT_KEYWORDS):
         full_input = f"[ROUTE_HINT: 威胁类型] {full_input}"
 
-    for attempt in range(1, 4):
-        try:
-            # 检查熔断器状态
-            if _team_circuit_breaker.state.name == "OPEN":
-                raise CircuitBreakerOpenError(
-                    f"熔断器已开启，请等待 {_team_circuit_breaker.recovery_timeout}s 后重试"
-                )
-
-            api_start_time = time.time()
-            logger.info(f"[API] 开始调用 Team.run (尝试 {attempt}/3)，输入长度: {len(full_input)}")
-
-            # 带超时保护：240s，Agno Route 模式包含 Team Leader 路由 + MemberAgent 两次串行 LLM 调用
-            result = await asyncio_mod.wait_for(
-                asyncio_mod.to_thread(team.run, full_input),
-                timeout=240.0,
+    try:
+        # 检查熔断器状态
+        if _team_circuit_breaker.state.name == "OPEN":
+            raise CircuitBreakerOpenError(
+                f"熔断器已开启，请等待 {_team_circuit_breaker.recovery_timeout}s 后重试"
             )
 
-            api_duration = time.time() - api_start_time
-            logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
+        api_start_time = time.time()
+        logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
 
-            result_content = result.content if hasattr(result, 'content') else str(result)
-            logger.info(f"[API] LLM输出长度: {len(result_content)} 字符")
+        # 带超时保护：60s，添加 max_iterations/tool_call_limit 后不会死循环
+        result = await asyncio_mod.wait_for(
+            asyncio_mod.to_thread(team.run, full_input),
+            timeout=60.0,
+        )
 
-            _log_token_usage(result)
-            _team_circuit_breaker._on_success()
-            return result
+        api_duration = time.time() - api_start_time
+        logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
 
-        except asyncio_mod.TimeoutError:
-            api_duration = time.time() - api_start_time
-            logger.error(f"[API] Team.run 超时 (attempt {attempt}/3)，240s 内未返回，耗时: {api_duration:.2f}秒")
-            last_exception = asyncio_mod.TimeoutError(f"Team.run 超时（240s），尝试 {attempt}/3")
-            _team_circuit_breaker._on_failure()
-            if attempt < 3:
-                wait_sec = retry_policy.get_delay(attempt)
-                logger.warning(f"[API] 超时后 {wait_sec:.1f}秒重试...")
-                if loading_msg:
-                    try:
-                        loading_msg.content = f"⏳ **请求超时，{wait_sec:.0f}秒后重试...**\n\n（当前 LLM 响应超过 240 秒）"
-                        await loading_msg.update()
-                    except Exception:
-                        pass
-                await asyncio_mod.sleep(wait_sec)
-            else:
-                logger.error("[API] Team.run 3次尝试均超时")
-            continue
-        except Exception as e:
-            last_exception = e
-            _team_circuit_breaker._on_failure()
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        logger.info(f"[API] LLM输出长度: {len(result_content)} 字符")
 
-            if not retry_policy.should_retry(attempt, e):
-                logger.error(f"[API] Team.run 不可重试错误 (尝试 {attempt}/3): {e}")
-                break
+        _log_token_usage(result)
+        _team_circuit_breaker._on_success()
+        return result
 
-            if attempt < 3:
-                wait_sec = retry_policy.get_delay(attempt)
-                logger.warning(f"[API] Team.run 失败 (尝试 {attempt}/3): {e}，{wait_sec:.1f}秒后重试...")
-                if loading_msg:
-                    try:
-                        loading_msg.content = f"⏳ **请求失败，{wait_sec:.0f}秒后重试...**\n\n{str(e)[:100]}"
-                        await loading_msg.update()
-                    except Exception:
-                        pass
-                await asyncio_mod.sleep(wait_sec)
-            else:
-                logger.error(f"[API] Team.run 3次尝试全部失败: {e}")
+    except asyncio_mod.TimeoutError:
+        api_duration = time.time() - api_start_time
+        _team_circuit_breaker._on_failure()
+        logger.error(f"[API] Team.run 超时，60s 内未返回，耗时: {api_duration:.2f}秒")
+        raise asyncio_mod.TimeoutError("Team.run 超时（60s），请检查 Agent 配置或重试")
 
-    raise last_exception
+    except Exception as e:
+        _team_circuit_breaker._on_failure()
+        logger.error(f"[API] Team.run 失败: {type(e).__name__}: {e}")
+        raise
 
 
 def setup_agno_logging_bridge():

@@ -130,6 +130,7 @@ def create_field_mapping_agent() -> Agent:
             generate_mapping_table_tool,   # 批量生成映射表
             base64_decode_tool,            # Base64 解码（输入常为 Base64 编码）
         ],
+        tool_call_limit=8,                # 最多调用 8 次工具，防止死循环
         markdown=True,
         debug_mode=False,
     )
@@ -148,6 +149,7 @@ def create_threat_agent() -> Agent:
             threat_type_tool,     # 威胁类型规则匹配 + 置信度评分
             base64_decode_tool,   # Base64 解码输入
         ],
+        tool_call_limit=5,                # 威胁类型任务简单，5 次足够
         markdown=True,
         debug_mode=False,
     )
@@ -170,6 +172,7 @@ def create_enum_agent() -> Agent:
             get_enum_as_mapping_file,     # 导出枚举为映射表文件
             base64_decode_tool,           # Base64 解码输入
         ],
+        tool_call_limit=5,                # 枚举处理，5 次足够
         markdown=True,
         debug_mode=False,
     )
@@ -217,6 +220,8 @@ def create_data_mapping_team() -> Team:
         markdown=True,
         debug_mode=_debug,
         show_members_responses=_show_members,
+        respond_directly=True,             # Leader 路由后直接返回 MemberAgent 结果，不再自己包装
+        max_iterations=3,                  # 最多 3 轮迭代（默认 10），防止死循环
     )
     
     return team

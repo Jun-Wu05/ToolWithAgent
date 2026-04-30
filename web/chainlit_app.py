@@ -15,7 +15,7 @@
 本文件仅保留 Chainlit 生命周期钩子 + 薄编排逻辑。
 业务函数已拆分至:
   - web/route_config.py      路由关键词加载
-  - web/llm_client.py        Team 调用 / Token 统计 / 重试
+  - web/llm_client.py        Team 调用 / Token 统计 / 熔断器
   - web/input_builder.py     LLM 输入构建
   - web/response_handler.py  响应解析与表格渲染
   - web/threat_handler.py    威胁填充模式分流与执行
@@ -421,7 +421,7 @@ Excel 格式说明：
     max_retries = 2
     for retry_attempt in range(max_retries + 1):
         try:
-            # 7. 调用 Team（带重试）→ llm_client
+            # 7. 调用 Team → llm_client
             result = await call_team(team, full_input, loading_msg)
 
             # 8. 删除 loading 消息（重试时不删除，保留状态）
