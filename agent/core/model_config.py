@@ -19,8 +19,8 @@ load_dotenv()
 class ModelConfig:
     """多模型配置"""
 
-    # 主模型（平衡）
-    MAIN_MODEL = "deepseek-ai/DeepSeek-V3.1-Terminus"
+    # 主模型（平衡），优先从环境变量 SILICONFLOW_MODEL 读取
+    MAIN_MODEL = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.1-Terminus")
 
     # 备用模型（主模型不可用时的 fallback）
     FALLBACK_MODEL = os.getenv(
