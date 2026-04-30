@@ -11,7 +11,7 @@ from agno.agent import Agent
 from agno.models.siliconflow import Siliconflow
 
 from agent.tools.base64_tool import base64_decode_and_extract, decode_base64_text, extract_normalize_indexes, extract_original_log_result
-from agent.tools.standard_mapper import standard_field_mapping, load_object_mapping, apply_field_mapping, manage_sim_entities
+from agent.tools.standard_mapper import field_mapping_tool, generate_mapping_table_tool, lookup_standard_field_tool, batch_lookup_standard_fields_tool
 from agent.tools.base64_encoder import base64_encode, json_to_base64
 from agent.tools.file_tool import read_file, write_file, list_files, get_project_root, get_standard_fields_path, get_config_path
 from agent.tools.enum_field_tool import decode_enum_config, generate_enum_mapping_template, apply_enum_mapping, load_mapping_from_excel, get_enum_fields_list
@@ -19,16 +19,6 @@ from agent.tools.threat_type_tool import generate_threat_type_mapping_table, app
 from agent.tools.extract_field_tool import extract_field_values, generate_mapping_table, save_mapping_to_excel
 from agent.tools.logs_enum_tool import extract_enum_from_logs, extract_enum_with_regex, get_enum_as_json_file, get_enum_as_mapping_file
 from agent.prompts import load_field_weak_prompt, load_field_strong_prompt, load_threat_type_prompt, load_enum_field_prompt, load_enum_extract_prompt
-
-
-def load_standard_fields_txt() -> str:
-    """加载标准字段表"""
-    data_path = Path(__file__).parent / "data" / "标准字段.txt"
-    
-    if data_path.exists():
-        return data_path.read_text(encoding='utf-8')
-    
-    return "标准字段表加载失败"
 
 
 def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None) -> Agent:
@@ -42,9 +32,6 @@ def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None
     Returns:
         Agent: 配置好的 Agno Agent
     """
-    # 加载标准字段表（全量 654 行）
-    standard_fields = load_standard_fields_txt()
-    
     # 加载提示词
     field_prompt = load_field_weak_prompt()
     threat_prompt = load_threat_type_prompt()
@@ -63,9 +50,10 @@ def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None
 ### 功能1：标准字段映射
 1. 解码 Base64 编码的数据文件
 2. 从解码后的 JSON 中提取字段列表
-3. 根据标准字段表生成字段映射表
-4. 执行字段映射并管理 simEntities 数组
-5. 将处理后的数据编码为 Base64 输出
+3. 使用 batch_lookup_standard_fields 工具一次性查询所有原始字段的标准字段候选
+4. 根据查询结果生成字段映射表
+5. 执行字段映射并管理 simEntities 数组
+6. 将处理后的数据编码为 Base64 输出
 
 ### 功能2：威胁类型枚举处理
 1. 解码威胁类型配置
@@ -99,11 +87,6 @@ def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None
 - 前端展示：mappingType | orgValue | mappingValue（用户可编辑）
 - 下载 JSON：{ "field": "字段名", "regex": "正则", "original_log": [...], "value": [...] }
 
-## 标准字段表（必须严格使用以下中文名称）
-```
-{standard_fields}
-```
-
 ## 字段映射提示词
 {field_prompt}
 
@@ -124,11 +107,13 @@ def create_agent(session_id: Optional[str] = None, user_id: Optional[str] = None
 
 ### 标准字段映射流程
 1. 接收用户上传的 Base64 编码数据
-2. 使用 base64_decode_and_extract 工具解码并提取字段
-3. 根据标准字段表生成字段映射表（Markdown 表格格式）
-4. 展示映射表，等待用户确认或修改
-5. 用户确认后，使用 standard_field_mapping 执行映射
-6. 使用 base64_encode 输出最终 Base64 数据
+2. 使用 base64_decode_and_extract 工具解码并提取字段列表
+3. **使用 batch_lookup_standard_fields 工具一次性查询所有提取到的字段**（作为 JSON 数组传入）
+4. 根据工具返回的候选列表，为每个字段选择最佳匹配的系统属性名称
+5. 生成字段映射表（Markdown 表格格式）
+6. 展示映射表，等待用户确认或修改
+7. 用户确认后，使用 field_mapping 执行映射
+8. 使用 base64_encode 输出最终 Base64 数据
 
 ### 普通字段枚举处理流程（当前阶段）
 1. 用户说"处理枚举字段"或类似指令
