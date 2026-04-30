@@ -20,8 +20,10 @@ class FieldMappingHandler:
     
     def load_config(self):
         """从 config/对象.xlsx 加载映射关系"""
+        # __file__ = agent/shared/field_mapping.py
+        # dirname*3 → 项目根目录 toolswithagent/
         config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "config", "对象.xlsx"
         )
         

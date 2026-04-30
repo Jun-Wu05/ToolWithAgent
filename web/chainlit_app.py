@@ -48,9 +48,10 @@ from agent.shared.logger import get_logger
 logger = get_logger("chainlit_app")
 
 # 隐藏第三方库的 DEBUG 日志
-logging.getLogger("openai").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
+ALLOWED_LOGGER_PREFIXES = ("agent.", "web.", "__main__")
+for name in logging.root.manager.loggerDict:
+    if not name.startswith(ALLOWED_LOGGER_PREFIXES):
+        logging.getLogger(name).setLevel(logging.WARNING)
 logger.info("=" * 60)
 logger.info("Chainlit聊天式Web应用启动")
 logger.info("=" * 60)
@@ -536,15 +537,7 @@ async def on_confirm_fill(action: cl.Action):
         await cl.Message(content="❌ 未找到映射数据，请先执行字段映射。").send()
         return
 
-    # 提取字段映射信息
-    field_mapping = {}
-    for item in mapping_data:
-        raw_field = item.get("原始字段名", "")
-        standard_field = item.get("系统属性名称", "")
-        if raw_field and standard_field:
-            field_mapping[raw_field] = standard_field
-
-    logger.info(f"[ACTION] 提取字段映射: {len(field_mapping)} 条")
+    logger.info(f"[ACTION] 提取字段映射: {len(mapping_data)} 条")
 
     # 执行字段填充
     try:
@@ -558,7 +551,7 @@ async def on_confirm_fill(action: cl.Action):
 
         logger.info("[ACTION] 开始执行字段填充")
         handler = get_field_mapping_handler()
-        updated_data, update_count = handler.apply_field_mapping(decoded_data, field_mapping)
+        updated_data, update_count = handler.apply_field_mapping(decoded_data, mapping_data)
         logger.info("[ACTION] 字段填充完成")
 
         # 导出 Base64
@@ -572,7 +565,7 @@ async def on_confirm_fill(action: cl.Action):
             mime="text/plain"
         )
         await cl.Message(
-            content=f"✅ **字段填充完成！**\n\n📊 映射了 {len(field_mapping)} 个字段\n\n📥 点击下载填充后的配置文件：",
+            content=f"✅ **字段填充完成！**\n\n📊 映射了 {update_count} 个字段\n\n📥 点击下载填充后的配置文件：",
             elements=[base64_file]
         ).send()
 
