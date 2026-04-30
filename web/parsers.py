@@ -65,11 +65,6 @@ def parse_json_mapping_result(content: str) -> list:
     
     content_stripped = content.strip()
     
-    # 方法0：拒绝检测 — 检查 LLM 是否在索要数据
-    if _is_refusal_response(content_stripped):
-        logger.warning("[PARSER] 检测到 LLM 拒绝响应（索要数据/无法处理），建议重试")
-        return []  # 返回空列表，由调用方决定是否重试
-    
     # 方法1：去除前后空白后直接尝试解析
     try:
         result = json.loads(content_stripped)
@@ -144,7 +139,11 @@ def parse_json_mapping_result(content: str) -> list:
         if valid_result:
             return valid_result
     
-    logger.warning(f"[PARSER] 所有方法均解析失败，无法提取有效的映射结果")
+    # 所有 JSON 解析方法均失败后，才检查是否为拒绝响应（用于日志区分原因）
+    if _is_refusal_response(content_stripped):
+        logger.warning("[PARSER] 所有 JSON 解析均失败，且内容疑似拒绝响应（索要数据/无法处理），建议重试")
+    else:
+        logger.warning(f"[PARSER] 所有方法均解析失败，无法提取有效的映射结果")
     return []
 
 

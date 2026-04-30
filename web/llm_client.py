@@ -271,8 +271,8 @@ def _log_token_usage(result):
 
         if not found_any:
             logger.info(f"[API] 模型: {model_name}，Token 用量未获取到（RunResponse 上无 usage/metrics 属性，请依赖 Agno logging bridge）")
-    except Exception:
-        pass  # Token 记录失败不影响主流程
+    except Exception as e:
+        logger.warning(f"[API] Token 用量探测异常: {type(e).__name__}: {e}")
 
 
 def _probe_nested(label: str, obj, model_name: str, emit_fn):

@@ -40,11 +40,17 @@ load_dotenv()
 import chainlit as cl
 import json
 import io
+import logging
 from datetime import datetime
 
 # 初始化日志
 from agent.shared.logger import get_logger
 logger = get_logger("chainlit_app")
+
+# 隐藏第三方库的 DEBUG 日志
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger.info("=" * 60)
 logger.info("Chainlit聊天式Web应用启动")
 logger.info("=" * 60)
@@ -534,7 +540,7 @@ async def on_confirm_fill(action: cl.Action):
     field_mapping = {}
     for item in mapping_data:
         raw_field = item.get("原始字段名", "")
-        standard_field = item.get("标准字段名", "")
+        standard_field = item.get("系统属性名称", "")
         if raw_field and standard_field:
             field_mapping[raw_field] = standard_field
 
