@@ -27,7 +27,7 @@ def _pre_query_field_candidates(fields_list: list) -> str:
     if not fields_list:
         return ""
     try:
-        result = batch_retrieve_candidates(fields_list, top_k=3)
+        result = batch_retrieve_candidates(fields_list, top_k=5)
         if result and result.strip():
             logger.info(f"[PRE_QUERY] 语义检索完成，{len(fields_list)} 个字段")
             return result

@@ -357,7 +357,7 @@ def _load_cache() -> tuple[Optional[np.ndarray], Optional[list[dict]]]:
         return None, None
 
 
-def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str:
+def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 5) -> str:
     """
     对一批原始字段名执行语义检索，返回紧凑格式的候选列表。
 
@@ -369,7 +369,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
 
     Args:
         raw_field_names: 原始字段名列表
-        top_k: 每个字段返回的候选数（默认 3）
+        top_k: 每个字段返回的候选数（默认 5）
 
     Returns:
         紧凑格式字符串，无候选时返回空字符串
