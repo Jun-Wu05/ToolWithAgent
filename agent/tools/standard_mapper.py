@@ -11,6 +11,8 @@ from typing import Any, Optional
 from agno.tools import tool
 from openpyxl import load_workbook
 
+from agent.prompts import load_standard_fields
+
 
 @tool(name="field_mapping", description="执行标准字段映射")
 def field_mapping_tool(
@@ -155,6 +157,134 @@ def generate_mapping_table_tool(
         
     except Exception as e:
         return f"生成映射表失败: {str(e)}"
+
+
+def _load_standard_fields_list() -> list[dict]:
+    """Load standard fields table as structured list"""
+    raw_text = load_standard_fields()
+    lines = raw_text.strip().split("\n")
+    header = None
+    fields = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if header is None:
+            # Strip BOM from the first column header if present
+            raw_cols = [col.strip() for col in line.split("\t")]
+            if raw_cols:
+                raw_cols[0] = raw_cols[0].lstrip('\ufeff')
+            header = raw_cols
+            continue
+        cols = [col.strip() for col in line.split("\t")]
+        if len(cols) >= len(header):
+            entry = dict(zip(header, cols))
+            fields.append(entry)
+    
+    return fields
+
+
+def _calculate_similarity(a: str, b: str) -> float:
+    """Simple normalized Levenshtein similarity (0.0 - 1.0, higher = more similar)"""
+    a_lower = a.lower()
+    b_lower = b.lower()
+    
+    # Direct containment bonus
+    if a_lower == b_lower:
+        return 1.0
+    if a_lower in b_lower or b_lower in a_lower:
+        return 0.95
+    
+    # Levenshtein distance
+    len_a, len_b = len(a_lower), len(b_lower)
+    if len_a == 0 or len_b == 0:
+        return 0.0
+    
+    # Use two-row DP for efficiency
+    prev = list(range(len_b + 1))
+    curr = [0] * (len_b + 1)
+    
+    for i in range(1, len_a + 1):
+        curr[0] = i
+        for j in range(1, len_b + 1):
+            cost = 0 if a_lower[i - 1] == b_lower[j - 1] else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev, curr = curr, prev
+    
+    distance = prev[len_b]
+    max_len = max(len_a, len_b)
+    return 1.0 - (distance / max_len)
+
+
+@tool(name="lookup_standard_field", description="Query standard field table by field name keyword, returns top matching system property names")
+def lookup_standard_field_tool(keyword: str, limit: int = 5) -> str:
+    """
+    Query the standard field table for matching system property names.
+    
+    Use this tool when you need to find standard field mappings for a given
+    original field name (e.g., "srcip", "dstport", "eventType").
+    Returns top candidates sorted by similarity score.
+    
+    Args:
+        keyword: The original field name to look up (e.g., "srcip", "dstport")
+        limit: Maximum number of candidates to return (default: 5)
+    
+    Returns:
+        JSON array of matching candidates with system property name, description, and object
+    """
+    try:
+        fields = _load_standard_fields_list()
+        if not fields:
+            return json.dumps({"status": "error", "message": "Standard field table is empty"}, ensure_ascii=False)
+        
+        # Score each field entry against the keyword
+        scored = []
+        for entry in fields:
+            system_name = entry.get("系统属性名称", "")
+            field_name = entry.get("字段名称", "")  # English field name (e.g., src_address)
+            description = entry.get("描述", "")
+            obj = entry.get("对象", "")
+            
+            # Primary score: match against English field name (most precise)
+            field_name_score = _calculate_similarity(keyword, field_name)
+            # Secondary score: match against Chinese system name
+            name_score = _calculate_similarity(keyword, system_name) * 0.85
+            # Tertiary score: match against description
+            desc_score = _calculate_similarity(keyword, description) * 0.6
+            # Best score wins
+            score = max(field_name_score, name_score, desc_score)
+            
+            if score > 0.15:  # Minimum threshold
+                scored.append((score, {
+                    "系统属性名称": system_name,
+                    "字段名称": field_name,
+                    "描述": description,
+                    "对象": obj,
+                    "相似度": round(score, 3)
+                }))
+        
+        # Sort by similarity descending, deduplicate by system_name
+        scored.sort(key=lambda x: x[0], reverse=True)
+        
+        # Deduplicate: keep highest score for each system_name
+        seen_system_names = set()
+        deduped = []
+        for score, item in scored:
+            name = item.get("系统属性名称", "")
+            if name not in seen_system_names:
+                seen_system_names.add(name)
+                deduped.append((score, item))
+        
+        # Return top-N
+        candidates = [item for _, item in deduped[:limit]]
+        return json.dumps(candidates, ensure_ascii=False, indent=2)
+    
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "error_message": f"Standard field lookup failed: {str(e)}"
+        }, ensure_ascii=False)
 
 
 def _load_object_mapping(excel_path: str) -> dict:

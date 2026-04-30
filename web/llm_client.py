@@ -56,8 +56,11 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
             api_start_time = time.time()
             logger.info(f"[API] 开始调用 Team.run (尝试 {attempt}/3)，输入长度: {len(full_input)}")
 
-            # 直接调用 Team.run，不设超时限制（由 API 自身超时控制）
-            result = await asyncio_mod.to_thread(team.run, full_input)
+            # 带超时保护：120s，避免 Agno Route 模式串行 LLM 调用无限期阻塞
+            result = await asyncio_mod.wait_for(
+                asyncio_mod.to_thread(team.run, full_input),
+                timeout=120.0,
+            )
 
             api_duration = time.time() - api_start_time
             logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
@@ -69,6 +72,24 @@ async def call_team(team, full_input: str, loading_msg=None) -> object:
             _team_circuit_breaker._on_success()
             return result
 
+        except asyncio_mod.TimeoutError:
+            api_duration = time.time() - api_start_time
+            logger.error(f"[API] Team.run 超时 (attempt {attempt}/3)，120s 内未返回，耗时: {api_duration:.2f}秒")
+            last_exception = asyncio_mod.TimeoutError(f"Team.run 超时（120s），尝试 {attempt}/3")
+            _team_circuit_breaker._on_failure()
+            if attempt < 3:
+                wait_sec = retry_policy.get_delay(attempt)
+                logger.warning(f"[API] 超时后 {wait_sec:.1f}秒重试...")
+                if loading_msg:
+                    try:
+                        loading_msg.content = f"⏳ **请求超时，{wait_sec:.0f}秒后重试...**\n\n（当前 LLM 响应超过 120 秒）"
+                        await loading_msg.update()
+                    except Exception:
+                        pass
+                await asyncio_mod.sleep(wait_sec)
+            else:
+                logger.error("[API] Team.run 3次尝试均超时")
+            continue
         except Exception as e:
             last_exception = e
             _team_circuit_breaker._on_failure()

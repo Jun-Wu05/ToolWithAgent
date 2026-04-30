@@ -107,12 +107,7 @@ async def start():
 
         from agent.core.team import get_team_instance
         user_session.team = get_team_instance()
-        logger.info("[START] Team初始化成功，开始预热...")
-
-        # 执行一次空操作预热（避免首次调用延迟）
-        import asyncio
-        warmup_result = await asyncio.to_thread(user_session.team.run, "你好")
-        logger.info("[START] Team预热完成")
+        logger.info("[START] Team初始化成功")
     except ValueError as e:
         logger.error(f"[START] Team初始化失败: {e}")
         await cl.Message(content=f"⚠️ Team初始化失败: {str(e)}").send()

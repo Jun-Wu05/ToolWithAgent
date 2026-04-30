@@ -2,7 +2,7 @@
 Agent 共享工具类模块
 
 从 src/ 迁移的共享工具类，供 Agent 和 Web 层共同使用。
-原 src/ 代码已归档至 reference/gui/ 仅供逻辑参考。
+原 src/ 代码已移除，当前为 agent + web 双模块架构。
 """
 
 from agent.shared.logger import get_logger

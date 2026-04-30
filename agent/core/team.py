@@ -19,11 +19,11 @@ from agno.team.mode import TeamMode
 
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
-from agent.prompts import load_standard_fields
 from agent.tools import (
     base64_decode_tool,
     field_mapping_tool,
     generate_mapping_table_tool,
+    lookup_standard_field_tool,
     threat_type_tool,
     enum_field_tool,
     extract_enum_from_logs,
@@ -44,11 +44,6 @@ def _load_prompts() -> dict:
     }
 
 
-def _load_standard_fields_list() -> str:
-    """加载标准字段表"""
-    return load_standard_fields()
-
-
 # ============= 路由指令（从 router.md 加载）=============
 
 def _load_router_instructions() -> str:
@@ -59,23 +54,17 @@ def _load_router_instructions() -> str:
 # ============= FieldMappingAgent =============
 
 def _get_field_mapping_instructions() -> str:
-    """获取字段映射Agent指令"""
+    """获取字段映射Agent指令（标准字段表通过 lookup_standard_field 工具按需查询）"""
     prompts = _load_prompts()
-    standard_fields = _load_standard_fields_list()
     
     return f"""你是网络安全日志标准化专家。
 
 {prompts['field']}
 
-## 标准字段表（参考字典 — 匹配时按需查询，无需逐条记忆）
-```
-{standard_fields}
-```
-
 ## 字段匹配策略
-- 将标准字段表视为参考字典，仅当需要匹配某字段时才在表中查找
-- 匹配方式：将用户字段名与标准字段表逐行对比，取最相似的中文系统属性名称
-- **禁止**：试图理解或记忆全部标准字段，只关注当前需要匹配的字段
+- **按需查询标准字段表**：使用 `lookup_standard_field` 工具按字段名关键词查询标准字段表，获取匹配候选列表
+- **禁止尝试记忆或猜测全量标准字段表**，每次匹配字段时调用工具查询
+- 匹配方式：将用户字段名传入工具的 `keyword` 参数，从返回的候选列表中选取最匹配的中文系统属性名称
 
 ## 工作原则
 - **用户消息中已包含所有可用数据**（字段列表 + 日志样本/解码数据），请直接使用，不要向用户索取更多数据
@@ -136,6 +125,7 @@ def create_field_mapping_agent() -> Agent:
         model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
         instructions=_get_field_mapping_instructions(),
         tools=[
+            lookup_standard_field_tool,     # 按字段名查询标准字段表（替代全量注入）
             field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
             generate_mapping_table_tool,   # 批量生成映射表
             base64_decode_tool,            # Base64 解码（输入常为 Base64 编码）
