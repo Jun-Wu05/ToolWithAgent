@@ -69,8 +69,22 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
         # 在 Python 侧预查询标准字段候选，注入 LLM 输入（消除 tool call 延迟）
         pre_query_candidates = _pre_query_field_candidates(fields_list)
 
-        full_input = f"""用户请求：{user_text}
+        # ====== P0 问题2：Agent 自决清空 — general 意图下注入会话摘要 ======
+        session_context = ""
+        if intent == "general":
+            session_summary = user_session.get_session_summary() if hasattr(user_session, "get_session_summary") else ""
+            if session_summary:
+                session_context = f"""
+📋 当前会话状态：
+{session_summary}
 
+⚠️ 重要提示：如果用户表达了切换数据、处理新文件、清空旧数据、重新开始等意图，请在回复末尾输出特殊标记 [SESSION_ACTION:clear]，系统将自动清空当前会话中的旧文件数据，以便接收新文件。
+"""
+                logger.info(f"[LLM_INPUT] General 意图：注入会话摘要（字段数: {len(fields_list)}）")
+        # ========================================================================
+
+        full_input = f"""用户请求：{user_text}
+{session_context}
 📋 可用数据字段列表：
 {fields_json_str}"""
 

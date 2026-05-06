@@ -126,6 +126,35 @@ async def process_team_response(
     return True
 
 
+async def _check_session_action(result_content: str, user_session, msg) -> bool:
+    """
+    Agent 自决清空：检测 LLM 响应中的 [SESSION_ACTION:clear] 标记。
+    
+    若存在，则清空旧数据并通过 msg 发送「数据已清空」通知给前端。
+    
+    Returns:
+        True 表示已执行清空操作，调用方应跳过后续处理。
+    """
+    if "[SESSION_ACTION:clear]" in result_content:
+        logger.info("[SESSION_ACTION] Agent 判定需要清空会话旧数据，执行 clear_decoded_data()")
+        if hasattr(user_session, "clear_decoded_data"):
+            user_session.clear_decoded_data()
+        else:
+            # 兼容 dict 类型 session
+            for key in ["decoded_data", "decoded_fields", "simplified_data", "decoded_text",
+                         "original_log", "uploaded_file_name", "uploaded_file_time"]:
+                user_session.pop(key, None)
+        # 移除标记，避免前端看到
+        clean_content = result_content.replace("[SESSION_ACTION:clear]", "").strip()
+        await msg.stream_token(clean_content[:50])
+        await msg.update()
+        await cl.Message(
+            content="🗑️ **会话数据已清空** — 旧文件字段数据已清除，请上传新文件继续处理。"
+        ).send()
+        return True
+    return False
+
+
 async def send_action_buttons(msg, mapping_data: list):
     """发送操作按钮消息（Excel + JSON 下载）"""
     import pandas as pd

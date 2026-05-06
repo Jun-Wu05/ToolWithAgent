@@ -39,6 +39,13 @@ class SessionState:
     decoded_text: Optional[str] = None
     """解码后的原始文本，供 input_builder 后备使用（解码时保存，映射时作为上下文）"""
 
+    # ---- 文件上传元信息（Agent 自决清空所需）----
+    uploaded_file_name: Optional[str] = None
+    """最近上传的文件名，供 Agent 感知当前会话处理的是哪个文件"""
+
+    uploaded_file_time: Optional[str] = None
+    """最近上传文件的时间戳（HH:MM:SS 格式）"""
+
     # ---- 字段映射结果 ----
     last_mapping_data: Optional[List[Dict[str, Any]]] = None
     """最后一次字段映射的结果列表，供确认填充使用"""
@@ -111,12 +118,36 @@ class SessionState:
         self.enum_preview = None
 
     def clear_decoded_data(self) -> None:
-        """清除解码后的数据"""
+        """清除解码后的数据及上传文件元信息"""
         self.decoded_data = None
         self.decoded_fields = None
         self.decoded_text = None
         self.original_log = None
         self.simplified_data = None
+        self.uploaded_file_name = None
+        self.uploaded_file_time = None
+
+    def get_session_summary(self) -> str:
+        """
+        构建当前会话的文本摘要，供 Agent 自决清空时感知上下文。
+        
+        返回示例：
+            - 已上传文件：syslog_config.txt
+            - 字段数量：51 个
+            - 上传时间：10:55:30
+        
+        无数据时返回空字符串。
+        """
+        if not self.has_decoded_data():
+            return ""
+        field_count = len(self.decoded_fields) if self.decoded_fields else 0
+        parts = []
+        if self.uploaded_file_name:
+            parts.append(f"- 已上传文件：{self.uploaded_file_name}")
+        parts.append(f"- 字段数量：{field_count} 个")
+        if self.uploaded_file_time:
+            parts.append(f"- 上传时间：{self.uploaded_file_time}")
+        return "\n".join(parts)
 
     def clear_mapping_results(self) -> None:
         """清除映射结果"""

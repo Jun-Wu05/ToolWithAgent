@@ -70,7 +70,7 @@ from web.route_config import MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, E
 from web.llm_client import call_team, setup_agno_logging_bridge
 from agent.core.tracing import trace_request
 from web.input_builder import build_llm_input
-from web.response_handler import process_team_response
+from web.response_handler import process_team_response, _check_session_action
 from web.threat_handler import handle_threat_fill_flow, execute_threat_fill
 from web.enum_handler import handle_enum_fill_flow, execute_enum_fill, handle_enum_extract_flow
 
@@ -316,6 +316,13 @@ async def handle_file_upload(user_session: dict, element):
             user_session["original_log"] = result["original_log"]
             user_session["decoded_text"] = result.get("decoded_text", "")  # 保存解码后的原始文本，供 input_builder 后备使用
 
+            # ====== P0 问题2：记录上传文件元信息（供 Agent 自决清空时感知上下文）======
+            file_name_val = getattr(element, 'name', '') or 'uploaded_file'
+            user_session["uploaded_file_name"] = file_name_val
+            user_session["uploaded_file_time"] = datetime.now().strftime("%H:%M:%S")
+            logger.info(f"[FILE_UPLOAD] 记录上传文件元信息: name={file_name_val}, time={user_session['uploaded_file_time']}")
+            # ====================================================================
+
             # 构建简化 JSON（只包含必要的索引和日志示例）
             indexes = result.get("fields", [])
             original_log = result.get("original_log", [])
@@ -382,6 +389,10 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     import asyncio as asyncio_mod
     import time
 
+    # ====== P2 问题3：记录用户输入 ======
+    logger.info(f"[USER_INPUT] 用户消息: {user_text[:500]}")
+    # ====================================
+
     user_lower = user_text.lower()
 
     # 意图检测（关键词匹配）
@@ -440,6 +451,17 @@ Excel 格式说明：
         try:
             # 7. 调用 Team → llm_client（传递 intent 跳过 RouterAgent）
             result = await call_team(team, full_input, loading_msg, intent=detected_intent)
+
+            # 7.5 Agent 自决清空：检测 [SESSION_ACTION:clear] 标记
+            result_content = result.content if hasattr(result, 'content') else str(result)
+            session_action_cleared = await _check_session_action(result_content, user_session, loading_msg)
+            if session_action_cleared:
+                # Agent 判定需要清空会话，已通过 _check_session_action 发送通知
+                try:
+                    await loading_msg.remove()
+                except Exception:
+                    pass
+                return
 
             # 8. 删除 loading 消息（重试时不删除，保留状态）
             if retry_attempt == 0:

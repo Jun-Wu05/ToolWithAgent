@@ -122,17 +122,75 @@ def _find_original_log_result(obj: Any) -> Any:
     return None
 
 
+def _looks_like_base64(text: str) -> bool:
+    """
+    启发式判断文本是否为 Base64 编码
+    
+    策略（由紧到松）：
+    1. 硬拒绝特征：含 ||、中文、换行、空格分隔的短词 → 纯文本
+    2. 字符集检查：Base64 字符集 = [A-Za-z0-9+/=]
+       允许 ≤5% 的非 Base64 字符（容忍空白/标点干扰）
+    3. 长度特征：有效 Base64 通常 ≥20 字符（太短不足以下结论时，检查是否有 = 填充符）
+    4. 填充符检测：含 = 号视为可能的 Base64 特征
+    
+    Returns:
+        True 表示应尝试 Base64 解码
+    """
+    if not text or len(text) < 4:
+        return False
+    
+    # 硬拒绝：含 || 分隔符的是纯文本 syslog
+    if "||" in text:
+        return False
+    
+    # 硬拒绝：含中文字符
+    if any('\u4e00' <= c <= '\u9fff' for c in text):
+        return False
+    
+    # 硬拒绝：含换行 → 极可能是多行纯文本
+    if "\n" in text or "\r" in text:
+        return False
+    
+    # 硬拒绝：空格分隔的短词模式（如 "hello world this is text"）
+    words = text.split()
+    if len(words) >= 3 and all(len(w) < 20 for w in words):
+        # 检查非 Base64 字符比例
+        base64_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+        non_b64 = sum(1 for c in text if c not in base64_chars)
+        if non_b64 > max(1, len(text) * 0.10):
+            return False
+    else:
+        # 长连续字符串：宽松字符集检查
+        base64_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+        text_sample = text[:2000]  # 只检查前2000字符
+        non_b64 = sum(1 for c in text_sample if c not in base64_chars)
+        if non_b64 > max(1, len(text_sample) * 0.05):
+            return False
+    
+    # 填充符特征：含 = 视为正向信号
+    if "=" in text:
+        return True
+    
+    # 无 = 但长度足够且全是 Base64 字符 → 可能是无填充 Base64
+    if len(text) >= 20:
+        return True
+    
+    return False
+
+
 def simple_decode(b64_text: str) -> dict:
     """
     简化的解码函数，不依赖 Agent
     
     功能：
-    1. Base64解码
-    2. 提取normalize indexes字段
-    3. 提取original_log result
+    1. 检测输入是否为 Base64 编码
+    2. Base64解码（仅当检测为 Base64 时）
+    3. 提取normalize indexes字段
+    4. 提取original_log result
+    5. 非 Base64 文本直接按纯文本处理
     
     Args:
-        b64_text: Base64 编码的文本
+        b64_text: Base64 编码的文本 或 纯文本
     
     Returns:
         dict: {
@@ -145,7 +203,15 @@ def simple_decode(b64_text: str) -> dict:
         }
     """
     try:
-        decoded_text = _decode_base64_text(b64_text)
+        # ====== P1 问题1：Base64 前置检测 ======
+        if _looks_like_base64(b64_text):
+            decoded_text = _decode_base64_text(b64_text)
+        else:
+            # 非 Base64 输入：直接作为纯文本处理
+            logger.info("[DECODE] 输入不像是 Base64 编码，按纯文本处理")
+            decoded_text = b64_text
+        # =======================================
+        
         fields = _extract_normalize_indexes(decoded_text)
         original_log = _extract_original_log_result(decoded_text)
         
