@@ -15,6 +15,7 @@
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -39,7 +40,6 @@ EMBEDDING_MAX_RETRIES = 2  # 最多重试次数
 
 # 相似度阈值：低于此值的候选不返回
 SIMILARITY_THRESHOLD = 0.25
-
 # 单条复合文本的最大字段描述长度（字符），防止超长文本溢出模型上下文
 MAX_DESCRIPTION_LENGTH = 200
 
@@ -339,6 +339,53 @@ def init_field_cache(force_refresh: bool = False) -> bool:
     return cache_ready
 
 
+def _normalize_field_name(name: str) -> str:
+    """
+    将字段名规范化为可比较的形式。
+
+    处理规则：
+    1. camelCase → snake_case（destAddress → dest_address）
+    2. 转小写
+    3. 移除下划线前的连字符（dest-address → dest_address）
+
+    Args:
+        name: 原始字段名
+
+    Returns:
+        规范化后的字段名
+    """
+    # 先转连字符为下划线
+    name = name.replace("-", "_")
+    # camelCase → snake_case：小写字母后跟大写字母 → 插入下划线
+    name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
+    # 连续大写后跟小写（处理首字母大写缩写如 macOS → mac_os 跳过，只处理全大写序列）
+    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    return name.lower()
+
+
+def _build_field_name_index(records: list[dict]) -> dict[str, int]:
+    """
+    构建「规范化字段名 → 记录索引」的精确匹配字典。
+
+    遍历所有标准字段记录，对其「字段名称」列做规范化处理作为 key。
+
+    Args:
+        records: 标准字段记录列表
+
+    Returns:
+        dict: 规范化字段名 → 在 records 中的索引位置
+    """
+    index: dict[str, int] = {}
+    for i, rec in enumerate(records):
+        field_name = rec.get("字段名称", "")
+        if field_name:
+            key = _normalize_field_name(field_name)
+            # 若存在多个记录映射到同一 key，保留第一个（最权威）
+            if key not in index:
+                index[key] = i
+    return index
+
+
 def _load_cache() -> tuple[Optional[np.ndarray], Optional[list[dict]]]:
     """
     加载磁盘缓存。
@@ -403,6 +450,9 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 5) -> str
     # 结果: (N_fields, N_records)
     similarity_matrix = np.dot(query_vecs, embeddings.T)
 
+    # 构建精确名称匹配索引（用于语义检索兜底前置）
+    exact_index = _build_field_name_index(records)
+
     lines: list[str] = []
     for i, field_name in enumerate(raw_field_names):
         sims = similarity_matrix[i]
@@ -417,14 +467,32 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 5) -> str
 
         # 收集候选（相似度 >= 阈值）
         candidates: list[str] = []
+        seen_field_keys: set[str] = set()  # 防止精确匹配和语义检索重复
+
+        # Layer 1: 精确名称匹配兜底（置顶）
+        normalized_key = _normalize_field_name(field_name)
+        exact_idx = exact_index.get(normalized_key)
+        if exact_idx is not None:
+            rec = records[exact_idx]
+            candidates.append(
+                f"{rec.get('系统属性名称', '')}(1.00, {rec.get('字段名称', '')})"
+            )
+            seen_field_keys.add(rec.get('字段名称', ''))
+
+        # Layer 2: 语义检索兜底
         for idx in top_indices:
+            rec = records[idx]
+            rec_field_name = rec.get('字段名称', '')
+            # 跳过已在精确匹配中出现的记录
+            if rec_field_name in seen_field_keys:
+                continue
             sim = float(sims[idx])
             if sim < SIMILARITY_THRESHOLD:
                 continue
-            rec = records[idx]
             candidates.append(
-                f"{rec.get('系统属性名称', '')}({sim:.2f}, {rec.get('字段名称', '')})"
+                f"{rec.get('系统属性名称', '')}({sim:.2f}, {rec_field_name})"
             )
+            seen_field_keys.add(rec_field_name)
 
         if candidates:
             lines.append(f"{field_name} → {' | '.join(candidates)}")
