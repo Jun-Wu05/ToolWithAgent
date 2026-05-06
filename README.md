@@ -12,7 +12,7 @@
 ├── .gitignore
 │
 ├── agent/                       # 🤖 AI 智能体系统
-│   ├── core/                    # Agent 核心（模型配置、提示词加载、Team）
+│   ├── core/                    # Agent 核心（模型配置、提示词加载、Team、熔断器、链路追踪）
 │   ├── tools/                   # Agent 工具集（Base64 编解码、字段映射、威胁类型、枚举处理）
 │   ├── prompts/                 # 业务提示词（字段映射、威胁类型、枚举字段）
 │   ├── memory/                  # 会话管理
@@ -28,7 +28,7 @@
 ├── web/                         # 🌐 Web 交互界面（Chainlit）
 │   ├── chainlit_app.py          # Web 应用入口
 │   ├── config.py                # Web 配置
-│   ├── llm_client.py            # LLM 客户端（Team 调用 + 超时保护）
+│   ├── llm_client.py            # LLM 客户端（Team 调用 + 意图直接路由 + 超时保护）
 │   ├── input_builder.py         # 输入构建
 │   ├── enum_handler.py          # 枚举处理
 │   ├── threat_handler.py        # 威胁类型处理

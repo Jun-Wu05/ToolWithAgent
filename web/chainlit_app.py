@@ -440,6 +440,7 @@ Excel 格式说明：
         detected_intent = "threat"
     elif is_mapping:
         detected_intent = "mapping"
+
     full_input = build_llm_input(user_text, user_session, intent=detected_intent)
 
     # 6. 发送 loading 消息

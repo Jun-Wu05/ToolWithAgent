@@ -16,25 +16,25 @@ def _pre_query_field_candidates(fields_list: list) -> str:
     """
     语义检索候选，返回紧凑格式字符串（空字符串表示无候选）。
 
-    不会抛出异常，所有错误降级为空字符串。
-    
+    异常直接抛出（不吞），让调用方感知 embedding API 故障，
+    避免无候选时 LLM 产生幻觉映射（如自造"天眼ID"）。
+
     Args:
         fields_list: 原始字段名列表
     
     Returns:
         紧凑格式候选字符串（LLM 可读），无候选时返回 ""
+
+    Raises:
+        RuntimeError: embedding API 调用失败时抛出
     """
     if not fields_list:
         return ""
-    try:
-        result = batch_retrieve_candidates(fields_list, top_k=5)
-        if result and result.strip():
-            logger.info(f"[PRE_QUERY] 语义检索完成，{len(fields_list)} 个字段")
-            return result
-        return ""
-    except Exception as e:
-        logger.warning(f"[PRE_QUERY] 语义检索失败: {e}，降级处理")
-        return ""
+    result = batch_retrieve_candidates(fields_list, top_k=5)
+    if result and result.strip():
+        logger.info(f"[PRE_QUERY] 语义检索完成，{len(fields_list)} 个字段")
+        return result
+    return ""
 
 
 def build_llm_input(user_text: str, user_session: dict, intent: str = "general") -> str:
@@ -67,7 +67,12 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
         fields_json_str = json.dumps(fields_list, ensure_ascii=False)
 
         # 在 Python 侧预查询标准字段候选，注入 LLM 输入（消除 tool call 延迟）
-        pre_query_candidates = _pre_query_field_candidates(fields_list)
+        try:
+            pre_query_candidates = _pre_query_field_candidates(fields_list)
+        except RuntimeError as e:
+            # embedding API 故障时降级：不带候选继续（避免 crash）
+            logger.warning(f"[LLM_INPUT] 语义检索候选获取失败，降级为无候选输入: {e}")
+            pre_query_candidates = ""
 
         # ====== P0 问题2：Agent 自决清空 — general 意图下注入会话摘要 ======
         session_context = ""

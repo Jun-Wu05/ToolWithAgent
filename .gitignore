@@ -43,9 +43,13 @@ archive/
 
 # CodeBuddy IDE 本地配置
 .codebuddy/
-
+.kilo/
 
 tmp/
 tests/
+archive/
+docs/
+context_summary/
+
 
 

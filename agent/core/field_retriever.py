@@ -435,10 +435,21 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 5) -> str
         if embeddings is None or records is None:
             return ""
 
-    # 批量嵌入用户字段名
-    query_vecs = _call_embedding_api(raw_field_names)
-    if query_vecs is None:
-        return ""
+    # 批量嵌入用户字段名 — 按 EMBEDDING_BATCH_SIZE 分批，防止 413 Request Entity Too Large
+    all_vectors: list[np.ndarray] = []
+    for batch_start in range(0, len(raw_field_names), EMBEDDING_BATCH_SIZE):
+        batch = raw_field_names[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
+        vectors = _call_embedding_api(batch)
+        if vectors is None:
+            raise RuntimeError(
+                f"[EMBEDDING] 语义检索失败（第 {batch_start // EMBEDDING_BATCH_SIZE + 1} 批），"
+                f"共 {len(raw_field_names)} 个字段，批次大小 {EMBEDDING_BATCH_SIZE}"
+            )
+        all_vectors.append(vectors)
+        # 批次间休眠，防止 API 429 限流（最后一批不睡）
+        if batch_start + EMBEDDING_BATCH_SIZE < len(raw_field_names):
+            time.sleep(EMBEDDING_BATCH_SLEEP)
+    query_vecs = np.concatenate(all_vectors, axis=0)
 
     # L2 归一化查询向量
     norms = np.linalg.norm(query_vecs, axis=1, keepdims=True)
