@@ -33,6 +33,15 @@ async def process_team_response(
         True 表示已处理（调用方可 return）
     """
     result_content = result.content if hasattr(result, 'content') else str(result)
+    
+    # v3: 兼容 output_schema 返回的 Pydantic 对象 → dict
+    if not isinstance(result_content, str):
+        if hasattr(result_content, 'model_dump'):          # Pydantic v2
+            result_content = json.dumps(result_content.model_dump(), ensure_ascii=False)
+        elif hasattr(result_content, 'dict'):              # Pydantic v1
+            result_content = json.dumps(result_content.dict(), ensure_ascii=False)
+        else:
+            result_content = str(result_content)
 
     # [Step2 改造] 不再依赖用户消息关键词判断响应类型，
     # 而是尝试解析两种 JSON 格式，以实际解析结果为准。

@@ -11,7 +11,10 @@ Route 模式：Team Leader 路由到单个 MemberAgent，直接返回结果
 """
 
 import os
-from typing import Optional
+from typing import List, Optional
+
+from pydantic import BaseModel
+
 from agno.agent import Agent
 from agno.models.siliconflow import Siliconflow
 from agno.team.team import Team
@@ -78,6 +81,19 @@ def _get_field_mapping_instructions() -> str:
 """
 
 
+# ============= 结构化输出模型 =============
+
+class ThreatMappingItem(BaseModel):
+    """威胁类型单条映射"""
+    mappingType: str = "REGULAR"
+    orgValue: str
+    mappingValue: str
+
+class ThreatMappingList(BaseModel):
+    """威胁类型映射列表（Agno output_schema 要求 BaseModel 包装）"""
+    items: List[ThreatMappingItem]
+
+
 # ============= ThreatAgent =============
 
 def _get_threat_instructions() -> str:
@@ -142,6 +158,7 @@ def create_threat_agent() -> Agent:
         tools=[
             threat_type_tool,     # 威胁类型规则匹配 + 置信度评分
         ],
+        output_schema=ThreatMappingList,  # v3: API 层强制输出 JSON 且符合 schema，杜绝非规范格式
         tool_call_limit=1,                # v2: 仅 1 个工具，1 次足够
         markdown=True,
         debug_mode=False,
