@@ -56,8 +56,12 @@ def parse_json_mapping_result(content: str) -> list:
             if len(filtered) == 3:
                 item.clear()
                 item.update(filtered)
-                return True
-            return False
+            else:
+                return False
+        # 值逻辑校验：系统属性名称 == "未匹配" 时，匹配状态必须也是"未匹配"
+        if item.get("系统属性名称") == "未匹配" and item.get("匹配状态") != "未匹配":
+            logger.warning(f"[PARSER] 自动修正矛盾数据(未匹配状态不一致): {item}")
+            item["匹配状态"] = "未匹配"
         return True
     
     # 记录原始内容（完整输出）
