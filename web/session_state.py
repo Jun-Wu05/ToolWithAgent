@@ -178,3 +178,11 @@ class SessionState:
     def __contains__(self, key: str) -> bool:
         """key in dict 兼容方法"""
         return hasattr(self, key)
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        """dict.pop() 兼容方法 — 取值后重置为默认值"""
+        if hasattr(self, key):
+            value = getattr(self, key)
+            setattr(self, key, default)
+            return value
+        return default
