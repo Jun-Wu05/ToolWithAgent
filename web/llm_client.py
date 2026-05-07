@@ -95,7 +95,14 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
         logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
 
         result_content = result.content if hasattr(result, 'content') else str(result)
-        logger.info(f"[API] LLM输出长度: {len(result_content)} 字符")
+        # 兼容 output_schema 返回的 Pydantic 对象（无 __len__）
+        if hasattr(result_content, 'model_dump'):
+            content_str = result_content.model_dump_json()
+        elif isinstance(result_content, str):
+            content_str = result_content
+        else:
+            content_str = str(result_content)
+        logger.info(f"[API] LLM输出长度: {len(content_str)} 字符")
 
         _log_token_usage(result)
         _team_circuit_breaker._on_success()
