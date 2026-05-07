@@ -30,7 +30,7 @@ def _pre_query_field_candidates(fields_list: list) -> str:
     """
     if not fields_list:
         return ""
-    result = batch_retrieve_candidates(fields_list, top_k=5)
+    result = batch_retrieve_candidates(fields_list, top_k=3)
     if result and result.strip():
         logger.info(f"[PRE_QUERY] 语义检索完成，{len(fields_list)} 个字段")
         return result
@@ -122,4 +122,52 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
     else:
         full_input = user_text
 
+    return full_input
+
+
+def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list,
+                          batch_idx: int, total_batches: int) -> str:
+    """
+    构建分批字段的 LLM 输入（用于 >50 字段场景，每批独立调用 Team）
+
+    Args:
+        user_text: 用户请求文本
+        user_session: 用户会话
+        fields_batch: 当前批次的字段列表
+        batch_idx: 当前批次索引（1-based）
+        total_batches: 总批次数
+
+    Returns:
+        完整 LLM 输入字符串（结构同 build_llm_input 的 mapping 分支）
+    """
+    simplified_data = user_session.get("simplified_data", {})
+    original_log_sample = simplified_data.get("original_log_sample", "")
+
+    fields_json_str = json.dumps(fields_batch, ensure_ascii=False)
+
+    # 对当前批次字段做语义检索
+    try:
+        pre_query_candidates = _pre_query_field_candidates(fields_batch)
+    except RuntimeError as e:
+        logger.warning(f"[BATCH] 第 {batch_idx}/{total_batches} 批语义检索失败: {e}")
+        pre_query_candidates = ""
+
+    full_input = f"""用户请求：{user_text}
+
+📋 当前批次字段列表（第 {batch_idx}/{total_batches} 批，共 {len(fields_batch)} 个字段）：
+{fields_json_str}"""
+
+    if pre_query_candidates:
+        full_input += f"\n\n{pre_query_candidates}\n"
+
+    if original_log_sample:
+        sample_str = (original_log_sample
+                      if len(original_log_sample) <= 2000
+                      else original_log_sample[:2000] + "...(已截断)")
+        full_input += f"""
+
+📋 原始日志样本（理解字段语义，所有批次共享同一份样本）：
+{sample_str}"""
+
+    logger.info(f"[BATCH] 第 {batch_idx}/{total_batches} 批输入构建完成，{len(fields_batch)} 个字段")
     return full_input

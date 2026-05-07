@@ -69,7 +69,7 @@ from web.parsers import parse_json_mapping_result, parse_json_threat_result, cre
 from web.route_config import MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS
 from web.llm_client import call_team, setup_agno_logging_bridge
 from agent.core.tracing import trace_request
-from web.input_builder import build_llm_input
+from web.input_builder import build_llm_input, build_batch_llm_input
 from web.response_handler import process_team_response, _check_session_action
 from web.threat_handler import handle_threat_fill_flow, execute_threat_fill
 from web.enum_handler import handle_enum_fill_flow, execute_enum_fill, handle_enum_extract_flow
@@ -148,6 +148,8 @@ async def start():
 - 支持筛选
 - 支持一键复制
 - 支持Excel导出
+
+💡 如需切换文件，发送 **"清空数据"** 即可快速重置会话。
 
 请上传数据文件或直接发送消息开始对话。""",
     ).send()
@@ -372,7 +374,9 @@ async def handle_file_upload(user_session: dict, element):
 
 📊 **字段数量**：{field_count} 个
 
-现在可以直接发送消息进行字段映射、威胁类型处理等操作。"""
+💡 如需处理其他文件，请输入 **"清空数据"** 或 **"切换文件"** 快速重置
+现在可以进行字段映射、威胁类型等操作。
+正在进行标准字段映射处理。。。"""
             ).send()
         else:
             await cl.Message(content=f"❌ 解码失败：{result.get('error_message', '未知错误')}").send()
@@ -394,6 +398,26 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     # ====================================
 
     user_lower = user_text.lower()
+
+    # ====== 清空/切换数据快捷路径（P2优化：避免LLM处理，秒级响应） ======
+    _clear_keywords = ("清空", "切换数据", "新文件", "换一个", "换文件",
+                       "重新上传", "丢弃", "丢掉", "清除数据", "clear", "reset",
+                       "从头开始", "新建", "重开")
+    if any(kw in user_lower for kw in _clear_keywords):
+        logger.info(f"[SHORTCUT] 检测到清空/切换数据意图: {user_text[:100]}，执行快捷清空")
+        # 清空解码数据
+        if hasattr(user_session, "clear_decoded_data"):
+            user_session.clear_decoded_data()
+        else:
+            for key in ["decoded_data", "decoded_fields", "simplified_data",
+                         "decoded_text", "original_log", "uploaded_file_name",
+                         "uploaded_file_time", "last_mapping_data", "last_threat_data"]:
+                user_session.pop(key, None)
+        await cl.Message(
+            content="🗑️ **数据已清空** — 请上传新文件继续处理。"
+        ).send()
+        return
+    # ====================================================================
 
     # 意图检测（关键词匹配）
     is_enum = any(kw in user_lower for kw in ENUM_KEYWORDS)
@@ -440,6 +464,86 @@ Excel 格式说明：
         detected_intent = "threat"
     elif is_mapping:
         detected_intent = "mapping"
+
+    # ====== P2 自动分批：字段 > 50 时分批调用，避免超时 ======
+    BATCH_SIZE = 50
+    if detected_intent == "mapping":
+        fields_list = user_session.get("simplified_data", {}).get("fields", [])
+        if len(fields_list) > BATCH_SIZE:
+            logger.info(f"[BATCH] 字段数 {len(fields_list)} > {BATCH_SIZE}，进入分批模式")
+            all_mapping_data = []
+            batches = [fields_list[i:i + BATCH_SIZE] for i in range(0, len(fields_list), BATCH_SIZE)]
+            total_batches = len(batches)
+
+            loading_msg = cl.Message(content=f"⏳ **正在处理字段映射（第 1/{total_batches} 批）...**")
+            await loading_msg.send()
+
+            for batch_idx, batch in enumerate(batches):
+                # 更新 loading 消息
+                try:
+                    loading_msg.content = f"⏳ **正在处理字段映射（第 {batch_idx + 1}/{total_batches} 批）...**"
+                    await loading_msg.update()
+                except Exception:
+                    pass
+
+                batch_input = build_batch_llm_input(user_text, user_session, batch,
+                                                    batch_idx + 1, total_batches)
+                try:
+                    result = await call_team(team, batch_input, loading_msg, intent="mapping")
+                    result_content = result.content if hasattr(result, 'content') else str(result)
+                    batch_mapping = parse_json_mapping_result(result_content)
+                    if batch_mapping:
+                        all_mapping_data.extend(batch_mapping)
+                        logger.info(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批完成，本批 {len(batch_mapping)} 条，累计 {len(all_mapping_data)} 条")
+                    else:
+                        logger.warning(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批未解析到映射结果")
+                except Exception as batch_e:
+                    logger.error(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批调用失败: {batch_e}")
+                    # 继续处理剩余批次，不因单批失败而中断
+
+            try:
+                await loading_msg.remove()
+            except Exception:
+                pass
+
+            if all_mapping_data:
+                user_session["last_mapping_data"] = all_mapping_data
+                matched_count = sum(1 for item in all_mapping_data if item.get("匹配状态") == "匹配成功")
+                unmatched_count = len(all_mapping_data) - matched_count
+
+                summary = f"""✅ **字段映射完成！（分 {total_batches} 批处理）**
+
+📊 **映射统计：**
+- 总字段数：{len(all_mapping_data)}
+- 匹配成功：{matched_count} 个
+- 未匹配：{unmatched_count} 个
+
+✨ **表格功能：**
+- 📌 点击列标题排序
+- 🔍 使用搜索框筛选
+- ✏️ 点击单元格编辑系统属性名称
+- 📥 导出CSV文件"""
+
+                msg = cl.Message(content="")
+                await msg.send()
+                for i in range(0, len(summary), 50):
+                    await msg.stream_token(summary[i:i + 50])
+                await msg.update()
+
+                elements = create_dataframe_elements(all_mapping_data)
+                if elements:
+                    await cl.Message(
+                        content="**📋 字段映射表：**\n\n请确认映射结果，点击下方按钮填充到原始数据中。",
+                        elements=elements,
+                        actions=[
+                            cl.Action(name="confirm_fill", label="✅ 确认填充", description="确认后将映射结果填充到原始数据", payload={})
+                        ]
+                    ).send()
+                return
+            else:
+                await cl.Message(content="❌ 所有批次均未返回有效映射结果，请缩短输入内容或联系管理员。").send()
+                return
+    # ====================================================================
 
     full_input = build_llm_input(user_text, user_session, intent=detected_intent)
 
