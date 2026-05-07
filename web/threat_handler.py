@@ -36,9 +36,19 @@ async def handle_threat_fill_flow(user_session: dict, user_text: str) -> bool:
             if field_text:
                 user_session["threat_target_field"] = field_text
                 logger.info(f"[HANDLE] 目标字段设置为: {field_text}")
-                await cl.Message(
-                    content=f"✅ 目标字段已设置为：**{field_text}**\n\n现在请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"
-                ).send()
+                # 检查是否有 pending_base64（用户同时发送了字段名和文件）
+                pending = user_session.pop("pending_base64", None)
+                if pending:
+                    logger.info("[HANDLE] 检测到 pending_base64，自动执行填充")
+                    try:
+                        await execute_threat_fill(user_session, pending)
+                    except Exception:
+                        user_session["pending_base64"] = pending  # 失败恢复
+                        raise
+                else:
+                    await cl.Message(
+                        content=f"✅ 目标字段已设置为：**{field_text}**\n\n现在请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"
+                    ).send()
             else:
                 await cl.Message(
                     content="⚠️ 请输入有效的字段名，例如：`original_log`"

@@ -86,6 +86,17 @@ async def process_team_response(
     threat_data = parse_json_threat_result(result_content)
     if threat_data:
         logger.info("[HANDLE] 进入威胁类型处理分支")
+        # 去重：以 (orgValue, mappingValue) 为键，保留首次出现
+        seen = set()
+        deduped = []
+        for item in threat_data:
+            key = (item.get("orgValue", ""), item.get("mappingValue", ""))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(item)
+        if len(deduped) < len(threat_data):
+            logger.info(f"[HANDLE] 威胁类型去重: {len(threat_data)} -> {len(deduped)} 条")
+        threat_data = deduped
         user_session["last_threat_data"] = threat_data
         threat_count = len(threat_data)
 
