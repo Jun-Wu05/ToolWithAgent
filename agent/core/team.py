@@ -20,15 +20,11 @@ from agno.team.mode import TeamMode
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
 from agent.tools import (
-    base64_decode_tool,
     field_mapping_tool,
-    generate_mapping_table_tool,
     threat_type_tool,
     enum_field_tool,
     extract_enum_from_logs,
     extract_enum_with_regex,
-    get_enum_as_json_file,
-    get_enum_as_mapping_file,
 )
 
 
@@ -71,7 +67,7 @@ def _get_field_mapping_instructions() -> str:
 - 当日志样本或解码数据包含字段值时，优先根据字段值和字段名语义进行匹配
 - 当仅有字段名时，根据候选相似度排序选择最佳匹配
 - **禁止**输出"请提供原始日志"、"需要更多数据"等索取性回复
-- **必须使用工具** `generate_mapping_table` 或 `field_mapping` 完成映射
+- **必须使用工具** `field_mapping` 完成映射
 - **严禁调用任何标准字段查询函数**
 
 注意：
@@ -117,7 +113,7 @@ def _get_enum_instructions() -> str:
 # ============= 创建专业Agent =============
 
 def create_field_mapping_agent() -> Agent:
-    """创建字段映射Agent（挂载工具：field_mapping, generate_mapping_table, base64_decode）"""
+    """创建字段映射Agent（挂载工具：field_mapping）"""
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     
     return Agent(
@@ -127,17 +123,15 @@ def create_field_mapping_agent() -> Agent:
         instructions=_get_field_mapping_instructions(),
         tools=[
             field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
-            generate_mapping_table_tool,   # 批量生成映射表
-            base64_decode_tool,            # Base64 解码（输入常为 Base64 编码）
         ],
-        tool_call_limit=8,                # 最多调用 8 次工具，防止死循环
+        tool_call_limit=1,                # v2: 仅 1 个工具，1 次足够
         markdown=True,
         debug_mode=False,
     )
 
 
 def create_threat_agent() -> Agent:
-    """创建威胁类型Agent（挂载工具：threat_type_tool, base64_decode）"""
+    """创建威胁类型Agent（挂载工具：threat_type_tool）"""
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     
     return Agent(
@@ -147,16 +141,15 @@ def create_threat_agent() -> Agent:
         instructions=_get_threat_instructions(),
         tools=[
             threat_type_tool,     # 威胁类型规则匹配 + 置信度评分
-            base64_decode_tool,   # Base64 解码输入
         ],
-        tool_call_limit=5,                # 威胁类型任务简单，5 次足够
+        tool_call_limit=1,                # v2: 仅 1 个工具，1 次足够
         markdown=True,
         debug_mode=False,
     )
 
 
 def create_enum_agent() -> Agent:
-    """创建枚举Agent（挂载工具：enum_field_tool, extract_enum_from_logs, extract_enum_with_regex, get_enum_as_json_file, get_enum_as_mapping_file, base64_decode）"""
+    """创建枚举Agent（挂载工具：enum_field_tool, extract_enum_from_logs, extract_enum_with_regex）"""
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     
     return Agent(
@@ -167,12 +160,9 @@ def create_enum_agent() -> Agent:
         tools=[
             enum_field_tool,              # 提取可枚举字段
             extract_enum_from_logs,       # 从日志中提取枚举值
-            extract_enum_with_regex,      # 正则提取枚举值
-            get_enum_as_json_file,        # 导出枚举为 JSON 文件
-            get_enum_as_mapping_file,     # 导出枚举为映射表文件
-            base64_decode_tool,           # Base64 解码输入
+            extract_enum_with_regex,      # 正则提取枚举值（返回值含所有枚举数据，生成下载文件由 Web 层完成）
         ],
-        tool_call_limit=5,                # 枚举处理，5 次足够
+        tool_call_limit=3,                # v2: 3 个工具，3 次足够
         markdown=True,
         debug_mode=False,
     )

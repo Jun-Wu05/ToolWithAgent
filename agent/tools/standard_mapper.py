@@ -12,6 +12,9 @@ from agno.tools import tool
 from openpyxl import load_workbook
 
 from agent.prompts import load_standard_fields
+from agent.shared.logger import get_logger
+
+logger = get_logger("standard_mapper")
 
 
 @tool(name="field_mapping", description="执行标准字段映射")
@@ -41,6 +44,10 @@ def field_mapping_tool(
     Returns:
         映射结果
     """
+    logger.info(
+        f"[TOOL_CALL] field_mapping 被调用: decoded_json_len={len(decoded_json) if decoded_json else 0}, "
+        f"mapping_table_len={len(field_mapping_table) if field_mapping_table else 0}"
+    )
     try:
         # 解析输入
         json_obj = json.loads(decoded_json) if isinstance(decoded_json, str) else decoded_json

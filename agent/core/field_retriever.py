@@ -404,7 +404,7 @@ def _load_cache() -> tuple[Optional[np.ndarray], Optional[list[dict]]]:
         return None, None
 
 
-def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 5) -> str:
+def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str:
     """
     对一批原始字段名执行语义检索，返回紧凑格式的候选列表。
 
@@ -416,7 +416,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 5) -> str
 
     Args:
         raw_field_names: 原始字段名列表
-        top_k: 每个字段返回的候选数（默认 5）
+        top_k: 每个字段返回的候选数（默认 3）
 
     Returns:
         紧凑格式字符串，无候选时返回空字符串
@@ -526,7 +526,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 5) -> str
     return raw_output
 
 
-def _debug_lookup(keyword: str, top_k: int = 5) -> str:
+def _debug_lookup(keyword: str, top_k: int = 3) -> str:
     """
     运维调试入口：根据关键词在标准字段表中做语义检索，返回人类可读结果。
 
@@ -534,7 +534,7 @@ def _debug_lookup(keyword: str, top_k: int = 5) -> str:
 
     Args:
         keyword: 查询关键词（如 "srcAddress"）
-        top_k: 返回候选数（默认 5）
+        top_k: 返回候选数（默认 3）
 
     Returns:
         紧凑格式的匹配结果字符串，无匹配时返回提示信息
