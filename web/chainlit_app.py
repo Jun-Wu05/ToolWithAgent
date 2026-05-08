@@ -38,8 +38,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import chainlit as cl
-import json
-import io
 import logging
 from datetime import datetime
 
@@ -73,6 +71,13 @@ from web.input_builder import build_llm_input, build_batch_llm_input
 from web.response_handler import process_team_response, _check_session_action
 from web.threat_handler import handle_threat_fill_flow, execute_threat_fill
 from web.enum_handler import handle_enum_fill_flow, execute_enum_fill, handle_enum_extract_flow
+from web.file_handler import (
+    read_element_content,
+    decode_file_content,
+    build_simplified_data,
+    get_element_file_name,
+    process_batched_mapping,
+)
 
 # 枚举工具（handle_file_upload 中引用）
 from agent.tools.enum_field_tool import get_enum_preview
@@ -188,16 +193,8 @@ async def main(message: cl.Message):
 async def handle_file_upload(user_session: dict, element):
     """处理文件上传 — 委托给各 handler"""
     try:
-        # 获取文件路径并读取内容
-        if hasattr(element, 'path') and element.path:
-            with open(element.path, 'r', encoding='utf-8', errors='ignore') as f:
-                file_content = f.read()
-        elif hasattr(element, 'content'):
-            file_content = element.content
-            if isinstance(file_content, bytes):
-                file_content = file_content.decode('utf-8', errors='ignore')
-        else:
-            file_content = str(element)
+        # 获取文件内容（委托 file_handler）
+        file_content = read_element_content(element)
 
         # ========== 威胁填充模式状态隔离 ==========
         if user_session.get("threat_fill_mode"):
@@ -309,45 +306,23 @@ async def handle_file_upload(user_session: dict, element):
                 return
 
         # ========== 正常模式：解码 Base64 内容 ==========
-        from agent.core.agent import simple_decode
-        result = simple_decode(file_content)
+        # 委托 file_handler 处理解码
+        result = decode_file_content(file_content)
 
         if result["status"] == "success":
             user_session["decoded_data"] = result["decoded_json"]
             user_session["decoded_fields"] = result["fields"]
             user_session["original_log"] = result["original_log"]
-            user_session["decoded_text"] = result.get("decoded_text", "")  # 保存解码后的原始文本，供 input_builder 后备使用
+            user_session["decoded_text"] = result.get("decoded_text", "")
 
-            # ====== P0 问题2：记录上传文件元信息（供 Agent 自决清空时感知上下文）======
-            file_name_val = getattr(element, 'name', '') or 'uploaded_file'
+            # 记录上传文件元信息
+            file_name_val = get_element_file_name(element)
             user_session["uploaded_file_name"] = file_name_val
             user_session["uploaded_file_time"] = datetime.now().strftime("%H:%M:%S")
             logger.info(f"[FILE_UPLOAD] 记录上传文件元信息: name={file_name_val}, time={user_session['uploaded_file_time']}")
-            # ====================================================================
 
-            # 构建简化 JSON（只包含必要的索引和日志示例）
-            indexes = result.get("fields", [])
-            original_log = result.get("original_log", [])
-            # 修复：original_log 可能是 string（JSON字符串）、list 或 dict
-            if isinstance(original_log, list):
-                first_item = original_log[0] if original_log else ""
-                # original_log[0] 可能是 dict/list → 转为 JSON 字符串
-                if isinstance(first_item, (dict, list)):
-                    original_log_sample = json.dumps(first_item, ensure_ascii=False)
-                else:
-                    original_log_sample = str(first_item) if first_item else ""
-            elif isinstance(original_log, str):
-                original_log_sample = original_log
-            elif isinstance(original_log, dict):
-                original_log_sample = json.dumps(original_log, ensure_ascii=False)
-            else:
-                original_log_sample = str(original_log) if original_log else ""
-
-            simplified_data = {
-                "fields": indexes,
-                "original_log_sample": original_log_sample
-            }
-            user_session["simplified_data"] = simplified_data
+            # 构建 simplified_data（委托 file_handler）
+            user_session["simplified_data"] = build_simplified_data(result)
 
             # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
             enum_excel_path = user_session.get("enum_excel_path")
@@ -471,35 +446,29 @@ Excel 格式说明：
         fields_list = user_session.get("simplified_data", {}).get("fields", [])
         if len(fields_list) > BATCH_SIZE:
             logger.info(f"[BATCH] 字段数 {len(fields_list)} > {BATCH_SIZE}，进入分批模式")
-            all_mapping_data = []
-            batches = [fields_list[i:i + BATCH_SIZE] for i in range(0, len(fields_list), BATCH_SIZE)]
-            total_batches = len(batches)
 
-            loading_msg = cl.Message(content=f"⏳ **正在处理字段映射（第 1/{total_batches} 批）...**")
+            loading_msg = cl.Message(content=f"⏳ **正在处理字段映射（第 1/? 批）...**")
             await loading_msg.send()
 
-            for batch_idx, batch in enumerate(batches):
-                # 更新 loading 消息
-                try:
-                    loading_msg.content = f"⏳ **正在处理字段映射（第 {batch_idx + 1}/{total_batches} 批）...**"
-                    await loading_msg.update()
-                except Exception:
-                    pass
+            # 委托 file_handler.process_batched_mapping 执行分批调用
+            # 构建回调适配器
+            def build_batch_fn(u_text, u_sess, batch, idx, total):
+                return build_batch_llm_input(u_text, u_sess, batch, idx, total)
 
-                batch_input = build_batch_llm_input(user_text, user_session, batch,
-                                                    batch_idx + 1, total_batches)
-                try:
-                    result = await call_team(team, batch_input, loading_msg, intent="mapping")
-                    result_content = result.content if hasattr(result, 'content') else str(result)
-                    batch_mapping = parse_json_mapping_result(result_content)
-                    if batch_mapping:
-                        all_mapping_data.extend(batch_mapping)
-                        logger.info(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批完成，本批 {len(batch_mapping)} 条，累计 {len(all_mapping_data)} 条")
-                    else:
-                        logger.warning(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批未解析到映射结果")
-                except Exception as batch_e:
-                    logger.error(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批调用失败: {batch_e}")
-                    # 继续处理剩余批次，不因单批失败而中断
+            async def call_team_fn(t, input_text, _loading, intent):
+                return await call_team(t, input_text, loading_msg, intent=intent)
+
+            from web.file_handler import process_batched_mapping
+            all_mapping_data, total_batches = await process_batched_mapping(
+                team=team,
+                fields_list=fields_list,
+                user_text=user_text,
+                user_session=user_session,
+                build_batch_fn=build_batch_fn,
+                call_team_fn=call_team_fn,
+                parse_fn=parse_json_mapping_result,
+                batch_size=BATCH_SIZE,
+            )
 
             try:
                 await loading_msg.remove()
@@ -673,11 +642,11 @@ async def on_fill_threat_with_field(action: cl.Action):
     await cl.Message(
         content="""📥 **威胁类型填充模式已开启**
 
-请先发送 **目标字段名**（如：original_log），然后上传 **Base64 配置文件**。
+请先发送 **目标字段名**（如：threat_type），然后上传 **Base64 配置文件**。
 
 示例：
 ```
-original_log
+threat_type
 ```
 """
     ).send()

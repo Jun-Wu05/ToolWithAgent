@@ -26,7 +26,8 @@
 │   └── threat_fill.py           # 威胁类型填充
 │
 ├── web/                         # 🌐 Web 交互界面（Chainlit）
-│   ├── chainlit_app.py          # Web 应用入口
+│   ├── chainlit_app.py          # Web 应用入口（仅保留 UI 生命周期钩子 + Action 回调）
+│   ├── file_handler.py          # 文件上传处理业务逻辑（从 chainlit_app.py 提取）
 │   ├── config.py                # Web 配置
 │   ├── llm_client.py            # LLM 客户端（Team 调用 + 意图直接路由 + 超时保护）
 │   ├── input_builder.py         # 输入构建
