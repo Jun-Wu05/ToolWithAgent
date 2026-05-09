@@ -35,7 +35,7 @@ def load_enum_field_prompt() -> str:
 
 def load_standard_fields() -> str:
     """加载标准字段表"""
-    data_path = Path(__file__).parent.parent / "data" / "标准字段.txt"
+    data_path = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
     
     if data_path.exists():
         content = data_path.read_text(encoding='utf-8')

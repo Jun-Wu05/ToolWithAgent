@@ -10,12 +10,10 @@ _project_root = os.path.dirname(os.path.dirname(_current_file))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from agent.core.agent import create_agent, create_simple_agent, create_complex_agent
+from agent.core.agent import create_agent
 from agent.memory.session_manager import SessionManager
 
 __all__ = [
     'create_agent',
-    'create_simple_agent', 
-    'create_complex_agent',
-    'SessionManager'
+    'SessionManager',
 ]

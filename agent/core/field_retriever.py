@@ -44,10 +44,10 @@ SIMILARITY_THRESHOLD = 0.25
 MAX_DESCRIPTION_LENGTH = 200
 
 # 缓存文件路径
-_STANDARD_FIELDS_PATH = Path(__file__).parent.parent / "data" / "标准字段.txt"
-_CACHE_EMBEDDINGS_PATH = Path(__file__).parent.parent / "data" / "标准字段_embeddings.npy"
-_CACHE_RECORDS_PATH = Path(__file__).parent.parent / "data" / "标准字段_records.json"
-_CACHE_META_PATH = Path(__file__).parent.parent / "data" / "标准字段_cache_meta.json"
+_STANDARD_FIELDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
+_CACHE_EMBEDDINGS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_embeddings.npy"
+_CACHE_RECORDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_records.json"
+_CACHE_META_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_cache_meta.json"
 
 
 def _load_standard_fields() -> list[dict]:
