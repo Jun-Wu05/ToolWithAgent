@@ -440,8 +440,8 @@ Excel 格式说明：
     elif is_mapping:
         detected_intent = "mapping"
 
-    # ====== P2 自动分批：字段 > 50 时分批调用，避免超时 ======
-    BATCH_SIZE = 50
+    # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
+    BATCH_SIZE = 25
     if detected_intent == "mapping":
         fields_list = user_session.get("simplified_data", {}).get("fields", [])
         if len(fields_list) > BATCH_SIZE:

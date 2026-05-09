@@ -5,6 +5,7 @@
 所有 UI 渲染保留在 chainlit_app.py 中。
 """
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -122,47 +123,80 @@ async def process_batched_mapping(
     Returns:
         Tuple[List[Dict], int]: (所有批次的映射结果列表, 总批次数)
     """
-    all_mapping_data = []
+    total_input_fields = len(fields_list)
     batches = [fields_list[i:i + batch_size] for i in range(0, len(fields_list), batch_size)]
     total_batches = len(batches)
-    total_input_fields = len(fields_list)
 
-    for batch_idx, batch in enumerate(batches):
+    # 并行并发控制：根据批次数决定并发度（2-3 路并行）
+    if total_batches <= 2:
+        max_parallel = total_batches
+    elif total_batches <= 4:
+        max_parallel = 2
+    else:
+        max_parallel = 3
+
+    semaphore = asyncio.Semaphore(max_parallel)
+
+    async def _process_one_batch(batch_idx: int, batch: List[str]):
+        """处理单个批次（带信号量和日志）"""
+        batch_no = batch_idx + 1
         batch_input = build_batch_fn(
             user_text, user_session, batch,
-            batch_idx + 1, total_batches
+            batch_no, total_batches
         )
 
-        try:
-            result = await call_team_fn(team, batch_input, None, intent="mapping")
-            result_content = result.content if hasattr(result, 'content') else str(result)
-            batch_mapping = parse_fn(result_content)
+        async with semaphore:
+            logger.info(f"[BATCH] 第 {batch_no}/{total_batches} 批开始（{len(batch)} 个字段）")
+            try:
+                result = await call_team_fn(team, batch_input, None, intent="mapping")
+                result_content = result.content if hasattr(result, 'content') else str(result)
+                batch_mapping = parse_fn(result_content)
 
-            if batch_mapping:
-                all_mapping_data.extend(batch_mapping)
-                logger.info(
-                    f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批完成，"
-                    f"本批 {len(batch_mapping)} 条，累计 {len(all_mapping_data)} 条"
-                )
-                # 单批校验：本批结果数 vs 本批字段数
-                if len(batch_mapping) < len(batch):
-                    logger.warning(
-                        f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批结果不完整: "
-                        f"输入 {len(batch)} 个字段, 输出 {len(batch_mapping)} 条, "
-                        f"缺失 {len(batch) - len(batch_mapping)} 条（LLM 偶发性漏字段）"
+                if batch_mapping:
+                    logger.info(
+                        f"[BATCH] 第 {batch_no}/{total_batches} 批完成，"
+                        f"本批 {len(batch_mapping)} 条"
                     )
-            else:
-                logger.warning(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批未解析到映射结果")
+                    if len(batch_mapping) < len(batch):
+                        logger.warning(
+                            f"[BATCH] 第 {batch_no}/{total_batches} 批结果不完整: "
+                            f"输入 {len(batch)} 个字段, 输出 {len(batch_mapping)} 条, "
+                            f"缺失 {len(batch) - len(batch_mapping)} 条（LLM 偶发性漏字段）"
+                        )
+                    return batch_mapping
+                else:
+                    logger.warning(f"[BATCH] 第 {batch_no}/{total_batches} 批未解析到映射结果")
+                    return []
 
-        except Exception as batch_e:
-            logger.error(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批调用失败: {batch_e}")
-            # 继续处理剩余批次，不因单批失败而中断
+            except Exception as batch_e:
+                logger.error(f"[BATCH] 第 {batch_no}/{total_batches} 批调用失败: {batch_e}")
+                return []  # 不抛异常，继续处理其他批次
 
-        # 通知调用方当前进度（用于更新前端 loading 消息）
+    # 并行执行所有批次
+    tasks = [_process_one_batch(i, batch) for i, batch in enumerate(batches)]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 按顺序合并结果 + 进度回调
+    all_mapping_data = []
+    for i, raw in enumerate(raw_results):
+        batch_no = i + 1
+        batch = batches[i]
+        if isinstance(raw, Exception):
+            logger.error(f"[BATCH] 第 {batch_no}/{total_batches} 批异常: {raw}")
+            batch_mapping = []
+        elif isinstance(raw, list):
+            batch_mapping = raw
+        else:
+            batch_mapping = []
+
+        if batch_mapping:
+            all_mapping_data.extend(batch_mapping)
+
+        # 通知调用方当前进度
         if on_batch_complete:
             try:
                 await on_batch_complete(
-                    batch_idx + 1, total_batches,
+                    batch_no, total_batches,
                     len(batch) if batch else 0,
                     len(all_mapping_data)
                 )
