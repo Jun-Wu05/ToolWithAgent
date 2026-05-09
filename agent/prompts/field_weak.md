@@ -15,6 +15,8 @@
     <constraint>IP、端口、时间、ID、状态严禁跨类型错配</constraint>
     <constraint>忽略（跳过/不输出）以下字段：original_log</constraint>
     <constraint level="highest">标准字段候选已由系统预查询并注入输入，所有匹配必须基于输入的候选列表，不得额外调用工具查询</constraint>
+    <constraint level="important">**低分候选谨慎匹配**：候选相似度是语义参考，但**不能作为唯一依据**。候选相似度标注在每个候选后面的括号里（如"候选名(0.52, field_name)"）。当所有候选相似度均较低时，必须结合字段名的语义规则（如 semantic_normalization 和 anti_mismatch_rules）以及原始日志样本中的字段值来判断，若字段值类型明确（如 IP、端口、时间戳、MAC 等），即使候选相似度偏低也可选择语义一致且值类型匹配的候选。仅在所有候选均语义不匹配时才输出"未匹配"。</constraint>
+    <constraint level="important">**杜绝明显错配**：严禁将语义类型明显不匹配的候选强加匹配（如 sendTime→发件人(0.46)、tenant→攻击者(0.47)）。判断时必须交叉校验字段名的语义规则和字段值的实际类型。</constraint>
   </hard_constraints>
 
   <object_mapping>

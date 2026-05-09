@@ -33,6 +33,11 @@ Thumbs.db
 # 子项目目录（避免嵌套 git 仓库问题）
 ToolWithAgent/
 
+# Embedding 缓存（运行时生成，不提交）
+config/标准字段_cache_meta.json
+config/标准字段_embeddings.npy
+config/标准字段_records.json
+
 
 .github/
 .trae/

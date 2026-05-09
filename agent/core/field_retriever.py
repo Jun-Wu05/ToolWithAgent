@@ -404,6 +404,28 @@ def _load_cache() -> tuple[Optional[np.ndarray], Optional[list[dict]]]:
         return None, None
 
 
+def _strip_field_prefix(name: str) -> list[str]:
+    """
+    对嵌套字段名（如 data.severity, original_log_1.origin.sip）生成去前缀变体。
+
+    规则：
+    - 去掉最外层前缀（data.xxx → xxx）
+    - 再去掉一层前缀（data.origin.sip → origin.sip, sip）
+
+    返回按优先级排列的无前缀变体列表（不含原 name）。
+    """
+    variants: list[str] = []
+    parts = name.split(".")
+    if len(parts) <= 1:
+        return variants
+    # 去掉第一层
+    variants.append(".".join(parts[1:]))
+    # 去掉前两层（如果还有足够深度）
+    if len(parts) > 2:
+        variants.append(".".join(parts[2:]))
+    return variants
+
+
 def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str:
     """
     对一批原始字段名执行语义检索，返回紧凑格式的候选列表。
@@ -464,6 +486,42 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
     # 构建精确名称匹配索引（用于语义检索兜底前置）
     exact_index = _build_field_name_index(records)
 
+    # 为嵌套字段（含 . ）收集去前缀变体，统一做一次额外 Embedding
+    stripped_fields_map: dict[int, list[str]] = {}  # 原始索引 → 变体字段名列表
+    stripped_variants: list[str] = []                # 顺序变体列表
+    stripped_to_original: dict[int, int] = {}        # 变体在 stripped_variants 中的索引 → 原始字段索引
+    for i, name in enumerate(raw_field_names):
+        variants = _strip_field_prefix(name)
+        if variants:
+            stripped_fields_map[i] = variants
+            for v in variants:
+                stripped_to_original[len(stripped_variants)] = i
+                stripped_variants.append(v)
+
+    # 批量嵌入去前缀变体
+    stripped_vecs: Optional[np.ndarray] = None
+    if stripped_variants:
+        try:
+            stripped_vecs_list: list[np.ndarray] = []
+            for bs in range(0, len(stripped_variants), EMBEDDING_BATCH_SIZE):
+                batch = stripped_variants[bs:bs + EMBEDDING_BATCH_SIZE]
+                vecs = _call_embedding_api(batch)
+                if vecs is None:
+                    raise RuntimeError(f"[EMBEDDING] 去前缀变体嵌入失败（第 {bs // EMBEDDING_BATCH_SIZE + 1} 批）")
+                stripped_vecs_list.append(vecs)
+                if bs + EMBEDDING_BATCH_SIZE < len(stripped_variants):
+                    time.sleep(EMBEDDING_BATCH_SLEEP)
+            stripped_vecs = np.concatenate(stripped_vecs_list, axis=0)
+            # L2 归一化
+            norms_s = np.linalg.norm(stripped_vecs, axis=1, keepdims=True)
+            norms_s = np.maximum(norms_s, 1e-10)
+            stripped_vecs = stripped_vecs / norms_s
+            # 计算去前缀变体的相似度矩阵
+            stripped_sim_matrix = np.dot(stripped_vecs, embeddings.T)
+        except RuntimeError as e:
+            logger.warning(f"[RETRIEVE] 去前缀变体嵌入失败，跳过: {e}")
+            stripped_variants.clear()
+
     lines: list[str] = []
     for i, field_name in enumerate(raw_field_names):
         sims = similarity_matrix[i]
@@ -480,7 +538,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
         candidates: list[str] = []
         seen_field_keys: set[str] = set()  # 防止精确匹配和语义检索重复
 
-        # Layer 1: 精确名称匹配兜底（置顶）
+        # Layer 1: 精确名称匹配兜底（置顶）— 先试原始字段名
         normalized_key = _normalize_field_name(field_name)
         exact_idx = exact_index.get(normalized_key)
         if exact_idx is not None:
@@ -490,7 +548,21 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
             )
             seen_field_keys.add(rec.get('字段名称', ''))
 
-        # Layer 2: 语义检索兜底
+        # Layer 1.5: 去前缀变体的精确名称匹配兜底
+        if field_name in stripped_fields_map:
+            for variant in stripped_fields_map[field_name]:
+                v_key = _normalize_field_name(variant)
+                v_exact_idx = exact_index.get(v_key)
+                if v_exact_idx is not None:
+                    v_rec = records[v_exact_idx]
+                    v_key_name = v_rec.get('字段名称', '')
+                    if v_key_name not in seen_field_keys:
+                        candidates.append(
+                            f"{v_rec.get('系统属性名称', '')}(1.00, {v_key_name}, by_stripped={variant})"
+                        )
+                        seen_field_keys.add(v_key_name)
+
+        # Layer 2: 语义检索兜底（原始字段名）
         for idx in top_indices:
             rec = records[idx]
             rec_field_name = rec.get('字段名称', '')
@@ -504,6 +576,31 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
                 f"{rec.get('系统属性名称', '')}({sim:.2f}, {rec_field_name})"
             )
             seen_field_keys.add(rec_field_name)
+
+        # Layer 2.5: 去前缀变体的语义检索结果合并
+        if stripped_variants and stripped_sim_matrix is not None:
+            for v_idx, orig_idx in stripped_to_original.items():
+                if orig_idx != i:
+                    continue
+                v_sims = stripped_sim_matrix[v_idx]
+                if len(v_sims) <= top_k:
+                    v_top = np.argsort(v_sims)[::-1]
+                else:
+                    v_partitioned = np.argpartition(v_sims, -top_k)[-top_k:]
+                    v_top = v_partitioned[np.argsort(v_sims[v_partitioned])[::-1]]
+                for vi in v_top:
+                    v_rec = records[vi]
+                    v_rfn = v_rec.get('字段名称', '')
+                    if v_rfn in seen_field_keys:
+                        continue
+                    v_sim = float(v_sims[vi])
+                    if v_sim < SIMILARITY_THRESHOLD:
+                        continue
+                    variant_name = stripped_variants[v_idx]
+                    candidates.append(
+                        f"{v_rec.get('系统属性名称', '')}({v_sim:.2f}, {v_rfn}, by_stripped={variant_name})"
+                    )
+                    seen_field_keys.add(v_rfn)
 
         if candidates:
             lines.append(f"{field_name} → {' | '.join(candidates)}")

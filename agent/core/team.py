@@ -16,7 +16,6 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from agno.agent import Agent
-from agno.models.siliconflow import Siliconflow
 from agno.team.team import Team
 from agno.team.mode import TeamMode
 
@@ -133,12 +132,10 @@ def _get_enum_instructions() -> str:
 
 def create_field_mapping_agent() -> Agent:
     """创建字段映射Agent（挂载工具：field_mapping）"""
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    
     return Agent(
         name="FieldMappingAgent",
         role="字段映射专家",
-        model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
+        model=ModelConfig.get_main_model(),
         instructions=_get_field_mapping_instructions(),
         tools=[
             field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
@@ -151,12 +148,10 @@ def create_field_mapping_agent() -> Agent:
 
 def create_threat_agent() -> Agent:
     """创建威胁类型Agent（挂载工具：threat_type_tool）"""
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    
     return Agent(
         name="ThreatAgent",
         role="威胁类型专家",
-        model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
+        model=ModelConfig.get_main_model(),
         instructions=_get_threat_instructions(),
         tools=[
             threat_type_tool,     # 威胁类型规则匹配 + 置信度评分
@@ -170,12 +165,10 @@ def create_threat_agent() -> Agent:
 
 def create_enum_agent() -> Agent:
     """创建枚举Agent（挂载工具：enum_field_tool, extract_enum_from_logs, extract_enum_with_regex）"""
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    
     return Agent(
         name="EnumAgent",
         role="枚举字段专家",
-        model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
+        model=ModelConfig.get_main_model(),
         instructions=_get_enum_instructions(),
         tools=[
             enum_field_tool,              # 提取可枚举字段
@@ -202,10 +195,12 @@ def create_data_mapping_team() -> Team:
     Returns:
         Team实例
     """
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    
+    # 验证 API Key 已配置
+    api_key = ModelConfig.get_api_key()
     if not api_key:
-        raise ValueError("请设置环境变量 SILICONFLOW_API_KEY")
+        raise ValueError(
+            f"请设置环境变量 {'DEEPSEEK_API_KEY' if ModelConfig.MODEL_PROVIDER == 'deepseek' else 'SILICONFLOW_API_KEY'}"
+        )
     
     # 创建专业Agent
     field_mapping_agent = create_field_mapping_agent()
@@ -216,10 +211,10 @@ def create_data_mapping_team() -> Team:
     _debug = os.getenv("AGNO_DEBUG_MODE", "false").lower() == "true"
     _show_members = os.getenv("AGNO_SHOW_MEMBERS", "false").lower() == "true"
 
-    # 创建Team
+    # 创建Team（Team Leader 使用主模型）
     team = Team(
         name="DataMappingTeam",
-        model=Siliconflow(id=ModelConfig.MAIN_MODEL, api_key=api_key),
+        model=ModelConfig.get_main_model(),
         mode=TeamMode.route,  # 路由模式
         members=[
             field_mapping_agent,

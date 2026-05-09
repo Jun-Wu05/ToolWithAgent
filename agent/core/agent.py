@@ -13,7 +13,6 @@ from typing import Optional, Any, List
 import logging
 
 from agno.agent import Agent
-from agno.models.siliconflow import Siliconflow
 
 from agent.core.model_config import ModelConfig
 from agent.core.prompts import load_system_prompt
@@ -254,9 +253,11 @@ def create_agent(
     logger.info("创建Agent实例...")
     
     # 获取API Key
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
+    api_key = ModelConfig.get_api_key()
     if not api_key:
-        raise ValueError("请设置环境变量 SILICONFLOW_API_KEY")
+        raise ValueError(
+            f"请设置环境变量 {'DEEPSEEK_API_KEY' if ModelConfig.MODEL_PROVIDER == 'deepseek' else 'SILICONFLOW_API_KEY'}"
+        )
     logger.info(f"API Key已加载: {api_key[:10]}...")
     
     # 加载系统提示词
@@ -265,11 +266,8 @@ def create_agent(
     
     # Agent基础配置
     agent_config = {
-        # 模型配置
-        "model": Siliconflow(
-            id=ModelConfig.MAIN_MODEL,
-            api_key=api_key
-        ),
+        # 模型配置（根据环境变量 AGNO_MODEL_PROVIDER 自动选择 Provider）
+        "model": ModelConfig.get_main_model(),
         
         # 基本信息
         "name": "数据映射助手",
@@ -350,15 +348,8 @@ def create_simple_agent(
     Returns:
         简单任务Agent实例
     """
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    if not api_key:
-        raise ValueError("请设置环境变量 SILICONFLOW_API_KEY")
-    
     agent_config = {
-        "model": Siliconflow(
-            id=ModelConfig.SIMPLE_MODEL,
-            api_key=api_key
-        ),
+        "model": ModelConfig.get_main_model(),
         "name": "SimpleAgent",
         "description": "处理简单的数据转换任务",
         "instructions": """
@@ -408,15 +399,8 @@ def create_complex_agent(
     Returns:
         复杂推理Agent实例
     """
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    if not api_key:
-        raise ValueError("请设置环境变量 SILICONFLOW_API_KEY")
-    
     agent_config = {
-        "model": Siliconflow(
-            id=ModelConfig.COMPLEX_MODEL,
-            api_key=api_key
-        ),
+        "model": ModelConfig.get_main_model(),
         "name": "ComplexAgent",
         "description": "处理需要推理的复杂任务",
         "instructions": """

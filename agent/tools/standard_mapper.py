@@ -16,6 +16,74 @@ from agent.shared.logger import get_logger
 
 logger = get_logger("standard_mapper")
 
+# ===== 标准字段名白名单（惰性加载，首次调用时从 标准字段.txt 构建） =====
+_valid_field_names: Optional[set] = None
+
+
+def _get_valid_field_names() -> set:
+    """
+    从标准字段表加载所有合法的「系统属性名称」集合。
+
+    构建一次后缓存，避免每次映射都读文件解析。
+    """
+    global _valid_field_names
+    if _valid_field_names is None:
+        try:
+            raw = load_standard_fields()
+            names: set = set()
+            for line in raw.strip().split("\n")[1:]:  # 跳过表头
+                cols = line.strip().split("\t")
+                if cols and cols[0]:
+                    # 去除 BOM 字符
+                    name = cols[0].lstrip("\ufeff").strip()
+                    if name:
+                        names.add(name)
+            _valid_field_names = names
+            logger.info(f"[VALIDATOR] 标准字段白名单已加载：{len(names)} 个合法系统属性名称")
+        except Exception as e:
+            logger.warning(f"[VALIDATOR] 加载标准字段白名单失败: {e}，跳过校验")
+            _valid_field_names = set()  # 空集合 = 跳过校验
+    return _valid_field_names
+
+
+def _validate_and_correct_mapping(mapping: dict) -> dict:
+    """
+    校验单条映射的「系统属性名称」是否在标准字段表中。
+
+    - 若"未匹配"则跳过校验（合法状态）
+    - 若匹配成功但名称不在白名单中 → 强制改为"未匹配"并记录警告
+
+    Returns:
+        校验/修正后的映射 dict（可能是原始引用或新 dict）
+    """
+    system_property = mapping.get("系统属性名称", "")
+    match_status = mapping.get("匹配状态", "")
+
+    # "未匹配" 是合法终态，无需校验
+    if system_property == "未匹配":
+        return mapping
+
+    valid_names = _get_valid_field_names()
+    if not valid_names:
+        # 白名单为空（加载失败），跳过校验
+        return mapping
+
+    if system_property not in valid_names:
+        logger.warning(
+            f"[VALIDATOR] 非法字段名 → 强制降级为未匹配: "
+            f"原始字段={mapping.get('原始字段名', '?')}, "
+            f"非法名称='{system_property}'"
+        )
+        # 创建新 dict 避免修改调用方的原始数据
+        return {
+            "原始字段名": mapping.get("原始字段名", ""),
+            "系统属性名称": "未匹配",
+            "匹配状态": "未匹配",
+            "_校正原因": f"LLM 输出了不在标准字段表中的名称 '{system_property}'",
+        }
+
+    return mapping
+
 
 @tool(name="field_mapping", description="执行标准字段映射")
 def field_mapping_tool(
@@ -64,11 +132,15 @@ def field_mapping_tool(
         if os.path.exists(excel_template_path):
             object_mapping = _load_object_mapping(excel_template_path)
         
-        # 解析字段映射表
+        # 解析字段映射表（带字段名合法性校验）
         field_to_object = {}
         field_to_new_value = {}
+        corrected_count = 0
         
         for mapping in mapping_table:
+            # 校验/修正映射的字段名合法性
+            mapping = _validate_and_correct_mapping(mapping)
+            
             original_field = mapping.get("原始字段名", "")
             system_property = mapping.get("系统属性名称", "")
             match_status = mapping.get("匹配状态", "")
@@ -77,6 +149,15 @@ def field_mapping_tool(
                 obj = object_mapping.get(system_property, "事件")
                 field_to_object[original_field] = obj
                 field_to_new_value[original_field] = system_property
+        
+        if corrected_count := sum(
+            1 for m in mapping_table
+            if m.get("_校正原因", "")
+        ):
+            logger.warning(
+                f"[VALIDATOR] 本批共 {corrected_count} 条映射被强制修正为'未匹配'"
+                f"（LLM 输出了不在标准字段表中的名称）"
+            )
         
         # 应用映射
         processed_json = _apply_field_mapping(json_obj, field_to_new_value, field_to_object)
