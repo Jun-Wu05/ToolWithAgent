@@ -445,9 +445,11 @@ Excel 格式说明：
     if detected_intent == "mapping":
         fields_list = user_session.get("simplified_data", {}).get("fields", [])
         if len(fields_list) > BATCH_SIZE:
-            logger.info(f"[BATCH] 字段数 {len(fields_list)} > {BATCH_SIZE}，进入分批模式")
+            import math
+            total_batches_preview = math.ceil(len(fields_list) / BATCH_SIZE)
+            logger.info(f"[BATCH] 字段数 {len(fields_list)} > {BATCH_SIZE}，进入分批模式，共 {total_batches_preview} 批")
 
-            loading_msg = cl.Message(content=f"⏳ **正在处理字段映射（第 1/? 批）...**")
+            loading_msg = cl.Message(content=f"⏳ **正在处理字段映射（第 1/{total_batches_preview} 批）...**")
             await loading_msg.send()
 
             # 委托 file_handler.process_batched_mapping 执行分批调用
@@ -457,6 +459,13 @@ Excel 格式说明：
 
             async def call_team_fn(t, input_text, _loading, intent):
                 return await call_team(t, input_text, loading_msg, intent=intent)
+
+            async def on_batch_complete(batch_idx: int, total: int, batch_count: int, total_count: int):
+                loading_msg.content = f"⏳ **正在处理字段映射（第 {batch_idx + 1}/{total} 批）...**"
+                try:
+                    await loading_msg.update()
+                except Exception:
+                    pass
 
             from web.file_handler import process_batched_mapping
             all_mapping_data, total_batches = await process_batched_mapping(
@@ -468,6 +477,7 @@ Excel 格式说明：
                 call_team_fn=call_team_fn,
                 parse_fn=parse_json_mapping_result,
                 batch_size=BATCH_SIZE,
+                on_batch_complete=on_batch_complete,
             )
 
             try:

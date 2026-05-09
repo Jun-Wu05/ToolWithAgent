@@ -101,6 +101,7 @@ async def process_batched_mapping(
     call_team_fn,
     parse_fn,
     batch_size: int = 50,
+    on_batch_complete=None,
 ) -> Tuple[List[Dict], int]:
     """分批处理字段映射（P2 优化：字段 > batch_size 时自动分批调用）
 
@@ -116,6 +117,7 @@ async def process_batched_mapping(
         call_team_fn: 调用 Team 的异步回调 (team, input, loading_msg, intent) -> result
         parse_fn: 解析结果的回调 (content) -> list
         batch_size: 每批处理的字段数上限
+        on_batch_complete: 每批完成后的异步回调 (batch_idx, total_batches, batch_count, total_count) -> None
 
     Returns:
         Tuple[List[Dict], int]: (所有批次的映射结果列表, 总批次数)
@@ -123,6 +125,7 @@ async def process_batched_mapping(
     all_mapping_data = []
     batches = [fields_list[i:i + batch_size] for i in range(0, len(fields_list), batch_size)]
     total_batches = len(batches)
+    total_input_fields = len(fields_list)
 
     for batch_idx, batch in enumerate(batches):
         batch_input = build_batch_fn(
@@ -141,11 +144,37 @@ async def process_batched_mapping(
                     f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批完成，"
                     f"本批 {len(batch_mapping)} 条，累计 {len(all_mapping_data)} 条"
                 )
+                # 单批校验：本批结果数 vs 本批字段数
+                if len(batch_mapping) < len(batch):
+                    logger.warning(
+                        f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批结果不完整: "
+                        f"输入 {len(batch)} 个字段, 输出 {len(batch_mapping)} 条, "
+                        f"缺失 {len(batch) - len(batch_mapping)} 条（LLM 偶发性漏字段）"
+                    )
             else:
                 logger.warning(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批未解析到映射结果")
 
         except Exception as batch_e:
             logger.error(f"[BATCH] 第 {batch_idx + 1}/{total_batches} 批调用失败: {batch_e}")
             # 继续处理剩余批次，不因单批失败而中断
+
+        # 通知调用方当前进度（用于更新前端 loading 消息）
+        if on_batch_complete:
+            try:
+                await on_batch_complete(
+                    batch_idx + 1, total_batches,
+                    len(batch) if batch else 0,
+                    len(all_mapping_data)
+                )
+            except Exception as cb_e:
+                logger.warning(f"[BATCH] 进度回调异常: {cb_e}")
+
+    # 全局校验：总结果数 vs 总输入字段数
+    if len(all_mapping_data) < total_input_fields:
+        logger.warning(
+            f"[BATCH] 全部分批完成，总结果不完整: "
+            f"输入 {total_input_fields} 个字段, 输出 {len(all_mapping_data)} 条, "
+            f"缺失 {total_input_fields - len(all_mapping_data)} 条（LLM 偶发性漏字段，建议重试）"
+        )
 
     return all_mapping_data, total_batches
