@@ -30,8 +30,8 @@ logger = get_logger("field_retriever")
 CACHE_SCHEMA_VERSION = "1"
 
 # Embedding 模型配置
-EMBEDDING_MODEL = "BAAI/bge-m3"
-EMBEDDING_DIM = 1024
+EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
+EMBEDDING_DIM = 4096
 EMBEDDING_API_URL = "https://api.siliconflow.cn/v1/embeddings"
 EMBEDDING_BATCH_SIZE = 30  # 每次 API 调用最多嵌入 30 个文本（防 413 Request Entity Too Large）
 EMBEDDING_BATCH_SLEEP = 0.3  # 每批请求间隔（秒），防止 API 429 限流
@@ -39,15 +39,104 @@ EMBEDDING_TIMEOUT = 10.0  # 单次 API 调用超时（秒）
 EMBEDDING_MAX_RETRIES = 2  # 最多重试次数
 
 # 相似度阈值：低于此值的候选不返回
-SIMILARITY_THRESHOLD = 0.25
+SIMILARITY_THRESHOLD = 0.15
 # 单条复合文本的最大字段描述长度（字符），防止超长文本溢出模型上下文
 MAX_DESCRIPTION_LENGTH = 200
+
+# 网络协议字段常见缩写 → 全称展开（覆盖所有标准字段，零手动维护）
+ABBR_EXPANSIONS: dict[str, str] = {
+    "dest": "destination",
+    "dst": "destination",
+    "src": "source",
+    "addr": "address",
+    "mac": "mac_address",
+    "ip": "ip_address",
+    "sip": "source_ip",
+    "dip": "destination_ip",
+    "dev": "device",
+    "host": "host",
+    "num": "number",
+    "id": "identifier",
+    "info": "information",
+    "desc": "description",
+    "cnt": "count",
+    "len": "length",
+    "seq": "sequence",
+    "ack": "acknowledgement",
+    "syn": "synchronize",
+    "pkt": "packet",
+    "msg": "message",
+    "cfg": "configuration",
+    "max": "maximum",
+    "min": "minimum",
+    "avg": "average",
+    "total": "total",
+    "list": "list",
+    "type": "type",
+    "name": "name",
+    "code": "code",
+    "flag": "flag",
+    "port": "port",
+    "proto": "protocol",
+    "ver": "version",
+    "uri": "uri",
+    "url": "url",
+    "svc": "service",
+    "loc": "location",
+    "prov": "province",
+    "cty": "city",
+    "cntry": "country",
+    "grp": "group",
+    "usr": "user",
+    "pwd": "password",
+    "tgt": "target",
+    "ref": "reference",
+    "orig": "origin",
+    "sub": "sub",
+    "pub": "public",
+    "priv": "private",
+    "ext": "external",
+    "int": "internal",
+    "nat": "network_address_translation",
+    "dns": "domain_name_system",
+    "dhcp": "dynamic_host_configuration_protocol",
+    "http": "hypertext_transfer_protocol",
+    "https": "hypertext_transfer_protocol_secure",
+    "ftp": "file_transfer_protocol",
+    "smtp": "simple_mail_transfer_protocol",
+    "tcp": "transmission_control_protocol",
+    "udp": "user_datagram_protocol",
+    "icmp": "internet_control_message_protocol",
+    "arp": "address_resolution_protocol",
+    "vlan": "virtual_local_area_network",
+    "vpn": "virtual_private_network",
+    "os": "operating_system",
+    "hw": "hardware",
+    "sw": "software",
+    "fw": "firewall",
+}
 
 # 缓存文件路径
 _STANDARD_FIELDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
 _CACHE_EMBEDDINGS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_embeddings.npy"
 _CACHE_RECORDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_records.json"
 _CACHE_META_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_cache_meta.json"
+
+
+def _expand_field_name(field_name: str) -> str:
+    """将缩写字段名展开为全英文描述，例如 destAddress → destination address"""
+    # camelCase/pascalCase → snake_case 拆分（与 _normalize_field_name 一致）
+    name = field_name.replace("-", "_")
+    name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
+    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    tokens = name.split("_")
+    expanded = [ABBR_EXPANSIONS.get(t.lower(), t) for t in tokens]
+    return " ".join(expanded)
+
+
+def _get_field_name_tokens(field_name: str) -> set[str]:
+    """将字段名拆分为展开后的 token 集合，用于候选重排序中的 token 重叠计算。"""
+    return set(_expand_field_name(field_name).split())
 
 
 def _load_standard_fields() -> list[dict]:
@@ -89,7 +178,8 @@ def _load_standard_fields() -> list[dict]:
             description = description[:MAX_DESCRIPTION_LENGTH] + "..."
         obj = entry.get("对象", "")
         data_type = entry.get("属性类型", "")
-        entry["_composite_text"] = f"{system_name} ({field_name})：{description}，对象：{obj}，数据类型：{data_type}"
+        english_expanded = _expand_field_name(field_name)
+        entry["_composite_text"] = f"{english_expanded} || {system_name} | {field_name} | {obj} | {data_type} | {description}"
         records.append(entry)
 
     return records
@@ -426,7 +516,7 @@ def _strip_field_prefix(name: str) -> list[str]:
     return variants
 
 
-def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str:
+def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str:
     """
     对一批原始字段名执行语义检索，返回紧凑格式的候选列表。
 
@@ -534,8 +624,8 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
             partitioned = np.argpartition(sims, -top_k)[-top_k:]
             top_indices = partitioned[np.argsort(sims[partitioned])[::-1]]
 
-        # 收集候选（相似度 >= 阈值）
-        candidates: list[str] = []
+        # 收集候选（相似度 >= 阈值）— 暂存为 (formatted_str, field_name, sim_score) 元组
+        candidates_tmp: list[tuple[str, str, float]] = []
         seen_field_keys: set[str] = set()  # 防止精确匹配和语义检索重复
 
         # Layer 1: 精确名称匹配兜底（置顶）— 先试原始字段名
@@ -543,10 +633,11 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
         exact_idx = exact_index.get(normalized_key)
         if exact_idx is not None:
             rec = records[exact_idx]
-            candidates.append(
-                f"{rec.get('系统属性名称', '')}(1.00, {rec.get('字段名称', '')})"
+            rfn = rec.get('字段名称', '')
+            candidates_tmp.append(
+                (f"{rec.get('系统属性名称', '')}(1.00, {rfn})", rfn, 1.0)
             )
-            seen_field_keys.add(rec.get('字段名称', ''))
+            seen_field_keys.add(rfn)
 
         # Layer 1.5: 去前缀变体的精确名称匹配兜底
         if field_name in stripped_fields_map:
@@ -557,8 +648,8 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
                     v_rec = records[v_exact_idx]
                     v_key_name = v_rec.get('字段名称', '')
                     if v_key_name not in seen_field_keys:
-                        candidates.append(
-                            f"{v_rec.get('系统属性名称', '')}(1.00, {v_key_name}, by_stripped={variant})"
+                        candidates_tmp.append(
+                            (f"{v_rec.get('系统属性名称', '')}(1.00, {v_key_name}, by_stripped={variant})", v_key_name, 1.0)
                         )
                         seen_field_keys.add(v_key_name)
 
@@ -572,8 +663,8 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
             sim = float(sims[idx])
             if sim < SIMILARITY_THRESHOLD:
                 continue
-            candidates.append(
-                f"{rec.get('系统属性名称', '')}({sim:.2f}, {rec_field_name})"
+            candidates_tmp.append(
+                (f"{rec.get('系统属性名称', '')}({sim:.2f}, {rec_field_name})", rec_field_name, sim)
             )
             seen_field_keys.add(rec_field_name)
 
@@ -597,10 +688,21 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
                     if v_sim < SIMILARITY_THRESHOLD:
                         continue
                     variant_name = stripped_variants[v_idx]
-                    candidates.append(
-                        f"{v_rec.get('系统属性名称', '')}({v_sim:.2f}, {v_rfn}, by_stripped={variant_name})"
+                    candidates_tmp.append(
+                        (f"{v_rec.get('系统属性名称', '')}({v_sim:.2f}, {v_rfn}, by_stripped={variant_name})", v_rfn, v_sim)
                     )
                     seen_field_keys.add(v_rfn)
+
+        # Token 重叠重排序：精确匹配优先，其次按展开 token 重叠数降序，再按相似度降序
+        source_tokens = _get_field_name_tokens(field_name)
+        reranked_rows: list[tuple[int, int, float, str]] = []
+        for fmt_str, cand_field, sim in candidates_tmp:
+            cand_tokens = _get_field_name_tokens(cand_field)
+            overlap = len(source_tokens & cand_tokens)
+            tier = 0 if sim >= 0.999 else 1
+            reranked_rows.append((tier, -overlap, -sim, fmt_str))
+        reranked_rows.sort()
+        candidates = [row[3] for row in reranked_rows]
 
         if candidates:
             lines.append(f"{field_name} → {' | '.join(candidates)}")
@@ -623,7 +725,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 3) -> str
     return raw_output
 
 
-def _debug_lookup(keyword: str, top_k: int = 3) -> str:
+def _debug_lookup(keyword: str, top_k: int = 6) -> str:
     """
     运维调试入口：根据关键词在标准字段表中做语义检索，返回人类可读结果。
 

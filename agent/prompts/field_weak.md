@@ -36,7 +36,6 @@
   <semantic_normalization>
     <rule key="src, source, from" value="源地址类（优先匹配 http协议 对象）" />
     <rule key="dst, dest, target" value="目的地址类" />
-    <rule key="time, timestamp, date" value="时间类" />
     <rule key="name" value="名称类（按对象匹配）" />
     <rule key="type, category" value="类型类（按对象匹配）" />
     <rule key="id, uuid, code" value="标识类" />
