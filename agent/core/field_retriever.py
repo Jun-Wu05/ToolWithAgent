@@ -22,12 +22,19 @@ from typing import Optional
 
 import numpy as np
 
+try:
+    from rank_bm25 import BM25Okapi
+    _BM25_AVAILABLE = True
+except ImportError:
+    _BM25_AVAILABLE = False
+    BM25Okapi = None  # type: ignore
+
 from agent.shared.logger import get_logger
 
 logger = get_logger("field_retriever")
 
 # 缓存 schema 版本：标准字段表格式变更时递增，触发自动刷新
-CACHE_SCHEMA_VERSION = "1"
+CACHE_SCHEMA_VERSION = "2"
 
 # Embedding 模型配置
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
@@ -122,6 +129,135 @@ _CACHE_EMBEDDINGS_PATH = Path(__file__).parent.parent.parent / "config" / "标�
 _CACHE_RECORDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_records.json"
 _CACHE_META_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_cache_meta.json"
 
+# BM25 混合检索状态（懒加载）
+_BM25_INDEX = None  # type: ignore[valid-type]
+_BM25_RECORDS: Optional[list[dict]] = None
+_BM25_INIT_ATTEMPTED: bool = False
+
+
+def _init_bm25_index() -> bool:
+    """
+    懒加载 BM25 关键词检索索引。
+
+    基于标准字段记录的「字段名称 + 系统属性名称」（展开缩写后）构建。
+    只在 rank_bm25 可用且缓存已加载时初始化。
+
+    Returns:
+        bool: BM25 索引是否就绪
+    """
+    global _BM25_INDEX, _BM25_RECORDS, _BM25_INIT_ATTEMPTED
+    if _BM25_INDEX is not None:
+        return True
+    if _BM25_INIT_ATTEMPTED:
+        return False
+    _BM25_INIT_ATTEMPTED = True
+
+    if not _BM25_AVAILABLE:
+        logger.info("[BM25] rank_bm25 未安装，降级为纯向量检索")
+        return False
+
+    # 加载缓存确保 records 可用
+    _emb, records = _load_cache()
+    if records is None:
+        logger.info("[BM25] 缓存未就绪，无法构建 BM25 索引")
+        return False
+
+    # 构建语料：每条记录的展开 token 序列
+    corpus: list[list[str]] = []
+    for rec in records:
+        field_name = rec.get('字段名称', '')
+        sys_name = rec.get('系统属性名称', '')
+        entry_text = f"{_expand_field_name(field_name)} {_expand_field_name(sys_name)}"
+        corpus.append(entry_text.split())
+
+    try:
+        _BM25_INDEX = BM25Okapi(corpus)
+        _BM25_RECORDS = records
+        logger.info(f"[BM25] 索引构建成功：{len(records)} 条文档")
+        return True
+    except Exception as e:
+        logger.warning(f"[BM25] 索引构建失败: {e}")
+        return False
+
+
+def _compute_bm25_scores(query_fields: list[str], bm25_index) -> np.ndarray:
+    """
+    对一批查询字段计算 BM25 分数矩阵。
+
+    Args:
+        query_fields: 查询字段名列表
+        bm25_index: BM25Okapi 索引实例
+
+    Returns:
+        (N_fields, N_docs) 的 float64 矩阵，每行为该查询对全部文档的 BM25 分数
+    """
+    n_fields = len(query_fields)
+    n_docs = bm25_index.corpus_size
+    scores = np.zeros((n_fields, n_docs), dtype=np.float64)
+    for i, field in enumerate(query_fields):
+        query_tokens = _expand_field_name(field).split()
+        doc_scores = bm25_index.get_scores(query_tokens)
+        scores[i, :] = np.array(doc_scores, dtype=np.float64)
+    return scores
+
+
+def _generate_field_tags(field_name: str) -> list[str]:
+    """
+    从字段名自动推断元数据标签（纯规则，零 LLM 调用）。
+
+    标签用于嵌入复合文本增强，使拥有相同标签的字段在向量空间中互相靠近。
+
+    Args:
+        field_name: 字段名称（英文，如 destAddress, src_ip_list）
+
+    Returns:
+        排序后的语义标签列表
+    """
+    tags: set[str] = set()
+    name_lower = _normalize_field_name(field_name)
+
+    # --- 方向标签 ---
+    if any(x in name_lower for x in ("src", "source")):
+        tags.update(("source", "network"))
+    if any(x in name_lower for x in ("dst", "dest", "destination")):
+        tags.update(("destination", "network"))
+
+    # --- 语义类型标签 ---
+    if any(x in name_lower for x in ("address", "addr", "ip", "sip", "dip")):
+        tags.add("address")
+    if "port" in name_lower:
+        tags.add("port")
+    if "mac" in name_lower:
+        tags.add("mac_address")
+    if any(x in name_lower for x in ("time", "timestamp", "date", "duration", "ttl")):
+        tags.add("time")
+    if any(x in name_lower for x in ("name", "label", "title")):
+        tags.add("name")
+    if any(x in name_lower for x in ("id", "identifier", "guid", "uuid", "xid")):
+        tags.add("identifier")
+    if any(x in name_lower for x in ("type", "category", "class", "code", "opcode", "op")):
+        tags.add("type")
+    if any(x in name_lower for x in ("count", "number", "size", "len", "length", "num",
+                                       "total", "cnt")):
+        tags.add("numeric")
+    if any(x in name_lower for x in ("status", "state", "flag")):
+        tags.add("status")
+    if any(x in name_lower for x in ("version", "ver")):
+        tags.add("version")
+    if any(x in name_lower for x in ("hash", "md5", "sha", "checksum")):
+        tags.add("hash")
+    if any(x in name_lower for x in ("path", "directory", "dir", "folder")):
+        tags.add("path")
+    if any(x in name_lower for x in ("protocol", "proto")):
+        tags.add("protocol")
+    if any(x in name_lower for x in ("dns", "dhcp", "http", "ftp", "smtp", "tcp", "udp",
+                                       "icmp", "arp", "ssh", "tls", "ssl")):
+        tags.add("protocol")
+    if any(x in name_lower for x in ("list", "items", "entries")):
+        tags.add("collection")
+
+    return sorted(tags)
+
 
 def _expand_field_name(field_name: str) -> str:
     """将缩写字段名展开为全英文描述，例如 destAddress → destination address"""
@@ -179,7 +315,10 @@ def _load_standard_fields() -> list[dict]:
         obj = entry.get("对象", "")
         data_type = entry.get("属性类型", "")
         english_expanded = _expand_field_name(field_name)
-        entry["_composite_text"] = f"{english_expanded} || {system_name} | {field_name} | {obj} | {data_type} | {description}"
+        field_tags = _generate_field_tags(field_name)
+        tag_text = f"[TAGS:{' '.join(field_tags)}]" if field_tags else ""
+        entry["_composite_text"] = f"{english_expanded} {tag_text} || {system_name} | {field_name} | {obj} | {data_type} | {description}"
+        entry["_tags"] = field_tags
         records.append(entry)
 
     return records
@@ -494,6 +633,26 @@ def _load_cache() -> tuple[Optional[np.ndarray], Optional[list[dict]]]:
         return None, None
 
 
+def _build_query_text_for_embedding(field_name: str) -> str:
+    """
+    为 Embedding API 查询构建带标签的增强输入文本。
+
+    使查询端与索引端使用相同的标签格式，
+    BGE-m3 可将拥有相同标签的查询与候选字段在向量空间中拉近。
+
+    Args:
+        field_name: 原始字段名（如 destAddress, src_ip_list）
+
+    Returns:
+        带标签的文本，供 Embedding API 编码
+    """
+    tags = _generate_field_tags(field_name)
+    expanded = _expand_field_name(field_name)
+    if tags:
+        return f"{expanded} [TAGS:{' '.join(tags)}]"
+    return expanded
+
+
 def _strip_field_prefix(name: str) -> list[str]:
     """
     对嵌套字段名（如 data.severity, original_log_1.origin.sip）生成去前缀变体。
@@ -550,8 +709,9 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
     # 批量嵌入用户字段名 — 按 EMBEDDING_BATCH_SIZE 分批，防止 413 Request Entity Too Large
     all_vectors: list[np.ndarray] = []
     for batch_start in range(0, len(raw_field_names), EMBEDDING_BATCH_SIZE):
-        batch = raw_field_names[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
-        vectors = _call_embedding_api(batch)
+        batch_raw = raw_field_names[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
+        batch_tagged = [_build_query_text_for_embedding(n) for n in batch_raw]
+        vectors = _call_embedding_api(batch_tagged)
         if vectors is None:
             raise RuntimeError(
                 f"[EMBEDDING] 语义检索失败（第 {batch_start // EMBEDDING_BATCH_SIZE + 1} 批），"
@@ -572,6 +732,27 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
     # query_vecs: (N_fields, D), embeddings: (N_records, D)
     # 结果: (N_fields, N_records)
     similarity_matrix = np.dot(query_vecs, embeddings.T)
+
+    # BM25 混合检索：在纯向量相似度基础上融合关键词匹配分数
+    # 权重分配：向量 70%，BM25 30%（当 BM25 索引就绪时）
+    bm25_weight: float = 0.3
+    _bm25_merged = False
+    if _init_bm25_index() and _BM25_INDEX is not None:
+        try:
+            bm25_scores = _compute_bm25_scores(raw_field_names, _BM25_INDEX)
+            # 对 BM25 分数做 min-max 归一化至 [0, 1]
+            bm25_min = bm25_scores.min(axis=1, keepdims=True)
+            bm25_max = bm25_scores.max(axis=1, keepdims=True)
+            bm25_range = np.maximum(bm25_max - bm25_min, 1e-10)
+            bm25_norm = (bm25_scores - bm25_min) / bm25_range
+            # 融合：向量相似度 * (1-w) + BM25 归一化分数 * w
+            similarity_matrix = similarity_matrix * (1.0 - bm25_weight) + bm25_norm * bm25_weight
+            _bm25_merged = True
+            logger.info(f"[BM25] 混合检索已融合：bm25_weight={bm25_weight}，{len(raw_field_names)} 个查询字段")
+        except Exception as e:
+            logger.warning(f"[BM25] 混合融合失败，降级为纯向量检索: {e}")
+    else:
+        logger.info("[BM25] 跳过混合检索（索引未就绪）")
 
     # 构建精确名称匹配索引（用于语义检索兜底前置）
     exact_index = _build_field_name_index(records)
@@ -594,8 +775,9 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         try:
             stripped_vecs_list: list[np.ndarray] = []
             for bs in range(0, len(stripped_variants), EMBEDDING_BATCH_SIZE):
-                batch = stripped_variants[bs:bs + EMBEDDING_BATCH_SIZE]
-                vecs = _call_embedding_api(batch)
+                batch_raw = stripped_variants[bs:bs + EMBEDDING_BATCH_SIZE]
+                batch_tagged = [_build_query_text_for_embedding(v) for v in batch_raw]
+                vecs = _call_embedding_api(batch_tagged)
                 if vecs is None:
                     raise RuntimeError(f"[EMBEDDING] 去前缀变体嵌入失败（第 {bs // EMBEDDING_BATCH_SIZE + 1} 批）")
                 stripped_vecs_list.append(vecs)

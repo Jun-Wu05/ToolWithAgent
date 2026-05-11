@@ -388,9 +388,9 @@ HOME目录路径	基础属性	home_directory	字符	系统/home下的目录		文
 源端口列表	基础属性	src_port_list	整型			流量
 域名	业务属性	domain_name	字符			流量,主机,域,smb协议,dns协议,http协议,域名资产
 协议	业务属性	protocol	字符			流量,服务端,登录,邮件,数据库,情报类型
-源地址	src_address	IP	业务属性			流量,登录
+源地址	业务属性	src_address	IP			流量,登录
 目的端口	基础属性	dst_port	整型	流量去往的端口		流量,登录
-目的地址	dst_address	IP	业务属性			流量,登录
+目的地址	业务属性	dst_address	IP			流量,登录
 源端口	基础属性	src_port	整型	流量来源的端口		流量,登录
 漏洞ID列表	基础属性	vul_id_list	字符	漏洞ID列表		漏洞
 漏洞威胁分	基础属性	vul_scores	字符	漏洞威胁分		漏洞
