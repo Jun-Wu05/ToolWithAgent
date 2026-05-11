@@ -155,6 +155,10 @@ def parse_json_threat_result(content: str) -> list:
     """
     解析威胁类型映射结果
     只提取3列格式：mappingType, orgValue, mappingValue
+
+    兼容两种输出格式：
+    - output_schema 模式: {"items": [...]}
+    - 纯 JSON 数组模式: [...]
     
     Args:
         content: Agent返回的内容
@@ -164,7 +168,16 @@ def parse_json_threat_result(content: str) -> list:
     """
     # 威胁类型只有3列
     VALID_COLUMNS = {"mappingType", "orgValue", "mappingValue"}
-    
+
+    def _unwrap_items(parsed) -> list:
+        """提取 items 列表：兼容 output_schema 的 {"items": [...]} 和纯数组 [...]"""
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict) and "items" in parsed and isinstance(parsed["items"], list):
+            logger.info("[THREAT_PARSER] 检测到 output_schema 格式 {\"items\": [...]}，自动解包")
+            return parsed["items"]
+        return []
+
     def validate_item(item: dict) -> bool:
         """验证单条记录是否符合格式要求"""
         if not isinstance(item, dict):
@@ -187,8 +200,9 @@ def parse_json_threat_result(content: str) -> list:
     content_stripped = content.strip()
     try:
         result = json.loads(content_stripped)
-        if isinstance(result, list):
-            valid_result = [item for item in result if validate_item(item)]
+        items = _unwrap_items(result)
+        if items:
+            valid_result = [item for item in items if validate_item(item)]
             if valid_result:
                 logger.info(f"[THREAT_PARSER] 方法1解析成功，获得 {len(valid_result)} 条有效记录")
                 return valid_result
@@ -205,14 +219,35 @@ def parse_json_threat_result(content: str) -> list:
         logger.info(f"[THREAT_PARSER] 方法2找到JSON候选，长度: {len(json_candidate)}")
         try:
             result = json.loads(json_candidate)
-            if isinstance(result, list) and len(result) > 0:
-                valid_result = [item for item in result if validate_item(item)]
+            items = _unwrap_items(result)
+            if items:
+                valid_result = [item for item in items if validate_item(item)]
                 if valid_result:
                     logger.info(f"[THREAT_PARSER] 方法2解析成功，获得 {len(valid_result)} 条有效记录")
                     return valid_result
         except json.JSONDecodeError as e:
             logger.warning(f"[THREAT_PARSER] 方法2 JSON解析失败: {e}")
             pass
+    
+    # 方法2.5：如果方法2解析失败，但原始内容包含 {"items": [...]}，尝试先解包 items
+    # 这处理 output_schema 产生的 {"items": [...]} 被含在额外文本中的场景
+    if first_bracket == -1:
+        # 用正则直接提取 items 数组内容
+        items_pattern = r'"items"\s*:\s*\[([\s\S]*?)\]'
+        items_match = re.search(items_pattern, content_stripped)
+        if items_match:
+            items_candidate = "[" + items_match.group(1) + "]"
+            logger.info(f"[THREAT_PARSER] 方法2.5 尝试解析 items 子数组，长度: {len(items_candidate)}")
+            try:
+                items_result = json.loads(items_candidate)
+                if isinstance(items_result, list) and len(items_result) > 0:
+                    valid_result = [item for item in items_result if validate_item(item)]
+                    if valid_result:
+                        logger.info(f"[THREAT_PARSER] 方法2.5 解析成功，获得 {len(valid_result)} 条有效记录")
+                        return valid_result
+            except json.JSONDecodeError as e:
+                logger.warning(f"[THREAT_PARSER] 方法2.5 JSON解析失败: {e}")
+                pass
     
     # 方法3：尝试提取代码块中的JSON
     code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
@@ -221,8 +256,9 @@ def parse_json_threat_result(content: str) -> list:
     for match in matches:
         try:
             result = json.loads(match.strip())
-            if isinstance(result, list):
-                valid_result = [item for item in result if validate_item(item)]
+            items = _unwrap_items(result)
+            if items:
+                valid_result = [item for item in items if validate_item(item)]
                 if valid_result:
                     logger.info(f"[THREAT_PARSER] 方法3解析成功，获得 {len(valid_result)} 条有效记录")
                     return valid_result
