@@ -109,7 +109,6 @@ def _get_threat_instructions() -> str:
 
 注意：
 - 必须严格按照上述规则输出
-- 只输出Markdown表格，不输出其他内容
 """
 
 
@@ -158,7 +157,7 @@ def create_threat_agent() -> Agent:
         ],
         output_schema=ThreatMappingList,  # v3: API 层强制输出 JSON 且符合 schema，杜绝非规范格式
         tool_call_limit=1,                # v2: 仅 1 个工具，1 次足够
-        markdown=True,
+        markdown=False,                   # 配合 output_schema JSON 输出，禁止 Markdown 包装
         debug_mode=False,
     )
 

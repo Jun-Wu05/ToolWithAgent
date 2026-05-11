@@ -736,7 +736,6 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
     # BM25 混合检索：在纯向量相似度基础上融合关键词匹配分数
     # 权重分配：向量 70%，BM25 30%（当 BM25 索引就绪时）
     bm25_weight: float = 0.3
-    _bm25_merged = False
     if _init_bm25_index() and _BM25_INDEX is not None:
         try:
             bm25_scores = _compute_bm25_scores(raw_field_names, _BM25_INDEX)
@@ -747,7 +746,6 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
             bm25_norm = (bm25_scores - bm25_min) / bm25_range
             # 融合：向量相似度 * (1-w) + BM25 归一化分数 * w
             similarity_matrix = similarity_matrix * (1.0 - bm25_weight) + bm25_norm * bm25_weight
-            _bm25_merged = True
             logger.info(f"[BM25] 混合检索已融合：bm25_weight={bm25_weight}，{len(raw_field_names)} 个查询字段")
         except Exception as e:
             logger.warning(f"[BM25] 混合融合失败，降级为纯向量检索: {e}")
