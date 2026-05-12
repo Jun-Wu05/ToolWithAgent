@@ -321,10 +321,18 @@ async def handle_file_upload(user_session: dict, element):
             # 枚举填充由 handle_user_message 路由统一触发，此处不再自动执行
 
             field_count = result["field_count"]
+            original_log = result.get("original_log")
+            log_line_count = len(original_log) if original_log and isinstance(original_log, list) else 0
+
+            stats_lines = [f"**字段数量**：{field_count} 个"]
+            if log_line_count > 0:
+                stats_lines.append(f"**日志行数**：{log_line_count} 行")
+            stats_text = "\n".join(f"📊 {line}" for line in stats_lines)
+
             await cl.Message(
                 content=f"""✅ **文件解码成功！**
 
-📊 **字段数量**：{field_count} 个
+{stats_text}
 
 💡 如需处理其他文件，请输入 **"清空数据"** 或 **"切换文件"** 快速重置
 现在可以进行字段映射、威胁类型、枚举提取等操作。"""
