@@ -190,40 +190,12 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
         ).send()
         return
 
-    # 从用户消息中提取目标字段名
-    field_name = None
+    # 字段名由 LLM 从用户输入中推断，不再使用硬编码正则
+    # 如果 decoded_fields 有值，作为提示传给 LLM；否则传空
+    decoded_fields = user_session.get("decoded_fields")
+    fields_hint = ", ".join(decoded_fields) if decoded_fields else "(请从日志样本中分析)"
 
-    # 模式匹配
-    patterns = [
-        r'提取"?(.+?)"?[字字段]*(?:的|的?)枚举',
-        r'列举"?(.+?)"?的枚举',
-        r'枚举"?(.+?)"?',
-        r'提取"?(.+?)"?的值',
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, user_text.lower())
-        if match:
-            field_name = match.group(1).strip()
-            break
-
-    # 如果没找到字段名，尝试使用 decoded_fields 中的第一个字段
-    if not field_name:
-        decoded_fields = user_session.get("decoded_fields")
-        if decoded_fields and len(decoded_fields) > 0:
-            field_name = decoded_fields[0]
-            logger.info(f"[ENUM_EXTRACT] 未识别字段名，使用第一个字段: {field_name}")
-        else:
-            await cl.Message(
-                content="""❌ **无法确定目标字段**
-
-请在消息中明确指定要提取枚举的字段，例如：
-- "提取 status 字段的枚举值"
-- "列举 action 的枚举" """
-            ).send()
-            return
-
-    logger.info(f"[ENUM_EXTRACT] 目标字段: {field_name}")
+    logger.info(f"[ENUM_EXTRACT] 字段名由 LLM 从用户输入推断，字段提示: {fields_hint}")
 
     # 发送 loading 消息
     loading_msg = cl.Message(content="⏳ **正在提取枚举值...**\n\n💭 分析日志格式并生成正则表达式...")
@@ -235,16 +207,17 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
         sampled_logs = sample_logs(logs_str, sample_size=20)
         logger.info(f"[ENUM_EXTRACT] 采样日志行数: {sampled_logs.count(chr(10)) + 1}")
 
-        # 2. 构建 LLM 输入
+        # 2. 构建 LLM 输入（字段名由 LLM 从 user_text 中推断）
         import asyncio
         llm_input = f"""{ENUM_EXTRACT_PROMPT}
 
-目标字段名：{field_name}
+用户输入：{user_text}
+可用字段提示：{fields_hint}
 
 采样日志（20行）：
 {sampled_logs}
 
-请分析以上日志格式，为 "{field_name}" 字段生成提取正则表达式。只输出 JSON 格式结果，不要输出其他内容。"""
+请先从用户输入中提取目标字段名，然后分析日志格式，为该字段生成提取正则表达式。只输出 JSON 格式结果，不要输出其他内容。"""
 
         # 3. 调用 LLM 生成正则表达式
         result = await asyncio.to_thread(team.run, llm_input)
@@ -252,20 +225,32 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
         # 删除 loading 消息
         await loading_msg.remove()
 
-        # 4. 解析 LLM 输出
+        # 4. 解析 LLM 输出（field_name 也从 LLM 响应中提取）
         result_content = result.content if hasattr(result, 'content') else str(result)
         logger.info(f"[ENUM_EXTRACT] LLM输出: {result_content[:500]}...")
 
         # 尝试解析 JSON
         regex_result = None
+        field_name_from_llm = None
         try:
             json_match = re.search(r'\{[^}]+\}', result_content, re.DOTALL)
             if json_match:
                 regex_data = json.loads(json_match.group())
                 regex_result = regex_data.get("regex", "")
-                logger.info(f"[ENUM_EXTRACT] 提取到正则: {regex_result}")
+                field_name_from_llm = regex_data.get("field", "")
+                logger.info(f"[ENUM_EXTRACT] LLM 推断字段: {field_name_from_llm}, 正则: {regex_result}")
         except json.JSONDecodeError:
             logger.warning(f"[ENUM_EXTRACT] JSON解析失败，尝试直接使用输出")
+
+        # 使用 LLM 推断的字段名，回退方案
+        if field_name_from_llm:
+            field_name = field_name_from_llm
+        elif decoded_fields and len(decoded_fields) > 0:
+            field_name = decoded_fields[0]
+            logger.info(f"[ENUM_EXTRACT] LLM未返回字段名，使用第一个字段: {field_name}")
+        else:
+            await cl.Message(content='❌ **无法确定目标字段**，请更明确地指定字段名，如"提取 alter_name 的枚举值"。').send()
+            return
 
         # 如果没有解析到正则，使用默认正则
         if not regex_result:
