@@ -250,9 +250,6 @@ async def handle_file_upload(user_session: dict, element):
                     await cl.Message(content="❌ Excel 文件中未找到有效的映射数据").send()
                     return
 
-                # 检查是否有待处理的 Base64 数据（同时上传场景）
-                pending_base64 = user_session.get("pending_base64")
-
                 # 保存到会话
                 user_session["enum_excel_path"] = excel_path
                 user_session["enum_preview"] = enum_preview
@@ -260,19 +257,7 @@ async def handle_file_upload(user_session: dict, element):
                 # 获取目标字段列表
                 target_fields = list(set(item["目标字段"] for item in enum_preview))
 
-                # 如果有待处理的 Base64，直接执行一站式填充
-                if pending_base64:
-                    logger.info(f"[FILE_UPLOAD] 检测到同时上传 Excel + Base64，执行一站式填充")
-
-                    # 清除待处理的 Base64
-                    user_session["pending_base64"] = None
-
-                    # 设置枚举填充模式并执行
-                    user_session["enum_fill_mode"] = True
-                    await execute_enum_fill(user_session, pending_base64)
-                    return
-
-                # 没有同时上传 Base64，按现有逻辑展示预览
+                # 展示预览，枚举填充交由 handle_user_message 的路由触发
                 preview_count = len(enum_preview)
                 await cl.Message(
                     content=f"""📊 **枚举映射预览**
@@ -324,24 +309,16 @@ async def handle_file_upload(user_session: dict, element):
             # 构建 simplified_data（委托 file_handler）
             user_session["simplified_data"] = build_simplified_data(result)
 
+            # 缓存原始 Base64 内容，供枚举填充等后续操作使用
+            user_session["raw_base64"] = file_content
+
             # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
             enum_excel_path = user_session.get("enum_excel_path")
             enum_preview_ = user_session.get("enum_preview")
 
-            logger.info(f"[FILE_UPLOAD] Base64解码成功，检查枚举状态: enum_excel_path={enum_excel_path is not None}")
+            logger.info(f"[FILE_UPLOAD] Base64解码成功，raw_base64已缓存，enum_excel_path={enum_excel_path is not None}")
 
-            if enum_excel_path and enum_preview_:
-                logger.info(f"[FILE_UPLOAD] 检测到已有枚举 Excel + 新上传 Base64，执行一站式填充")
-
-                # 保存到 pending_base64 以防枚举填充失败时可以恢复
-                user_session["pending_base64"] = file_content
-
-                # 设置枚举填充模式
-                user_session["enum_fill_mode"] = True
-
-                # 执行填充
-                await execute_enum_fill(user_session, file_content)
-                return
+            # 枚举填充由 handle_user_message 路由统一触发，此处不再自动执行
 
             field_count = result["field_count"]
             await cl.Message(
@@ -408,10 +385,19 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     if await handle_enum_fill_flow(user_session, user_text):
         return
 
-    # 2.5 上下文感知：已上传枚举 Excel 时，"枚举"消息路由到填充模式
+    # 2.5 枚举填充自动触发：同时存在 raw_base64 + enum_excel_path 则直接执行填充
     if user_session.get("enum_excel_path") and any(kw in user_lower for kw in ENUM_KEYWORDS):
+        raw_base64 = user_session.get("raw_base64")
+
+        if raw_base64:
+            user_session["enum_fill_mode"] = True
+            logger.info("[ROUTE] raw_base64 + enum_excel_path 同时存在，自动触发枚举填充")
+            await execute_enum_fill(user_session, raw_base64)
+            return
+
+        # 有 Excel 但无 Base64：提示上传
         user_session["enum_fill_mode"] = True
-        logger.info("[ROUTE] 检测到已有枚举Excel，自动激活枚举填充模式")
+        logger.info("[ROUTE] 检测到已有枚举Excel，激活填充模式，等待Base64上传")
         await cl.Message(
             content=f"""📋 **枚举填充模式已激活**
 
