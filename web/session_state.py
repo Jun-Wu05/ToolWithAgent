@@ -80,6 +80,9 @@ class SessionState:
     enum_base64: Optional[str] = None
     """枚举待处理的 Base64 内容"""
 
+    raw_base64: Optional[str] = None
+    """原始 Base64 内容缓存，供枚举填充等后续操作直接使用（替代 pending_base64 的旧模式）"""
+
     enum_excel_path: Optional[str] = None
     """枚举映射表 Excel 文件路径"""
 
@@ -114,6 +117,7 @@ class SessionState:
         """重置枚举填充模式相关状态"""
         self.enum_fill_mode = False
         self.enum_base64 = None
+        self.raw_base64 = None
         self.enum_excel_path = None
         self.enum_preview = None
 
