@@ -327,8 +327,7 @@ async def handle_file_upload(user_session: dict, element):
 📊 **字段数量**：{field_count} 个
 
 💡 如需处理其他文件，请输入 **"清空数据"** 或 **"切换文件"** 快速重置
-现在可以进行字段映射、威胁类型等操作。
-正在进行标准字段映射处理。。。"""
+现在可以进行字段映射、威胁类型、枚举提取等操作。"""
             ).send()
         else:
             await cl.Message(content=f"❌ 解码失败：{result.get('error_message', '未知错误')}").send()
