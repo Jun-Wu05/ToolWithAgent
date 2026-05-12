@@ -408,6 +408,19 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     if await handle_enum_fill_flow(user_session, user_text):
         return
 
+    # 2.5 上下文感知：已上传枚举 Excel 时，"枚举"消息路由到填充模式
+    if user_session.get("enum_excel_path") and any(kw in user_lower for kw in ENUM_KEYWORDS):
+        user_session["enum_fill_mode"] = True
+        logger.info("[ROUTE] 检测到已有枚举Excel，自动激活枚举填充模式")
+        await cl.Message(
+            content=f"""📋 **枚举填充模式已激活**
+
+已选择映射表：{user_session.get('enum_excel_path')}
+
+请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
+        ).send()
+        return
+
     # 3. 枚举提取分流（精确匹配优先：含"提取"/"列举"/"列出"等词）
     if is_enum_extract:
         await handle_enum_extract_flow(user_session, team, user_text)
