@@ -408,7 +408,12 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     if await handle_enum_fill_flow(user_session, user_text):
         return
 
-    # 3. 枚举处理分流（当检测到枚举关键词时）
+    # 3. 枚举提取分流（精确匹配优先：含"提取"/"列举"/"列出"等词）
+    if is_enum_extract:
+        await handle_enum_extract_flow(user_session, team, user_text)
+        return
+
+    # 4. 枚举处理分流（宽泛匹配：仅含"枚举"但无提取意图）
     if is_enum:
         await cl.Message(
             content="""📋 **枚举字段处理**
@@ -423,11 +428,6 @@ Excel 格式说明：
 
 上传后将展示映射预览，确认后可执行填充。"""
         ).send()
-        return
-
-    # 4. 枚举提取分流（当检测到枚举提取关键词时）
-    if is_enum_extract:
-        await handle_enum_extract_flow(user_session, team, user_text)
         return
 
     # 5. 构建 LLM 输入（按意图隔离上下文）

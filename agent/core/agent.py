@@ -171,6 +171,19 @@ def simple_decode(b64_text: str) -> dict:
         except json.JSONDecodeError:
             decoded_json = {"raw_text": decoded_text[:1000]}
 
+        # 纯文本（非 JSON）兜底：将每行内容保存为 original_log，
+        # 让枚举提取等流程可以从上传的 TXT/日志文件中读取原始数据
+        if original_log is None and decoded_text and isinstance(decoded_text, str):
+            import re as _re_log
+            # 跳过仅含空白/分隔线的空行
+            raw_lines = [
+                line for line in decoded_text.splitlines()
+                if line.strip() and not _re_log.match(r'^[=\-_#*]{3,}$', line.strip())
+            ]
+            if raw_lines:
+                original_log = raw_lines[:5000]  # 最多保留 5000 行，避免内存过大
+                logger.info(f"[DECODE] 纯文本场景：保存 {len(original_log)} 行为 original_log")
+
         return {
             "status": "success",
             "decoded_json": decoded_json,
