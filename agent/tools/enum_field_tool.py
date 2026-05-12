@@ -149,12 +149,12 @@ def read_enum_mappings_from_excel(excel_path: str) -> Dict[str, List[Dict]]:
                     continue
                 
                 # 读取映射类型，默认 EQUAL
-                mapping_type = str(row[0]).upper() if row[0] else "EQUAL"
+                mapping_type = str(row[0]).upper() if row[0] is not None else "EQUAL"
                 if mapping_type not in valid_types:
                     mapping_type = "EQUAL"
                 
-                org_value = str(row[1]).strip() if row[1] else ""
-                mapping_value = str(row[2]).strip() if row[2] else ""
+                org_value = str(row[1]).strip() if row[1] is not None else ""
+                mapping_value = str(row[2]).strip() if row[2] is not None else ""
                 
                 if not org_value:
                     continue
