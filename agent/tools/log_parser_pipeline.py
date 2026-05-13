@@ -181,7 +181,7 @@ def _do_identify_log_format(logs_str: str) -> str:
             )
 
         prompt = _LOG_FORMAT_IDENTIFY_PROMPT.format(sampled_logs=sampled)
-        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=500, timeout=30)
+        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=500, timeout=90)
 
         parsed = _try_parse_json(response)
         if parsed is None:
@@ -528,7 +528,16 @@ def _aggregate_by_log_type(
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
-            continue
+            # 支持"日志头+JSON"格式：提取第一个 { 到最后一个 } 之间的 JSON 子串
+            json_start = line.find("{")
+            json_end = line.rfind("}")
+            if json_start != -1 and json_end > json_start:
+                try:
+                    obj = json.loads(line[json_start:json_end + 1])
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            else:
+                continue
 
         # 支持嵌套路径，如 "event.type" 或 "log_type"
         feature_value = _get_nested_value(obj, feature_field)
