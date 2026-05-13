@@ -90,6 +90,7 @@ from web.file_handler import (
 
 # 枚举工具（handle_file_upload 中引用）
 from agent.tools.enum_field_tool import get_enum_preview
+from agent.tools.log_parser_pipeline import identify_log_format, classify_log_features, fill_sample_logs
 
 # 加载路由关键词（枚举提取关键词保留，用于枚举提取流触发）
 
@@ -538,30 +539,54 @@ Excel 格式说明：
 
     # 4.5 日志解析分流
     if is_log_parser:
-        logger.info("[ROUTE] 命中日志解析关键词，路由到 LogParserAgent")
+        logger.info("[ROUTE] 命中日志解析关键词，直接调用 Pipeline（跳过 Agent 路由）")
         loading_msg = cl.Message(content="⏳ **AI正在分析日志，请稍候...**\n\n🔍 正在识别格式并提取特征...")
         await loading_msg.send()
-        # 若有"原始日志"列预提取数据，只送该列（避免全量 Excel 输入导致 ReadTimeout）
-        raw_log_lines = user_session.get("raw_log_lines")
-        if raw_log_lines:
-            log_sample = "\n".join(str(line) for line in raw_log_lines[:50])
-            raw_count = len(raw_log_lines)
-            full_input = f"""用户请求：{user_text}
-
-原始日志列内容（共 {raw_count} 行，展示前 50 行）：
-{log_sample}
-
-请根据上述原始日志，识别日志类型和格式特征，分析字段结构。"""
-            logger.info(f"[ROUTE] 日志解析使用精简输入：{raw_count} 行原始日志，输入长度 {len(full_input)}")
-        else:
-            full_input = build_llm_input(user_text, user_session, intent="general")
-        result = await call_team(team, full_input, loading_msg, intent="log_parser")
-        result_content = result.content if hasattr(result, 'content') else str(result)
         try:
-            await loading_msg.remove()
-        except Exception:
-            pass
-        await cl.Message(content=str(result_content)).send()
+            # 获取原始日志文本
+            raw_log_lines = user_session.get("raw_log_lines")
+            if raw_log_lines:
+                logs_str = "\n".join(str(line) for line in raw_log_lines[:200])
+                logger.info(f"[ROUTE][LogParser] 使用精简输入：{len(raw_log_lines)} 行原始日志")
+            else:
+                logs_str = user_text
+                logger.info(f"[ROUTE][LogParser] 无 raw_log_lines，回退使用 user_text")
+
+            # Step 1: 格式识别
+            logger.info("[ROUTE][LogParser] Step 1: identify_log_format")
+            format_info_str = identify_log_format(logs_str)
+            format_info = _parse_json_safe(format_info_str)
+            format_type = format_info.get("format", "unknown") if isinstance(format_info, dict) else "unknown"
+            format_detail = format_info.get("format_detail", "") if isinstance(format_info, dict) else ""
+            feature_field = format_info.get("log_feature_field", "log_type") if isinstance(format_info, dict) else "log_type"
+            logger.info(f"[ROUTE][LogParser] 格式识别结果: format={format_type}, detail={format_detail}, feature_field={feature_field}")
+
+            # Step 2: 特征分类
+            logger.info("[ROUTE][LogParser] Step 2: classify_log_features")
+            classification_str = classify_log_features(
+                logs_str=logs_str,
+                format_type=format_type,
+                format_detail=format_detail,
+                feature_field=feature_field,
+            )
+            classification = _parse_json_safe(classification_str)
+
+            # Step 3: 用 matched_regex 替换真实样例
+            logger.info("[ROUTE][LogParser] Step 3: fill_sample_logs")
+            if isinstance(classification, dict):
+                classification = fill_sample_logs(classification, logs_str)
+
+            # 渲染结果
+            result_content = _render_log_parser_result(classification, format_info)
+        except Exception as e:
+            logger.error(f"[ROUTE][LogParser] Pipeline 异常: {type(e).__name__}: {e}")
+            result_content = f"❌ 日志解析失败: {e}"
+        finally:
+            try:
+                await loading_msg.remove()
+            except Exception:
+                pass
+        await cl.Message(content=result_content).send()
         return
 
     # 5. 构建 LLM 输入（按意图隔离上下文）
@@ -879,3 +904,95 @@ async def on_start_enum_fill(action: cl.Action):
 
 请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
     ).send()
+
+
+# ============= 日志解析辅助函数 =============
+
+def _parse_json_safe(text: str) -> dict | None:
+    """安全解析 JSON，支持 markdown 代码块包装"""
+    if not text:
+        return None
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        import re as _re2
+        m = _re2.search(r"\{.*\}", text, _re2.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group())
+            except json.JSONDecodeError:
+                pass
+    return None
+
+
+def _render_log_parser_result(classification: dict | None, format_info: dict | None) -> str:
+    """将 pipeline 结果渲染为用户可读的 Markdown 文本"""
+    if classification is None:
+        return "❌ 日志解析失败：无法解析分类结果"
+
+    status = classification.get("status", "FAILED")
+    if status == "FAILED":
+        error = classification.get("error", "未知错误")
+        return f"❌ 日志解析失败: {error}"
+
+    log_format = classification.get("log_format", "未知")
+    feature_field = classification.get("feature_field", "log_type")
+    feature_count = classification.get("feature_count", 0)
+    feature_identifier = classification.get("feature_identifier", "")
+    expert_summary = classification.get("expert_summary", "")
+    details = classification.get("classification_details", [])
+    total_lines = classification.get("total_lines", "?")
+    matched_lines = classification.get("matched_lines", "?")
+
+    lines: list[str] = []
+    lines.append("## 🔍 日志解析结果")
+    lines.append("")
+    lines.append(f"| 项目 | 值 |")
+    lines.append(f"|---|---|")
+    lines.append(f"| 日志格式 | {log_format} |")
+    lines.append(f"| 业务分类字段 | `{feature_field}` |")
+    lines.append(f"| 特征标识符 | `{feature_identifier}` |")
+    lines.append(f"| 总行数 | {total_lines} |")
+    lines.append(f"| 匹配行数 | {matched_lines} |")
+    lines.append(f"| 分类数量 | {feature_count} |")
+
+    if format_info:
+        fmt = format_info.get("format", "unknown")
+        confidence = format_info.get("confidence", 0)
+        detail = format_info.get("format_detail", "")
+        reason = format_info.get("reason", "")
+        lines.append(f"| 格式类型 | {fmt} |")
+        lines.append(f"| 格式详情 | {detail} |")
+        lines.append(f"| 置信度 | {confidence:.2f} |")
+        if reason:
+            lines.append(f"| 判断理由 | {reason[:100]} |")
+
+    if expert_summary:
+        lines.append("")
+        lines.append(f"### 📝 综合分析")
+        lines.append(expert_summary)
+
+    if details:
+        lines.append("")
+        lines.append(f"### 📊 分类详情（{len(details)} 类）")
+        lines.append("")
+        lines.append("| 字段值 | 含义 | 严重程度 | 攻击类型 | 匹配正则 | 真实样例 |")
+        lines.append("|---|---|---|---|---|---|")
+        for _d in details:
+            value = str(_d.get("value", ""))[:30]
+            meaning = str(_d.get("meaning", ""))[:20]
+            severity = str(_d.get("severity", ""))[:6]
+            attack_type = str(_d.get("attack_type", ""))[:15]
+            matched_regex = str(_d.get("matched_regex", ""))[:30]
+            real_samples = _d.get("real_samples", [])
+            sample = real_samples[0][:50] if real_samples else str(_d.get("sample", ""))[:50]
+            lines.append(f"| {value} | {meaning} | {severity} | {attack_type} | `{matched_regex}` | {sample} |")
+
+    lines.append("")
+    lines.append("*以上结果由 LogParser Pipeline 直接生成*")
+    return "\n".join(lines)

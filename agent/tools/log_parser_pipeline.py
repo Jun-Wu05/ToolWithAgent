@@ -2,12 +2,15 @@
 """
 日志格式识别与特征提取 Pipeline
 
-参考 Dify 流实现：
+流程说明：
   Step 1: identify_log_format   — 采样 → LLM → 格式识别
   Step 2: aggregate_by_format   — 纯函数 → 按格式聚合
-  Step 3: classify_aggregated   — LLM → 特征提取 + 分类
-  Step 4: fill_sample_logs      — 纯函数 → 替换样例日志
+  Step 3: classify_log_features — LLM → 特征提取 + 分类（对齐 Dify 工作流）
+  Step 4: fill_sample_logs      — 纯函数 → 用 matched_regex 替换样例日志
 
+对齐 Dify 工作流：
+  原始日志 → 抽样(3行) → LLM格式识别 → 按 log_type 聚合 → LLM分类（找业务分类字段）→ 正则替换样例
+  
 工具内部直接通过 httpx 调 LLM API，不走 Agno Agent 路由循环。
 """
 
@@ -16,7 +19,7 @@ from __future__ import annotations
 import json
 import re as _re
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from typing import Any, Optional
 
 import httpx
@@ -146,8 +149,10 @@ _LOG_FORMAT_IDENTIFY_PROMPT = """你是安全日志格式分析专家。分析�
 - comma: 逗号分隔格式（CSV）
 - unknown: 无法识别
 
+你需要同时判断日志是否有"日志头"特征（即日志行的前半部分是固定格式的时间戳+主机名+进程名等，后半部分才是 JSON/KV 结构体）。
+
 输出 JSON（严格一行，不要有额外文字）：
-{{"format":"json|kv|space|semicolon|comma|unknown","delimiter":"分隔符字符(space格式为空格)","confidence":0.0~1.0,"kv_connector":"key-value连接符(= 或 : 或 空格等)","kv_separator":"kv对之间的分隔符(空格或;或,等)","has_header":true|false,"space_count":0,"reason":"判断理由"}}"""
+{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符(space格式为空格)","confidence":0.0~1.0,"kv_connector":"key-value连接符(= 或 : 或 空格等)","kv_separator":"kv对之间的分隔符(空格或;或,等)","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"推测的业务分类字段名(如log_type/event_type/category等)","reason":"判断理由"}}"""
 
 
 @tool(
@@ -197,12 +202,15 @@ def identify_log_format(logs_str: str) -> str:
 
         # 标准化字段名
         parsed.setdefault("format", "unknown")
+        parsed.setdefault("format_detail", "unknown")
         parsed.setdefault("delimiter", None)
         parsed.setdefault("confidence", 0.5)
         parsed.setdefault("kv_connector", None)
         parsed.setdefault("kv_separator", None)
         parsed.setdefault("has_header", False)
+        parsed.setdefault("has_header_feature", False)
         parsed.setdefault("space_count", 0)
+        parsed.setdefault("log_feature_field", None)
         parsed.setdefault("reason", "")
 
         return json.dumps(parsed, ensure_ascii=False)
@@ -319,7 +327,6 @@ def _parse_kv_line(
 ) -> list[tuple[str, str]]:
     """解析一行 KV 格式日志"""
     pairs: list[tuple[str, str]] = []
-    # 尝试按 kv_separator 拆分
     tokens = _smart_split(line, kv_separator)
     for token in tokens:
         token = token.strip().strip('"').strip("'")
@@ -335,7 +342,6 @@ def _parse_kv_line(
 def _smart_split(text: str, sep: str) -> list[str]:
     """智能拆分，考虑引号内的分隔符"""
     if sep == " ":
-        # 对空格分隔，保护引号内内容
         parts = []
         current: list[str] = []
         in_quote = False
@@ -357,7 +363,6 @@ def _smart_split(text: str, sep: str) -> list[str]:
             parts.append("".join(current))
         return parts
     else:
-        # 非空格分隔符直接 split
         return text.split(sep)
 
 
@@ -476,168 +481,309 @@ def aggregate_by_format(logs_str: str, format_info: dict) -> dict:
 
 
 # ============================================================================
-# Step 3: 日志特征提取 + 分类 (工具内调 LLM)
+# Step 2.5: 按业务字段聚合 (纯函数，无 LLM)
+#   对齐 Dify 工作流中"JSON格式日志聚合处理脚本"
 # ============================================================================
 
-_CLASSIFY_JSON_PROMPT = """你是安全日志分析专家。分析已聚合的 JSON 格式日志。
+def _aggregate_by_log_type(
+    logs_str: str,
+    feature_field: str = "log_type",
+) -> dict:
+    """
+    按指定的业务分类字段值做纯函数聚合。
 
-聚合结果：
-{aggregated_json}
+    对每行 JSON 日志提取 feature_field 的值，统计每种值出现的次数和对应样例。
 
-请为每个字段提取以下信息：
-1. field_name: 字段名（使用 JSON path）
-2. field_type: 字段类型（ip/port/protocol/time/status/action/severity/category/message/id/number/device/user/url/string）
-3. aliases: 可能的别名列表（如 srcIp 的别名: ["源IP","source_ip","sip"]）
-4. position: 在日志中的位置路径
-5. example_values: 3-5 个样本值
-6. total_count: 总出现次数
-7. unique_count: 去重后的数量（可估计）
+    Args:
+        logs_str: 原始 JSON 日志字符串（每行一个 JSON）
+        feature_field: 业务分类字段名，默认 "log_type"
 
-输出 JSON（严格一行）：
-{{"fields": [{{"field_name":"...","field_type":"...","aliases":["...],"position":"...","example_values":["..."],"total_count":N,"unique_count":N}}], "sample_raw_log": "一条原始日志示例", "matched_lines": N, "total_lines": N}}"""
+    Returns:
+        {
+            "total_lines": int,
+            "matched_lines": int,
+            "feature_field": str,
+            "values": {
+                "value_1": {"count": N, "samples": ["...", "..."]},
+                "value_2": {"count": N, "samples": ["..."]},
+                ...
+            },
+            "value_count": int,           # 唯一值数量
+            "top_values": ["v1", "v2", ...],  # TOP 值列表
+        }
+    """
+    lines = [l for l in logs_str.strip().split("\n") if l.strip()]
+    total_lines = len(lines)
+    matched_lines = 0
 
-_CLASSIFY_KV_PROMPT = """你是安全日志分析专家。分析已聚合的 KV 键值对格式日志。
+    value_counter: Counter[str] = Counter()
+    value_samples: dict[str, list[str]] = {}
 
-聚合结果：
-{aggregated_json}
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
 
-请为每个 key 提取以下信息：
-1. field_name: 键名（从日志中提取的原始键名）
-2. field_type: 值类型（ip/port/protocol/time/status/action/severity/category/message/id/number/device/user/url/string）
-3. aliases: 可能的别名列表
-4. position: 在日志中的位置（键名）
-5. example_values: 3-5 个样本值
-6. total_count: 总出现次数
-7. unique_count: 去重后的数量（可估计）
+        # 支持嵌套路径，如 "event.type" 或 "log_type"
+        feature_value = _get_nested_value(obj, feature_field)
+        if feature_value is None:
+            continue
 
-输出 JSON（严格一行）：
-{{"fields": [{{"field_name":"...","field_type":"...","aliases":["..."],"position":"...","example_values":["..."],"total_count":N,"unique_count":N}}], "sample_raw_log": "一条原始日志示例", "matched_lines": N, "total_lines": N}}"""
+        matched_lines += 1
+        feature_str = str(feature_value)
+        value_counter[feature_str] += 1
 
-_CLASSIFY_SPACE_PROMPT = """你是安全日志分析专家。分析已聚合的空格分隔格式日志（如 Syslog/防火墙日志）。
+        if feature_str not in value_samples:
+            value_samples[feature_str] = []
+        if len(value_samples[feature_str]) < 3:
+            # 取该行的简短摘要（核心字段值）
+            sample = _extract_sample_summary(obj)
+            if sample not in value_samples[feature_str]:
+                value_samples[feature_str].append(sample)
 
-聚合结果：
-{aggregated_json}
+    # 构建输出
+    values_dict: dict[str, dict] = {}
+    for val, cnt in value_counter.most_common():
+        values_dict[val] = {
+            "count": cnt,
+            "samples": value_samples.get(val, []),
+        }
 
-请为每个列位置提取以下信息，并结合日志上下文推断列名和类型：
-1. field_name: 推断的字段名（如 col_0 可能是 timestamp，col_3 可能是 src_ip）
-2. field_type: 值为 ip/port/protocol/time/status/action/severity/category/message/id/number/device/user/url/string
-3. aliases: 可能的别名列表
-4. position: 列索引（0-based）
-5. example_values: 3-5 个样本值
-6. total_count: 总出现次数
-7. unique_count: 去重后的数量（可估计）
+    return {
+        "total_lines": total_lines,
+        "matched_lines": matched_lines,
+        "feature_field": feature_field,
+        "values": values_dict,
+        "value_count": len(value_counter),
+        "top_values": [v for v, _ in value_counter.most_common(20)],
+    }
 
-输出 JSON（严格一行）：
-{{"fields": [{{"field_name":"...","field_type":"...","aliases":["..."],"position":"...","example_values":["..."],"total_count":N,"unique_count":N}}], "sample_raw_log": "一条原始日志示例", "matched_lines": N, "total_lines": N}}"""
 
-_CLASSIFY_DELIMITED_PROMPT = """你是安全日志分析专家。分析已聚合的分隔符格式日志。
+def _get_nested_value(obj: dict, path: str) -> Any:
+    """从嵌套 JSON 对象中按点分隔路径获取值，如 'event.type'"""
+    if not path:
+        return None
+    keys = path.split(".")
+    current: Any = obj
+    for key in keys:
+        if isinstance(current, dict):
+            current = current.get(key)
+            if current is None:
+                return None
+        else:
+            return None
+    return current
 
-聚合结果：
-{aggregated_json}
 
-请为每个列位置提取以下信息，结合日志上下文推断列名和类型：
-1. field_name: 推断的字段名
-2. field_type: ip/port/protocol/time/status/action/severity/category/message/id/number/device/user/url/string
-3. aliases: 可能的别名列表
-4. position: 列索引（0-based）
-5. example_values: 3-5 个样本值
-6. total_count: 总出现次数
-7. unique_count: 去重后的数量（可估计）
+def _extract_sample_summary(obj: dict) -> str:
+    """提取 JSON 对象的核心字段值摘要（用于样本展示）"""
+    # 优先取常见的关键字段
+    priority_keys = [
+        "log_type", "event_type", "category", "type",
+        "action", "status", "severity", "message",
+    ]
+    parts: list[str] = []
+    for key in priority_keys:
+        val = _get_nested_value(obj, key)
+        if val is not None:
+            parts.append(f"{key}={val}")
+    if not parts:
+        # 取前 3 个非嵌套字段
+        count = 0
+        for k, v in obj.items():
+            if not isinstance(v, (dict, list)):
+                parts.append(f"{k}={v}")
+                count += 1
+                if count >= 3:
+                    break
+    return "; ".join(parts)
 
-输出 JSON（严格一行）：
-{{"fields": [{{"field_name":"...","field_type":"...","aliases":["..."],"position":"...","example_values":["..."],"total_count":N,"unique_count":N}}], "sample_raw_log": "一条原始日志示例", "matched_lines": N, "total_lines": N}}"""
 
-_CLASSIFY_UNKNOWN_PROMPT = """你是安全日志分析专家。分析以下未知格式的日志，尝试识别其结构并提取特征。
+# ============================================================================
+# Step 3: 日志特征分类 (工具内调 LLM) — 对齐 Dify "JSON格式日志分类" 提示词
+# ============================================================================
 
-聚合结果：
-{aggregated_json}
+_CLASSIFY_FEATURE_PROMPT = """你是安全日志分析专家。请分析以下日志样本及其业务分类字段的聚合统计信息，识别各类日志的业务含义、攻击特征、分类和危害等级。
 
-请为每个可识别的字段提取以下信息：
-1. field_name: 推断的字段名
-2. field_type: ip/port/protocol/time/status/action/severity/category/message/id/number/device/user/url/string
-3. aliases: 可能的别名列表
-4. position: 位置描述
-5. example_values: 3-5 个样本值
-6. total_count: 总出现次数
-7. unique_count: 去重后的数量（可估计）
+【格式信息】
+- 格式类型：{format_type}
+- 格式详情：{format_detail}
+- 业务分类字段：{feature_field}
 
-输出 JSON（严格一行）：
-{{"fields": [{{"field_name":"...","field_type":"...","aliases":["..."],"position":"...","example_values":["..."],"total_count":N,"unique_count":N}}], "sample_raw_log": "一条原始日志示例", "matched_lines": N, "total_lines": N}}"""
+【业务分类字段聚合统计】
+{aggregation_text}
 
-# Prompt 映射表
-_CLASSIFY_PROMPTS: dict[str, str] = {
-    "json": _CLASSIFY_JSON_PROMPT,
-    "kv": _CLASSIFY_KV_PROMPT,
-    "space": _CLASSIFY_SPACE_PROMPT,
-    "semicolon": _CLASSIFY_DELIMITED_PROMPT,
-    "comma": _CLASSIFY_DELIMITED_PROMPT,
-    "unknown": _CLASSIFY_UNKNOWN_PROMPT,
-}
+【原始日志样本】（前 5 行）
+```
+{sampled_logs}
+```
+
+任务：
+1. 分析日志结构，判断完整格式描述（如"日志头+JSON"、"纯JSON"、"KV"等）
+2. 提取业务特征的唯一标识符（feature_identifier），即一个能匹配所有业务分类值的正则表达式
+3. 对每种业务分类值，分析其意义、匹配正则、危害等级
+
+请严格按以下 JSON 格式输出（一行，不要额外文字）：
+{{
+  "status": "SUCCESS",
+  "log_format": "日志头+JSON 或 JSON 或 KV 或 日志头+KV",
+  "feature_field": "业务分类字段名",
+  "feature_identifier": "正则表达式，用于从原始日志中匹配该字段值",
+  "feature_count": N,
+  "classification_details": [
+    {{"value": "字段值1", "matched_regex": "匹配该值的正则", "meaning": "业务含义", "severity": "严重/高危/中危/低危/信息", "attack_type": "攻击类型(如暴力破解/恶意软件/C2通信/信息泄露等)", "sample": "一行原始日志示例"}}
+  ],
+  "expert_summary": "综合分析摘要（100字以内）"
+}}"""
 
 
 @tool(
     name="classify_log_features",
-    description="对已聚合的日志字段进行分类和特征提取。输入 aggregated_json=聚合结果JSON, format_type=格式类型。返回特征分类结果。",
+    description="识别日志的业务分类特征。输入 logs_str=原始日志字符串, format_type=格式类型, format_detail=格式详情。对齐 Dify 工作流找业务分类字段。",
 )
-def classify_log_features(aggregated_json: str, format_type: str = "unknown") -> str:
+def classify_log_features(
+    logs_str: str,
+    format_type: str = "unknown",
+    format_detail: str = "",
+    feature_field: str = "log_type",
+) -> str:
     """
-    对聚合后的字段进行 LLM 分类。
+    按业务分类字段聚合日志，由 LLM 对各类日志做特征分类。
+
+    对齐 Dify 工作流中"JSON格式日志分类"步骤：
+    1. 内部按 feature_field 聚合统计
+    2. 将聚合信息 + 样本喂给 LLM
+    3. 输出 log_format / feature_identifier / classification_details
 
     Args:
-        aggregated_json: aggregate_by_format 的 JSON 输出
+        logs_str: 原始日志字符串（多行）
         format_type: 格式类型 (json/kv/space/semicolon/comma/unknown)
+        format_detail: 格式详情描述 (如"日志头+JSON"/"纯JSON")
+        feature_field: 业务分类字段名，默认 "log_type"
 
     Returns:
-        JSON 字符串: {"fields": [...], "sample_raw_log": "...", "matched_lines": N, "total_lines": N}
+        JSON 字符串:
+        {
+          "status": "SUCCESS",
+          "log_format": "日志头+JSON",
+          "feature_field": "log_type",
+          "feature_identifier": "(event-log|dac_weakpasswd|...)",
+          "feature_count": N,
+          "classification_details": [
+            {"value": "event-log", "matched_regex": "event-log", "meaning": "安全事件日志", "severity": "中危", "attack_type": "信息收集", "sample": "..."}
+          ],
+          "expert_summary": "..."
+        }
     """
-    try:
-        aggregated = json.loads(aggregated_json)
-    except json.JSONDecodeError:
-        return json.dumps(
-            {"fields": [], "error": "聚合结果不是有效 JSON", "total_lines": 0, "matched_lines": 0},
-            ensure_ascii=False,
-        )
-
-    fields_list = aggregated.get("fields", [])
-    total_lines = aggregated.get("total_lines", 0)
-    matched_lines = aggregated.get("matched_lines", 0)
-
-    if not fields_list:
+    if not logs_str or not logs_str.strip():
         return json.dumps(
             {
-                "fields": [],
-                "error": "无聚合字段",
-                "total_lines": total_lines,
-                "matched_lines": matched_lines,
+                "status": "FAILED",
+                "error": "日志内容为空",
+                "log_format": format_detail or "unknown",
+                "feature_field": feature_field,
+                "feature_identifier": "",
+                "feature_count": 0,
+                "classification_details": [],
+                "expert_summary": "无日志数据",
             },
             ensure_ascii=False,
         )
 
-    # 选择对应格式的 prompt
-    prompt_template = _CLASSIFY_PROMPTS.get(format_type, _CLASSIFY_UNKNOWN_PROMPT)
-
     try:
-        prompt = prompt_template.format(aggregated_json=aggregated_json)
-        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=3000, timeout=60)
+        # 内部聚合：按业务字段统计
+        aggregation = _aggregate_by_log_type(logs_str, feature_field)
+        total_lines = aggregation["total_lines"]
+        matched_lines = aggregation["matched_lines"]
+        value_count = aggregation["value_count"]
+        top_values = aggregation["top_values"]
 
-        parsed = _try_parse_json(response)
-        if parsed is None:
-            logger.warning(f"[classify_log_features] LLM 返回非 JSON: {response[:200]}")
+        if value_count == 0:
+            logger.warning(
+                f"[classify_log_features] 字段 '{feature_field}' 无匹配结果"
+            )
             return json.dumps(
                 {
-                    "fields": [],
-                    "error": "LLM 返回非 JSON",
-                    "raw_response": response[:500],
+                    "status": "PARTIAL",
+                    "error": f"字段 '{feature_field}' 在日志中未找到，请检查字段名",
+                    "log_format": format_detail or format_type,
+                    "feature_field": feature_field,
+                    "feature_identifier": "",
+                    "feature_count": 0,
+                    "classification_details": [],
+                    "expert_summary": f"未找到业务分类字段 {feature_field}，总行数 {total_lines}",
                     "total_lines": total_lines,
                     "matched_lines": matched_lines,
                 },
                 ensure_ascii=False,
             )
 
+        # 构建聚合文本供 LLM 分析
+        agg_parts: list[str] = []
+        agg_parts.append(
+            f"总行数: {total_lines}, 匹配行数: {matched_lines}, 唯一值数: {value_count}"
+        )
+        agg_parts.append(f"业务分类字段: {feature_field}")
+        agg_parts.append("")
+        agg_parts.append("各值统计（TOP 20）：")
+        for val in top_values:
+            info = aggregation["values"].get(val, {})
+            cnt = info.get("count", 0)
+            samples = info.get("samples", [])
+            sample_str = " | ".join(samples[:2]) if samples else "无样本"
+            agg_parts.append(f"  {val}: 出现 {cnt} 次 | 样本: {sample_str}")
+
+        aggregation_text = "\n".join(agg_parts)
+
+        # 采样原始日志供 LLM 参考
+        sampled_logs = sample_logs(logs_str, 5)
+
+        prompt = _CLASSIFY_FEATURE_PROMPT.format(
+            format_type=format_type,
+            format_detail=format_detail or format_type,
+            feature_field=feature_field,
+            aggregation_text=aggregation_text,
+            sampled_logs=sampled_logs,
+        )
+
+        logger.info(
+            f"[classify_log_features] 调用 LLM, format={format_type}, "
+            f"feature_field={feature_field}, values={value_count}, "
+            f"prompt_len={len(prompt)}"
+        )
+        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=3000, timeout=90)
+
+        parsed = _try_parse_json(response)
+        if parsed is None:
+            logger.warning(f"[classify_log_features] LLM 返回非 JSON: {response[:200]}")
+            return json.dumps(
+                {
+                    "status": "PARTIAL",
+                    "error": "LLM 返回非 JSON",
+                    "log_format": format_detail or format_type,
+                    "feature_field": feature_field,
+                    "feature_identifier": "",
+                    "feature_count": value_count,
+                    "classification_details": _build_fallback_details(aggregation),
+                    "expert_summary": f"LLM 返回格式异常，原始响应前 500 字: {response[:500]}",
+                    "total_lines": total_lines,
+                    "matched_lines": matched_lines,
+                    "raw_response": response[:500],
+                },
+                ensure_ascii=False,
+            )
+
+        # 标准化输出字段
+        parsed.setdefault("status", "SUCCESS")
+        parsed.setdefault("log_format", format_detail or format_type)
+        parsed.setdefault("feature_field", feature_field)
+        parsed.setdefault("feature_identifier", "")
+        parsed.setdefault("feature_count", value_count)
+        parsed.setdefault("classification_details", [])
+        parsed.setdefault("expert_summary", "")
         parsed.setdefault("total_lines", total_lines)
         parsed.setdefault("matched_lines", matched_lines)
-        parsed.setdefault("sample_raw_log", "")
-        parsed.setdefault("fields", [])
 
         return json.dumps(parsed, ensure_ascii=False)
 
@@ -645,51 +791,109 @@ def classify_log_features(aggregated_json: str, format_type: str = "unknown") ->
         logger.error(f"[classify_log_features] API 错误: {e}")
         return json.dumps(
             {
-                "fields": [],
+                "status": "FAILED",
                 "error": f"LLM API 调用失败: {e.response.status_code}",
-                "total_lines": total_lines,
-                "matched_lines": matched_lines,
+                "log_format": format_detail or format_type,
+                "feature_field": feature_field,
+                "feature_identifier": "",
+                "feature_count": 0,
+                "classification_details": [],
+                "expert_summary": f"API 错误: {e.response.status_code}",
             },
             ensure_ascii=False,
         )
     except Exception as e:
         logger.error(f"[classify_log_features] 异常: {type(e).__name__}: {e}")
         return json.dumps(
-            {"fields": [], "error": str(e), "total_lines": 0, "matched_lines": 0},
+            {
+                "status": "FAILED",
+                "error": str(e),
+                "log_format": format_detail or format_type,
+                "feature_field": feature_field,
+                "feature_identifier": "",
+                "feature_count": 0,
+                "classification_details": [],
+                "expert_summary": f"异常: {str(e)[:200]}",
+            },
             ensure_ascii=False,
         )
 
 
+def _build_fallback_details(aggregation: dict) -> list[dict]:
+    """当 LLM 无法正常解析时，用纯函数构建兜底的 classification_details"""
+    details: list[dict] = []
+    for val, info in aggregation.get("values", {}).items():
+        details.append({
+            "value": val,
+            "matched_regex": _re.escape(val),
+            "meaning": "",
+            "severity": "未知",
+            "attack_type": "",
+            "sample": info.get("samples", [None])[0] if info.get("samples") else "",
+        })
+    return details
+
+
 # ============================================================================
 # Step 4: 替换样例日志 (纯函数)
+#   用 classification_details 中的 matched_regex 从原始日志匹配真实样例
+#   对齐 Dify 工作流中"替换样例日志"代码节点
 # ============================================================================
 
 
 def fill_sample_logs(
-    classification: dict, logs_str: str, max_samples: int = 10
+    classification: dict,
+    logs_str: str,
+    max_samples_per_type: int = 3,
 ) -> dict:
     """
-    用分类结果中找到的字段位置信息，填充样例日志。
+    用分类结果中的 matched_regex 从原始日志匹配真实样例日志。
+
+    对齐 Dify 工作流中"替换样例日志"代码节点的逻辑：
+    对每个 classification_detail，用其 matched_regex 去原始日志中匹配真实行，
+    替换模板占位符为真实日志行。
 
     Args:
-        classification: classify_log_features 的输出
+        classification: classify_log_features 的输出 dict
         logs_str: 原始日志字符串
-        max_samples: 每种字段类型最多取多少样本日志
+        max_samples_per_type: 每种分类最多取多少条真实样例
 
     Returns:
-        classification 的副本，每个字段增加 "sample_logs" 列表
+        classification 的副本，每个 classification_detail 增加 "real_samples" 列表
     """
-    fields = classification.get("fields", [])
-    if not fields:
+    details = classification.get("classification_details", [])
+    if not details:
         return classification
 
     lines = [l for l in logs_str.strip().split("\n") if l.strip()]
     result = dict(classification)
-    result["fields"] = []
+    result["classification_details"] = []
 
-    for field_info in fields:
-        field_copy = dict(field_info)
-        field_copy.setdefault("sample_logs", [])
-        result["fields"].append(field_copy)
+    for detail in details:
+        detail_copy = dict(detail)
+        matched_regex = detail_copy.get("matched_regex", "")
+        detail_copy.setdefault("real_samples", [])
+
+        if matched_regex:
+            try:
+                pattern = _re.compile(matched_regex)
+                matched_count = 0
+                for line in lines:
+                    if pattern.search(line):
+                        detail_copy["real_samples"].append(line[:300])
+                        matched_count += 1
+                        if matched_count >= max_samples_per_type:
+                            break
+            except _re.error as e:
+                logger.warning(
+                    f"[fill_sample_logs] 正则编译失败: {matched_regex}, 错误: {e}"
+                )
+                detail_copy["regex_error"] = str(e)
+
+        # 如果正则匹配不到，回退用原始的 sample 字段
+        if not detail_copy["real_samples"] and detail_copy.get("sample"):
+            detail_copy["real_samples"] = [detail_copy["sample"]]
+
+        result["classification_details"].append(detail_copy)
 
     return result
