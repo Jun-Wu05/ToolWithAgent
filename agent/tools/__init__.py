@@ -11,6 +11,10 @@ from agent.tools.logs_enum_tool import (
     extract_enum_from_logs,
     extract_enum_with_regex,
 )
+from agent.tools.log_parser_pipeline import (
+    identify_log_format,
+    classify_log_features,
+)
 
 __all__ = [
     'field_mapping_tool',
@@ -18,4 +22,6 @@ __all__ = [
     'enum_field_tool',
     'extract_enum_from_logs',
     'extract_enum_with_regex',
+    'identify_log_format',
+    'classify_log_features',
 ]

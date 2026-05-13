@@ -27,6 +27,8 @@ from agent.tools import (
     enum_field_tool,
     extract_enum_from_logs,
     extract_enum_with_regex,
+    identify_log_format,
+    classify_log_features,
 )
 
 
@@ -180,6 +182,49 @@ def create_enum_agent() -> Agent:
     )
 
 
+# ============= LogParserAgent =============
+
+def _get_log_parser_instructions() -> str:
+    """获取日志解析Agent指令"""
+    return """你是日志格式识别与字段特征提取专家。
+
+## 任务流程
+1. 使用 `identify_log_format` 识别日志格式（json/kv/space/semicolon/comma）
+2. 根据识别结果判断是否需要分类：
+   - 若为 JSON 或 KV 格式，字段名已明确，可跳过分类
+   - 若为 space/semicolon/comma 格式，使用 `classify_log_features` 推断字段名和类型
+
+## 输出要求
+- 输出 JSON 格式的字段列表和特征分类结果
+- 包含每个字段的名称、类型、别名、位置、样本值
+- 不要输出解释性文字，直接输出结果
+
+## 约束
+- 只做格式识别和字段提取，不修改原始日志
+- 不做威胁分析、枚举提取、字段映射
+- 工具中已包含 LLM 调用，你只需调工具即可"""
+
+
+def create_log_parser_agent() -> Agent:
+    """创建日志解析Agent（挂载工具：identify_log_format, classify_log_features）
+    
+    设计意图：工具内部通过 httpx 直调 LLM，不经 Agno 路由循环，省 40-60s。
+    """
+    return Agent(
+        name="LogParserAgent",
+        role="日志格式识别与字段提取专家",
+        model=ModelConfig.get_main_model(),
+        instructions=_get_log_parser_instructions(),
+        tools=[
+            identify_log_format,           # Step 1: 格式识别（工具内调 LLM）
+            classify_log_features,         # Step 2: 特征分类（工具内调 LLM）
+        ],
+        tool_call_limit=2,                 # 2 个工具，2 次足够
+        markdown=True,
+        debug_mode=False,
+    )
+
+
 # ============= 创建Team =============
 
 def create_data_mapping_team() -> Team:
@@ -219,6 +264,7 @@ def create_data_mapping_team() -> Team:
             field_mapping_agent,
             threat_agent,
             enum_agent,
+            create_log_parser_agent(),
         ],
         instructions=_load_router_instructions(),
         markdown=True,
