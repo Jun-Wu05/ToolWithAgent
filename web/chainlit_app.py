@@ -274,12 +274,21 @@ async def handle_file_upload(user_session: dict, element):
                         user_session["uploaded_file_time"] = datetime.now().strftime("%H:%M:%S")
                         # 保存路径供枚举填充等后续使用
                         user_session["enum_excel_path"] = excel_path
+                        # 检测"原始日志"列并预提取，供 LogParserAgent 精简输入使用
+                        raw_log_lines = None
+                        for col in df.columns:
+                            if "原始日志" in str(col):
+                                raw_log_lines = df[col].dropna().astype(str).tolist()
+                                user_session["raw_log_lines"] = raw_log_lines
+                                logger.info(f"[FILE_UPLOAD] 提取\"原始日志\"列({col})：{len(raw_log_lines)} 行")
+                                break
                         await cl.Message(
                             content=f"📊 已读取 Excel 文件 `{file_name}`\n\n"
                                     f"📊 **行数**：{len(df)} 行\n"
                                     f"📊 **列数**：{len(fields)} 列\n"
                                     f"📊 **列名**：{', '.join(fields[:20])}"
                                     f"{'...' if len(fields) > 20 else ''}"
+                                    + (f"\n📊 **原始日志**：{len(raw_log_lines)} 行" if raw_log_lines else "")
                         ).send()
                         logger.info(f"[FILE_UPLOAD] Excel 数据表格读取成功：{len(df)} 行 × {len(fields)} 列")
                         return
@@ -484,7 +493,20 @@ Excel 格式说明：
         logger.info("[ROUTE] 命中日志解析关键词，路由到 LogParserAgent")
         loading_msg = cl.Message(content="⏳ **AI正在分析日志，请稍候...**\n\n🔍 正在识别格式并提取特征...")
         await loading_msg.send()
-        full_input = build_llm_input(user_text, user_session, intent="general")
+        # 若有"原始日志"列预提取数据，只送该列（避免全量 Excel 输入导致 ReadTimeout）
+        raw_log_lines = user_session.get("raw_log_lines")
+        if raw_log_lines:
+            log_sample = "\n".join(str(line) for line in raw_log_lines[:50])
+            raw_count = len(raw_log_lines)
+            full_input = f"""用户请求：{user_text}
+
+原始日志列内容（共 {raw_count} 行，展示前 50 行）：
+{log_sample}
+
+请根据上述原始日志，识别日志类型和格式特征，分析字段结构。"""
+            logger.info(f"[ROUTE] 日志解析使用精简输入：{raw_count} 行原始日志，输入长度 {len(full_input)}")
+        else:
+            full_input = build_llm_input(user_text, user_session, intent="general")
         result = await call_team(team, full_input, loading_msg, intent="log_parser")
         result_content = result.content if hasattr(result, 'content') else str(result)
         try:
