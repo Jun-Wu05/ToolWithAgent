@@ -247,7 +247,12 @@ async def handle_file_upload(user_session: dict, element):
                 enum_preview = get_enum_preview(excel_path)
 
                 if not enum_preview:
-                    await cl.Message(content="❌ Excel 文件中未找到有效的映射数据").send()
+                    await cl.Message(
+                        content="⚠️ 该 Excel 文件未识别为有效的枚举映射表。\n\n"
+                                "如需使用枚举填充功能，请上传符合格式要求的映射表。\n"
+                                "文件已保存，可继续使用其他功能。"
+                    ).send()
+                    user_session["enum_excel_path"] = excel_path
                     return
 
                 # 保存到会话
@@ -444,7 +449,12 @@ Excel 格式说明：
         await loading_msg.send()
         full_input = build_llm_input(user_text, user_session, intent="general")
         result = await call_team(team, full_input, loading_msg, intent="log_parser")
-        await handle_team_response(result, user_session, user_text)
+        result_content = result.content if hasattr(result, 'content') else str(result)
+        try:
+            await loading_msg.remove()
+        except Exception:
+            pass
+        await cl.Message(content=str(result_content)).send()
         return
 
     # 5. 构建 LLM 输入（按意图隔离上下文）
