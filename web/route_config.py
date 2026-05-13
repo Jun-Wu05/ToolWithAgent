@@ -23,6 +23,7 @@ def _load_route_keywords():
         "threat_keywords": ["威胁类型", "threat_type", "威胁类型标准化", "威胁类型映射"],
         "enum_keywords": ["枚举", "枚举字段", "enum"],
         "enum_extract_keywords": ["提取枚举", "枚举值", "列举枚举", "列出枚举"],
+        "log_parser_keywords": ["日志类型", "特征提取", "识别日志", "日志格式", "日志解析"],
     }
     try:
         with open(_config_path, "r", encoding="utf-8") as _f:
@@ -32,6 +33,7 @@ def _load_route_keywords():
             _data.get("threat_keywords", _defaults["threat_keywords"]),
             _data.get("enum_keywords", _defaults["enum_keywords"]),
             _data.get("enum_extract_keywords", _defaults["enum_extract_keywords"]),
+            _data.get("log_parser_keywords", _defaults["log_parser_keywords"]),
         )
     except Exception as _e:
         logger.warning(f"[CONFIG] 加载 route_keywords.json 失败: {_e}，使用默认关键词")
@@ -40,7 +42,8 @@ def _load_route_keywords():
             _defaults["threat_keywords"],
             _defaults["enum_keywords"],
             _defaults["enum_extract_keywords"],
+            _defaults["log_parser_keywords"],
         )
 
 
-MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS = _load_route_keywords()
+MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS = _load_route_keywords()

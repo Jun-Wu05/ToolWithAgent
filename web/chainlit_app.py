@@ -64,7 +64,7 @@ from web.session_state import SessionState
 
 # 路由与解析
 from web.parsers import parse_json_mapping_result, parse_json_threat_result, create_dataframe_elements
-from web.route_config import MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS
+from web.route_config import MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS
 from web.llm_client import call_team, setup_agno_logging_bridge
 from agent.core.tracing import trace_request
 from web.input_builder import build_llm_input, build_batch_llm_input
@@ -383,6 +383,7 @@ async def handle_user_message(user_session: dict, team, user_text: str):
     is_enum_extract = any(kw in user_lower for kw in ENUM_EXTRACT_KEYWORDS)
     is_threat = any(kw in user_lower for kw in THREAT_KEYWORDS)
     is_mapping = any(kw in user_lower for kw in MAPPING_KEYWORDS)
+    is_log_parser = any(kw in user_lower for kw in LOG_PARSER_KEYWORDS)
 
     # 1. 威胁填充模式分流 → threat_handler
     if await handle_threat_fill_flow(user_session, user_text):
@@ -436,15 +437,28 @@ Excel 格式说明：
         ).send()
         return
 
+    # 4.5 日志解析分流
+    if is_log_parser:
+        logger.info("[ROUTE] 命中日志解析关键词，路由到 LogParserAgent")
+        loading_msg = cl.Message(content="⏳ **AI正在分析日志，请稍候...**\n\n🔍 正在识别格式并提取特征...")
+        await loading_msg.send()
+        full_input = build_llm_input(user_text, user_session, intent="general")
+        result = await call_team(team, full_input, loading_msg, intent="log_parser")
+        await handle_team_response(result, user_session, user_text)
+        return
+
     # 5. 构建 LLM 输入（按意图隔离上下文）
     # 威胁路由：只传文本，不拼接字段数据（避免旧缓存污染威胁处理）
     # 映射路由：拼接字段数据，供 LLM 做字段映射
+    # 日志解析路由：由 RouterAgent 路由到 LogParserAgent
     # 通用路由：由 RouterAgent 自己判断
     detected_intent = "general"
     if is_threat:
         detected_intent = "threat"
     elif is_mapping:
         detected_intent = "mapping"
+    elif is_log_parser:
+        detected_intent = "log_parser"
 
     # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
     BATCH_SIZE = 25

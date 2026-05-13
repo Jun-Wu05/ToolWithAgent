@@ -16,7 +16,7 @@ import time
 from agent.shared.logger import get_logger
 from agent.core.resilience import CircuitBreaker, CircuitBreakerOpenError
 from agent.core.model_config import ModelConfig
-from web.route_config import ENUM_KEYWORDS, THREAT_KEYWORDS
+from web.route_config import ENUM_KEYWORDS, THREAT_KEYWORDS, LOG_PARSER_KEYWORDS
 
 logger = get_logger("llm_client")
 
@@ -46,7 +46,9 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
     """
     # 关键词预筛：命中枚举/威胁则加入路由提示，减少 RouterAgent 推理时间
     lower_input = full_input.lower()
-    if any(kw in lower_input for kw in ENUM_KEYWORDS):
+    if any(kw in lower_input for kw in LOG_PARSER_KEYWORDS):
+        full_input = f"[ROUTE_HINT: 日志解析] {full_input}"
+    elif any(kw in lower_input for kw in ENUM_KEYWORDS):
         full_input = f"[ROUTE_HINT: 枚举处理] {full_input}"
     elif any(kw in lower_input for kw in THREAT_KEYWORDS):
         full_input = f"[ROUTE_HINT: 威胁类型] {full_input}"
@@ -65,6 +67,7 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
             "mapping": "FieldMappingAgent",
             "threat": "ThreatAgent",
             "enum": "EnumAgent",
+            "log_parser": "LogParserAgent",
         }
         target_member = None
         if intent in intent_agent_map:
