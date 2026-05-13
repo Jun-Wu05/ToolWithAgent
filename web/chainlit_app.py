@@ -38,6 +38,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import chainlit as cl
+import json
 import logging
 from datetime import datetime
 
@@ -247,13 +248,49 @@ async def handle_file_upload(user_session: dict, element):
                 enum_preview = get_enum_preview(excel_path)
 
                 if not enum_preview:
-                    await cl.Message(
-                        content="⚠️ 该 Excel 文件未识别为有效的枚举映射表。\n\n"
-                                "如需使用枚举填充功能，请上传符合格式要求的映射表。\n"
-                                "文件已保存，可继续使用其他功能。"
-                    ).send()
-                    user_session["enum_excel_path"] = excel_path
-                    return
+                    # 不是枚举映射表 → 读取 Excel 内容作为结构化数据，供 LogParserAgent 等下游使用
+                    logger.info(f"[FILE_UPLOAD] Excel 非枚举映射表，尝试读取为数据表格: {file_name}")
+                    try:
+                        import pandas as pd
+                        df = pd.read_excel(excel_path)
+                        if df.empty:
+                            await cl.Message(content=f"⚠️ Excel 文件 `{file_name}` 为空，无法读取数据。").send()
+                            return
+                        # 将 DataFrame 转为结构化数据，填入 user_session（与 Base64 解码流程对齐）
+                        records = df.fillna("").to_dict(orient="records")
+                        fields = list(df.columns)
+                        # original_log 必须是字符串列表（enum_handler 中使用 '\n'.join() 拼接）
+                        original_log = [json.dumps(r, ensure_ascii=False) for r in records]
+                        decoded_text = df.to_string(index=False)
+                        user_session["original_log"] = original_log
+                        user_session["decoded_data"] = records
+                        user_session["decoded_fields"] = fields
+                        user_session["decoded_text"] = decoded_text
+                        user_session["simplified_data"] = {
+                            "fields": fields,
+                            "original_log_sample": decoded_text[:2000]
+                        }
+                        user_session["uploaded_file_name"] = file_name
+                        user_session["uploaded_file_time"] = datetime.now().strftime("%H:%M:%S")
+                        # 保存路径供枚举填充等后续使用
+                        user_session["enum_excel_path"] = excel_path
+                        await cl.Message(
+                            content=f"📊 已读取 Excel 文件 `{file_name}`\n\n"
+                                    f"📊 **行数**：{len(df)} 行\n"
+                                    f"📊 **列数**：{len(fields)} 列\n"
+                                    f"📊 **列名**：{', '.join(fields[:20])}"
+                                    f"{'...' if len(fields) > 20 else ''}"
+                        ).send()
+                        logger.info(f"[FILE_UPLOAD] Excel 数据表格读取成功：{len(df)} 行 × {len(fields)} 列")
+                        return
+                    except ImportError:
+                        logger.error("[FILE_UPLOAD] pandas 未安装，无法读取 Excel 数据")
+                        await cl.Message(content="⚠️ 系统缺少 Excel 解析库 (pandas)，请联系管理员。").send()
+                        return
+                    except Exception as excel_read_err:
+                        logger.error(f"[FILE_UPLOAD] 读取 Excel 数据表格失败: {excel_read_err}")
+                        await cl.Message(content=f"⚠️ 读取 Excel 文件失败：{excel_read_err}").send()
+                        return
 
                 # 保存到会话
                 user_session["enum_excel_path"] = excel_path
