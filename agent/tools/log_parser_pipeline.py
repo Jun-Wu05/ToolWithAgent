@@ -155,13 +155,9 @@ _LOG_FORMAT_IDENTIFY_PROMPT = """你是安全日志格式分析专家。分析�
 {{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符(space格式为空格)","confidence":0.0~1.0,"kv_connector":"key-value连接符(= 或 : 或 空格等)","kv_separator":"kv对之间的分隔符(空格或;或,等)","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"推测的业务分类字段名(如log_type/event_type/category等)","reason":"判断理由"}}"""
 
 
-@tool(
-    name="identify_log_format",
-    description="识别日志文本的格式类型（json/kv/space/csv等）。输入 logs_str=原始日志字符串。返回 JSON 格式信息。",
-)
-def identify_log_format(logs_str: str) -> str:
+def _do_identify_log_format(logs_str: str) -> str:
     """
-    采样日志并由 LLM 识别格式类型。
+    采样日志并由 LLM 识别格式类型（纯函数，供 chainlit_app 等直接调用）。
 
     Args:
         logs_str: 原始日志字符串（多行）
@@ -231,6 +227,15 @@ def identify_log_format(logs_str: str) -> str:
             {"format": "unknown", "error": str(e), "confidence": 0},
             ensure_ascii=False,
         )
+
+
+@tool(
+    name="identify_log_format",
+    description="识别日志文本的格式类型（json/kv/space/csv等）。输入 logs_str=原始日志字符串。返回 JSON 格式信息。",
+)
+def identify_log_format(logs_str: str) -> str:
+    """Agno Agent 工具封装，委托给 _do_identify_log_format。"""
+    return _do_identify_log_format(logs_str)
 
 
 # ============================================================================
@@ -600,6 +605,21 @@ def _extract_sample_summary(obj: dict) -> str:
     return "; ".join(parts)
 
 
+def _build_fallback_details(aggregation: dict) -> list[dict]:
+    """当 LLM 无法正常解析时，用纯函数构建兜底的 classification_details"""
+    details: list[dict] = []
+    for val, info in aggregation.get("values", {}).items():
+        details.append({
+            "value": val,
+            "matched_regex": _re.escape(val),
+            "meaning": "",
+            "severity": "未知",
+            "attack_type": "",
+            "sample": info.get("samples", [None])[0] if info.get("samples") else "",
+        })
+    return details
+
+
 # ============================================================================
 # Step 3: 日志特征分类 (工具内调 LLM) — 对齐 Dify "JSON格式日志分类" 提示词
 # ============================================================================
@@ -638,66 +658,46 @@ _CLASSIFY_FEATURE_PROMPT = """你是安全日志分析专家。请分析以下�
 }}"""
 
 
-@tool(
-    name="classify_log_features",
-    description="识别日志的业务分类特征。输入 logs_str=原始日志字符串, format_type=格式类型, format_detail=格式详情。对齐 Dify 工作流找业务分类字段。",
-)
-def classify_log_features(
+def _do_classify_log_features(
     logs_str: str,
     format_type: str = "unknown",
     format_detail: str = "",
     feature_field: str = "log_type",
 ) -> str:
     """
-    按业务分类字段聚合日志，由 LLM 对各类日志做特征分类。
-
-    对齐 Dify 工作流中"JSON格式日志分类"步骤：
-    1. 内部按 feature_field 聚合统计
-    2. 将聚合信息 + 样本喂给 LLM
-    3. 输出 log_format / feature_identifier / classification_details
+    解析日志、聚合、调 LLM 分类（纯函数，供 chainlit_app 等直接调用）。
 
     Args:
-        logs_str: 原始日志字符串（多行）
-        format_type: 格式类型 (json/kv/space/semicolon/comma/unknown)
-        format_detail: 格式详情描述 (如"日志头+JSON"/"纯JSON")
-        feature_field: 业务分类字段名，默认 "log_type"
+        logs_str: 原始日志字符串
+        format_type: 格式类型 (json/kv/space)
+        format_detail: 格式详情
+        feature_field: 业务分类字段名
 
     Returns:
-        JSON 字符串:
-        {
-          "status": "SUCCESS",
-          "log_format": "日志头+JSON",
-          "feature_field": "log_type",
-          "feature_identifier": "(event-log|dac_weakpasswd|...)",
-          "feature_count": N,
-          "classification_details": [
-            {"value": "event-log", "matched_regex": "event-log", "meaning": "安全事件日志", "severity": "中危", "attack_type": "信息收集", "sample": "..."}
-          ],
-          "expert_summary": "..."
-        }
+        JSON 字符串
     """
     if not logs_str or not logs_str.strip():
         return json.dumps(
             {
                 "status": "FAILED",
                 "error": "日志内容为空",
-                "log_format": format_detail or "unknown",
+                "log_format": format_detail or format_type,
                 "feature_field": feature_field,
                 "feature_identifier": "",
                 "feature_count": 0,
                 "classification_details": [],
-                "expert_summary": "无日志数据",
+                "expert_summary": "日志内容为空",
             },
             ensure_ascii=False,
         )
 
     try:
-        # 内部聚合：按业务字段统计
+        # 按业务字段聚合
         aggregation = _aggregate_by_log_type(logs_str, feature_field)
-        total_lines = aggregation["total_lines"]
-        matched_lines = aggregation["matched_lines"]
-        value_count = aggregation["value_count"]
-        top_values = aggregation["top_values"]
+        value_count = aggregation.get("value_count", 0)
+        top_values = aggregation.get("top_values", [])
+        total_lines = aggregation.get("total_lines", 0)
+        matched_lines = aggregation.get("matched_lines", 0)
 
         if value_count == 0:
             logger.warning(
@@ -705,16 +705,14 @@ def classify_log_features(
             )
             return json.dumps(
                 {
-                    "status": "PARTIAL",
-                    "error": f"字段 '{feature_field}' 在日志中未找到，请检查字段名",
+                    "status": "FAILED",
+                    "error": f"字段 '{feature_field}' 无匹配结果",
                     "log_format": format_detail or format_type,
                     "feature_field": feature_field,
                     "feature_identifier": "",
                     "feature_count": 0,
                     "classification_details": [],
-                    "expert_summary": f"未找到业务分类字段 {feature_field}，总行数 {total_lines}",
-                    "total_lines": total_lines,
-                    "matched_lines": matched_lines,
+                    "expert_summary": f"字段 '{feature_field}' 无匹配结果",
                 },
                 ensure_ascii=False,
             )
@@ -819,19 +817,18 @@ def classify_log_features(
         )
 
 
-def _build_fallback_details(aggregation: dict) -> list[dict]:
-    """当 LLM 无法正常解析时，用纯函数构建兜底的 classification_details"""
-    details: list[dict] = []
-    for val, info in aggregation.get("values", {}).items():
-        details.append({
-            "value": val,
-            "matched_regex": _re.escape(val),
-            "meaning": "",
-            "severity": "未知",
-            "attack_type": "",
-            "sample": info.get("samples", [None])[0] if info.get("samples") else "",
-        })
-    return details
+@tool(
+    name="classify_log_features",
+    description="识别日志的业务分类特征。输入 logs_str=原始日志字符串, format_type=格式类型, format_detail=格式详情。对齐 Dify 工作流找业务分类字段。",
+)
+def classify_log_features(
+    logs_str: str,
+    format_type: str = "unknown",
+    format_detail: str = "",
+    feature_field: str = "log_type",
+) -> str:
+    """Agno Agent 工具封装，委托给 _do_classify_log_features。"""
+    return _do_classify_log_features(logs_str, format_type, format_detail, feature_field)
 
 
 # ============================================================================

@@ -90,7 +90,7 @@ from web.file_handler import (
 
 # 枚举工具（handle_file_upload 中引用）
 from agent.tools.enum_field_tool import get_enum_preview
-from agent.tools.log_parser_pipeline import identify_log_format, classify_log_features, fill_sample_logs
+from agent.tools.log_parser_pipeline import _do_identify_log_format, _do_classify_log_features, fill_sample_logs
 
 # 加载路由关键词（枚举提取关键词保留，用于枚举提取流触发）
 
@@ -554,7 +554,7 @@ Excel 格式说明：
 
             # Step 1: 格式识别
             logger.info("[ROUTE][LogParser] Step 1: identify_log_format")
-            format_info_str = identify_log_format(logs_str)
+            format_info_str = _do_identify_log_format(logs_str)
             format_info = _parse_json_safe(format_info_str)
             format_type = format_info.get("format", "unknown") if isinstance(format_info, dict) else "unknown"
             format_detail = format_info.get("format_detail", "") if isinstance(format_info, dict) else ""
@@ -563,7 +563,7 @@ Excel 格式说明：
 
             # Step 2: 特征分类
             logger.info("[ROUTE][LogParser] Step 2: classify_log_features")
-            classification_str = classify_log_features(
+            classification_str = _do_classify_log_features(
                 logs_str=logs_str,
                 format_type=format_type,
                 format_detail=format_detail,
