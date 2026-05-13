@@ -41,10 +41,18 @@ import chainlit as cl
 import json
 import logging
 from datetime import datetime
+from typing import Set
 
 # 初始化日志
 from agent.shared.logger import get_logger
 logger = get_logger("chainlit_app")
+
+# === 枚举映射表列头关键词（用于区分枚举映射表 vs 数据表格）===
+_ENUM_HEADER_KEYWORDS: Set[str] = {
+    "mappingtype", "orgvalue", "mappingvalue",
+    "原始值", "映射值", "映射类型",
+    "目标字段", "target_field", "targetfield"
+}
 
 # 隐藏第三方库的 DEBUG 日志
 logging.getLogger("openai").setLevel(logging.WARNING)	 
@@ -191,6 +199,37 @@ async def main(message: cl.Message):
 
 # ============= 文件处理 =============
 
+def _is_enum_mapping_excel(excel_path: str) -> bool:
+    """
+    通过列头判断 Excel 是否为枚举映射表（而非数据表格）。
+    
+    Args:
+        excel_path: Excel 文件路径
+    
+    Returns:
+        True 如果列头匹配枚举映射表关键词，False 表示是普通数据表格
+    """
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(excel_path, read_only=True)
+        try:
+            if not wb.sheetnames:
+                return False
+            ws = wb[wb.sheetnames[0]]
+            # 读取第一行列头
+            row1_cells = [cell for cell in ws[1] if cell.value is not None]
+            if not row1_cells:
+                return False
+            row1_headers = {str(cell.value).strip().lower() for cell in row1_cells if str(cell.value).strip()}
+            # 判断是否包含枚举映射表关键词
+            return bool(row1_headers & _ENUM_HEADER_KEYWORDS)
+        finally:
+            wb.close()
+    except Exception as e:
+        logger.warning(f"[ENUM_DETECT] 枚举表头检测异常，回退为数据表格: {e}")
+        return False
+
+
 async def handle_file_upload(user_session: dict, element):
     """处理文件上传 — 委托给各 handler"""
     try:
@@ -244,12 +283,13 @@ async def handle_file_upload(user_session: dict, element):
                 return
 
             try:
-                # 读取枚举映射预览
-                enum_preview = get_enum_preview(excel_path)
+                # 通过列头检测区分枚举映射表 vs 数据表格（避免 get_enum_preview 误判）
+                is_enum_table = _is_enum_mapping_excel(excel_path)
+                logger.info(f"[FILE_UPLOAD] Excel 表头检测: is_enum_table={is_enum_table}, file={file_name}")
 
-                if not enum_preview:
-                    # 不是枚举映射表 → 读取 Excel 内容作为结构化数据，供 LogParserAgent 等下游使用
-                    logger.info(f"[FILE_UPLOAD] Excel 非枚举映射表，尝试读取为数据表格: {file_name}")
+                if not is_enum_table:
+                    # 不是枚举映射表 → 直接读取为数据表格，供 LogParserAgent 等下游使用
+                    logger.info(f"[FILE_UPLOAD] Excel 列头不匹配枚举映射表，按数据表格处理: {file_name}")
                     try:
                         import pandas as pd
                         df = pd.read_excel(excel_path)
@@ -300,6 +340,14 @@ async def handle_file_upload(user_session: dict, element):
                         logger.error(f"[FILE_UPLOAD] 读取 Excel 数据表格失败: {excel_read_err}")
                         await cl.Message(content=f"⚠️ 读取 Excel 文件失败：{excel_read_err}").send()
                         return
+
+                # 是枚举映射表 → 读取枚举映射预览
+                enum_preview = get_enum_preview(excel_path)
+                logger.info(f"[FILE_UPLOAD] 枚举映射表确认，预览条数: {len(enum_preview) if enum_preview else 0}")
+
+                if not enum_preview:
+                    await cl.Message(content=f"⚠️ 枚举映射表 `{file_name}` 未读取到有效映射规则").send()
+                    return
 
                 # 保存到会话
                 user_session["enum_excel_path"] = excel_path
