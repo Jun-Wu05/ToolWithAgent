@@ -39,6 +39,9 @@ class SessionState:
     decoded_text: Optional[str] = None
     """解码后的原始文本，供 input_builder 后备使用（解码时保存，映射时作为上下文）"""
 
+    raw_log_lines: Optional[List[str]] = None
+    """从数据表格的"原始日志"列预提取的行列表，供 LogParserAgent 精简输入使用"""
+
     # ---- 文件上传元信息（Agent 自决清空所需）----
     uploaded_file_name: Optional[str] = None
     """最近上传的文件名，供 Agent 感知当前会话处理的是哪个文件"""
@@ -127,6 +130,7 @@ class SessionState:
         self.decoded_fields = None
         self.decoded_text = None
         self.original_log = None
+        self.raw_log_lines = None
         self.simplified_data = None
         self.uploaded_file_name = None
         self.uploaded_file_time = None
