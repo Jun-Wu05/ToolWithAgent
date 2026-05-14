@@ -493,15 +493,24 @@ def aggregate_by_format(logs_str: str, format_info: dict) -> dict:
 def _aggregate_by_log_type(
     logs_str: str,
     feature_field: str = "log_type",
+    format_type: str = "json",
+    format_info: dict | None = None,
 ) -> dict:
     """
     按指定的业务分类字段值做纯函数聚合。
 
-    对每行 JSON 日志提取 feature_field 的值，统计每种值出现的次数和对应样例。
+    支持多种日志格式：
+    - json: 每行 JSON（含"日志头+JSON"子串回退）
+    - kv: key=value 或 key:value 键值对
+    - semicolon/comma: 分隔符格式，从中提取 key=value 对
+    - space: 空格分隔格式，从中提取 key=value 对
+    - cef: CEF 格式（CEF:Version|...|extensions=key value pairs）
 
     Args:
-        logs_str: 原始 JSON 日志字符串（每行一个 JSON）
+        logs_str: 原始日志字符串（多行）
         feature_field: 业务分类字段名，默认 "log_type"
+        format_type: 日志格式类型 (json/kv/semicolon/comma/space/cef)
+        format_info: identify_log_format 返回的完整格式信息
 
     Returns:
         {
@@ -510,11 +519,10 @@ def _aggregate_by_log_type(
             "feature_field": str,
             "values": {
                 "value_1": {"count": N, "samples": ["...", "..."]},
-                "value_2": {"count": N, "samples": ["..."]},
                 ...
             },
-            "value_count": int,           # 唯一值数量
-            "top_values": ["v1", "v2", ...],  # TOP 值列表
+            "value_count": int,
+            "top_values": ["v1", "v2", ...],
         }
     """
     lines = [l for l in logs_str.strip().split("\n") if l.strip()]
@@ -525,22 +533,16 @@ def _aggregate_by_log_type(
     value_samples: dict[str, list[str]] = {}
 
     for line in lines:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            # 支持"日志头+JSON"格式：提取第一个 { 到最后一个 } 之间的 JSON 子串
-            json_start = line.find("{")
-            json_end = line.rfind("}")
-            if json_start != -1 and json_end > json_start:
-                try:
-                    obj = json.loads(line[json_start:json_end + 1])
-                except (json.JSONDecodeError, ValueError):
-                    continue
-            else:
-                continue
+        feature_value: Any = None
 
-        # 支持嵌套路径，如 "event.type" 或 "log_type"
-        feature_value = _get_nested_value(obj, feature_field)
+        if format_type == "json":
+            feature_value = _try_extract_json_feature(line, feature_field)
+        else:
+            # 非 JSON 格式：从行中提取 key=value 对，找 feature_field
+            feature_value = _try_extract_kv_feature(
+                line, feature_field, format_type, format_info
+            )
+
         if feature_value is None:
             continue
 
@@ -551,8 +553,7 @@ def _aggregate_by_log_type(
         if feature_str not in value_samples:
             value_samples[feature_str] = []
         if len(value_samples[feature_str]) < 3:
-            # 取该行的简短摘要（核心字段值）
-            sample = _extract_sample_summary(obj)
+            sample = line[:200].strip()
             if sample not in value_samples[feature_str]:
                 value_samples[feature_str].append(sample)
 
@@ -572,6 +573,150 @@ def _aggregate_by_log_type(
         "value_count": len(value_counter),
         "top_values": [v for v, _ in value_counter.most_common(20)],
     }
+
+
+def _try_extract_json_feature(line: str, feature_field: str) -> Any:
+    """从一行 JSON 日志中提取 feature_field 的值（含日志头+JSON 子串回退）。"""
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        # 支持"日志头+JSON"格式：提取第一个 { 到最后一个 } 之间的 JSON 子串
+        json_start = line.find("{")
+        json_end = line.rfind("}")
+        if json_start != -1 and json_end > json_start:
+            try:
+                obj = json.loads(line[json_start:json_end + 1])
+            except (json.JSONDecodeError, ValueError):
+                return None
+        else:
+            return None
+    return _get_nested_value(obj, feature_field)
+
+
+def _try_extract_kv_feature(
+    line: str,
+    feature_field: str,
+    format_type: str,
+    format_info: dict | None = None,
+) -> Any:
+    """
+    从非 JSON 日志行中提取 feature_field 的值。
+
+    策略（按优先级）：
+    1. semicolon/comma：按分隔符拆分 → 每个 token 按 key=value 解析
+    2. kv：使用 format_info 中的 kv_connector/kv_separator
+    3. space：用正则 /\S+=\S+/ 匹配 key=value 对
+    4. cef：查找 CEF 扩展字段中的 key=value 对
+    5. 兜底：遍历行中所有 key=value 对查找匹配
+    """
+    if format_info is None:
+        format_info = {}
+
+    pairs: dict[str, str] = {}
+
+    if format_type == "semicolon":
+        # 分号分隔 → 按 ; 拆分 → 每个 token 可能是 key=value
+        tokens = line.split(";")
+        for token in tokens:
+            token = token.strip().strip('"').strip("'")
+            _kv_from_token(token, pairs)
+    elif format_type == "comma":
+        # 逗号分隔 → 注意引号内的逗号
+        tokens = _smart_split(line, ",")
+        for token in tokens:
+            token = token.strip().strip('"').strip("'")
+            _kv_from_token(token, pairs)
+    elif format_type == "kv":
+        kv_connector = format_info.get("kv_connector", "=")
+        kv_separator = format_info.get("kv_separator", " ")
+        kv_pairs = _parse_kv_line(line, kv_connector, kv_separator)
+        for k, v in kv_pairs:
+            pairs[k] = v
+    elif format_type == "space":
+        # 空格分隔：先尝试按 key=value 正则匹配
+        _kv_from_space_line(line, pairs)
+        # 也尝试用 CEF 的 key=value 模式
+        if feature_field not in pairs:
+            _kv_from_cef_style(line, pairs)
+    elif format_type == "cef":
+        _kv_from_cef_style(line, pairs)
+    else:
+        # unknown：遍历所有可能的 key=value 对
+        _kv_from_token(line, pairs)
+        _kv_from_space_line(line, pairs)
+        _kv_from_cef_style(line, pairs)
+
+    # 查找 feature_field（支持嵌套路径如 "event.type"）
+    field_parts = feature_field.split(".")
+    for k, v in pairs.items():
+        if k == field_parts[0]:
+            return v
+        # 如果 feature_field 是单字段路径但 key 以 / 分隔（如 SHELL/6/SHELL_CMD）
+        if feature_field in k:
+            return v
+
+    # 如果没找到精确匹配，尝试模糊匹配：去掉前导路径部分
+    for k, v in pairs.items():
+        # e.g. SHELL/6/SHELL_CMD contains SHELL_CMD
+        if "/" in feature_field:
+            last_part = feature_field.rsplit("/", 1)[-1]
+            if k == last_part:
+                return v
+        if "/" in k:
+            last_part = k.rsplit("/", 1)[-1]
+            if last_part == feature_field or last_part == feature_field.rsplit("/", 1)[-1]:
+                return v
+
+    return None
+
+
+def _kv_from_token(token: str, pairs: dict[str, str]) -> None:
+    """从一个 token 中提取 key=value 或 key:value 对。"""
+    for connector in ("=", ":", " "):
+        if connector in token:
+            key, sep, value = token.partition(connector)
+            key = key.strip().strip('"').strip("'").strip()
+            value = value.strip().strip('"').strip("'").strip()
+            if key and key not in pairs:
+                pairs[key] = value
+            return
+
+
+def _kv_from_space_line(line: str, pairs: dict[str, str]) -> None:
+    """从空格分隔的行中提取 key=value 对（正则匹配）。"""
+    # 匹配 patterns like key=value 或 key="value" 或 key:value
+    pattern = _re.compile(r'(\S+)([=:])(?:"([^"]*)"|\'([^\']*)\'|(\S+))')
+    for m in pattern.finditer(line):
+        key = m.group(1).strip()
+        value = m.group(3) or m.group(4) or m.group(5)
+        if key and key not in pairs:
+            pairs[key] = value
+
+
+def _kv_from_cef_style(line: str, pairs: dict[str, str]) -> None:
+    """
+    从 CEF 风格的扩展字段中提取 key=value 对。
+    CEF 格式: CEF:Version|Device Vendor|...|Extension
+    Extension 为 key=value 空格分隔的对。
+    """
+    # 提取 CEF 扩展部分（最后一个 | 之后）
+    if "|" in line:
+        cef_parts = line.split("|")
+        # CEF 扩展从第 8 个字段开始（下标 7）
+        # 但常见的是最后一个 | 之后的所有内容
+        extension = cef_parts[-1]
+        # 按空格拆分扩展字段中的 key=value 对
+        for token in extension.split():
+            token = token.strip()
+            if "=" in token and not token.startswith("="):
+                key, sep, value = token.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in pairs:
+                    pairs[key] = value
+
+    # 同时也尝试按 key=value 正则匹配整行
+    _kv_from_space_line(line, pairs)
 
 
 def _get_nested_value(obj: dict, path: str) -> Any:
@@ -715,8 +860,10 @@ def _do_classify_log_features(
         )
 
     try:
-        # 按业务字段聚合
-        aggregation = _aggregate_by_log_type(logs_str, feature_field)
+        # 按业务字段聚合（传入 format_type 以支持非 JSON 格式）
+        aggregation = _aggregate_by_log_type(
+            logs_str, feature_field, format_type=format_type
+        )
         value_count = aggregation.get("value_count", 0)
         top_values = aggregation.get("top_values", [])
         total_lines = aggregation.get("total_lines", 0)
@@ -724,20 +871,8 @@ def _do_classify_log_features(
 
         if value_count == 0:
             logger.warning(
-                f"[classify_log_features] 字段 '{feature_field}' 无匹配结果"
-            )
-            return json.dumps(
-                {
-                    "status": "FAILED",
-                    "error": f"字段 '{feature_field}' 无匹配结果",
-                    "log_format": format_detail or format_type,
-                    "feature_field": feature_field,
-                    "feature_identifier": "",
-                    "feature_count": 0,
-                    "classification_details": [],
-                    "expert_summary": f"字段 '{feature_field}' 无匹配结果",
-                },
-                ensure_ascii=False,
+                f"[classify_log_features] 字段 '{feature_field}' 纯函数聚合无匹配，"
+                f"将继续调 LLM 直接分析原始日志"
             )
 
         # 构建聚合文本供 LLM 分析
@@ -747,13 +882,18 @@ def _do_classify_log_features(
         )
         agg_parts.append(f"业务分类字段: {feature_field}")
         agg_parts.append("")
-        agg_parts.append("各值统计（TOP 20）：")
-        for val in top_values:
-            info = aggregation["values"].get(val, {})
-            cnt = info.get("count", 0)
-            samples = info.get("samples", [])
-            sample_str = " | ".join(samples[:2]) if samples else "无样本"
-            agg_parts.append(f"  {val}: 出现 {cnt} 次 | 样本: {sample_str}")
+        if value_count > 0:
+            agg_parts.append("各值统计（TOP 20）：")
+            for val in top_values:
+                info = aggregation["values"].get(val, {})
+                cnt = info.get("count", 0)
+                samples = info.get("samples", [])
+                sample_str = " | ".join(samples[:2]) if samples else "无样本"
+                agg_parts.append(f"  {val}: 出现 {cnt} 次 | 样本: {sample_str}")
+        else:
+            agg_parts.append(
+                f"纯函数未能按 '{feature_field}' 聚合，请直接从原始日志分析特征。"
+            )
 
         aggregation_text = "\n".join(agg_parts)
 
