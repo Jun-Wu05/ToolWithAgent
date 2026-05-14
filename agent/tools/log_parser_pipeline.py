@@ -151,8 +151,13 @@ _LOG_FORMAT_IDENTIFY_PROMPT = """你是安全日志格式分析专家。分析�
 
 你需要同时判断日志是否有"日志头"特征（即日志行的前半部分是固定格式的时间戳+主机名+进程名等，后半部分才是 JSON/KV 结构体）。
 
+【重要】判断业务分类字段（feature_field）的位置：
+- 如果分类标识在日志头部固定位置（如 %%10SHELL/6/SHELL_CMD、%LINK-5-CHANGED、[FW]ACCEPT、TYPE=Login 等），feature_position 设为 "header_regex"，并输出能提取该标识的正则（用 () 捕获值）。
+- 如果分类标识在 KV body 中（如 log_type=xxx、event_type=xxx），feature_position 设为 "kv_body"。
+- 如果分类标识在固定列位置（CSV第N列等），feature_position 设为 "positional"，并给出 column_index。
+
 输出 JSON（严格一行，不要有额外文字）：
-{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符(space格式为空格)","confidence":0.0~1.0,"kv_connector":"key-value连接符(= 或 : 或 空格等)","kv_separator":"kv对之间的分隔符(空格或;或,等)","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"推测的业务分类字段名(如log_type/event_type/category等)","reason":"判断理由"}}"""
+{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符(space格式为空格)","confidence":0.0~1.0,"kv_connector":"key-value连接符(= 或 : 或 空格等)","kv_separator":"kv对之间的分隔符(空格或;或,等)","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"推测的业务分类字段名(如log_type/event_type/category/module_identifier等)","feature_position":"kv_body|header_regex|positional","feature_extract_regex":"当feature_position=header_regex时，用于从行中提取特征值的正则表达式(含一个捕获组)","reason":"判断理由"}}"""
 
 
 def _do_identify_log_format(logs_str: str) -> str:
@@ -207,6 +212,8 @@ def _do_identify_log_format(logs_str: str) -> str:
         parsed.setdefault("has_header_feature", False)
         parsed.setdefault("space_count", 0)
         parsed.setdefault("log_feature_field", None)
+        parsed.setdefault("feature_position", "kv_body")
+        parsed.setdefault("feature_extract_regex", None)
         parsed.setdefault("reason", "")
 
         return json.dumps(parsed, ensure_ascii=False)
@@ -614,6 +621,33 @@ def _try_extract_kv_feature(
 
     pairs: dict[str, str] = {}
 
+    # 【优先级 0】LLM 识别特征值在日志头部固定位置，用 LLM 生成的正则提取
+    feature_position = format_info.get("feature_position", "kv_body")
+    if feature_position == "header_regex":
+        extract_regex = format_info.get("feature_extract_regex")
+        if extract_regex:
+            try:
+                m = _re.search(extract_regex, line)
+                if m:
+                    return m.group(1) if m.lastindex else m.group(0)
+            except _re.error:
+                pass
+    # 【优先级 0.5】positional: 按固定列位置提取
+    if feature_position == "positional":
+        column_index = format_info.get("column_index")
+        if column_index is not None:
+            try:
+                col_idx = int(column_index)
+                if format_type in ("semicolon", "comma"):
+                    tokens = _smart_split(line, ";" if format_type == "semicolon" else ",")
+                else:
+                    tokens = _re.split(r"\s+", line.strip())
+                tokens = [t for t in tokens if t]
+                if 0 <= col_idx < len(tokens):
+                    return tokens[col_idx].strip().strip('"').strip("'")
+            except (ValueError, IndexError):
+                pass
+
     if format_type == "semicolon":
         # 分号分隔 → 按 ; 拆分 → 每个 token 可能是 key=value
         tokens = line.split(";")
@@ -831,6 +865,7 @@ def _do_classify_log_features(
     format_type: str = "unknown",
     format_detail: str = "",
     feature_field: str = "log_type",
+    format_info: dict | None = None,
 ) -> str:
     """
     解析日志、聚合、调 LLM 分类（纯函数，供 chainlit_app 等直接调用）。
@@ -840,6 +875,7 @@ def _do_classify_log_features(
         format_type: 格式类型 (json/kv/space)
         format_detail: 格式详情
         feature_field: 业务分类字段名
+        format_info: identify_log_format 返回的完整格式信息（含 feature_position 等）
 
     Returns:
         JSON 字符串
@@ -860,9 +896,9 @@ def _do_classify_log_features(
         )
 
     try:
-        # 按业务字段聚合（传入 format_type 以支持非 JSON 格式）
+        # 按业务字段聚合（传入 format_type + format_info 以支持 header_regex 提取）
         aggregation = _aggregate_by_log_type(
-            logs_str, feature_field, format_type=format_type
+            logs_str, feature_field, format_type=format_type, format_info=format_info
         )
         value_count = aggregation.get("value_count", 0)
         top_values = aggregation.get("top_values", [])

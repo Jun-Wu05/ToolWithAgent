@@ -568,6 +568,7 @@ Excel 格式说明：
                 format_type=format_type,
                 format_detail=format_detail,
                 feature_field=feature_field,
+                format_info=format_info,
             )
             classification = _parse_json_safe(classification_str)
 
