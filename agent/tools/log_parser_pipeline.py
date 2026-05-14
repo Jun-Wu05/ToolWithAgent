@@ -134,30 +134,52 @@ def _try_parse_json(text: str) -> dict | None:
 # Step 1: 日志格式识别 (工具内调 LLM)
 # ============================================================================
 
-_LOG_FORMAT_IDENTIFY_PROMPT = """你是安全日志格式分析专家。分析以下3条采样日志，识别日志格式类型。
+_LOG_FORMAT_IDENTIFY_PROMPT = """你是安全日志格式分析专家。分析以下3条采样日志，识别日志格式类型及业务分类方法。
 
 采样日志：
 ```
 {sampled_logs}
 ```
 
-可能的格式类型：
-- json: JSON 格式（每行一个 JSON 对象）
-- kv: key=value 或 key="value" 键值对格式
-- space: 空格分隔的多列格式（Syslog、防火墙日志、W3C日志）
-- semicolon: 分号分隔格式
-- comma: 逗号分隔格式（CSV）
+## 格式类型
+- json: 每行一个 JSON 对象（或"日志头+JSON"）
+- kv: key=value 键值对，分隔符为空格、分号或逗号
+- space: 纯空格分隔多列（Syslog/防火墙/W3C）
+- semicolon: 分号分隔
+- comma: 逗号分隔（CSV）
 - unknown: 无法识别
 
-你需要同时判断日志是否有"日志头"特征（即日志行的前半部分是固定格式的时间戳+主机名+进程名等，后半部分才是 JSON/KV 结构体）。
+同时判断是否有"日志头"（前置的时间戳+主机名等固定前缀），在 format_detail 中描述（如"日志头+KV"、"日志头+JSON"、"纯KV"等）。
 
-【重要】判断业务分类字段（feature_field）的位置：
-- 如果分类标识在日志头部固定位置（如 %%10SHELL/6/SHELL_CMD、%LINK-5-CHANGED、[FW]ACCEPT、TYPE=Login 等），feature_position 设为 "header_regex"，并输出能提取该标识的正则（用 () 捕获值）。
-- 如果分类标识在 KV body 中（如 log_type=xxx、event_type=xxx），feature_position 设为 "kv_body"。
-- 如果分类标识在固定列位置（CSV第N列等），feature_position 设为 "positional"，并给出 column_index。
+## 【关键】业务分类字段位置判断（feature_position）
 
-输出 JSON（严格一行，不要有额外文字）：
-{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符(space格式为空格)","confidence":0.0~1.0,"kv_connector":"key-value连接符(= 或 : 或 空格等)","kv_separator":"kv对之间的分隔符(空格或;或,等)","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"推测的业务分类字段名(如log_type/event_type/category/module_identifier等)","feature_position":"kv_body|header_regex|positional","feature_extract_regex":"当feature_position=header_regex时，用于从行中提取特征值的正则表达式(含一个捕获组)","reason":"判断理由"}}"""
+你需要判断**最顶层的业务分类标识**位于日志的哪个位置。关键是：**先判断日志头部是否有分类关键词**（如设备类型、应用名、事件SYSLOG-FACILITY-SEVERITY-MNEMONIC模式），**再**看 KV body 内有没有 type/category 等字段。
+
+### 判断规则（按优先级）：
+
+**1. header_regex（头部固定位置）**：日志行的前缀/头部的某个固定位置隐藏着分类关键词。典型场景：
+- Syslog FACILITY-SEVERITY-MNEMONIC 模式：`%%01IFPDT/4/IF_STATE` → 特征在时间戳后的 %% 标记中
+- 设备类型标签：`<188>...WAF :...` 或 `<188>...DDOS:...` → 特征是日期后面的设备名称
+- 进程/应用名：`<44>AuditLog - WARNING - ...` → 特征在时间戳后的进程名
+- 方括号标记：`[FW]ACCEPT`、`[IDS]ALERT` → 特征在行首的 [TAG]
+- 当头部包含明显的分类关键词时，应优先设为 header_regex
+- **当头部和 body 都有分类相关信息时，取头部**（因为头部是顶层分类，body 中的 type 可能是子类）
+
+**2. kv_body（KV body 内）**：日志主体KV字段中有分类字段（如 log_type=xxx、event_type=xxx、category=xxx）。典型场景：
+- JSON body：`{{..."log_type":"dac_dga_log"...}}`
+- 纯KV行：`log_type=Login event=success src=10.0.0.1`
+- **如果 body 中有 type/severity/category 等字段，但不是顶层业务分类（例如某些 type 是子类），仍应在头部找顶层分类**
+
+**3. positional（固定列位置）**：分类标识在固定列（如 CSV 第 N 列），给出 column_index（从0开始）。
+
+### feature_extract_regex 编写要求
+当 feature_position=header_regex 时，提供一个含**一个捕获组**的正则表达式用于提取分类值：
+- 对于"WAF :"或"DDOS:"场景：`(WAF|DDOS|AuditLog)` — 关键是捕获头部关键词
+- 对于 SYSLOG MNEMONIC：`%%(\\S+/\\d+/\\w+)`
+- 正则必须能完整匹配，捕获组捕获分类值
+
+输出 JSON（严格一行）：
+{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:或 ","kv_separator":"空格或;或,","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"特征字段名（当feature_position=header_regex时写头部关键词的分类类属名称，如device_type/event_class等；当feature_position=kv_body时写KV body中的字段名如log_type）","feature_position":"kv_body|header_regex|positional","feature_extract_regex":"正则(含一个捕获组)","reason":"判断理由，说明为什么选择这个 position"}}"""
 
 
 def _do_identify_log_format(logs_str: str) -> str:
@@ -215,6 +237,13 @@ def _do_identify_log_format(logs_str: str) -> str:
         parsed.setdefault("feature_position", "kv_body")
         parsed.setdefault("feature_extract_regex", None)
         parsed.setdefault("reason", "")
+
+        logger.info(
+            f"[identify_log_format] feature_position={parsed['feature_position']}, "
+            f"feature_extract_regex={parsed['feature_extract_regex']}, "
+            f"feature_field={parsed['log_feature_field']}, "
+            f"reason={parsed['reason'][:100]}"
+        )
 
         return json.dumps(parsed, ensure_ascii=False)
 
@@ -542,13 +571,28 @@ def _aggregate_by_log_type(
     for line in lines:
         feature_value: Any = None
 
-        if format_type == "json":
-            feature_value = _try_extract_json_feature(line, feature_field)
-        else:
-            # 非 JSON 格式：从行中提取 key=value 对，找 feature_field
-            feature_value = _try_extract_kv_feature(
-                line, feature_field, format_type, format_info
-            )
+        # 优先级最高：header_regex 不依赖 format_type（日志头+JSON / 日志头+KV 均适用）
+        if (
+            format_info
+            and format_info.get("feature_position") == "header_regex"
+            and format_info.get("feature_extract_regex")
+        ):
+            try:
+                m = _re.search(format_info["feature_extract_regex"], line)
+                if m:
+                    feature_value = m.group(1) if m.lastindex else m.group(0)
+            except _re.error:
+                pass
+
+        # 回退到常规 JSON/KV body 提取
+        if feature_value is None:
+            if format_type == "json":
+                feature_value = _try_extract_json_feature(line, feature_field)
+            else:
+                # 非 JSON 格式：从行中提取 key=value 对，找 feature_field
+                feature_value = _try_extract_kv_feature(
+                    line, feature_field, format_type, format_info
+                )
 
         if feature_value is None:
             continue
