@@ -581,12 +581,25 @@ Excel 格式说明：
         except Exception as e:
             logger.error(f"[ROUTE][LogParser] Pipeline 异常: {type(e).__name__}: {e}")
             result_content = f"❌ 日志解析失败: {e}"
+            classification = None
         finally:
             try:
                 await loading_msg.remove()
             except Exception:
                 pass
         await cl.Message(content=result_content).send()
+        # 附加完整 JSON 文件下载
+        if classification and isinstance(classification, dict):
+            try:
+                json_bytes = json.dumps(classification, ensure_ascii=False, indent=2).encode("utf-8")
+                json_file = cl.File(
+                    name="日志解析结果.json",
+                    content=json_bytes,
+                    mime="application/json",
+                )
+                await cl.Message(content="📥 **完整结果下载：**", elements=[json_file]).send()
+            except Exception as json_err:
+                logger.error(f"[ROUTE][LogParser] 生成 JSON 下载文件失败: {json_err}")
         return
 
     # 5. 构建 LLM 输入（按意图隔离上下文）
@@ -945,6 +958,9 @@ def _render_log_parser_result(classification: dict | None, format_info: dict | N
     feature_count = classification.get("feature_count", 0)
     feature_identifier = classification.get("feature_identifier", "")
     expert_summary = classification.get("expert_summary", "")
+    categorical_features = classification.get("categorical_features", "")
+    diversion_method = classification.get("Diversion_method", "")
+    fail_reason = classification.get("fail_reason", "")
     details = classification.get("classification_details", [])
     total_lines = classification.get("total_lines", "?")
     matched_lines = classification.get("matched_lines", "?")
@@ -957,6 +973,12 @@ def _render_log_parser_result(classification: dict | None, format_info: dict | N
     lines.append(f"| 日志格式 | {log_format} |")
     lines.append(f"| 业务分类字段 | `{feature_field}` |")
     lines.append(f"| 特征标识符 | `{feature_identifier}` |")
+    if categorical_features:
+        lines.append(f"| 分类特征名称 | {categorical_features} |")
+    if diversion_method:
+        lines.append(f"| 分流方法 | {diversion_method} |")
+    if fail_reason:
+        lines.append(f"| 失败原因 | {fail_reason} |")
     lines.append(f"| 总行数 | {total_lines} |")
     lines.append(f"| 匹配行数 | {matched_lines} |")
     lines.append(f"| 分类数量 | {feature_count} |")
@@ -984,13 +1006,14 @@ def _render_log_parser_result(classification: dict | None, format_info: dict | N
         lines.append("| 字段值 | 含义 | 严重程度 | 攻击类型 | 匹配正则 | 真实样例 |")
         lines.append("|---|---|---|---|---|---|")
         for _d in details:
-            value = str(_d.get("value", ""))[:30]
-            meaning = str(_d.get("meaning", ""))[:20]
-            severity = str(_d.get("severity", ""))[:6]
-            attack_type = str(_d.get("attack_type", ""))[:15]
-            matched_regex = str(_d.get("matched_regex", ""))[:30]
+            # CHANGED: 取消硬截断，完整展示字段内容
+            value = str(_d.get("value", ""))
+            meaning = str(_d.get("meaning", ""))
+            severity = str(_d.get("severity", ""))
+            attack_type = str(_d.get("attack_type", ""))
+            matched_regex = str(_d.get("matched_regex", ""))
             real_samples = _d.get("real_samples", [])
-            sample = real_samples[0][:50] if real_samples else str(_d.get("sample", ""))[:50]
+            sample = real_samples[0] if real_samples else str(_d.get("sample", ""))
             lines.append(f"| {value} | {meaning} | {severity} | {attack_type} | `{matched_regex}` | {sample} |")
 
     lines.append("")

@@ -650,20 +650,34 @@ _CLASSIFY_FEATURE_PROMPT = """你是安全日志分析专家。请分析以下�
 
 任务：
 1. 分析日志结构，判断完整格式描述（如"日志头+JSON"、"纯JSON"、"KV"等）
-2. 提取业务特征的唯一标识符（feature_identifier），即一个能匹配所有业务分类值的正则表达式
+2. 提取业务特征的唯一标识符（feature_identifier），即一个**双捕获组正则表达式**：
+   - Group 1（第一个捕获组）：去掉日志头后的日志主体部分
+   - Group 2（第二个捕获组）：{feature_field} 对应的字段值
+   示例（日志头+JSON）：
+     原始行: <8>Mar 26 12:06:20 localhost respond:{{... "log_type": "dac_dga_log" ...}}
+     feature_identifier: (\\{{.*"{feature_field}":\\s"([^"]*)".*\\}})
+     → Group 1 = JSON主体，Group 2 = dac_dga_log
+   示例（日志头+文本）：
+     原始行: <188>Sep 29 2024 03:10:15 host %%01IFPDT/4/IF_STATE(l)[48703]:Interface...UP state.
+     feature_identifier: (?:%%|)(\\S+/\\d+/\\w+)(?:\\(\\w+\\)\\[\\d+\\]|\\[\\d+\\]|\\(\\w+\\)|):([\\S\\s]*)
+     → Group 1 = 01IFPDT/4/IF_STATE，Group 2 = 后续消息体
+   核心规则：Group 1 捕获去掉日志头的主体，Group 2 捕获 feature_field 的值。
 3. 对每种业务分类值，分析其意义、匹配正则、危害等级
 
 请严格按以下 JSON 格式输出（一行，不要额外文字）：
 {{
   "status": "SUCCESS",
+  "categorical_features": "分类特征名称",
+  "Diversion_method": "日志分流方法",
   "log_format": "日志头+JSON 或 JSON 或 KV 或 日志头+KV",
   "feature_field": "业务分类字段名",
-  "feature_identifier": "正则表达式，用于从原始日志中匹配该字段值",
+  "feature_identifier": "双捕获组正则：Group 1=去掉日志头后的日志主体，Group 2=feature_field的值",
   "feature_count": N,
   "classification_details": [
-    {{"value": "字段值1", "matched_regex": "匹配该值的正则", "meaning": "业务含义", "severity": "严重/高危/中危/低危/信息", "attack_type": "攻击类型(如暴力破解/恶意软件/C2通信/信息泄露等)", "sample": "一行原始日志示例"}}
+    {{"value": "字段值1", "matched_regex": "匹配该值的正则", "meaning": "业务含义", "severity": "严重/高危/中危/低危/信息", "attack_type": "攻击类型(如暴力破解/恶意软件/C2通信/信息泄露等)", "sample": "一行完整原始日志示例(不做截断)"}}
   ],
-  "expert_summary": "综合分析摘要（100字以内）"
+  "expert_summary": "综合分析摘要（100字以内）",
+  "fail_reason": ""
 }}"""
 
 
@@ -759,7 +773,7 @@ def _do_classify_log_features(
             f"feature_field={feature_field}, values={value_count}, "
             f"prompt_len={len(prompt)}"
         )
-        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=3000, timeout=90)
+        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=4000, timeout=90)
 
         parsed = _try_parse_json(response)
         if parsed is None:
@@ -789,6 +803,9 @@ def _do_classify_log_features(
         parsed.setdefault("feature_count", value_count)
         parsed.setdefault("classification_details", [])
         parsed.setdefault("expert_summary", "")
+        parsed.setdefault("categorical_features", "")
+        parsed.setdefault("Diversion_method", "")
+        parsed.setdefault("fail_reason", "")
         parsed.setdefault("total_lines", total_lines)
         parsed.setdefault("matched_lines", matched_lines)
 
