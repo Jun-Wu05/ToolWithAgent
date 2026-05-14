@@ -38,6 +38,9 @@ config/标准字段_cache_meta.json
 config/标准字段_embeddings.npy
 config/标准字段_records.json
 
+# 向量知识库（运行时生成，不提交）
+*.db
+
 
 .github/
 .trae/

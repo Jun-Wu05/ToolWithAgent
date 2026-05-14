@@ -26,6 +26,7 @@ import httpx
 from agno.tools import tool
 
 from agent.core.model_config import ModelConfig
+from agent.core.prompts import load_log_format_identify_prompt, load_log_classify_feature_prompt
 from agent.tools.enum_extract_tool import sample_logs
 from agent.shared.logger import get_logger
 
@@ -134,55 +135,7 @@ def _try_parse_json(text: str) -> dict | None:
 # Step 1: 日志格式识别 (工具内调 LLM)
 # ============================================================================
 
-_LOG_FORMAT_IDENTIFY_PROMPT = """<task>
-分析以下采样日志，识别日志格式类型，并判定业务分类字段的位置。
-</task>
-
-<role>安全日志格式分析专家</role>
-
-<format_types>
-<type name="json">每行一个 JSON 对象，或"日志头+JSON"（行首有固定前缀，后面跟 JSON body）</type>
-<type name="kv">key=value 键值对，分隔符为空格、分号或逗号</type>
-<type name="space">纯空格分隔多列，固定列位无显式 key</type>
-<type name="semicolon">分号分隔</type>
-<type name="comma">逗号分隔（CSV）</type>
-<type name="unknown">无法识别</type>
-</format_types>
-
-<header_detection>
-判断日志是否有"日志头"——即日志行前半部分为固定格式的时间戳、主机名、进程名等系统前缀。
-在 format_detail 中描述完整格式，例如"日志头+KV"、"日志头+JSON"、"纯KV"、"纯JSON"等。
-</header_detection>
-
-<feature_position_rules>
-<!-- 判断最顶层的业务分类标识位于日志的哪个位置。关键原则：先判断头部，再看 body。当头部和 body 都有分类信息时，取头部（头部是顶层分类，body 中的字段可能是子类）。 -->
-
-<position name="header_regex">
-<description>分类标识位于日志行头部固定位置（时间戳之后、body 之前的前缀区域）。特征是日志头部包含区分不同业务/设备类型的关键词标记。</description>
-<trigger>头部有明显的、可区分不同日志来源的固定关键词或模式标记时，应优先设为 header_regex。</trigger>
-<regex_rule>提供含一个捕获组的正则表达式，捕获组匹配分类关键词。正则应紧凑、不依赖具体时间戳或 IP 值。</regex_rule>
-</position>
-
-<position name="kv_body">
-<description>分类标识位于日志主体的 KV 字段中（如 log_type=xxx、event_type=xxx、category=xxx）。</description>
-<trigger>头部无区分性标记，且 body 中有明确分类字段时使用。</trigger>
-</position>
-
-<position name="positional">
-<description>分类标识位于固定列位置（如 CSV 第 N 列），给出 column_index（从 0 开始）。</description>
-<trigger>严格定长定列结构，且无显式 key 名时使用。</trigger>
-</position>
-</feature_position_rules>
-
-<output>
-严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:","kv_separator":"空格或;或,","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"特征字段名","feature_position":"kv_body|header_regex|positional","feature_extract_regex":"正则(含一个捕获组)","reason":"判断理由"}}
-</output>
-
-<input>
-{sampled_logs}
-</input>"""
-
+# CHANGED: Prompt migrated to agent/prompts/log_format_identify.md, loaded via load_log_format_identify_prompt()
 
 def _do_identify_log_format(logs_str: str) -> str:
     """
@@ -209,7 +162,7 @@ def _do_identify_log_format(logs_str: str) -> str:
                 ensure_ascii=False,
             )
 
-        prompt = _LOG_FORMAT_IDENTIFY_PROMPT.format(sampled_logs=sampled)
+        prompt = load_log_format_identify_prompt().format(sampled_logs=sampled)
         response = _call_llm_direct(prompt, temperature=0.1, max_tokens=500, timeout=90)
 
         parsed = _try_parse_json(response)
@@ -856,46 +809,7 @@ def _build_fallback_details(aggregation: dict) -> list[dict]:
 # Step 3: 日志特征分类 (工具内调 LLM) — 对齐 Dify "JSON格式日志分类" 提示词
 # ============================================================================
 
-_CLASSIFY_FEATURE_PROMPT = """<task>
-分析日志样本及业务分类字段的聚合统计信息，识别各类日志的业务含义、攻击特征、分类和危害等级。
-</task>
-
-<role>安全日志分析专家</role>
-
-<context>
-<format_info>
-<format_type>{format_type}</format_type>
-<format_detail>{format_detail}</format_detail>
-<feature_field>{feature_field}</feature_field>
-</format_info>
-
-<aggregation_statistics>
-{aggregation_text}
-</aggregation_statistics>
-
-<raw_samples count="5">
-{sampled_logs}
-</raw_samples>
-</context>
-
-<requirements>
-<requirement index="1">分析日志结构，给出完整格式描述（如"日志头+JSON"、"纯JSON"、"KV"、"日志头+KV"等）</requirement>
-
-<requirement index="2">
-提取业务特征的唯一标识符（feature_identifier），即一个双捕获组正则表达式：
-<group index="1">去掉日志头后的日志主体部分（若为纯 JSON 则为完整 JSON，若为 KV 则为 key=value 主体）</group>
-<group index="2">{feature_field} 对应的字段值</group>
-<rule>Group 1 和 Group 2 的捕获范围必须互不重叠，正则应对所有同类日志行通用，不应依赖具体时间戳或 IP。</rule>
-</requirement>
-
-<requirement index="3">对每种业务分类值，分析其意义、匹配正则（matched_regex）、危害等级</requirement>
-</requirements>
-
-<output>
-严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"status":"SUCCESS","categorical_features":"分类特征名称","Diversion_method":"日志分流方法","log_format":"日志头+JSON 或 JSON 或 KV","feature_field":"{feature_field}","feature_identifier":"双捕获组正则","feature_count":N,"classification_details":[{{"value":"值","matched_regex":"匹配正则","meaning":"业务含义","sample":"完整原始日志行"}}],"expert_summary":"综合摘要(100字内)","fail_reason":""}}
-</output>"""
-
+# CHANGED: Prompt migrated to agent/prompts/log_classify_feature.md, loaded via load_log_classify_feature_prompt()
 
 def _do_classify_log_features(
     logs_str: str,
@@ -973,7 +887,7 @@ def _do_classify_log_features(
         # 采样原始日志供 LLM 参考
         sampled_logs = sample_logs(logs_str, 5)
 
-        prompt = _CLASSIFY_FEATURE_PROMPT.format(
+        prompt = load_log_classify_feature_prompt().format(
             format_type=format_type,
             format_detail=format_detail or format_type,
             feature_field=feature_field,

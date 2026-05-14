@@ -33,6 +33,22 @@ def load_enum_field_prompt() -> str:
     return ""
 
 
+def load_log_format_identify_prompt() -> str:
+    """加载日志格式识别提示词"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / "log_format_identify.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding='utf-8')
+    return ""
+
+
+def load_log_classify_feature_prompt() -> str:
+    """加载日志特征分类提示词"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / "log_classify_feature.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding='utf-8')
+    return ""
+
+
 def load_standard_fields() -> str:
     """加载标准字段表"""
     data_path = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
