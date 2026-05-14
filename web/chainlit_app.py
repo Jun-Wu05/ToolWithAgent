@@ -1004,18 +1004,16 @@ def _render_log_parser_result(classification: dict | None, format_info: dict | N
         lines.append("")
         lines.append(f"### 📊 分类详情（{len(details)} 类）")
         lines.append("")
-        lines.append("| 字段值 | 含义 | 严重程度 | 攻击类型 | 匹配正则 | 真实样例 |")
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("| 字段值 | 含义 | 匹配正则 | 真实样例 |")
+        lines.append("|---|---|---|---|")
         for _d in details:
             # CHANGED: 取消硬截断，完整展示字段内容
             value = str(_d.get("value", ""))
             meaning = str(_d.get("meaning", ""))
-            severity = str(_d.get("severity", ""))
-            attack_type = str(_d.get("attack_type", ""))
             matched_regex = str(_d.get("matched_regex", ""))
             real_samples = _d.get("real_samples", [])
             sample = real_samples[0] if real_samples else str(_d.get("sample", ""))
-            lines.append(f"| {value} | {meaning} | {severity} | {attack_type} | `{matched_regex}` | {sample} |")
+            lines.append(f"| {value} | {meaning} | `{matched_regex}` | {sample} |")
 
     lines.append("")
     lines.append("*以上结果由 LogParser Pipeline 直接生成*")

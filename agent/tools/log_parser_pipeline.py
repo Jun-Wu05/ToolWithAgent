@@ -801,8 +801,6 @@ def _build_fallback_details(aggregation: dict) -> list[dict]:
             "value": val,
             "matched_regex": _re.escape(val),
             "meaning": "",
-            "severity": "未知",
-            "attack_type": "",
             "sample": info.get("samples", [None])[0] if info.get("samples") else "",
         })
     return details
@@ -853,7 +851,7 @@ _CLASSIFY_FEATURE_PROMPT = """你是安全日志分析专家。请分析以下�
   "feature_identifier": "双捕获组正则：Group 1=去掉日志头后的日志主体，Group 2=feature_field的值",
   "feature_count": N,
   "classification_details": [
-    {{"value": "字段值1", "matched_regex": "匹配该值的正则", "meaning": "业务含义", "severity": "严重/高危/中危/低危/信息", "attack_type": "攻击类型(如暴力破解/恶意软件/C2通信/信息泄露等)", "sample": "一行完整原始日志示例(不做截断)"}}
+    {{"value": "字段值1", "matched_regex": "匹配该值的正则", "meaning": "业务含义", "sample": "一行完整原始日志示例(不做截断)"}}
   ],
   "expert_summary": "综合分析摘要（100字以内）",
   "fail_reason": ""
