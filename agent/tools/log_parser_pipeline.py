@@ -134,52 +134,54 @@ def _try_parse_json(text: str) -> dict | None:
 # Step 1: 日志格式识别 (工具内调 LLM)
 # ============================================================================
 
-_LOG_FORMAT_IDENTIFY_PROMPT = """你是安全日志格式分析专家。分析以下3条采样日志，识别日志格式类型及业务分类方法。
+_LOG_FORMAT_IDENTIFY_PROMPT = """<task>
+分析以下采样日志，识别日志格式类型，并判定业务分类字段的位置。
+</task>
 
-采样日志：
-```
+<role>安全日志格式分析专家</role>
+
+<format_types>
+<type name="json">每行一个 JSON 对象，或"日志头+JSON"（行首有固定前缀，后面跟 JSON body）</type>
+<type name="kv">key=value 键值对，分隔符为空格、分号或逗号</type>
+<type name="space">纯空格分隔多列，固定列位无显式 key</type>
+<type name="semicolon">分号分隔</type>
+<type name="comma">逗号分隔（CSV）</type>
+<type name="unknown">无法识别</type>
+</format_types>
+
+<header_detection>
+判断日志是否有"日志头"——即日志行前半部分为固定格式的时间戳、主机名、进程名等系统前缀。
+在 format_detail 中描述完整格式，例如"日志头+KV"、"日志头+JSON"、"纯KV"、"纯JSON"等。
+</header_detection>
+
+<feature_position_rules>
+<!-- 判断最顶层的业务分类标识位于日志的哪个位置。关键原则：先判断头部，再看 body。当头部和 body 都有分类信息时，取头部（头部是顶层分类，body 中的字段可能是子类）。 -->
+
+<position name="header_regex">
+<description>分类标识位于日志行头部固定位置（时间戳之后、body 之前的前缀区域）。特征是日志头部包含区分不同业务/设备类型的关键词标记。</description>
+<trigger>头部有明显的、可区分不同日志来源的固定关键词或模式标记时，应优先设为 header_regex。</trigger>
+<regex_rule>提供含一个捕获组的正则表达式，捕获组匹配分类关键词。正则应紧凑、不依赖具体时间戳或 IP 值。</regex_rule>
+</position>
+
+<position name="kv_body">
+<description>分类标识位于日志主体的 KV 字段中（如 log_type=xxx、event_type=xxx、category=xxx）。</description>
+<trigger>头部无区分性标记，且 body 中有明确分类字段时使用。</trigger>
+</position>
+
+<position name="positional">
+<description>分类标识位于固定列位置（如 CSV 第 N 列），给出 column_index（从 0 开始）。</description>
+<trigger>严格定长定列结构，且无显式 key 名时使用。</trigger>
+</position>
+</feature_position_rules>
+
+<output>
+严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
+{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:","kv_separator":"空格或;或,","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"特征字段名","feature_position":"kv_body|header_regex|positional","feature_extract_regex":"正则(含一个捕获组)","reason":"判断理由"}}
+</output>
+
+<input>
 {sampled_logs}
-```
-
-## 格式类型
-- json: 每行一个 JSON 对象（或"日志头+JSON"）
-- kv: key=value 键值对，分隔符为空格、分号或逗号
-- space: 纯空格分隔多列（Syslog/防火墙/W3C）
-- semicolon: 分号分隔
-- comma: 逗号分隔（CSV）
-- unknown: 无法识别
-
-同时判断是否有"日志头"（前置的时间戳+主机名等固定前缀），在 format_detail 中描述（如"日志头+KV"、"日志头+JSON"、"纯KV"等）。
-
-## 【关键】业务分类字段位置判断（feature_position）
-
-你需要判断**最顶层的业务分类标识**位于日志的哪个位置。关键是：**先判断日志头部是否有分类关键词**（如设备类型、应用名、事件SYSLOG-FACILITY-SEVERITY-MNEMONIC模式），**再**看 KV body 内有没有 type/category 等字段。
-
-### 判断规则（按优先级）：
-
-**1. header_regex（头部固定位置）**：日志行的前缀/头部的某个固定位置隐藏着分类关键词。典型场景：
-- Syslog FACILITY-SEVERITY-MNEMONIC 模式：`%%01IFPDT/4/IF_STATE` → 特征在时间戳后的 %% 标记中
-- 设备类型标签：`<188>...WAF :...` 或 `<188>...DDOS:...` → 特征是日期后面的设备名称
-- 进程/应用名：`<44>AuditLog - WARNING - ...` → 特征在时间戳后的进程名
-- 方括号标记：`[FW]ACCEPT`、`[IDS]ALERT` → 特征在行首的 [TAG]
-- 当头部包含明显的分类关键词时，应优先设为 header_regex
-- **当头部和 body 都有分类相关信息时，取头部**（因为头部是顶层分类，body 中的 type 可能是子类）
-
-**2. kv_body（KV body 内）**：日志主体KV字段中有分类字段（如 log_type=xxx、event_type=xxx、category=xxx）。典型场景：
-- JSON body：`{{..."log_type":"dac_dga_log"...}}`
-- 纯KV行：`log_type=Login event=success src=10.0.0.1`
-- **如果 body 中有 type/severity/category 等字段，但不是顶层业务分类（例如某些 type 是子类），仍应在头部找顶层分类**
-
-**3. positional（固定列位置）**：分类标识在固定列（如 CSV 第 N 列），给出 column_index（从0开始）。
-
-### feature_extract_regex 编写要求
-当 feature_position=header_regex 时，提供一个含**一个捕获组**的正则表达式用于提取分类值：
-- 对于"WAF :"或"DDOS:"场景：`(WAF|DDOS|AuditLog)` — 关键是捕获头部关键词
-- 对于 SYSLOG MNEMONIC：`%%(\\S+/\\d+/\\w+)`
-- 正则必须能完整匹配，捕获组捕获分类值
-
-输出 JSON（严格一行）：
-{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:或 ","kv_separator":"空格或;或,","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"特征字段名（当feature_position=header_regex时写头部关键词的分类类属名称，如device_type/event_class等；当feature_position=kv_body时写KV body中的字段名如log_type）","feature_position":"kv_body|header_regex|positional","feature_extract_regex":"正则(含一个捕获组)","reason":"判断理由，说明为什么选择这个 position"}}"""
+</input>"""
 
 
 def _do_identify_log_format(logs_str: str) -> str:
@@ -854,52 +856,45 @@ def _build_fallback_details(aggregation: dict) -> list[dict]:
 # Step 3: 日志特征分类 (工具内调 LLM) — 对齐 Dify "JSON格式日志分类" 提示词
 # ============================================================================
 
-_CLASSIFY_FEATURE_PROMPT = """你是安全日志分析专家。请分析以下日志样本及其业务分类字段的聚合统计信息，识别各类日志的业务含义、攻击特征、分类和危害等级。
+_CLASSIFY_FEATURE_PROMPT = """<task>
+分析日志样本及业务分类字段的聚合统计信息，识别各类日志的业务含义、攻击特征、分类和危害等级。
+</task>
 
-【格式信息】
-- 格式类型：{format_type}
-- 格式详情：{format_detail}
-- 业务分类字段：{feature_field}
+<role>安全日志分析专家</role>
 
-【业务分类字段聚合统计】
+<context>
+<format_info>
+<format_type>{format_type}</format_type>
+<format_detail>{format_detail}</format_detail>
+<feature_field>{feature_field}</feature_field>
+</format_info>
+
+<aggregation_statistics>
 {aggregation_text}
+</aggregation_statistics>
 
-【原始日志样本】（前 5 行）
-```
+<raw_samples count="5">
 {sampled_logs}
-```
+</raw_samples>
+</context>
 
-任务：
-1. 分析日志结构，判断完整格式描述（如"日志头+JSON"、"纯JSON"、"KV"等）
-2. 提取业务特征的唯一标识符（feature_identifier），即一个**双捕获组正则表达式**：
-   - Group 1（第一个捕获组）：去掉日志头后的日志主体部分
-   - Group 2（第二个捕获组）：{feature_field} 对应的字段值
-   示例（日志头+JSON）：
-     原始行: <8>Mar 26 12:06:20 localhost respond:{{... "log_type": "dac_dga_log" ...}}
-     feature_identifier: (\\{{.*"{feature_field}":\\s"([^"]*)".*\\}})
-     → Group 1 = JSON主体，Group 2 = dac_dga_log
-   示例（日志头+文本）：
-     原始行: <188>Sep 29 2024 03:10:15 host %%01IFPDT/4/IF_STATE(l)[48703]:Interface...UP state.
-     feature_identifier: (?:%%|)(\\S+/\\d+/\\w+)(?:\\(\\w+\\)\\[\\d+\\]|\\[\\d+\\]|\\(\\w+\\)|):([\\S\\s]*)
-     → Group 1 = 01IFPDT/4/IF_STATE，Group 2 = 后续消息体
-   核心规则：Group 1 捕获去掉日志头的主体，Group 2 捕获 feature_field 的值。
-3. 对每种业务分类值，分析其意义、匹配正则、危害等级
+<requirements>
+<requirement index="1">分析日志结构，给出完整格式描述（如"日志头+JSON"、"纯JSON"、"KV"、"日志头+KV"等）</requirement>
 
-请严格按以下 JSON 格式输出（一行，不要额外文字）：
-{{
-  "status": "SUCCESS",
-  "categorical_features": "分类特征名称",
-  "Diversion_method": "日志分流方法",
-  "log_format": "日志头+JSON 或 JSON 或 KV 或 日志头+KV",
-  "feature_field": "业务分类字段名",
-  "feature_identifier": "双捕获组正则：Group 1=去掉日志头后的日志主体，Group 2=feature_field的值",
-  "feature_count": N,
-  "classification_details": [
-    {{"value": "字段值1", "matched_regex": "匹配该值的正则", "meaning": "业务含义", "sample": "一行完整原始日志示例(不做截断)"}}
-  ],
-  "expert_summary": "综合分析摘要（100字以内）",
-  "fail_reason": ""
-}}"""
+<requirement index="2">
+提取业务特征的唯一标识符（feature_identifier），即一个双捕获组正则表达式：
+<group index="1">去掉日志头后的日志主体部分（若为纯 JSON 则为完整 JSON，若为 KV 则为 key=value 主体）</group>
+<group index="2">{feature_field} 对应的字段值</group>
+<rule>Group 1 和 Group 2 的捕获范围必须互不重叠，正则应对所有同类日志行通用，不应依赖具体时间戳或 IP。</rule>
+</requirement>
+
+<requirement index="3">对每种业务分类值，分析其意义、匹配正则（matched_regex）、危害等级</requirement>
+</requirements>
+
+<output>
+严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
+{{"status":"SUCCESS","categorical_features":"分类特征名称","Diversion_method":"日志分流方法","log_format":"日志头+JSON 或 JSON 或 KV","feature_field":"{feature_field}","feature_identifier":"双捕获组正则","feature_count":N,"classification_details":[{{"value":"值","matched_regex":"匹配正则","meaning":"业务含义","sample":"完整原始日志行"}}],"expert_summary":"综合摘要(100字内)","fail_reason":""}}
+</output>"""
 
 
 def _do_classify_log_features(
