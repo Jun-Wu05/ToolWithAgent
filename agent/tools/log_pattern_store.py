@@ -106,6 +106,74 @@ def generate_fingerprint_from_fields(pattern_info: dict) -> str:
     return finger
 
 
+def generate_structured_fingerprint(
+    classify_result: dict,
+    format_detail: str = "",
+    feature_field: str = "",
+) -> str:
+    """
+    基于 classify_log_features 输出的语义骨架生成结构化指纹。
+    
+    指纹 = format_detail | feature_field | feature_identifier_clean
+    
+    对日志增删字段不敏感——只要核心正则骨架不变，指纹就不变。
+    
+    feature_identifier_clean 处理：
+    - 将 Group 2（值捕获）改为通用匹配，使同类日志指纹一致
+    - 归一化转义字符统一用小写 (\\s, \\w, \\d ...)
+    
+    Args:
+        classify_result: classify_log_features 的输出 dict
+        format_detail: 格式详情（"日志头+JSON" / "JSON" / "KV" ...）
+        feature_field: 业务分类字段名
+        
+    Returns:
+        结构化指纹字符串
+    """
+    fd = format_detail or classify_result.get("format_detail", "") or classify_result.get("log_format", "")
+    ff = feature_field or classify_result.get("feature_field", "")
+    fi = classify_result.get("feature_identifier", "")
+    
+    # 归一化 feature_identifier：去掉尾部精确值捕获组，保留结构骨架
+    # 策略：提取 Group 1 部分（去掉日志头后的主体），保留其正则结构
+    fi_clean = _normalize_feature_identifier(fi)
+    
+    return f"{fd}|{ff}|{fi_clean}"
+
+
+def _normalize_feature_identifier(feature_identifier: str) -> str:
+    """
+    归一化 feature_identifier，去除值相关的精确匹配，保留结构骨架。
+    
+    处理步骤：
+    1. 将 Group 2（字段值捕获组）内容泛化
+    2. 统一转义字符为小写
+    3. 统一空格
+    
+    Args:
+        feature_identifier: 双捕获组正则表达式
+        
+    Returns:
+        归一化后的正则骨架
+    """
+    if not feature_identifier:
+        return ""
+    
+    fi = feature_identifier.strip()
+    
+    # 将大写的转义符统一为小写
+    fi = _re.sub(r'\\([SWDNswdn])', lambda m: f'\\{m.group(1).lower()}', fi)
+    
+    # 将捕获组中的精确字符串值泛化（如 "dac_dga_log" → "[^\"]*"）
+    # 匹配捕获组内的字面量字符串
+    fi = _re.sub(r'"([^"\\]*(?:\\.[^"\\]*)*)"', r'"[^"]*"', fi)
+    
+    # 标准化空白（去掉多余空格）
+    fi = _re.sub(r'\s+', '', fi)
+    
+    return fi
+
+
 # ============================================================================
 # SQLite 存储
 # ============================================================================

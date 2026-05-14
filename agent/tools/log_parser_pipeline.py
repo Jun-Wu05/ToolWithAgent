@@ -809,6 +809,41 @@ def _do_classify_log_features(
         parsed.setdefault("total_lines", total_lines)
         parsed.setdefault("matched_lines", matched_lines)
 
+        # ====================================================================
+        # 成功解析后自动存入向量知识库（失败不影响主流程）
+        # ====================================================================
+        if parsed.get("status") == "SUCCESS":
+            try:
+                from agent.tools.log_pattern_store import (
+                    generate_structured_fingerprint,
+                    store_log_knowledge,
+                )
+
+                structured_fp = generate_structured_fingerprint(
+                    classify_result=parsed,
+                    format_detail=format_detail,
+                    feature_field=feature_field,
+                )
+                if structured_fp:
+                    sample_lines = [
+                        l for l in logs_str.strip().split("\n") if l.strip()
+                    ][:10]
+                    store_log_knowledge(
+                        fingerprint=structured_fp,
+                        format_type=format_type,
+                        meta=parsed,
+                        sample_logs=sample_lines,
+                    )
+                    logger.info(
+                        f"[classify_log_features] 知识库存储成功: "
+                        f"{structured_fp[:80]}..."
+                    )
+            except Exception as store_err:
+                logger.warning(
+                    f"[classify_log_features] 知识库存储失败（不影响主流程）: "
+                    f"{store_err}"
+                )
+
         return json.dumps(parsed, ensure_ascii=False)
 
     except httpx.HTTPStatusError as e:
