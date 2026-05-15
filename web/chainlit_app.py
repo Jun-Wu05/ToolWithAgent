@@ -575,7 +575,11 @@ Excel 格式说明：
             # Step 3: 用 matched_regex 替换真实样例
             logger.info("[ROUTE][LogParser] Step 3: fill_sample_logs")
             if isinstance(classification, dict):
-                classification = fill_sample_logs(classification, logs_str)
+                feature_identifier = classification.get("feature_identifier", "")
+                classification = fill_sample_logs(
+                    classification, logs_str,
+                    feature_identifier=feature_identifier,
+                )
 
             # 渲染结果
             result_content = _render_log_parser_result(classification, format_info)
@@ -1008,7 +1012,7 @@ def _render_log_parser_result(classification: dict | None, format_info: dict | N
         lines.append("|---|---|---|---|")
         for _d in details:
             # CHANGED: 取消硬截断，完整展示字段内容
-            value = str(_d.get("value", ""))
+            value = str(_d.get("logtype", ""))
             meaning = str(_d.get("meaning", ""))
             matched_regex = str(_d.get("matched_regex", ""))
             real_samples = _d.get("real_samples", [])
