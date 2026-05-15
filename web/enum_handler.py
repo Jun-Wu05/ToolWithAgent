@@ -229,18 +229,60 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
         result_content = result.content if hasattr(result, 'content') else str(result)
         logger.info(f"[ENUM_EXTRACT] LLM输出: {result_content[:500]}...")
 
+        # 格式遵从度检测
+        has_preamble = not result_content.strip().startswith('{')
+        if has_preamble:
+            logger.warning(f"[ENUM_EXTRACT] LLM 未遵守纯 JSON 输出格式，输出包含前导文本: {result_content[:200].strip()}")
+        else:
+            logger.info(f"[ENUM_EXTRACT] LLM 严格遵循了 JSON 输出格式")
+
+        # 自平衡括号提取 JSON（支持正则内含 {} 等特殊字符）
+        def _extract_json_from_llm(text: str) -> dict | None:
+            """从 LLM 响应中提取 JSON，支持嵌套括号和内嵌正则字符"""
+            text = text.strip()
+            # 第一级：直接 json.loads 整个文本（LLM 严格遵守格式时）
+            if text.startswith('{'):
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    pass
+
+            # 第二级：自平衡括号提取（LLM 前后加了说明文字时）
+            stack = []
+            start = -1
+            in_string = False
+            for i, ch in enumerate(text):
+                if ch == '"' and (i == 0 or text[i - 1] != '\\'):
+                    in_string = not in_string
+                if in_string:
+                    continue
+                if ch == '{':
+                    if not stack:
+                        start = i
+                    stack.append(i)
+                elif ch == '}':
+                    if stack:
+                        stack.pop()
+                        if not stack and start >= 0:
+                            try:
+                                return json.loads(text[start:i + 1])
+                            except json.JSONDecodeError:
+                                return None
+            return None
+
         # 尝试解析 JSON
         regex_result = None
         field_name_from_llm = None
         try:
-            json_match = re.search(r'\{[^}]+\}', result_content, re.DOTALL)
-            if json_match:
-                regex_data = json.loads(json_match.group())
+            regex_data = _extract_json_from_llm(result_content)
+            if regex_data:
                 regex_result = regex_data.get("regex", "")
                 field_name_from_llm = regex_data.get("field", "")
                 logger.info(f"[ENUM_EXTRACT] LLM 推断字段: {field_name_from_llm}, 正则: {regex_result}")
-        except json.JSONDecodeError:
-            logger.warning(f"[ENUM_EXTRACT] JSON解析失败，尝试直接使用输出")
+            else:
+                logger.warning(f"[ENUM_EXTRACT] 无法从 LLM 输出中提取 JSON")
+        except Exception as exc:
+            logger.warning(f"[ENUM_EXTRACT] JSON解析异常: {exc}")
 
         # 使用 LLM 推断的字段名，回退方案
         if field_name_from_llm:

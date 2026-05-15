@@ -57,8 +57,18 @@
 {"field":"EventType","regex":"EventType=\"([^\"]+)\"","pattern_type":"quoted"}
 ```
 
+## 输出格式约束（必须严格遵守）
+
+1. **输出必须是且仅是**一个 JSON 对象，不允许包含任何其他文本
+2. **不允许**在 JSON 前后添加任何说明、注释、分析过程
+3. **不允许**使用 markdown 代码块（如 ```json ... ```）
+4. **只输出一行** JSON，不要换行、不要缩进
+
+✅ 正确示例：`{"field":"status","regex":"\"status\":\"([^\"]+)\"","pattern_type":"json"}`
+❌ 错误示例：`用户输入中的字段是...\n{"field":"status",...}`  ← 不允许前导说明文字
+❌ 错误示例：`分析结果如下：\n{"field":"status",...}`  ← 不允许任何前缀
+
 ## 注意事项
 - **只输出JSON**，不要有任何额外文字
 - **禁止 lookbehind (?<=...)**，必须用捕获组
 - 正则中的引号需要转义
-- 如果无法识别格式，返回：`{"field":"xxx","regex":null,"pattern_type":"unknown"}`
