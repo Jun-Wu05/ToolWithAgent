@@ -810,14 +810,18 @@ def _build_log_analysis(logs_str: str) -> dict:
 
     从原始日志前 5 行推断结构信息，用于补充 classification_details 的元数据。
 
+    互斥规则（优先级从高到低）：
+      CEF > JSON > KV > SEPARATOR
+    只有主体格式对应的 bool 为 true，其余强制为 false。
+
     Returns:
         {
-            "has_json_structure": bool,      # 是否含 JSON 子串
-            "has_cef_prefix": bool,          # 是否以 CEF: 开头
-            "has_key_value_pairs": bool,     # 是否含 key=value / key:value 对
-            "has_delimited_structure": bool, # 是否含分隔符结构
-            "delimit": str,                  # 猜测的 key-value 连接符 (":" 或 "=")
-            "tab": str,                      # 猜测的字段分隔符 ("," / ";" / "|" / "space")
+            "has_json_structure": bool,      # 互斥：只有 JSON 主体时为 true
+            "has_cef_prefix": bool,          # 互斥：只有 CEF 主体时为 true
+            "has_key_value_pairs": bool,     # 互斥：只有 KV 主体时为 true
+            "has_delimited_structure": bool, # 互斥：只有分隔符主体时为 true
+            "delimit": str,                  # key-value 连接符 (":" 或 "=")
+            "tab": str,                      # 字段分隔符 ("," / ";" / "|" / "space")
         }
     """
     lines = [l for l in logs_str.strip().split("\n") if l.strip()][:5]
@@ -832,12 +836,14 @@ def _build_log_analysis(logs_str: str) -> dict:
         }
     text = " ".join(lines)
 
-    has_json = bool(_re.search(r'\{[^}]*"[^}]*"[^}]*\}', text))
-    has_cef = any(l.strip().startswith("CEF:") for l in lines)
+    # ---- 互斥检测（优先级 CEF > JSON > KV > SEPARATOR） ----
 
-    #  Token-level KV detection: split by whitespace and common field delimiters,
-    #  then check per-token K/V patterns.  Key must start with a letter or underscore
-    #  to avoid false positives on timestamps (09:46:01) and IPv6 (2409:8a18).
+    has_cef = any(l.strip().startswith("CEF:") for l in lines)
+    has_json = bool(_re.search(r'\{[^}]*"[^}]*"[^}]*\}', text))
+
+    # Token-level KV detection: split by whitespace and common field delimiters,
+    # then check per-token K/V patterns.  Key must start with a letter or underscore
+    # to avoid false positives on timestamps (09:46:01) and IPv6 (2409:8a18).
     tokens: list[str] = _re.split(r'[\s,;|]+', text)
     tokens = [t for t in tokens if t.strip()]
 
@@ -845,7 +851,6 @@ def _build_log_analysis(logs_str: str) -> dict:
         kv_equal = _re.compile(r'^[a-zA-Z_]\w*=')
         kv_colon = _re.compile(r'^[a-zA-Z_]\w*:')
         kv_slash = _re.compile(r'^[a-zA-Z]\w*/')
-
         kv_count = sum(
             1 for t in tokens
             if kv_equal.search(t) or kv_colon.search(t) or kv_slash.search(t)
@@ -854,8 +859,19 @@ def _build_log_analysis(logs_str: str) -> dict:
     else:
         has_kv = False
 
-    # Delimited structure only when NOT classified as key-value format
-    has_delim = (not has_kv) and len(_re.findall(r'[,;|]', text)) >= 1
+    has_delim = len(_re.findall(r'[,;|]', text)) >= 1
+
+    # 互斥：按优先级保留最高优先级的格式
+    if has_cef:
+        has_json = False
+        has_kv = False
+        has_delim = False
+    elif has_json:
+        has_kv = False
+        has_delim = False
+    elif has_kv:
+        has_delim = False
+    # has_delim 保留原值（最低优先级）
 
     # 猜测 key-value 连接符
     eq_count = text.count("=")
@@ -888,6 +904,23 @@ def _build_log_analysis(logs_str: str) -> dict:
 
 # CHANGED: Prompt migrated to agent/prompts/log_classify_feature.md, loaded via load_log_classify_feature_prompt()
 
+def _normalize_log_format(format_type: str) -> str:
+    """将 LLM 返回的格式类型映射为固定枚举值（JSON/KV/CEF/SEPARATOR/UNKNOWN）。"""
+    type_lower = (format_type or "").lower()
+    if type_lower in ("json",):
+        return "JSON"
+    if type_lower in ("kv", "key_value", "key-value"):
+        return "KV"
+    if type_lower in ("cef",):
+        return "CEF"
+    if type_lower in (
+        "space", "semicolon", "comma", "separator",
+        "csv", "pipe", "delimited", "delimiter",
+    ):
+        return "SEPARATOR"
+    return "UNKNOWN"
+
+
 def _do_classify_log_features(
     logs_str: str,
     format_type: str = "unknown",
@@ -913,7 +946,8 @@ def _do_classify_log_features(
             {
                 "status": "FAILED",
                 "error": "日志内容为空",
-                "log_format": format_detail or format_type,
+                "log_format": _normalize_log_format(format_type),
+                "log_format_detail": format_detail or format_type,
                 "feature_field": feature_field,
                 "feature_identifier": "",
                 "feature_count": 0,
@@ -986,7 +1020,8 @@ def _do_classify_log_features(
                 {
                     "status": "PARTIAL",
                     "error": "LLM 返回非 JSON",
-                    "log_format": format_detail or format_type,
+                    "log_format": _normalize_log_format(format_type),
+                    "log_format_detail": format_detail or format_type,
                     "feature_field": feature_field,
                     "feature_identifier": "",
                     "feature_count": value_count,
@@ -1001,7 +1036,8 @@ def _do_classify_log_features(
 
         # 标准化输出字段
         parsed.setdefault("status", "SUCCESS")
-        parsed.setdefault("log_format", format_detail or format_type)
+        parsed.setdefault("log_format", _normalize_log_format(format_type))
+        parsed.setdefault("log_format_detail", format_detail or format_type)
         parsed.setdefault("feature_field", feature_field)
         parsed.setdefault("feature_identifier", "")
         parsed.setdefault("feature_count", value_count)
@@ -1057,7 +1093,8 @@ def _do_classify_log_features(
             {
                 "status": "FAILED",
                 "error": f"LLM API 调用失败: {e.response.status_code}",
-                "log_format": format_detail or format_type,
+                "log_format": _normalize_log_format(format_type),
+                "log_format_detail": format_detail or format_type,
                 "feature_field": feature_field,
                 "feature_identifier": "",
                 "feature_count": 0,
@@ -1072,7 +1109,8 @@ def _do_classify_log_features(
             {
                 "status": "FAILED",
                 "error": str(e),
-                "log_format": format_detail or format_type,
+                "log_format": _normalize_log_format(format_type),
+                "log_format_detail": format_detail or format_type,
                 "feature_field": feature_field,
                 "feature_identifier": "",
                 "feature_count": 0,
