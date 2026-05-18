@@ -797,12 +797,89 @@ def _build_fallback_details(aggregation: dict) -> list[dict]:
     details: list[dict] = []
     for val, info in aggregation.get("values", {}).items():
         details.append({
-            "value": val,
+            "logtype": val,
             "matched_regex": _re.escape(val),
             "meaning": "",
             "sample": info.get("samples", [None])[0] if info.get("samples") else "",
         })
     return details
+
+
+def _build_log_analysis(logs_str: str) -> dict:
+    """分析日志结构特征（纯函数，不依赖 LLM）
+
+    从原始日志前 5 行推断结构信息，用于补充 classification_details 的元数据。
+
+    Returns:
+        {
+            "has_json_structure": bool,      # 是否含 JSON 子串
+            "has_cef_prefix": bool,          # 是否以 CEF: 开头
+            "has_key_value_pairs": bool,     # 是否含 key=value / key:value 对
+            "has_delimited_structure": bool, # 是否含分隔符结构
+            "delimit": str,                  # 猜测的 key-value 连接符 (":" 或 "=")
+            "tab": str,                      # 猜测的字段分隔符 ("," / ";" / "|" / "space")
+        }
+    """
+    lines = [l for l in logs_str.strip().split("\n") if l.strip()][:5]
+    if not lines:
+        return {
+            "has_json_structure": False,
+            "has_cef_prefix": False,
+            "has_key_value_pairs": False,
+            "has_delimited_structure": False,
+            "delimit": ":",
+            "tab": "space",
+        }
+    text = " ".join(lines)
+
+    has_json = bool(_re.search(r'\{[^}]*"[^}]*"[^}]*\}', text))
+    has_cef = any(l.strip().startswith("CEF:") for l in lines)
+
+    #  Token-level KV detection: split by whitespace and common field delimiters,
+    #  then check per-token K/V patterns.  Key must start with a letter or underscore
+    #  to avoid false positives on timestamps (09:46:01) and IPv6 (2409:8a18).
+    tokens: list[str] = _re.split(r'[\s,;|]+', text)
+    tokens = [t for t in tokens if t.strip()]
+
+    if tokens:
+        kv_equal = _re.compile(r'^[a-zA-Z_]\w*=')
+        kv_colon = _re.compile(r'^[a-zA-Z_]\w*:')
+        kv_slash = _re.compile(r'^[a-zA-Z]\w*/')
+
+        kv_count = sum(
+            1 for t in tokens
+            if kv_equal.search(t) or kv_colon.search(t) or kv_slash.search(t)
+        )
+        has_kv = kv_count / len(tokens) >= 0.25
+    else:
+        has_kv = False
+
+    # Delimited structure only when NOT classified as key-value format
+    has_delim = (not has_kv) and len(_re.findall(r'[,;|]', text)) >= 1
+
+    # 猜测 key-value 连接符
+    eq_count = text.count("=")
+    colon_count = text.count(":")
+    delimit = "=" if eq_count >= colon_count else ":"
+
+    # 猜测字段分隔符
+    delim_counts: dict[str, int] = {
+        ",": text.count(","),
+        ";": text.count(";"),
+        "|": text.count("|"),
+        "\t": text.count("\t"),
+    }
+    max_delim = max(delim_counts, key=delim_counts.get)  # type: ignore[arg-type]
+    tab = max_delim if delim_counts[max_delim] > 0 else "space"  # type: ignore[index]
+
+    return {
+        "has_json_structure": has_json,
+        "has_cef_prefix": has_cef,
+        "has_key_value_pairs": has_kv,
+        "has_delimited_structure": has_delim,
+        "delimit": delimit,
+        "tab": tab if isinstance(tab, str) else "space",
+    }
 
 
 # ============================================================================
@@ -935,6 +1012,7 @@ def _do_classify_log_features(
         parsed.setdefault("fail_reason", "")
         parsed.setdefault("total_lines", total_lines)
         parsed.setdefault("matched_lines", matched_lines)
+        parsed.setdefault("analysis", _build_log_analysis(logs_str))
 
         # ====================================================================
         # 成功解析后自动存入向量知识库（失败不影响主流程）
@@ -1030,6 +1108,7 @@ def fill_sample_logs(
     classification: dict,
     logs_str: str,
     max_samples_per_type: int = 3,
+    feature_identifier: str = "",
 ) -> dict:
     """
     用分类结果中的 matched_regex 从原始日志匹配真实样例日志。
@@ -1042,6 +1121,7 @@ def fill_sample_logs(
         classification: classify_log_features 的输出 dict
         logs_str: 原始日志字符串
         max_samples_per_type: 每种分类最多取多少条真实样例
+        feature_identifier: 双捕获组正则（group1=日志主体），用于提取日志主体而非整行
 
     Returns:
         classification 的副本，每个 classification_detail 增加 "real_samples" 列表
@@ -1054,30 +1134,61 @@ def fill_sample_logs(
     result = dict(classification)
     result["classification_details"] = []
 
+    # 预编译 feature_identifier 正则（group1 提取日志主体）
+    fi_pattern = None
+    if feature_identifier:
+        try:
+            fi_pattern = _re.compile(feature_identifier)
+        except _re.error:
+            logger.warning(f"[fill_sample_logs] feature_identifier 编译失败: {feature_identifier}")
+
     for detail in details:
         detail_copy = dict(detail)
         matched_regex = detail_copy.get("matched_regex", "")
-        detail_copy.setdefault("real_samples", [])
+        # 策略 A：feature_identifier 可用时，用 matched_regex 搜索行
+        # real_samples 存 matched_regex 的 Group 1（日志主体值），sample 存完整行
+        if fi_pattern and matched_regex:
+            try:
+                m_regex = _re.compile(matched_regex)
+                for line in lines:
+                    m_body = m_regex.search(line)
+                    if m_body:
+                        body_text = (
+                            m_body.group(1)
+                            if m_body.lastindex and m_body.lastindex >= 1
+                            else line
+                        )
+                        detail_copy["real_samples"] = body_text
+                        detail_copy["sample"] = line
+                        break
+            except _re.error:
+                pass
 
-        if matched_regex:
+        # 策略 B：无 feature_identifier 时，用 matched_regex 提取 Group 1
+        if not detail_copy.get("real_samples") and matched_regex:
             try:
                 pattern = _re.compile(matched_regex)
-                matched_count = 0
                 for line in lines:
-                    if pattern.search(line):
-                        detail_copy["real_samples"].append(line[:300])
-                        matched_count += 1
-                        if matched_count >= max_samples_per_type:
-                            break
+                    m_body = pattern.search(line)
+                    if m_body:
+                        body_text = (
+                            m_body.group(1)
+                            if m_body.lastindex and m_body.lastindex >= 1
+                            else line
+                        )
+                        detail_copy["real_samples"] = body_text
+                        if not detail_copy.get("sample"):
+                            detail_copy["sample"] = line
+                        break
             except _re.error as e:
                 logger.warning(
                     f"[fill_sample_logs] 正则编译失败: {matched_regex}, 错误: {e}"
                 )
                 detail_copy["regex_error"] = str(e)
 
-        # 如果正则匹配不到，回退用原始的 sample 字段
-        if not detail_copy["real_samples"] and detail_copy.get("sample"):
-            detail_copy["real_samples"] = [detail_copy["sample"]]
+        # 兜底：用原始 sample 字段
+        if not detail_copy.get("real_samples") and detail_copy.get("sample"):
+            detail_copy["real_samples"] = detail_copy["sample"]
 
         result["classification_details"].append(detail_copy)
 
