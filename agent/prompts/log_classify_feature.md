@@ -56,5 +56,5 @@
 
 <output>
 严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"status":"SUCCESS","categorical_features":"分类特征名称","Diversion_method":"日志分流方法","log_format":"日志头+JSON 或 JSON 或 KV","feature_field":"{feature_field}","feature_identifier":"双捕获组正则","feature_count":N,"classification_details":[{{"logtype":"值","matched_regex":"匹配正则","meaning":"业务含义","sample":"完整原始日志行"}}],"expert_summary":"综合摘要(100字内)","fail_reason":""}}
+{{"status":"SUCCESS","categorical_features":"分类特征名称","Diversion_method":"日志分流方法","log_format":"固定枚举值：JSON / KV / CEF / SEPARATOR / UNKNOWN（必须取其一，不能自由填写）","feature_field":"{feature_field}","feature_identifier":"双捕获组正则","feature_count":N,"classification_details":[{{"logtype":"值","matched_regex":"匹配正则","meaning":"业务含义","sample":"完整原始日志行"}}],"expert_summary":"综合摘要(100字内)","fail_reason":""}}
 </output>

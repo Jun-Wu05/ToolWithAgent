@@ -193,6 +193,10 @@ def _do_identify_log_format(logs_str: str) -> str:
         parsed.setdefault("feature_extract_regex", None)
         parsed.setdefault("reason", "")
 
+        # CHANGED: 归一化 format 字段为枚举值，确保 Step 1 输出与 Step 2 一致
+        parsed["format"] = _normalize_log_format(parsed.get("format", "unknown"))
+        parsed.setdefault("format_detail", parsed.get("format_detail") or parsed.get("format", ""))
+
         logger.info(
             f"[identify_log_format] feature_position={parsed['feature_position']}, "
             f"feature_extract_regex={parsed['feature_extract_regex']}, "
@@ -456,7 +460,11 @@ def aggregate_by_format(logs_str: str, format_info: dict) -> dict:
             "fields": [{"field_name": ..., "position": ..., "example_values": [...], "total_count": int}],
         }
     """
-    fmt = format_info.get("format", "unknown")
+    fmt = (format_info.get("format", "unknown") or "").lower()
+
+    # CHANGED: SEPARATOR 枚举回退到 format_detail 中的子类型
+    if fmt == "separator":
+        fmt = (format_info.get("format_detail", "") or "").lower()
 
     if fmt == "json":
         return _aggregate_json(logs_str, format_info.get("space_count", 4))
@@ -466,12 +474,18 @@ def aggregate_by_format(logs_str: str, format_info: dict) -> dict:
             kv_connector=format_info.get("kv_connector", "="),
             kv_separator=format_info.get("kv_separator", " "),
         )
-    elif fmt == "space":
-        return _aggregate_space(logs_str, format_info.get("space_count", 0))
-    elif fmt == "semicolon":
-        return _aggregate_delimited(logs_str, ";")
-    elif fmt == "comma":
-        return _aggregate_delimited(logs_str, ",")
+    elif fmt in ("space", "semicolon", "comma", "csv", "pipe", "delimited"):
+        # SEPARATOR 子类型：空格/分号/逗号等分别聚合
+        if fmt == "space":
+            return _aggregate_space(logs_str, format_info.get("space_count", 0))
+        elif fmt == "semicolon":
+            return _aggregate_delimited(logs_str, ";")
+        elif fmt == "comma" or fmt == "csv":
+            return _aggregate_delimited(logs_str, ",")
+        elif fmt == "pipe":
+            return _aggregate_delimited(logs_str, "|")
+        else:
+            return _aggregate_delimited(logs_str, format_info.get("delimiter", ";") if format_info.get("delimiter") else ";")
     else:
         return _aggregate_fallback(logs_str)
 
@@ -1036,7 +1050,8 @@ def _do_classify_log_features(
 
         # 标准化输出字段
         parsed.setdefault("status", "SUCCESS")
-        parsed.setdefault("log_format", _normalize_log_format(format_type))
+        # CHANGED: 强制用归一化枚举值覆盖 LLM 输出，确保 log_format 始终为固定枚举
+        parsed["log_format"] = _normalize_log_format(format_type)
         parsed.setdefault("log_format_detail", format_detail or format_type)
         parsed.setdefault("feature_field", feature_field)
         parsed.setdefault("feature_identifier", "")
