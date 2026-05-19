@@ -1065,6 +1065,30 @@ def _do_classify_log_features(
         parsed.setdefault("matched_lines", matched_lines)
         parsed.setdefault("analysis", _build_log_analysis(logs_str))
 
+        # CHANGED: 确保 classification_details 覆盖 aggregation 中所有已知分类值
+        # 防御 LLM 遗漏低频分类（如 ssoaccess 占比 0.46% 被忽略）
+        _known_values = set(aggregation.get("values", {}).keys())
+        _existing_logtypes = {
+            d.get("logtype") for d in parsed.get("classification_details", []) if d.get("logtype")
+        }
+        _missing_values = _known_values - _existing_logtypes
+        if _missing_values:
+            logger.warning(
+                f"[classify_log_features] LLM 遗漏 classification_details: {_missing_values}，"
+                f"自动补充"
+            )
+            for _val in sorted(_missing_values):
+                _info = aggregation["values"].get(_val, {})
+                _samples = _info.get("samples", [])
+                _sample = _samples[0] if _samples else ""
+                parsed["classification_details"].append({
+                    "logtype": _val,
+                    "matched_regex": "",
+                    "meaning": f"LLM 未分析（自动补充，出现 {_info.get('count', 0)} 次）",
+                    "sample": _sample,
+                })
+            parsed["feature_count"] = len(parsed["classification_details"])
+
         # ====================================================================
         # 成功解析后自动存入向量知识库（失败不影响主流程）
         # ====================================================================

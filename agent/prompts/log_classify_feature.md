@@ -26,7 +26,7 @@
 <requirement index="2">
 提取业务特征的唯一标识符（feature_identifier），即一个**双捕获组正则表达式**：
 <group index="1">去掉日志系统前缀（时间戳、主机名、PID 等）后的日志主体内容（若为纯 JSON 则为完整 JSON 对象，若为 KV 则为 key=value 主体）</group>
-<group index="2">{feature_field} 对应的字段值（如 "API SERVER"、"TLSv1.3"）</group>
+<group index="2">{feature_field} 对应的字段值（必须用通配符如 ([^"]+) 或 (\S+) 提取所有可能的字段值，禁止写死具体的值如 "grantblock"、"API SERVER" 等）</group>
 
 <rule>正则只需做到：能在日志行中定位到特征字段，正确提取 Group 1（日志主体）和 Group 2（特征值）。</rule>
 <rule>正则不需精确匹配日志系统前缀（时间戳、主机名、PID 等），可以跳过或使用 .*? 通配。</rule>
@@ -51,7 +51,7 @@
 </examples>
 </requirement>
 
-<requirement index="3">对每种业务分类值，分析其意义、匹配正则（matched_regex）、危害等级</requirement>
+<requirement index="3">对 aggregation_statistics 中出现的每种业务分类值，逐条生成 classification_details；不得遗漏任何分类值</requirement>
 </requirements>
 
 <output>
