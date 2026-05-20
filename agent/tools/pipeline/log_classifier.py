@@ -74,6 +74,7 @@ def _aggregate_by_log_type(
             "top_values": ["v1", "v2", ...],
         }
     """
+    format_type = (format_type or "").lower()  # CHANGED: 归一化小写，防御 Step1 输出 "JSON" 等大写值
     lines = [l for l in logs_str.strip().split("\n") if l.strip()]
     total_lines = len(lines)
     matched_lines = 0
