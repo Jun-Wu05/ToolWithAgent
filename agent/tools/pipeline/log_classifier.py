@@ -423,6 +423,19 @@ def _do_classify_log_features(
         _existing_logtypes = {
             d.get("logtype") for d in parsed.get("classification_details", []) if d.get("logtype")
         }
+
+        # 防御 LLM 新增无关分类（如按 username 而不是 feature_field 分类）
+        _extra_values = _existing_logtypes - _known_values
+        if _extra_values:
+            logger.warning(
+                f"[classify_log_features] LLM 新增了不在 aggregation 中的分类值: {_extra_values}，"
+                f"已自动剔除"
+            )
+            parsed["classification_details"] = [
+                d for d in parsed.get("classification_details", [])
+                if d.get("logtype") in _known_values
+            ]
+
         _missing_values = _known_values - _existing_logtypes
         if _missing_values:
             logger.warning(
