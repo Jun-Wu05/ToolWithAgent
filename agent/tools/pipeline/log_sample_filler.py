@@ -64,12 +64,15 @@ def fill_sample_logs(
             try:
                 for line in lines:
                     m = fi_pattern.search(line)
-                    # CHANGED: lastindex 在嵌套捕获组中只反映最右侧 `)` 的组编号，
-                    # 例如 (\{...(\w+)...\}) 的 lastindex=1，永远不满足 >=2，
-                    # 改用 len(m.groups()) 判断捕获组数量
-                    if m and len(m.groups()) >= 2 and m.group(2) == logtype:
-                        detail_copy["real_samples"] = m.group(1)   # Group1 = 日志主体捕获组
-                        detail_copy["sample"] = line               # sample = 完整原始日志行
+                    # CHANGED: 使用 LLM 输出的 feature_body_group / feature_value_group
+                    # 替代硬编码 Group1=主体, Group2=特征值
+                    # 特征位于头部 keyword 时（如 dns_result, IPS），value 可能是 Group1
+                    # 默认值 (1, 2) 保持向后兼容
+                    feature_body_group = classification.get("feature_body_group", 1)
+                    feature_value_group = classification.get("feature_value_group", 2)
+                    if m and len(m.groups()) >= max(feature_body_group, feature_value_group) and m.group(feature_value_group) == logtype:
+                        detail_copy["real_samples"] = m.group(feature_body_group)
+                        detail_copy["sample"] = line
                         break
             except _re.error:
                 pass
