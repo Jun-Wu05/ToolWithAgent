@@ -186,8 +186,6 @@ def _build_fallback_details(aggregation: dict) -> list[dict]:
     for val, info in aggregation.get("values", {}).items():
         details.append({
             "logtype": val,
-            "matched_regex": _re.escape(val),
-            "meaning": "",
             "sample": info.get("samples", [None])[0] if info.get("samples") else "",
         })
     return details
@@ -318,8 +316,9 @@ def _do_classify_log_features(
                 "feature_field": feature_field,
                 "feature_identifier": "",
                 "feature_count": 0,
+                "total_valid_lines": 0,
+                "covered_lines": 0,
                 "classification_details": [],
-                "expert_summary": "日志内容为空",
             },
             ensure_ascii=False,
         )
@@ -392,10 +391,9 @@ def _do_classify_log_features(
                     "feature_field": feature_field,
                     "feature_identifier": "",
                     "feature_count": value_count,
+                    "total_valid_lines": total_lines,
+                    "covered_lines": matched_lines,
                     "classification_details": _build_fallback_details(aggregation),
-                    "expert_summary": f"LLM 返回格式异常，原始响应前 500 字: {response[:500]}",
-                    "total_lines": total_lines,
-                    "matched_lines": matched_lines,
                     "raw_response": response[:500],
                 },
                 ensure_ascii=False,
@@ -409,13 +407,12 @@ def _do_classify_log_features(
         parsed.setdefault("feature_field", feature_field)
         parsed.setdefault("feature_identifier", "")
         parsed.setdefault("feature_count", value_count)
+        # CHANGED: total_lines/matched_lines 改名为 total_valid_lines/covered_lines 后，需显式写入输出
+        parsed.setdefault("total_valid_lines", total_lines)
+        parsed.setdefault("covered_lines", matched_lines)
         parsed.setdefault("classification_details", [])
-        parsed.setdefault("expert_summary", "")
         parsed.setdefault("categorical_features", "")
         parsed.setdefault("Diversion_method", "")
-        parsed.setdefault("fail_reason", "")
-        parsed.setdefault("total_lines", total_lines)
-        parsed.setdefault("matched_lines", matched_lines)
         parsed.setdefault("analysis", _build_log_analysis(logs_str))
 
         # CHANGED: 确保 classification_details 覆盖 aggregation 中所有已知分类值
@@ -449,11 +446,11 @@ def _do_classify_log_features(
                 _sample = _samples[0] if _samples else ""
                 parsed["classification_details"].append({
                     "logtype": _val,
-                    "matched_regex": "",
-                    "meaning": f"LLM 未分析（自动补充，出现 {_info.get('count', 0)} 次）",
                     "sample": _sample,
                 })
-            parsed["feature_count"] = len(parsed["classification_details"])
+
+        # CHANGED: 始终同步 feature_count 为实际 classification_details 长度
+        parsed["feature_count"] = len(parsed["classification_details"])
 
         # ====================================================================
         # 成功解析后自动存入向量知识库（失败不影响主流程）
@@ -503,8 +500,9 @@ def _do_classify_log_features(
                 "feature_field": feature_field,
                 "feature_identifier": "",
                 "feature_count": 0,
+                "total_valid_lines": 0,
+                "covered_lines": 0,
                 "classification_details": [],
-                "expert_summary": f"API 错误: {e.response.status_code}",
             },
             ensure_ascii=False,
         )
@@ -519,8 +517,9 @@ def _do_classify_log_features(
                 "feature_field": feature_field,
                 "feature_identifier": "",
                 "feature_count": 0,
+                "total_valid_lines": 0,
+                "covered_lines": 0,
                 "classification_details": [],
-                "expert_summary": f"异常: {str(e)[:200]}",
             },
             ensure_ascii=False,
         )

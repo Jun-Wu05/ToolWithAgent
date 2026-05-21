@@ -94,6 +94,8 @@ from agent.tools.log_parser_pipeline import _do_identify_log_format, _do_classif
 
 # 加载路由关键词（枚举提取关键词保留，用于枚举提取流触发）
 
+# 规则生成模块（入口/子规则生成 + base64 导出）
+from agent.tools.rule_generator import generate_rules, rules_to_base64_text
 
 
 # ============= Chainlit 事件处理 =============
@@ -581,6 +583,9 @@ Excel 格式说明：
                     feature_identifier=feature_identifier,
                 )
 
+            # 保存分类结果到会话（供规则导出使用）
+            user_session["log_classification"] = classification
+
             # 渲染结果
             result_content = _render_log_parser_result(classification, format_info)
         except Exception as e:
@@ -592,7 +597,23 @@ Excel 格式说明：
                 await loading_msg.remove()
             except Exception:
                 pass
-        await cl.Message(content=result_content).send()
+        await cl.Message(
+            content=result_content,
+            actions=[
+                cl.Action(
+                    name="export_rules",
+                    label="📥 导出入口规则",
+                    description="生成入口分发规则并导出 base64",
+                    payload={}
+                ),
+                cl.Action(
+                    name="export_sub_rules",
+                    label="📥 导出子规则",
+                    description="生成子类分发规则并导出 base64",
+                    payload={}
+                ),
+            ],
+        ).send()
         # 附加完整 JSON 文件下载
         if classification and isinstance(classification, dict):
             try:
@@ -924,6 +945,70 @@ async def on_start_enum_fill(action: cl.Action):
     ).send()
 
 
+# ============= 规则导出 Action 回调 =============
+
+@cl.action_callback("export_rules")
+async def on_export_rules(action: cl.Action):
+    """用户点击"📥 导出入口规则"按钮 — 从分类结果生成入口分发规则并导出 base64"""
+    user_session = cl.user_session.get("user_session")
+    classification = user_session.get("log_classification")
+    logger.info('[ACTION] 用户点击"导出入口规则"按钮')
+
+    if not classification or not isinstance(classification, dict):
+        await cl.Message(content="❌ 未找到日志分类结果，请先执行日志解析。").send()
+        return
+
+    try:
+        logger.info("[ACTION] 调用 generate_rules(mode='entry')")
+        result = generate_rules(classification, mode="entry")
+        if not result.get("success"):
+            await cl.Message(content=f"❌ 入口规则生成失败：{result.get('error', '未知错误')}").send()
+            return
+
+        base64_text = rules_to_base64_text(result.get("rules", []))
+        file_name = result.get("file_name", "entry_rules.txt")
+
+        base64_file = cl.File(name=file_name, content=base64_text, mime="text/plain")
+        await cl.Message(
+            content=f"✅ 入口规则已生成！共 {result.get('rule_count', 0)} 条规则。\n\n📥 点击下载：",
+            elements=[base64_file],
+        ).send()
+    except Exception as e:
+        logger.error(f"[ACTION] 入口规则导出异常: {e}")
+        await cl.Message(content=f"❌ 入口规则导出失败：{e}").send()
+
+
+@cl.action_callback("export_sub_rules")
+async def on_export_sub_rules(action: cl.Action):
+    """用户点击"📥 导出子规则"按钮 — 从分类结果生成子类分发规则并导出 base64"""
+    user_session = cl.user_session.get("user_session")
+    classification = user_session.get("log_classification")
+    logger.info('[ACTION] 用户点击"导出子规则"按钮')
+
+    if not classification or not isinstance(classification, dict):
+        await cl.Message(content="❌ 未找到日志分类结果，请先执行日志解析。").send()
+        return
+
+    try:
+        logger.info("[ACTION] 调用 generate_rules(mode='sub')")
+        result = generate_rules(classification, mode="sub")
+        if not result.get("success"):
+            await cl.Message(content=f"❌ 子规则生成失败：{result.get('error', '未知错误')}").send()
+            return
+
+        base64_text = rules_to_base64_text(result.get("rules", []))
+        file_name = result.get("file_name", "sub_rules.txt")
+
+        base64_file = cl.File(name=file_name, content=base64_text, mime="text/plain")
+        await cl.Message(
+            content=f"✅ 子规则已生成！共 {result.get('rule_count', 0)} 条规则。\n\n📥 点击下载：",
+            elements=[base64_file],
+        ).send()
+    except Exception as e:
+        logger.error(f"[ACTION] 子规则导出异常: {e}")
+        await cl.Message(content=f"❌ 子规则导出失败：{e}").send()
+
+
 # ============= 日志解析辅助函数 =============
 
 def _parse_json_safe(text: str) -> dict | None:
@@ -962,13 +1047,10 @@ def _render_log_parser_result(classification: dict | None, format_info: dict | N
     feature_field = classification.get("feature_field", "log_type")
     feature_count = classification.get("feature_count", 0)
     feature_identifier = classification.get("feature_identifier", "")
-    expert_summary = classification.get("expert_summary", "")
+    overall_summary = classification.get("overall_summary", "")
     categorical_features = classification.get("categorical_features", "")
     diversion_method = classification.get("Diversion_method", "")
-    fail_reason = classification.get("fail_reason", "")
     details = classification.get("classification_details", [])
-    total_lines = classification.get("total_lines", "?")
-    matched_lines = classification.get("matched_lines", "?")
 
     lines: list[str] = []
     lines.append("## 🔍 日志解析结果")
@@ -982,42 +1064,37 @@ def _render_log_parser_result(classification: dict | None, format_info: dict | N
         lines.append(f"| 分类特征名称 | {categorical_features} |")
     if diversion_method:
         lines.append(f"| 分流方法 | {diversion_method} |")
-    if fail_reason:
-        lines.append(f"| 失败原因 | {fail_reason} |")
-    lines.append(f"| 总行数 | {total_lines} |")
-    lines.append(f"| 匹配行数 | {matched_lines} |")
     lines.append(f"| 分类数量 | {feature_count} |")
 
-    if format_info:
-        fmt = format_info.get("format", "unknown")
-        confidence = format_info.get("confidence", 0)
-        detail = format_info.get("format_detail", "")
-        reason = format_info.get("reason", "")
-        lines.append(f"| 格式类型 | {fmt} |")
-        lines.append(f"| 格式详情 | {detail} |")
-        lines.append(f"| 置信度 | {confidence:.2f} |")
-        if reason:
-            lines.append(f"| 判断理由 | {reason[:100]} |")
+    # CHANGED: 展示 log_format_detail（LLM 原始描述），避免与上方 log_format 枚举值重复
+    log_format_detail = classification.get("log_format_detail", "")
+    if log_format_detail:
+        lines.append(f"| 格式详情 | {log_format_detail} |")
 
-    if expert_summary:
+    if overall_summary:
         lines.append("")
-        lines.append(f"### 📝 综合分析")
-        lines.append(expert_summary)
+        lines.append(f"### 📝 综合描述")
+        lines.append(overall_summary)
 
     if details:
         lines.append("")
         lines.append(f"### 📊 分类详情（{len(details)} 类）")
         lines.append("")
-        lines.append("| 字段值 | 含义 | 匹配正则 | 真实样例 |")
-        lines.append("|---|---|---|---|")
+        lines.append("| 字段值 | 特征值 | 真实样例 |")
+        lines.append("|---|---|---|")
         for _d in details:
             # CHANGED: 取消硬截断，完整展示字段内容
             value = str(_d.get("logtype", ""))
-            meaning = str(_d.get("meaning", ""))
-            matched_regex = str(_d.get("matched_regex", ""))
+            # CHANGED: meaning/matched_regex 已废弃，改用 logtype + sample 展示
+            feature_val = str(_d.get("logtype", ""))
             real_samples = _d.get("real_samples", [])
-            sample = real_samples[0] if real_samples else str(_d.get("sample", ""))
-            lines.append(f"| {value} | {meaning} | `{matched_regex}` | {sample} |")
+            if isinstance(real_samples, str):
+                sample = real_samples
+            elif real_samples:
+                sample = real_samples[0] if isinstance(real_samples, list) else str(real_samples)
+            else:
+                sample = str(_d.get("sample", ""))
+            lines.append(f"| {value} | {feature_val} | {sample} |")
 
     lines.append("")
     lines.append("*以上结果由 LogParser Pipeline 直接生成*")

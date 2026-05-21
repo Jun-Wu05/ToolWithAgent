@@ -54,51 +54,29 @@ def fill_sample_logs(
 
     for detail in details:
         detail_copy = dict(detail)
-        matched_regex = detail_copy.get("matched_regex", "")
-        # 策略 A：feature_identifier 可用时，用 matched_regex 搜索行
-        # real_samples 存 matched_regex 的 Group 1（日志主体值），sample 存完整行
-        if fi_pattern and matched_regex:
+        # CHANGED: 不再依赖 matched_regex，改用 feature_identifier 双捕获组正则
+        detail_copy.pop("matched_regex", None)   # 防御性清理废弃字段
+        detail_copy.pop("meaning", None)         # 防御性清理废弃字段
+        logtype = detail_copy.get("logtype", "")
+
+        # 用 feature_identifier 双捕获组正则提取（Group1=日志主体，Group2=特征值）
+        if fi_pattern and logtype:
             try:
-                m_regex = _re.compile(matched_regex)
                 for line in lines:
-                    m_body = m_regex.search(line)
-                    if m_body:
-                        body_text = (
-                            m_body.group(1)
-                            if m_body.lastindex and m_body.lastindex >= 1
-                            else line
-                        )
-                        detail_copy["real_samples"] = body_text
-                        detail_copy["sample"] = line
+                    m = fi_pattern.search(line)
+                    # CHANGED: lastindex 在嵌套捕获组中只反映最右侧 `)` 的组编号，
+                    # 例如 (\{...(\w+)...\}) 的 lastindex=1，永远不满足 >=2，
+                    # 改用 len(m.groups()) 判断捕获组数量
+                    if m and len(m.groups()) >= 2 and m.group(2) == logtype:
+                        detail_copy["real_samples"] = m.group(1)   # Group1 = 日志主体捕获组
+                        detail_copy["sample"] = line               # sample = 完整原始日志行
                         break
             except _re.error:
                 pass
 
-        # 策略 B：无 feature_identifier 时，用 matched_regex 提取 Group 1
-        if not detail_copy.get("real_samples") and matched_regex:
-            try:
-                pattern = _re.compile(matched_regex)
-                for line in lines:
-                    m_body = pattern.search(line)
-                    if m_body:
-                        body_text = (
-                            m_body.group(1)
-                            if m_body.lastindex and m_body.lastindex >= 1
-                            else line
-                        )
-                        detail_copy["real_samples"] = body_text
-                        if not detail_copy.get("sample"):
-                            detail_copy["sample"] = line
-                        break
-            except _re.error as e:
-                logger.warning(
-                    f"[fill_sample_logs] 正则编译失败: {matched_regex}, 错误: {e}"
-                )
-                detail_copy["regex_error"] = str(e)
-
-        # 兜底：用原始 sample 字段
-        if not detail_copy.get("real_samples") and detail_copy.get("sample"):
-            detail_copy["real_samples"] = detail_copy["sample"]
+        # 匹配不到则标记失败
+        if not detail_copy.get("real_samples"):
+            detail_copy["real_samples"] = "[匹配失败]"
 
         result["classification_details"].append(detail_copy)
 

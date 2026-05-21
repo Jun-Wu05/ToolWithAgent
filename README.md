@@ -1,126 +1,128 @@
-# ToolWithAgent
+# ToolWithAgent — 数据映射智能助手
 
-安全设备日志字段映射与威胁类型分析智能工具，基于 AI 智能体（Agent）+ Web 交互界面（GUI 已归档至 reference/gui/）。
+基于 AI Agent 的安全日志字段映射、威胁类型分析和日志解析工具。交付形式为 **Chainlit Web 聊天界面**（桌面 GUI 已归档至 `reference/gui/`）。
 
-## 📁 项目结构
+## 核心功能
+
+| 功能 | 说明 |
+|------|------|
+| **标准字段映射** | 异构日志字段 → 统一标准字段（Levenshtein 编辑距离 + BM25 混合检索） |
+| **威胁类型标准化** | 告警威胁类型归一化到威胁知识库 |
+| **枚举提取/填充** | 从日志提取映射规则词对，或批量填充枚举映射表 |
+| **日志格式识别** | LLM 识别日志数据结构类型（JSON/CSV/CEF/KeyValue/Header+JSON 等） |
+| **日志特征分类** | 提取字段统计特征（field_name, value_count, data_type, sample_values） |
+| **结构化指纹知识库** | 基于 ChromaDB 向量索引，相似格式快速匹配复用 |
+
+## 项目结构
 
 ```
-├── README.md                    # 项目说明
-├── main.py                      # 桌面应用入口（Tkinter GUI）
-├── requirements.txt             # Python 依赖
-├── chainlit.md                  # Chainlit Web 配置
-├── .gitignore
+toolswithagent/
+├── main.py                          # 桌面应用入口（Tkinter，已归档）
+├── requirements.txt                 # Python 依赖
+├── chainlit.md                      # Chainlit 配置
+├── CHANGELOG.md                     # 变更日志
 │
-├── agent/                       # 🤖 AI 智能体系统
-│   ├── core/                    # Agent 核心（模型配置、提示词加载、Team、熔断器、链路追踪）
-│   ├── tools/                   # Agent 工具集（Base64 编解码、字段映射、威胁类型、枚举处理）
-│   ├── prompts/                 # 业务提示词（字段映射、威胁类型、枚举字段）
-│   ├── memory/                  # 会话管理
-│   ├── data/                    # 标准字段表
-│   └── agent.py                 # Agent 定义入口
+├── web/                             # Chainlit Web 界面
+│   ├── chainlit_app.py              # 入口：生命周期钩子 + 薄编排
+│   ├── route_config.py              # 路由关键词匹配（字段映射/威胁/枚举/日志解析）
+│   ├── llm_client.py                # LLM 客户端（Team 调用 + CircuitBreaker）
+│   ├── input_builder.py             # LLM 输入构造
+│   ├── response_handler.py          # 响应解析 + cl.Dataframe 渲染
+│   ├── threat_handler.py            # 威胁填充模式分流
+│   ├── enum_handler.py              # 枚举填充/提取分流
+│   ├── file_handler.py              # 文件上传处理
+│   ├── parsers.py                   # JSON 解析
+│   └── session_state.py             # 会话状态管理
 │
-├── agent/shared/                # 🔧 Agent 共享工具（从 GUI 迁移）
-│   ├── __init__.py
-│   ├── logger.py                # 日志模块
-│   ├── field_mapping.py         # 字段映射处理
-│   └── threat_fill.py           # 威胁类型填充
+├── agent/                           # AI Agent 系统
+│   ├── core/                        # 核心层
+│   │   ├── team.py                  # Agno Team 定义（Route Mode）
+│   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
+│   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
+│   │   ├── prompts.py               # .md Prompt 加载器
+│   │   ├── field_retriever.py       # BM25 + 向量混合检索
+│   │   └── tracing.py               # OpenTelemetry 请求追踪
+│   ├── tools/                       # Agent 工具集
+│   │   ├── field_mapping_tool.py    # 字段映射工具
+│   │   ├── threat_mapping_tool.py   # 威胁类型匹配工具
+│   │   ├── enum_extract_tool.py     # 枚举提取工具
+│   │   ├── enum_field_tool.py       # 枚举填充工具
+│   │   ├── base64_tool.py           # Base64 编解码
+│   │   ├── log_parser_pipeline.py   # 日志解析管道（4-step）
+│   │   └── log_pattern_store.py     # 日志模式知识库
+│   ├── shared/                      # 共享算法
+│   │   ├── field_mapping.py         # Levenshtein 编辑距离核心
+│   │   ├── threat_fill.py           # 威胁填充逻辑
+│   │   ├── base64_encode_decode.py  # Base64 核心
+│   │   └── logger.py                # 统一日志
+│   └── prompts/                     # LLM Prompt 模板（.md 文件）
+│       ├── log_format_identify.md   # Step 1：日志格式识别
+│       └── log_classify_feature.md  # Step 3：日志特征分类
 │
-├── web/                         # 🌐 Web 交互界面（Chainlit）
-│   ├── chainlit_app.py          # Web 应用入口（仅保留 UI 生命周期钩子 + Action 回调）
-│   ├── file_handler.py          # 文件上传处理业务逻辑（从 chainlit_app.py 提取）
-│   ├── config.py                # Web 配置
-│   ├── llm_client.py            # LLM 客户端（Team 调用 + 意图直接路由 + 超时保护）
-│   ├── input_builder.py         # 输入构建
-│   ├── enum_handler.py          # 枚举处理
-│   ├── threat_handler.py        # 威胁类型处理
-│   ├── response_handler.py      # 响应处理
-│   ├── route_config.py          # 路由配置（关键词预筛）
-│   ├── session_state.py         # 会话状态管理
-│   ├── parsers.py               # 数据解析
-│   └── utils.py                 # 工具函数
+├── config/                          # 共享配置
+│   ├── route_keywords.json          # 路由关键词
+│   ├── threat_type_config.json      # 威胁类型映射配置
+│   ├── 标准字段.txt                 # 标准字段列表
+│   └── 对象.xlsx                    # 系统属性映射表
 │
-├── reference/gui/               # 📦 桌面 GUI 归档（仅逻辑参考，不再维护）
-│   ├── handlers/                # 各功能模块处理器
-│   ├── data_processor.py        # 数据处理核心
-│   ├── gui_handler.py           # GUI 界面分发
-│   ├── field_mapping_handler.py # 字段映射处理
-│   ├── threat_fill_handler.py   # 威胁类型填充
-│   ├── threat_type_manager.py   # 威胁类型管理
-│   └── logger.py                # 日志模块
+├── docs/                            # 项目文档
+│   ├── architecture/                # 架构文档
+│   │   ├── 20260514_架构概览.md     # 系统架构全景图
+│   │   └── 20260514_代码级设计说明.md # 模块依赖/函数签名/算法/数据流
+│   └── 文档维护规范.md              # 文档编写与维护标准
 │
-├── config/                      # ⚙️ 共享配置
-│   ├── 对象.xlsx                # 系统属性映射表
-│   ├── threat_type_config.json  # 威胁类型配置
-│   └── threat_nomal.txt         # 威胁类型参考
-│
-├── docs/                        # 📚 项目文档
-│   ├── readme.md                # 桌面工具详细说明
-│   ├── 代码优化.md
-│   ├── 威胁类型映射与字段处理完整指南.md
-│   └── skill.md
-│
+└── reference/gui/                   # 桌面 GUI 归档（不再维护）
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 ### 环境要求
 
 - Python 3.9+
-- Windows / macOS / Linux
+- SiliconFlow API Key（需设置环境变量 `SILICONFLOW_API_KEY`）
 
-### 安装依赖
+### 安装
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 运行方式
-
-#### 1. 桌面 GUI 应用
-
-> ⚠️ **已归档**：桌面 GUI 代码已移至 `reference/gui/`，仅供逻辑参考，不再维护。
-
-```bash
-python main.py
-```
-
-提供功能：Base64 编解码、字段映射、威胁类型填充、CSV 格式转换、标准字段映射。
-
-#### 2. Web 交互界面（Chainlit）
+### 启动 Web 界面
 
 ```bash
 chainlit run web/chainlit_app.py
 ```
-启动后访问 `http://localhost:8000` 与 AI Agent 进行对话式交互。
 
-#### 3. 命令行/API
+启动后访问 `http://localhost:8000`，在聊天界面：
+1. **上传** Excel 或粘贴日志数据
+2. **输入指令**：`字段映射` / `威胁类型` / `枚举提取` / `枚举值填充` / `日志解析`
+3. Agent 自动识别意图并完成处理
 
-```python
-from agent import create_agent
+### 环境变量
 
-agent = create_agent()
-response = agent.run("解码这个 Base64 数据...")
-```
+| 变量名 | 说明 | 必需 |
+|--------|------|------|
+| `SILICONFLOW_API_KEY` | SiliconFlow API 密钥 | 是 |
+| `SILICONFLOW_BASE_URL` | SiliconFlow 端点 | 否 |
+| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | 否（故障转移用） |
+| `CHROMADB_PATH` | ChromaDB 存储路径 | 否 |
 
+可通过 `.env` 文件配置或直接设置系统环境变量。
 
-## 🔧 功能概览
+## 文档导航
 
-| 功能 | 桌面应用 | AI Agent | Web 界面 |
-|------|:---:|:---:|:---:|
-| Base64 编解码 | ✅ | ✅ | ✅ |
-| 标准字段映射 | ✅ | ✅ | ✅ |
-| 威胁类型标准化 | ✅ | ✅ | ✅ |
-| 枚举字段批量处理 | ✅ | ✅ | ✅ |
-| 字段映射集合（功能5） | 📦 | - | - |
-| Base64 错误检测 | 📦 | - | - |
-| CSV 格式转换 | 📦 | - | - |
-| 对话式交互 | - | ✅ | ✅ |
-| 自主推理与任务规划 | - | ✅ | ✅ |
+| 文档 | 内容 |
+|------|------|
+| [架构概览](docs/architecture/20260514_架构概览.md) | 系统架构图、核心流程、外部依赖、错误处理策略 |
+| [代码级设计说明](docs/architecture/20260514_代码级设计说明.md) | 模块依赖图、函数签名、关键算法、数据流、配置结构 |
+| [CHANGELOG](CHANGELOG.md) | 按版本整理的完整变更记录 |
+| [项目概要](docs/20260514_项目概要.md) | 项目背景、目标、功能全景 |
+| [文档维护规范](docs/文档维护规范.md) | 文档编写、命名、更新标准 |
 
-## 📝 模型配置
+## 技术栈
 
-Agent 使用 SiliconFlow 平台的 DeepSeek-V3.2 模型。在环境变量中配置：
-
-```bash
-export SILICONFLOW_API_KEY="your-api-key"
-export SILICONFLOW_MODEL="deepseek-ai/DeepSeek-V3.2"  # 可选
+- **Agent 框架**：Agno (Team Route Mode, 4+ MemberAgents)
+- **LLM Provider**：SiliconFlow (主) / DeepSeek (备用)，含 CircuitBreaker 熔断
+- **Web 界面**：Chainlit
+- **向量检索**：ChromaDB + BM25 混合检索
+- **可观测性**：OpenTelemetry

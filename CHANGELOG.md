@@ -13,12 +13,16 @@
 ### Changed
 - Prompt 改写为 XML 格式，移除硬编码测试数据
 - 移除分类表中废弃的 `severity`/`attack_type` 列
+- Pipeline 分类输出 schema 清理：移除废弃字段 `expert_summary`→`overall_summary`、`total_lines`/`matched_lines`→`total_valid_lines`/`covered_lines`、`matched_regex`/`meaning`/`fail_reason`/`field_uses_full_line`
 
 ### Fixed
 - `header_regex` 特征提取在 JSON 格式下也能优先执行
 - `_aggregate_by_log_type` 支持非 JSON 格式（semicolon/kv/comma/space/cef）+ `value_count=0` 时继续调 LLM 而非早期失败
 - 传递 `format_info` 到 `_aggregate_by_log_type` 支持 `header_regex` 提取
 - `log_parser_pipeline` timeout 90s + JSON 子串回退修复
+- `log_classify_feature.md` Prompt 双捕获组修复，确保 LLM 输出结构化 JSON
+- `_render_log_parser_result`（chainlit_app.py）对齐新 pipeline 输出字段，修复废弃字段引用导致的渲染异常
+- `rule_generator.py`、`log_sample_filler.py`、`log_classifier.py` 中 `matched_regex`/`meaning` 等废弃字段的残留引用清理
 
 ---
 

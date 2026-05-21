@@ -96,6 +96,10 @@ class SessionState:
     last_enum_extract_result: Optional[Dict[str, Any]] = None
     """最后一次枚举提取的结果"""
 
+    # ---- 日志解析结果 ----
+    log_classification: Optional[Dict[str, Any]] = None
+    """日志解析 Pipeline 的分类结果，供规则导出使用"""
+
     # ---- 工厂方法 ----
 
     @classmethod
