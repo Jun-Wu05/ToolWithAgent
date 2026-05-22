@@ -191,7 +191,7 @@ def _build_fallback_details(aggregation: dict) -> list[dict]:
     return details
 
 
-def _build_log_analysis(logs_str: str) -> dict:
+def _build_log_analysis(logs_str: str, format_type: str = "") -> dict:
     """分析日志结构特征（纯函数，不依赖 LLM）
 
     从原始日志前 5 行推断结构信息，用于补充 classification_details 的元数据。
@@ -199,6 +199,10 @@ def _build_log_analysis(logs_str: str) -> dict:
     互斥规则（优先级从高到低）：
       CEF > JSON > KV > SEPARATOR
     只有主体格式对应的 bool 为 true，其余强制为 false。
+
+    Args:
+        logs_str: 原始日志字符串
+        format_type: Step 1 识别的格式类型 (json/kv/cef 等)，用于修正启发式误判
 
     Returns:
         {
@@ -258,6 +262,16 @@ def _build_log_analysis(logs_str: str) -> dict:
     elif has_kv:
         has_delim = False
     # has_delim 保留原值（最低优先级）
+
+    # CHANGED: Use format_type from Step 1 to override heuristic detection.
+    # When Step 1 identified the format as KV/UNKNOWN, embedded JSON values
+    # (e.g., process_tree=[{...}], env=[...]) should NOT trigger has_json_structure.
+    # Unconditionally force has_json=False and has_kv=True when Step 1 says KV.
+    if format_type and format_type.lower() in ("kv", "unknown"):
+        if has_json:
+            has_json = False
+            if not has_kv:
+                has_kv = True
 
     # 猜测 key-value 连接符
     eq_count = text.count("=")
@@ -413,7 +427,11 @@ def _do_classify_log_features(
         parsed.setdefault("classification_details", [])
         parsed.setdefault("categorical_features", "")
         parsed.setdefault("Diversion_method", "")
-        parsed.setdefault("analysis", _build_log_analysis(logs_str))
+        # CHANGED: Always overwrite LLM's "analysis" with heuristic result.
+        # LLM may misdetect KV logs with embedded JSON arrays (e.g., process_tree=[...])
+        # as having JSON structure. The heuristic _build_log_analysis() already applies
+        # format_type-based correction (Fix 1), so its result must take precedence.
+        parsed["analysis"] = _build_log_analysis(logs_str, format_type=format_type)
 
         # CHANGED: 确保 classification_details 覆盖 aggregation 中所有已知分类值
         # 防御 LLM 遗漏低频分类（如 ssoaccess 占比 0.46% 被忽略）
@@ -451,6 +469,85 @@ def _do_classify_log_features(
 
         # CHANGED: 始终同步 feature_count 为实际 classification_details 长度
         parsed["feature_count"] = len(parsed["classification_details"])
+
+        # CHANGED: Validate logtype against feature_identifier regex extraction.
+        # LLM may truncate or misidentify the logtype (e.g., "suspicious-command"
+        # instead of "cloudwalker-suspicious-command"). Re-extract the actual
+        # feature value from each sample using the regex.
+        _feat_id = parsed.get("feature_identifier", "")
+        _raw_val_group = parsed.get("feature_value_group", 0) or 0
+        # CHANGED: Defensive int() conversion — LLM may return string "2" instead of int 2.
+        # TypeError from str vs int comparison would silently skip correction.
+        try:
+            _val_group = int(_raw_val_group)
+        except (TypeError, ValueError):
+            logger.warning(
+                f"[classify_log_features] feature_value_group is not int: "
+                f"{type(_raw_val_group).__name__} '{_raw_val_group}', defaulting to 0"
+            )
+            _val_group = 0
+
+        logger.info(
+            f"[classify_log_features] logtype validation: "
+            f"feature_identifier='{_feat_id[:80]}', "
+            f"feature_value_group={_val_group} (raw={_raw_val_group!r}), "
+            f"known_values={_known_values}, "
+            f"details_count={len(parsed.get('classification_details', []))}"
+        )
+
+        if _feat_id and _val_group:
+            for detail in parsed.get("classification_details", []):
+                _sample = detail.get("sample", "")
+                _llm_logtype = detail.get("logtype", "")
+                if not _sample:
+                    logger.info(
+                        f"[classify_log_features] Skipping detail with empty sample, "
+                        f"logtype='{_llm_logtype}'"
+                    )
+                    continue
+                try:
+                    _m = _re.search(_feat_id, _sample)
+                    if _m is None:
+                        logger.info(
+                            f"[classify_log_features] Regex did not match sample "
+                            f"for logtype='{_llm_logtype}', sample_len={len(_sample)}"
+                        )
+                        continue
+                    if _m.lastindex is None or _m.lastindex < _val_group:
+                        logger.info(
+                            f"[classify_log_features] Regex matched but not enough groups: "
+                            f"lastindex={_m.lastindex}, need={_val_group}, "
+                            f"logtype='{_llm_logtype}'"
+                        )
+                        continue
+                    _actual_value = _m.group(_val_group)
+                    if _actual_value and _actual_value != _llm_logtype:
+                        logger.info(
+                            f"[classify_log_features] Correcting logtype: "
+                            f"LLM='{_llm_logtype}' -> regex='{_actual_value}'"
+                        )
+                        detail["logtype"] = _actual_value
+                    elif _actual_value == _llm_logtype:
+                        logger.info(
+                            f"[classify_log_features] logtype already correct: "
+                            f"'{_llm_logtype}'"
+                        )
+                    else:
+                        logger.info(
+                            f"[classify_log_features] Regex extracted empty value "
+                            f"for logtype='{_llm_logtype}'"
+                        )
+                except (_re.error, IndexError, TypeError) as _err:
+                    logger.warning(
+                        f"[classify_log_features] logtype regex validation error: "
+                        f"{type(_err).__name__}: {_err}, logtype='{_llm_logtype}'"
+                    )
+        else:
+            logger.info(
+                f"[classify_log_features] Skipping logtype validation: "
+                f"feature_identifier={'set' if _feat_id else 'empty'}, "
+                f"feature_value_group={_val_group}"
+            )
 
         # ====================================================================
         # 成功解析后自动存入向量知识库（失败不影响主流程）
