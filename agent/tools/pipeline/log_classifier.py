@@ -84,8 +84,10 @@ def _aggregate_by_log_type(
 
     for line in lines:
         feature_value: Any = None
+        header_value: Any = None
+        body_value: Any = None
 
-        # 优先级最高：header_regex 不依赖 format_type（日志头+JSON / 日志头+KV 均适用）
+        # 提取 1: header_regex（可能截断，如 cloudwalker-(\S+) 只捕获 suffix）
         if (
             format_info
             and format_info.get("feature_position") == "header_regex"
@@ -94,19 +96,28 @@ def _aggregate_by_log_type(
             try:
                 m = _re.search(format_info["feature_extract_regex"], line)
                 if m:
-                    feature_value = m.group(1) if m.lastindex else m.group(0)
+                    header_value = m.group(1) if m.lastindex else m.group(0)
             except _re.error:
                 pass
 
-        # 回退到常规 JSON/KV body 提取
-        if feature_value is None:
-            if format_type == "json":
-                feature_value = _try_extract_json_feature(line, feature_field)
-            else:
-                # 非 JSON 格式：从行中提取 key=value 对，找 feature_field
-                feature_value = _try_extract_kv_feature(
-                    line, feature_field, format_type, format_info
-                )
+        # 提取 2: 常规 JSON/KV body 提取（完整值，如 msg_type="cloudwalker-suspicious-command"）
+        if format_type == "json":
+            body_value = _try_extract_json_feature(line, feature_field)
+        else:
+            # 非 JSON 格式：从行中提取 key=value 对，找 feature_field
+            body_value = _try_extract_kv_feature(
+                line, feature_field, format_type, format_info
+            )
+
+        # CHANGED: KV body 值优先于 header_regex 值。
+        # header_regex 的 capture group 可能截断前缀（如 cloudwalker-(\S+) 只捕获 suffix），
+        # 而 KV body 中的 feature_field="full-value" 是完整值。
+        feature_value = body_value or header_value
+        if header_value and body_value and header_value != body_value:
+            logger.debug(
+                f"[aggregate] header_value='{header_value}' != body_value='{body_value}', "
+                f"using body_value"
+            )
 
         if feature_value is None:
             continue
@@ -548,6 +559,53 @@ def _do_classify_log_features(
                 f"feature_identifier={'set' if _feat_id else 'empty'}, "
                 f"feature_value_group={_val_group}"
             )
+
+        # CHANGED: Fallback logtype correction using simple single-group regex.
+        # When feature_identifier's multi-group regex fails (e.g., lastindex < val_group),
+        # construct a simpler regex directly from feature_field to extract the correct value.
+        # This handles cases where header_regex truncates values (e.g., cloudwalker-(\S+)
+        # capturing only "suspicious-command") while the KV body has the full value
+        # (e.g., msg_type="cloudwalker-suspicious-command").
+        _ff = parsed.get("feature_field", feature_field)
+        if _ff and parsed.get("classification_details"):
+            # Try common KV patterns: field="value", field='value', field=value
+            _fallback_patterns = [
+                _re.compile(rf'{_re.escape(_ff)}="([^"]+)"'),   # field="value"
+                _re.compile(rf"{_re.escape(_ff)}='([^']+)'"),   # field='value'
+                _re.compile(rf'{_re.escape(_ff)}=([^\s,;\|]+)'), # field=value (unquoted)
+            ]
+            _corrected_count = 0
+            for detail in parsed["classification_details"]:
+                _sample = detail.get("sample", "")
+                _llm_logtype = detail.get("logtype", "")
+                if not _sample or not _llm_logtype:
+                    continue
+                # Skip if already corrected by the primary validation above
+                if _llm_logtype in _known_values and _llm_logtype == detail.get("logtype", ""):
+                    # Check if the logtype was already found correct by primary validation
+                    pass
+                for _pat in _fallback_patterns:
+                    try:
+                        _fm = _pat.search(_sample)
+                        if _fm and _fm.group(1):
+                            _extracted = _fm.group(1)
+                            if _extracted != _llm_logtype:
+                                logger.info(
+                                    f"[classify_log_features] Fallback correcting logtype: "
+                                    f"LLM='{_llm_logtype}' -> extracted='{_extracted}' "
+                                    f"via pattern='{_pat.pattern}'"
+                                )
+                                detail["logtype"] = _extracted
+                                _corrected_count += 1
+                            break  # Found a match, no need to try other patterns
+                    except (_re.error, IndexError) as _fb_err:
+                        logger.warning(
+                            f"[classify_log_features] Fallback regex error: {_fb_err}"
+                        )
+            if _corrected_count > 0:
+                logger.info(
+                    f"[classify_log_features] Fallback corrected {_corrected_count} logtype(s)"
+                )
 
         # ====================================================================
         # 成功解析后自动存入向量知识库（失败不影响主流程）
