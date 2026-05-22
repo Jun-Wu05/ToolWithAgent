@@ -30,7 +30,7 @@
 <group index="body">日志主体 = 去掉日志系统前缀（时间戳、主机名、PID 等）后的内容（若为纯 JSON 则为完整 JSON 对象，若为 KV 则为 key=value 主体。特征位于头部 keyword 时，keyword 和 body 可以分布在任意组，取决于正则写法）</group>
 <group index="value">{feature_field} 对应的字段值（必须用通配符如 ([^"]+) 或 (\S+) 提取所有可能的字段值，禁止写死具体的值如 "grantblock"、"API SERVER" 等）</group>
 
-<critical>feature_identifier 正则中必须包含外层捕获组，缺少外层捕获组的单捕获组正则会直接导致匹配失败。例如：日志 `{"topic":"waf_access","msg":"..."}` 的正则必须为 `(\{{.*"topic":"([^"]+)".*\}})` 而非 `"topic":"([^"]+)"`。</critical>
+<critical>feature_identifier 正则中必须包含外层捕获组，缺少外层捕获组的单捕获组正则会直接导致匹配失败。例如：日志 `{{"topic":"waf_access","msg":"..."}}` 的正则必须为 `(\{{.*"topic":"([^"]+)".*\}})` 而非 `"topic":"([^"]+)"`。</critical>
 
 <rule>正则只需做到：能在日志行中定位到特征字段，正确提取 2 个捕获组。</rule>
 <rule>正则不需精确匹配日志系统前缀（时间戳、主机名、PID 等），可以跳过或使用 .*? 通配。</rule>
@@ -44,8 +44,8 @@
 <note>特征位于 JSON 内部字段：Group1(外括号)=完整JSON主体=body, Group2(内括号)=tag_特征值=value。feature_body_group=1, feature_value_group=2</note>
 </example>
 <example>
-<log><14>MAY 21 11:30:47 localhost.localdomain dns_result: {"protocol":"dns","sport":3950,"dport":53,"sip":"::ffff:192.168.20.61","qname":"www.baidu.com"}</log>
-<regex>(\S+):\s+(\{[\S\s]*\})</regex>
+<log><14>MAY 21 11:30:47 localhost.localdomain dns_result: {{"protocol":"dns","sport":3950,"dport":53,"sip":"::ffff:192.168.20.61","qname":"www.baidu.com"}}</log>
+<regex>(\S+):\s+(\{{[\S\s]*\}})</regex>
 <note>特征位于头部 keyword（header+JSON 结构）：Group1=keyword(dns_result)=value, Group2=完整JSON主体=body。feature_body_group=2, feature_value_group=1。正则不依赖 JSON 内部字段名</note>
 </example>
 <example>

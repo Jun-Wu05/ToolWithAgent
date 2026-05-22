@@ -548,8 +548,10 @@ Excel 格式说明：
             # 获取原始日志文本
             raw_log_lines = user_session.get("raw_log_lines")
             if raw_log_lines:
-                logs_str = "\n".join(str(line) for line in raw_log_lines[:200])
-                logger.info(f"[ROUTE][LogParser] 使用精简输入：{len(raw_log_lines)} 行原始日志")
+                # CHANGED: 移除 [:200] 截断，让 _aggregate_by_log_type 能发现低频日志类型（如 ssoaccess）
+                # 内部函数（identify/classify）已各自采样 3~5 行供 LLM，无需外部截断
+                logs_str = "\n".join(str(line) for line in raw_log_lines)
+                logger.info(f"[ROUTE][LogParser] 使用完整输入：{len(raw_log_lines)} 行原始日志")
             else:
                 logs_str = user_text
                 logger.info(f"[ROUTE][LogParser] 无 raw_log_lines，回退使用 user_text")
