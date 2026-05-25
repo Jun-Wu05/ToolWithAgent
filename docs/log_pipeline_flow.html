@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日志类型提取 Pipeline 完整流程</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d2991d;
+    --purple: #a371f7;
+    --code-bg: #1c2128;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  h1 {
+    text-align: center;
+    color: var(--accent);
+    font-size: 2rem;
+    margin-bottom: 0.25rem;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+
+  /* ──────── 总览图 ──────── */
+  .overview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    margin-bottom: 3rem;
+  }
+  .overview-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.5rem;
+    text-align: center;
+    min-width: 160px;
+    flex: 1;
+  }
+  .overview-card .step-num {
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .overview-card .step-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 0.3rem 0;
+  }
+  .overview-card .step-file {
+    font-size: 0.78rem;
+    color: var(--muted);
+    word-break: break-all;
+  }
+  .arrow {
+    display: flex;
+    align-items: center;
+    font-size: 1.5rem;
+    color: var(--muted);
+  }
+
+  /* ──────── Step 详情 Section ──────── */
+  .step-section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    overflow: hidden;
+  }
+  .step-header {
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .step-badge {
+    background: var(--accent);
+    color: #000;
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .step-header h2 {
+    font-size: 1.25rem;
+  }
+  .step-header .file-path {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .step-body {
+    padding: 1.5rem;
+  }
+
+  /* ──────── 子模块卡片 ──────── */
+  .sub-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 1rem;
+  }
+  .sub-card {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .sub-card h4 {
+    color: var(--purple);
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+  .sub-card p, .sub-card li {
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .sub-card ul {
+    padding-left: 1.2rem;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin: 2px;
+  }
+  .tag-llm { background: #1f6feb33; color: #58a6ff; }
+  .tag-pure { background: #2ea04333; color: #3fb950; }
+  .tag-fix  { background: #d2991d33; color: #d2991d; }
+  .tag-risk { background: #f8514933; color: #f85149; }
+
+  /* ──────── 代码块 ──────── */
+  pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    margin: 0.5rem 0;
+  }
+  code {
+    font-family: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  .code-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    display: block;
+  }
+
+  /* ──────── 数据流图 ──────── */
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 1rem 0;
+    font-size: 0.82rem;
+  }
+  .flow-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.8rem;
+    white-space: nowrap;
+  }
+  .flow-box.key { border-color: var(--accent); color: var(--accent); }
+  .flow-arrow { color: var(--muted); font-size: 1.2rem; }
+
+  .fix-history {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.8rem;
+  }
+  .fix-history h4 {
+    color: var(--orange);
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+  }
+
+  /* ──────── 响应式 ──────── */
+  @media (max-width: 768px) {
+    body { padding: 1rem; }
+    .overview { flex-direction: column; }
+    .arrow { justify-content: center; transform: rotate(90deg); }
+    .sub-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>🔍 日志类型提取 Pipeline</h1>
+<p class="subtitle">从 Excel 上传 → 格式识别 → 预聚合 → LLM 分类 → 样例替换 → 结果展示</p>
+
+<!-- ═══════════════ 总览 ═══════════════ -->
+<div class="overview">
+  <div class="overview-card">
+    <div class="step-num">Step 0</div>
+    <div class="step-name">📥 Excel 上传</div>
+    <div class="step-file">web/chainlit_app.py</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="overview-card">
+    <div class="step-num">Step 1</div>
+    <div class="step-name">🔎 格式识别</div>
+    <div class="step-file">pipeline/log_format_identifier.py</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="overview-card">
+    <div class="step-num">Step 2.5</div>
+    <div class="step-name">📊 纯函数预聚合</div>
+    <div class="step-file">pipeline/log_classifier.py</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="overview-card">
+    <div class="step-num">Step 2</div>
+    <div class="step-name">🤖 LLM 特征分类</div>
+    <div class="step-file">pipeline/log_classifier.py</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="overview-card">
+    <div class="step-num">Step 3</div>
+    <div class="step-name">📝 样例替换</div>
+    <div class="step-file">pipeline/log_sample_filler.py</div>
+  </div>
+</div>
+
+<!-- ═══════════════ Step 0: Excel 上传 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge">Step 0</span>
+    <h2>📥 Excel 上传 & 输入构建</h2>
+    <span class="file-path">web/chainlit_app.py → web/file_handler.py → web/input_builder.py</span>
+  </div>
+  <div class="step-body">
+    <div class="sub-grid">
+      <div class="sub-card">
+        <h4>📌 用户操作</h4>
+        <p>用户在 Chainlit 界面 <strong>上传 Excel (.xlsx)</strong>，或者直接粘贴日志文本。</p>
+        <ul>
+          <li>Excel → <code>file_handler.py</code> 用 openpyxl 解析</li>
+          <li>提取 <code>原始日志</code> 列作为 <code>logs_str</code></li>
+          <li>提取其它列为 <code>simplified_data</code>（用于后续字段映射/威胁填充）</li>
+        </ul>
+      </div>
+      <div class="sub-card">
+        <h4>📌 路由分发</h4>
+        <p><code>chainlit_app.py</code> 的 <code>process_user_message()</code> 负责判断用户意图：</p>
+        <div class="flow-row">
+          <span class="flow-box key">用户输入</span>
+          <span class="flow-arrow">→</span>
+          <span class="flow-box">RouterAgent</span>
+          <span class="flow-arrow">→</span>
+          <span class="flow-box key">is_log_parser?</span>
+          <span class="flow-arrow">→</span>
+          <span class="flow-box">LogParserAgent</span>
+        </div>
+        <p style="margin-top:0.5rem">同时检测 <code>is_mapping</code> / <code>is_threat</code> / <code>is_enum_extract</code> 做多意图复用。</p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 上下文隔离</h4>
+        <p>不同意图的 LLM 输入互不污染：</p>
+        <ul>
+          <li><strong>日志解析</strong>：只传原始日志文本</li>
+          <li><strong>字段映射</strong>：拼接字段名列表</li>
+          <li><strong>威胁处理</strong>：只传文本，不拼字段数据</li>
+        </ul>
+        <span class="tag tag-pure">纯文本传递</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ Step 1: 格式识别 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge">Step 1</span>
+    <h2>🔎 格式识别 — identify_log_format</h2>
+    <span class="file-path">agent/tools/pipeline/log_format_identifier.py</span>
+  </div>
+  <div class="step-body">
+    <div class="sub-grid">
+      <div class="sub-card">
+        <h4>📌 输入 / 输出</h4>
+        <div class="flow-row">
+          <span class="flow-box">logs_str (原始日志)</span>
+          <span class="flow-arrow">→</span>
+          <span class="flow-box key">采样 5 行</span>
+          <span class="flow-arrow">→</span>
+          <span class="flow-box">Prompt 注入</span>
+          <span class="flow-arrow">→</span>
+          <span class="flow-box key">LLM</span>
+          <span class="flow-arrow">→</span>
+          <span class="flow-box">JSON {
+  format, format_detail,
+  delimiter, confidence,
+  kv_connector, kv_separator,
+  feature_position,
+  feature_extract_regex
+}</span>
+        </div>
+      </div>
+      <div class="sub-card">
+        <h4>📌 枚举归一化 <span class="tag tag-fix">已修复</span></h4>
+        <p>LLM 返回的 <code>format</code> 字段经 <code>normalize_log_format()</code> 映射为枚举：</p>
+        <table style="width:100%; font-size:0.8rem; margin-top:0.5rem; border-collapse:collapse;">
+          <tr style="background:var(--code-bg);"><td style="padding:4px 8px;">json / JSON / json格式</td><td style="padding:4px 8px;color:var(--green);">→ JSON</td></tr>
+          <tr><td style="padding:4px 8px;">kv / key=value / KV</td><td style="padding:4px 8px;color:var(--green);">→ KV</td></tr>
+          <tr style="background:var(--code-bg);"><td style="padding:4px 8px;">space / 空格</td><td style="padding:4px 8px;color:var(--green);">→ KV</td></tr>
+          <tr><td style="padding:4px 8px;">semicolon / comma</td><td style="padding:4px 8px;color:var(--green);">→ SEPARATOR</td></tr>
+          <tr style="background:var(--code-bg);"><td style="padding:4px 8px;">cef</td><td style="padding:4px 8px;color:var(--green);">→ CEF</td></tr>
+          <tr><td style="padding:4px 8px;">其它</td><td style="padding:4px 8px;color:var(--red);">→ UNKNOWN</td></tr>
+        </table>
+        <p style="margin-top:0.5rem;"><strong>输出为大写</strong>（<code>"JSON"</code> 而非 <code>"json"</code>），这是后续 Step 2.5 需要特殊处理的地方。</p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 feature_position 三种模式</h4>
+        <ul>
+          <li><strong>header_regex</strong> — 分类标识在日志头（如 "API SERVER"）<br>→ 输出 <code>feature_extract_regex</code></li>
+          <li><strong>kv_body</strong> — 分类标识在 body 的 KV 字段中（如 <code>log_type=xxx</code>）</li>
+          <li><strong>positional</strong> — 固定列位置（如 CSV 第 N 列）</li>
+        </ul>
+      </div>
+      <div class="sub-card">
+        <h4>📌 Prompt 文件</h4>
+        <p><code>agent/prompts/log_format_identify.md</code></p>
+        <p>要求 LLM 识别：JSON / KV / SEPARATOR / CEF / UNKNOWN<br>同时判定是否有日志头（header_regex）。</p>
+        <span class="tag tag-llm">LLM 调用</span>
+      </div>
+    </div>
+
+    <div class="fix-history">
+      <h4>🔧 历史修复</h4>
+      <p style="font-size:0.82rem;">
+        <strong>问题：</strong>LLM 返回 <code>"json 格式"</code>、<code>"纯JSON"</code> 等自然语言 → 枚举归一化失败。<br>
+        <strong>修复：</strong><code>normalize_log_format()</code> 增加模糊匹配 + <code>parsed["log_format"] = normalize(...)</code> 强制覆盖（commit <code>3a52330</code>）。<br>
+        <strong>问题：</strong>归一化后输出大写 <code>"JSON"</code>，Step 2.5 用 <code>== "json"</code> 匹配失败 → 走错 KV 分支。<br>
+        <strong>修复：</strong>Step 2.5 开头加 <code>format_type.lower()</code>（commit <code>64ef105</code>）。
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ Step 2.5: 纯函数预聚合 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge" style="background:var(--green);color:#000;">Step 2.5</span>
+    <h2>📊 纯函数预聚合 — _aggregate_by_log_type</h2>
+    <span class="file-path">agent/tools/pipeline/log_classifier.py · L37</span>
+  </div>
+  <div class="step-body">
+    <div class="sub-grid">
+      <div class="sub-card">
+        <h4>📌 定位</h4>
+        <p><strong>纯 Python 函数，不调 LLM。</strong> 在 Step 1 和 Step 2 之间执行，为 LLM 提供统计信息。</p>
+        <p>按 <code>feature_field</code>（默认 <code>"log_type"</code>）聚合所有行，输出每种值的计数和样本。</p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 数据结构</h4>
+        <pre><code>{
+  "total_lines": 867,
+  "matched_lines": 867,
+  "feature_field": "log_type",
+  "values": {
+    "grantblock":     { "count": 400, "samples": ["..."] },
+    "grantLogin":     { "count": 300, "samples": ["..."] },
+    "ssoaccess":      { "count": 4,   "samples": ["..."] },
+    ...
+  },
+  "value_count": 10,
+  "top_values": ["grantblock", "grantLogin", ...]
+}</code></pre>
+      </div>
+      <div class="sub-card">
+        <h4>📌 按 format_type 分流</h4>
+        <table style="width:100%; font-size:0.78rem; margin-top:0.5rem;">
+          <tr style="background:var(--code-bg);"><td>json</td><td>→ <code>_try_extract_json_feature()</code><br>每行 JSON.parse 或"日志头+JSON"子串提取</td></tr>
+          <tr><td>kv / space / semicolon / comma</td><td>→ <code>_try_extract_kv_feature()</code><br>tokenize → 匹配 key=value / key:value</td></tr>
+          <tr style="background:var(--code-bg);"><td>cef</td><td>→ CEF 扩展解析</td></tr>
+        </table>
+      </div>
+      <div class="sub-card">
+        <h4>🚨 关键点位 <span class="tag tag-fix">最近修复</span></h4>
+        <pre><code># L67 — CHANGED: 归一化小写，防御 Step1 输出 "JSON" 等大写值
+<b>format_type = (format_type or "").lower()</b></code></pre>
+        <p style="margin-top:0.4rem; font-size:0.8rem;">
+          Step 1 的 <code>normalize_log_format()</code> 输出大写 <code>"JSON"</code>。<br>
+          若不 lower()：<code>"JSON" != "json"</code> → 走 else 分支 → KV 提取 → 误匹配 username 等字段 → 聚合值错误。
+        </p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 header_regex 优先级</h4>
+        <pre><code>if feature_position == "header_regex":
+    # 用 feature_extract_regex 直接提取
+    m = re.search(feature_extract_regex, line)
+    feature_value = m.group(1)
+else:
+    # 回退到 JSON/KV body 提取</code></pre>
+        <p style="font-size:0.8rem; margin-top:0.3rem;">日志头有分类关键词时，header_regex 优先级最高，不依赖 format_type。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ Step 2: LLM 特征分类 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge">Step 2</span>
+    <h2>🤖 LLM 特征分类 — _do_classify_log_features</h2>
+    <span class="file-path">agent/tools/pipeline/log_classifier.py · L217</span>
+  </div>
+  <div class="step-body">
+    <div class="sub-grid">
+      <div class="sub-card">
+        <h4>📌 整体流程</h4>
+        <div class="flow-row" style="flex-direction:column; align-items:flex-start; gap:0.3rem;">
+          <span>① 调 <code>_aggregate_by_log_type</code> 得到聚合统计</span>
+          <span>② 构建 Prompt（注入 format_type + aggregation_text + 采样日志）</span>
+          <span>③ 调 LLM（temperature=0.1, max_tokens=4000）</span>
+          <span>④ <code>_try_parse_json</code> 解析 LLM 返回</span>
+          <span>⑤ ⚡ 字段强制覆盖 & 防御性校验</span>
+          <span>⑥ 成功时写入向量知识库</span>
+        </div>
+      </div>
+      <div class="sub-card">
+        <h4>📌 Prompt 模板</h4>
+        <p><code>agent/prompts/log_classify_feature.md</code></p>
+        <ul>
+          <li>要求 LLM 输出 <code>log_format</code> 固定枚举值（不能自由填写）</li>
+          <li>要求 <code>classification_details</code> 不遗漏任何值，也不新增任何值</li>
+          <li>要求 <code>feature_identifier</code> 双捕获组正则（Group1=日志主体, Group2=特征值）</li>
+        </ul>
+        <span class="tag tag-llm">LLM 调用</span>
+        <span class="tag tag-fix">Prompt 已加固</span>
+      </div>
+      <div class="sub-card">
+        <h4>📌 5 个字段强制覆盖 <span class="tag tag-fix">关键防御</span></h4>
+        <pre><code># log_format 用归一化枚举值强制覆盖 LLM 输出
+<b>parsed["log_format"] = _normalize_log_format(format_type)</b>
+
+# 其余用 setdefault（已有值不覆盖）
+parsed.setdefault("log_format_detail", format_detail)
+parsed.setdefault("feature_field", feature_field)
+parsed.setdefault("feature_identifier", "")
+parsed.setdefault("feature_count", value_count)
+parsed.setdefault("classification_details", [])
+parsed.setdefault("expert_summary", "")
+parsed.setdefault("categorical_features", "")
+parsed.setdefault("Diversion_method", "")
+parsed.setdefault("fail_reason", "")
+parsed.setdefault("total_lines", total_lines)
+parsed.setdefault("matched_lines", matched_lines)</code></pre>
+        <p style="font-size:0.78rem; margin-top:0.3rem;">
+          <strong>log_format 是唯一用 = 强覆盖的字段</strong>（其它用 setdefault 不覆盖 LLM 有效输出）。<br>
+          原因：Prompt 要求枚举值但 LLM 仍可能输出自然语言，代码层兜底。
+        </p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 _extra_values 过滤 <span class="tag tag-risk">防御</span></h4>
+        <p>如果 LLM 在 <code>classification_details</code> 中新增了聚合统计里不存在的值（如按 username 分类）：</p>
+        <pre><code>_extra_values = _existing_logtypes - _known_values
+if _extra_values:
+    logger.warning(f"LLM 新增无关分类值: {_extra_values}，已自动剔除")
+    parsed["classification_details"] = [
+        d for d in details if d["logtype"] in _known_values
+    ]</code></pre>
+      </div>
+      <div class="sub-card">
+        <h4>📌 _missing_values 补漏 <span class="tag tag-risk">防御</span></h4>
+        <p>如果 LLM 遗漏了低频分类（如 ssoaccess 占比 0.46%）：</p>
+        <pre><code>_missing_values = _known_values - _existing_logtypes
+if _missing_values:
+    logger.warning(f"LLM 遗漏: {_missing_values}，自动补充")
+    for _val in sorted(_missing_values):
+        parsed["classification_details"].append({
+            "logtype": _val,
+            "matched_regex": "",
+            "meaning": f"LLM 未分析（自动补充，出现 N 次）",
+            "sample": aggregation_samples[_val]
+        })</code></pre>
+      </div>
+      <div class="sub-card">
+        <h4>📌 _build_log_analysis <span class="tag tag-pure">纯函数</span></h4>
+        <p>互斥检测（优先级 CEF > JSON > KV > SEPARATOR）：</p>
+        <pre><code>{
+  "has_json_structure": bool,       # 互斥
+  "has_cef_prefix": bool,           # 互斥
+  "has_key_value_pairs": bool,      # 互斥
+  "has_delimited_structure": bool,  # 互斥
+  "delimit": ":" 或 "=",
+  "tab": "," / ";" / "|" / "space"
+}</code></pre>
+        <p style="font-size:0.78rem;">注意 KV token 检测用 <code>^[a-zA-Z_]\w*=</code> 排除时间戳和 IPv6 误判。</p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 _generate_feature_identifier <span class="tag tag-fix">Bug 1 修复</span></h4>
+        <p>代码自动生成双捕获组正则（覆盖 LLM 输出），利用 <code>header_end_marker</code> 区分有头/无头日志：</p>
+        <pre><code># 有 header_end_marker（如 " - "）：
+# Group1 只捕获 body（跳过 syslog 头部）
+regex = rf'.*{escaped_marker}(.*{field}="([^"]+)".*)'
+
+# 无 marker：
+# Group1 = 整行（即 body）
+regex = rf'(.*?{field}="([^"]+)".*)'</code></pre>
+        <p style="font-size:0.78rem; margin-top:0.3rem;">
+          之前未区分有无头部，KV 正则 <code>(.*?field="value".*)</code> 的 Group1 总是捕获整行（含 syslog 头）。
+        </p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 知识库自动存储</h4>
+        <p>分类成功（status=SUCCESS）后，自动调用：</p>
+        <pre><code>from agent.tools.log_pattern_store import (
+    generate_structured_fingerprint,
+    store_log_knowledge,
+)
+structured_fp = generate_structured_fingerprint(result, format_detail)
+store_log_knowledge(structured_fp, format_type, meta, sample_logs)</code></pre>
+        <span class="tag tag-pure">失败不影响主流程</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ Step 3: 样例替换 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge" style="background:var(--purple);">Step 3</span>
+    <h2>📝 样例替换 — fill_sample_logs</h2>
+    <span class="file-path">agent/tools/pipeline/log_sample_filler.py</span>
+  </div>
+  <div class="step-body">
+    <div class="sub-grid">
+      <div class="sub-card">
+        <h4>📌 定位</h4>
+        <p><strong>纯 Python 函数。</strong> 用 LLM 输出的 <code>matched_regex</code> 从原始日志中匹配真实样例行，替换 LLM 返回的占位符 sample。</p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 策略 A: 有 feature_identifier（双捕获组正则）</h4>
+        <pre><code># fi_pattern 由 feature_identifier 编译而来
+# feature_body_group / feature_value_group 决定哪个 group 提取什么
+if fi_pattern and logtype:
+    for line in lines:
+        m = fi_pattern.search(line)
+        if m.group(feature_value_group) == logtype:
+            body_from_regex = m.group(feature_body_group)
+            if body_from_regex != line:
+                real_samples = body_from_regex   # Group1=body only
+            else:
+                real_samples = _strip_header(line, header_end_marker)  # fallback
+            break</code></pre>
+        <p style="font-size:0.78rem; margin-top:0.3rem;">
+          <strong>关键</strong>：当正则 Group1 捕获了完整行（等于 line），说明正则不够精确，
+          此时 fallback 到 <code>_strip_header(line, header_end_marker)</code> 剥离头部。
+        </p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 策略 B: 无 feature_identifier → header_end_marker 剥离</h4>
+        <pre><code># fi_pattern 为 None（feature_identifier 未生成或编译失败）
+for line in lines:
+    if logtype in line:  # 简单子串匹配
+        real_samples = _strip_header(line, header_end_marker)
+        break</code></pre>
+      </div>
+      <div class="sub-card">
+        <h4>📌 兜底</h4>
+        <p>如果以上策略均匹配不到 → <code>real_samples = "[匹配失败]"</code>。</p>
+      </div>
+      <div class="sub-card">
+        <h4>📌 参数自动提取 <span class="tag tag-fix">Bug 2 修复</span></h4>
+        <pre><code># CHANGED: 从 classification dict 自动提取 feature_identifier
+# 修复 chainlit_app.py 调用时未传 feature_identifier 导致 fi_pattern=None
+if not feature_identifier:
+    feature_identifier = classification.get("feature_identifier", "")
+
+# header_end_marker 同理（已有逻辑）
+if not header_end_marker:
+    header_end_marker = classification.get("header_end_marker", "")</code></pre>
+        <p style="font-size:0.78rem; margin-top:0.3rem;">
+          之前 <code>chainlit_app.py</code> 调用 <code>fill_sample_logs(classification, logs_str)</code>
+          只传了 2 个参数，<code>feature_identifier</code> 默认 <code>""</code>，
+          导致 JSON 格式日志的 <code>real_samples</code> 输出了完整行（含 syslog 头）。
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ 输出渲染 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge" style="background:var(--green);color:#000;">Output</span>
+    <h2>📤 结果渲染 & 规则导出</h2>
+    <span class="file-path">web/chainlit_app.py · L570-630</span>
+  </div>
+  <div class="step-body">
+    <div class="sub-grid">
+      <div class="sub-card">
+        <h4>📌 渲染内容</h4>
+        <ul>
+          <li>✅ 分类统计摘要（成功/值数/样本数）</li>
+          <li>📋 逐类展示：logtype / matched_regex / meaning / sample</li>
+          <li>📥 <strong>入口规则导出</strong> 按钮（生成 logger_regex → 分流规则）</li>
+          <li>📥 <strong>子规则导出</strong> 按钮（生成 type_regex → 子类规则）</li>
+          <li>📄 <strong>JSON 下载</strong>（完整解析结果文件）</li>
+        </ul>
+      </div>
+      <div class="sub-card">
+        <h4>📌 并行处理模式</h4>
+        <p>Step 1-2 为同步 Pipeline；枚举提取和威胁处理有独立的 flow：</p>
+        <ul>
+          <li><code>web/enum_handler.py</code> — 枚举填充 / 枚举提取分流</li>
+          <li><code>web/threat_handler.py</code> — 威胁类型匹配 & 填充</li>
+          <li><code>web/response_handler.py</code> — 映射/威胁结果 UI 渲染</li>
+        </ul>
+        <p style="font-size:0.78rem;">这些 flow 与日志类型提取 Pipeline 共享同一个 <code>logs_str</code> 输入，但 LLM 调用独立。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ 关键点位速查 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge" style="background:var(--red);">⚠️</span>
+    <h2>关键点位速查表</h2>
+    <span class="file-path">已知坑位 & 防御措施</span>
+  </div>
+  <div class="step-body">
+    <table style="width:100%; font-size:0.82rem; border-collapse:collapse;">
+      <thead>
+        <tr style="background:var(--code-bg); text-align:left;">
+          <th style="padding:6px 10px;">#</th>
+          <th style="padding:6px 10px;">位置</th>
+          <th style="padding:6px 10px;">问题</th>
+          <th style="padding:6px 10px;">防御</th>
+          <th style="padding:6px 10px;">Commit</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:6px 10px;">1</td>
+          <td style="padding:6px 10px;"><code>log_classifier.py L67</code></td>
+          <td style="padding:6px 10px;">format_type 大写 vs 小写不匹配，聚合走错分支</td>
+          <td style="padding:6px 10px;"><code>format_type.lower()</code></td>
+          <td style="padding:6px 10px;"><code>64ef105</code></td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;">2</td>
+          <td style="padding:6px 10px;"><code>log_classifier.py L330</code></td>
+          <td style="padding:6px 10px;">LLM 返回 "日志头+JSON" → 枚举归一化失败</td>
+          <td style="padding:6px 10px;"><code>parsed["log_format"] = normalize(...)</code> 强制覆盖</td>
+          <td style="padding:6px 10px;"><code>3a52330</code></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;">3</td>
+          <td style="padding:6px 10px;"><code>log_classify_feature.md L59</code></td>
+          <td style="padding:6px 10px;">Prompt 写 "日志头+JSON 或 JSON 或 KV" → LLM 输出自由文本</td>
+          <td style="padding:6px 10px;">Prompt 改为固定枚举值要求</td>
+          <td style="padding:6px 10px;"><code>3a52330</code></td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;">4</td>
+          <td style="padding:6px 10px;"><code>log_classifier.py L340</code></td>
+          <td style="padding:6px 10px;">LLM 新增无关分类（按 username 而非 log_type）</td>
+          <td style="padding:6px 10px;"><code>_extra_values</code> 自动剔除</td>
+          <td style="padding:6px 10px;">—</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;">5</td>
+          <td style="padding:6px 10px;"><code>log_classifier.py L355</code></td>
+          <td style="padding:6px 10px;">LLM 遗漏低频分类（如 ssoaccess 0.46%）</td>
+          <td style="padding:6px 10px;"><code>_missing_values</code> 自动补充</td>
+          <td style="padding:6px 10px;">—</td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;">6</td>
+          <td style="padding:6px 10px;"><code>_build_log_analysis</code></td>
+          <td style="padding:6px 10px;">时间戳/ IPv6 被误判为 KV</td>
+          <td style="padding:6px 10px;">Key 必须以字母/下划线开头</td>
+          <td style="padding:6px 10px;">—</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;">7</td>
+          <td style="padding:6px 10px;"><code>log_classifier.py _generate_feature_identifier</code></td>
+          <td style="padding:6px 10px;">KV 正则 Group1 捕获整行（含 syslog 头），未利用 header_end_marker 跳过头部</td>
+          <td style="padding:6px 10px;"><code>header_end_marker</code> 存在时，正则改为 <code>.*marker(.*field="value".*)</code>，Group1 只含 body</td>
+          <td style="padding:6px 10px;"><code>本次</code></td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;">8</td>
+          <td style="padding:6px 10px;"><code>log_sample_filler.py fill_sample_logs</code></td>
+          <td style="padding:6px 10px;">chainlit_app.py 调用未传 feature_identifier，导致 fi_pattern=None → real_samples=完整行</td>
+          <td style="padding:6px 10px;">自动从 <code>classification.get("feature_identifier")</code> 提取</td>
+          <td style="padding:6px 10px;"><code>本次</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════ 文件索引 ═══════════════ -->
+<div class="step-section">
+  <div class="step-header">
+    <span class="step-badge">📁</span>
+    <h2>涉及文件索引</h2>
+  </div>
+  <div class="step-body">
+    <table style="width:100%; font-size:0.82rem; border-collapse:collapse;">
+      <thead>
+        <tr style="background:var(--code-bg); text-align:left;">
+          <th style="padding:6px 10px;">文件</th>
+          <th style="padding:6px 10px;">职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:6px 10px;"><code>web/chainlit_app.py</code></td>
+          <td style="padding:6px 10px;">入口：上传 → 路由 → 渲染</td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;"><code>web/file_handler.py</code></td>
+          <td style="padding:6px 10px;">Excel 解析 + 字段映射分批</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;"><code>web/input_builder.py</code></td>
+          <td style="padding:6px 10px;">构建 LLM 输入文本</td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;"><code>web/response_handler.py</code></td>
+          <td style="padding:6px 10px;">解析 Team 返回 → 渲染 UI 表格/按钮</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;"><code>web/enum_handler.py</code></td>
+          <td style="padding:6px 10px;">枚举填充/枚举提取流程</td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;"><code>agent/tools/log_parser_pipeline.py</code></td>
+          <td style="padding:6px 10px;">Pipeline 兼容入口（薄包装层）</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;"><code>agent/tools/pipeline/log_format_identifier.py</code></td>
+          <td style="padding:6px 10px;"><strong>Step 1</strong>：调 LLM 识别日志格式 + 枚举归一化</td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;"><code>agent/tools/pipeline/log_feature_extractor.py</code></td>
+          <td style="padding:6px 10px;"><strong>底层支撑</strong>：单行 JSON/KV/CEF 字段提取</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;"><code>agent/tools/pipeline/log_classifier.py</code></td>
+          <td style="padding:6px 10px;"><strong>Step 2.5 + Step 2</strong>：纯函数聚合 + LLM 分类 + 防御校验</td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;"><code>agent/tools/pipeline/log_sample_filler.py</code></td>
+          <td style="padding:6px 10px;"><strong>Step 3</strong>：用 matched_regex 替换真实样例</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;"><code>agent/prompts/log_format_identify.md</code></td>
+          <td style="padding:6px 10px;">Step 1 Prompt 模板</td>
+        </tr>
+        <tr style="background:var(--code-bg);">
+          <td style="padding:6px 10px;"><code>agent/prompts/log_classify_feature.md</code></td>
+          <td style="padding:6px 10px;">Step 2 Prompt 模板</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px;"><code>agent/tools/pipeline/llm_client.py</code></td>
+          <td style="padding:6px 10px;">LLM 调用 + JSON 解析 + normalize_log_format</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p style="text-align:center; color:var(--muted); margin-top:3rem; font-size:0.8rem;">
+  更新时间：2026-05-25 · 修复 Bug 1 (KV正则header_end_marker) + Bug 2 (fill_sample_logs自动提取feature_identifier)
+</p>
+
+</body>
+</html>
