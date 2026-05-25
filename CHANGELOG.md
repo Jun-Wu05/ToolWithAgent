@@ -16,6 +16,9 @@
 - Pipeline 分类输出 schema 清理：移除废弃字段 `expert_summary`→`overall_summary`、`total_lines`/`matched_lines`→`total_valid_lines`/`covered_lines`、`matched_regex`/`meaning`/`fail_reason`/`field_uses_full_line`
 
 ### Fixed
+- `_generate_feature_identifier` KV 正则 Group1 利用 `header_end_marker` 跳过 syslog 头部，`real_samples` 只输出 body 部分（之前 Group1 捕获整行含头部）
+- `fill_sample_logs` 自动从 `classification.get("feature_identifier")` 提取正则，修复 `chainlit_app.py` 调用未传参导致 `fi_pattern=None` → `real_samples` = 完整行的问题
+- `docs/log_pipeline_flow.html` 新增 Bug 1/2 修复说明 + Step 3 策略描述更新
 - `header_regex` 特征提取在 JSON 格式下也能优先执行
 - `_aggregate_by_log_type` 支持非 JSON 格式（semicolon/kv/comma/space/cef）+ `value_count=0` 时继续调 LLM 而非早期失败
 - 传递 `format_info` 到 `_aggregate_by_log_type` 支持 `header_regex` 提取
