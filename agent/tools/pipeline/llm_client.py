@@ -118,17 +118,11 @@ def _try_parse_json(text: str) -> dict | None:
 
 
 def normalize_log_format(format_type: str) -> str:
-    """将 LLM 返回的格式类型映射为固定枚举值（JSON/KV/CEF/SEPARATOR/UNKNOWN）。"""
+    """将格式类型映射为固定枚举值。
+
+    当前仅支持 JSON 格式，其他格式统一返回 UNKNOWN。
+    """
     type_lower = (format_type or "").lower()
     if type_lower in ("json",):
         return "JSON"
-    if type_lower in ("kv", "key_value", "key-value"):
-        return "KV"
-    if type_lower in ("cef",):
-        return "CEF"
-    if type_lower in (
-        "space", "semicolon", "comma", "separator",
-        "csv", "pipe", "delimited", "delimiter",
-    ):
-        return "SEPARATOR"
     return "UNKNOWN"

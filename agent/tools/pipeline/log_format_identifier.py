@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-[Step 1] 日志格式识别 — 采样 → LLM → 格式类型判定。
+日志格式识别（Step 1）。
 
-提供 _do_identify_log_format() 和 identify_log_format(@tool)。
+采样日志行 → 调用 LLM → 判定格式类型。
+当前仅支持 JSON 格式，非 JSON 格式返回 UNSUPPORTED 状态。
 """
 
 from __future__ import annotations
@@ -25,14 +26,14 @@ logger = get_logger("log_parser_pipeline")
 
 
 def _do_identify_log_format(logs_str: str) -> str:
-    """
-    采样日志并由 LLM 识别格式类型（纯函数，供 chainlit_app 等直接调用）。
+    """采样日志并由 LLM 识别格式类型。
 
-    Args:
+    参数:
         logs_str: 原始日志字符串（多行）
 
-    Returns:
-        JSON 字符串: {"format": "...", "delimiter": "...", "confidence": 0.95, ...}
+    返回:
+        JSON 字符串，包含格式信息和置信度。
+        非 JSON 格式时返回 status="UNSUPPORTED"。
     """
     if not logs_str or not logs_str.strip():
         return json.dumps(
@@ -41,7 +42,7 @@ def _do_identify_log_format(logs_str: str) -> str:
         )
 
     try:
-        # 采样 3 行供 LLM 分析（节省 token）
+        # 采样 3 行供 LLM 分析
         sampled = sample_logs(logs_str, 3)
         if not sampled:
             return json.dumps(
@@ -65,7 +66,7 @@ def _do_identify_log_format(logs_str: str) -> str:
                 ensure_ascii=False,
             )
 
-        # 标准化字段名
+        # 填充默认字段
         parsed.setdefault("format", "unknown")
         parsed.setdefault("format_detail", "unknown")
         parsed.setdefault("delimiter", None)
@@ -73,22 +74,32 @@ def _do_identify_log_format(logs_str: str) -> str:
         parsed.setdefault("kv_connector", None)
         parsed.setdefault("kv_separator", None)
         parsed.setdefault("has_header", False)
-        parsed.setdefault("has_header_feature", False)
-        parsed.setdefault("space_count", 0)
-        parsed.setdefault("log_feature_field", None)
-        parsed.setdefault("feature_position", "kv_body")
-        parsed.setdefault("feature_extract_regex", None)
+        parsed.setdefault("header_end_marker", "")
+        parsed.setdefault("has_header_feature", False)  # CHANGED: 新增字段
+        parsed.setdefault("feature_field", "")  # CHANGED: 新增字段
+        parsed.setdefault("feature_location", "unknown")  # CHANGED: 新增字段
         parsed.setdefault("reason", "")
 
-        # CHANGED: 归一化 format 字段为枚举值，确保 Step 1 输出与 Step 2 一致
+        # CHANGED: has_header=false 时强制 has_header_feature=false
+        if not parsed.get("has_header"):
+            parsed["has_header_feature"] = False
+
+        # 归一化 format 字段为枚举值
         parsed["format"] = normalize_log_format(parsed.get("format", "unknown"))
         parsed.setdefault("format_detail", parsed.get("format_detail") or parsed.get("format", ""))
 
+        # 非 JSON 格式标记为不支持
+        if parsed["format"] == "unknown":
+            logger.info(
+                f"[identify_log_format] 无法识别的格式"
+            )
+            parsed["status"] = "UNSUPPORTED"
+            parsed["reason"] = "无法识别日志格式"
+
         logger.info(
-            f"[identify_log_format] feature_position={parsed['feature_position']}, "
-            f"feature_extract_regex={parsed['feature_extract_regex']}, "
-            f"feature_field={parsed['log_feature_field']}, "
-            f"reason={parsed['reason'][:100]}"
+            f"[identify_log_format] format={parsed['format']}, "
+            f"has_header={parsed.get('has_header')}, "
+            f"header_end_marker='{parsed.get('header_end_marker', '')}'"
         )
 
         return json.dumps(parsed, ensure_ascii=False)
@@ -113,8 +124,8 @@ def _do_identify_log_format(logs_str: str) -> str:
 
 @tool(
     name="identify_log_format",
-    description="识别日志文本的格式类型（json/kv/space/csv等）。输入 logs_str=原始日志字符串。返回 JSON 格式信息。",
+    description="识别日志文本的格式类型。当前仅支持 JSON 格式。输入 logs_str=原始日志字符串，返回 JSON 格式信息。",
 )
 def identify_log_format(logs_str: str) -> str:
-    """Agno Agent 工具封装，委托给 _do_identify_log_format。"""
+    """日志格式识别工具，委托给 _do_identify_log_format。"""
     return _do_identify_log_format(logs_str)

@@ -49,6 +49,14 @@ def load_log_classify_feature_prompt() -> str:
     return ""
 
 
+def load_log_header_classify_prompt() -> str:
+    """加载日志头分类专用提示词（Path A）"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / "log_header_classify.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding='utf-8')
+    return ""
+
+
 def load_standard_fields() -> str:
     """加载标准字段表"""
     data_path = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"

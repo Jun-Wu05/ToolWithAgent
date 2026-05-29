@@ -562,27 +562,39 @@ Excel 格式说明：
             format_info = _parse_json_safe(format_info_str)
             format_type = format_info.get("format", "unknown") if isinstance(format_info, dict) else "unknown"
             format_detail = format_info.get("format_detail", "") if isinstance(format_info, dict) else ""
-            feature_field = format_info.get("log_feature_field", "log_type") if isinstance(format_info, dict) else "log_type"
-            logger.info(f"[ROUTE][LogParser] 格式识别结果: format={format_type}, detail={format_detail}, feature_field={feature_field}")
+            # feature_field 由 Step 1 (log_format_identifier) 中 LLM 识别，Step 2 中使用
+            feature_field = format_info.get("feature_field", "log_type") if isinstance(format_info, dict) else "log_type"
+            header_end_marker = format_info.get("header_end_marker", "") if isinstance(format_info, dict) else ""
+            logger.info(f"[ROUTE][LogParser] 格式识别结果: format={format_type}, detail={format_detail}, header_end_marker='{header_end_marker}'")
 
             # Step 2: 特征分类
-            logger.info("[ROUTE][LogParser] Step 2: classify_log_features")
-            classification_str = _do_classify_log_features(
-                logs_str=logs_str,
-                format_type=format_type,
-                format_detail=format_detail,
-                feature_field=feature_field,
-                format_info=format_info,
-            )
+            # CHANGED: 根据 has_header_feature 决定走 Path A（日志头特征）还是 Path B（JSON 内部字段）
+            _has_header_feature = format_info.get("has_header_feature", False) if isinstance(format_info, dict) else False
+            if _has_header_feature and format_type.lower() == "json":
+                logger.info("[ROUTE][LogParser] Step 2: classify_log_features (Path A: header feature)")
+                from agent.tools.pipeline.log_header_processor import classify_header_features
+                classification_str = classify_header_features(
+                    logs_str=logs_str,
+                    format_type=format_type,
+                    format_detail=format_detail,
+                )
+            else:
+                logger.info("[ROUTE][LogParser] Step 2: classify_log_features (Path B: JSON field)")
+                classification_str = _do_classify_log_features(
+                    logs_str=logs_str,
+                    format_type=format_type,
+                    format_detail=format_detail,
+                    feature_field=feature_field,
+                    format_info=format_info,
+                    header_end_marker=header_end_marker,
+                )
             classification = _parse_json_safe(classification_str)
 
-            # Step 3: 用 matched_regex 替换真实样例
+            # Step 3: 用 feature_identifier 替换真实样例
             logger.info("[ROUTE][LogParser] Step 3: fill_sample_logs")
             if isinstance(classification, dict):
-                feature_identifier = classification.get("feature_identifier", "")
                 classification = fill_sample_logs(
                     classification, logs_str,
-                    feature_identifier=feature_identifier,
                 )
 
             # 保存分类结果到会话（供规则导出使用）

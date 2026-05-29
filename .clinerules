@@ -39,7 +39,7 @@
 
 ## 8. Response Style & Quality Checks
 
-- **Language**: Use English for all code, comments, and technical explanations.
+- **Language**: Use Chinese for all code, comments, and technical explanations.
 - **Format**: Present code blocks with language identifiers. Keep responses structured but conversational.
 - **Confidence scoring**: Before/after important operations, state confidence (1–10).
 - **Final summary**: Before finishing a task, provide a bullet list: "Summary of changes: ..."

@@ -1,5 +1,6 @@
 <task>
-分析以下采样日志，识别日志格式类型，并判定业务分类字段的位置。
+分析以下采样日志，识别日志格式类型和基本结构。
+本任务只负责格式识别，不需要判断分类字段（分类字段由后续步骤自动发现）。
 </task>
 
 <role>安全日志格式分析专家</role>
@@ -13,34 +14,32 @@
 <type name="unknown">无法识别</type>
 </format_types>
 
+<important_rules>
+- 对于"日志头 + JSON body"的格式，必须识别为 format="json"，NOT "syslog" NOT "mixed"
+- 所有可解析的 JSON body 日志（包括有 syslog 前缀的）都属于 json 类型
+- 如果识别到 feature_field，请务必填写具体字段名（如 "event.action"、"type"、"tag_name"），不要留空
+- 实在找不到分类字段时 feature_field 才留空
+</important_rules>
+
 <header_detection>
 判断日志是否有"日志头"——即日志行前半部分为固定格式的时间戳、主机名、进程名等系统前缀。
 在 format_detail 中描述完整格式，例如"日志头+KV"、"日志头+JSON"、"纯KV"、"纯JSON"等。
+如果存在日志头，还需识别日志头与 body 之间的分界标记（header_end_marker），即紧接在系统前缀之后、body 开始之前的一个固定字符串。
+例如 syslog 格式 `<14>1 2026-04-14T05:57:55Z host app 1 type - body_content` 中，` - ` 就是分界标记。
+如果无日志头（纯 JSON / 纯 KV），header_end_marker 为空字符串。
 </header_detection>
 
-<feature_position_rules>
-<!-- 判断最顶层的业务分类标识位于日志的哪个位置。关键原则：先判断头部，再看 body。当头部和 body 都有分类信息时，取头部（头部是顶层分类，body 中的字段可能是子类）。 -->
-
-<position name="header_regex">
-<description>分类标识位于日志行头部固定位置（时间戳之后、body 之前的前缀区域）。特征是日志头部包含区分不同业务/设备类型的关键词标记。</description>
-<trigger>头部有明显的、可区分不同日志来源的固定关键词或模式标记时，应优先设为 header_regex。</trigger>
-<regex_rule>提供含一个捕获组的正则表达式，捕获组匹配分类关键词。正则应紧凑、不依赖具体时间戳或 IP 值。</regex_rule>
-</position>
-
-<position name="kv_body">
-<description>分类标识位于日志主体的 KV 字段中（如 log_type=xxx、event_type=xxx、category=xxx）。</description>
-<trigger>头部无区分性标记，且 body 中有明确分类字段时使用。</trigger>
-</position>
-
-<position name="positional">
-<description>分类标识位于固定列位置（如 CSV 第 N 列），给出 column_index（从 0 开始）。</description>
-<trigger>严格定长定列结构，且无显式 key 名时使用。</trigger>
-</position>
-</feature_position_rules>
 
 <output>
 严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:","kv_separator":"空格或;或,","has_header":true|false,"has_header_feature":true|false,"space_count":0,"log_feature_field":"特征字段名","feature_position":"kv_body|header_regex|positional","feature_extract_regex":"正则(含一个捕获组)","reason":"判断理由"}}
+{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:","kv_separator":"空格或;或,","has_header":true|false,"header_end_marker":"日志头与body的分界标记字符串（仅RFC5424 syslog格式有值如' - '，BSD syslog和纯格式为空字符串）","has_header_feature":true|false,"feature_field":"日志分类特征所在的JSON字段名（仅当format=json且有明显分类字段时填写，否则为空字符串）","feature_location":"body|header|unknown（特征值在header中则填header，在JSON body内则填body，无法判断填unknown）","reason":"判断理由"}}
+
+注意：
+- format_detail 必须准确描述结构，如"日志头+KV"表示 syslog 头部后跟 KV body
+- has_header 为 true 时，header_end_marker 仅对 RFC5424 格式有值（如 ` - `），BSD syslog 格式（如 `<221>May 21 14:09:05 ips IPS: body`）的 header_end_marker 为空字符串
+- has_header_feature 判断规则：当 has_header=true 时，检查日志头中是否包含可作为日志类型分类的特征关键词（如攻击类型名、功能模块名、日志类别等），不包含 IP/时间/UUID/数字/日志级别等非分类信息。如果 has_header=false，则 has_header_feature 必须为 false
+- feature_field: 识别JSON body中哪个字段是日志分类的主要特征字段（如 tag_、event_type、msg_type、type、action 等）。如果 has_header_feature=true 且特征在头部，则 feature_field 可留空
+- feature_location: 分类特征所在位置。"body"=分类字段在JSON body内部值中，"header"=分类特征在日志头部分（{{之前的文本}}），"unknown"=无法判断
 </output>
 
 <input>
