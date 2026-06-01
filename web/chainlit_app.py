@@ -1180,10 +1180,40 @@ async def on_apply_field_mapping(action: cl.Action):
         user_session["mapped_sub_rules"] = mapped_sub_rules
         user_session["sub_rule_mapping_results"] = mapping_results
 
-        # 10. 展示映射结果
-        render_text = _render_mapping_result(mapping_results, len(sub_rules))
+        # 10. 展示映射结果（可排序 DataFrame）
+        total_matched = 0
+        total_fields = 0
+        flat_mappings: list[dict] = []
+        for mr in mapping_results:
+            rule_name = mr.get("rule_name", "未知")
+            for m in mr.get("mappings", []):
+                flat_mappings.append({
+                    "子规则": rule_name,
+                    "原始字段": m.get("原始字段名", ""),
+                    "标准字段": m.get("系统属性名称", ""),
+                    "匹配状态": m.get("匹配状态", ""),
+                })
+                total_fields += 1
+                if "匹配成功" in m.get("匹配状态", ""):
+                    total_matched += 1
+
+        summary = (
+            f"✅ **标准字段映射完成！**\n\n"
+            f"📊 **映射统计：**\n"
+            f"- 子规则数量：{len(mapping_results)}\n"
+            f"- 总字段数：{total_fields}\n"
+            f"- 匹配成功：{total_matched} 个\n"
+            f"- 未匹配：{total_fields - total_matched} 个\n\n"
+            f"✨ **表格功能：**\n"
+            f"- 📌 点击列标题排序\n"
+            f"- 🔍 使用搜索框筛选\n\n"
+            f"💡 点击下方 **📥 导出映射后子规则** 下载带标准字段映射的子规则文件。"
+        )
+
+        elements = create_dataframe_elements(flat_mappings)
         await cl.Message(
-            content=render_text,
+            content=summary,
+            elements=elements,
             actions=[
                 cl.Action(
                     name="export_mapped_sub_rules",
