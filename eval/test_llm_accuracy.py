@@ -25,42 +25,8 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from agent.tools.standard_mapper import _calculate_similarity, _load_standard_fields_list
+from agent.tools.standard_mapper import query_field_candidates, _load_standard_fields_list
 from agent.tools.pipeline.llm_client import _call_llm_direct
-
-
-def _query_top_k_candidates(
-    raw_field: str,
-    fields_table: list[dict[str, Any]],
-    k: int = 3,
-    min_score: float = 0.15,
-) -> list[tuple[float, str]]:
-    """复用候选查询逻辑"""
-    scored: list[tuple[float, str]] = []
-    for entry in fields_table:
-        system_name = entry.get("系统属性名称", "")
-        eng_name = entry.get("字段名称", "")
-        desc = entry.get("描述", "")
-
-        score = max(
-            _calculate_similarity(raw_field, eng_name),
-            _calculate_similarity(raw_field, system_name) * 0.85,
-            _calculate_similarity(raw_field, desc) * 0.6,
-        )
-        if score > min_score:
-            scored.append((score, system_name))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    seen: set[str] = set()
-    result: list[tuple[float, str]] = []
-    for score, name in scored:
-        if name not in seen:
-            seen.add(name)
-            result.append((score, name))
-        if len(result) >= k:
-            break
-    return result
 
 
 def _build_llm_prompt(cases: list[dict], fields_table: list[dict]) -> str:
@@ -75,7 +41,7 @@ def _build_llm_prompt(cases: list[dict], fields_table: list[dict]) -> str:
 
     for case in cases:
         raw = case["raw_field"]
-        candidates = _query_top_k_candidates(raw, fields_table, k=3)
+        candidates = query_field_candidates(raw, fields_table, top_k=3)
 
         prompt += f"- `{raw}`: "
         if candidates:
