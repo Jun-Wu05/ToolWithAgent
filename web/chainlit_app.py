@@ -1029,18 +1029,13 @@ async def on_export_sub_rules(action: cl.Action):
 
 @cl.action_callback("apply_field_mapping")
 async def on_apply_field_mapping(action: cl.Action):
-    """用户点击「🔍 标准字段映射」— 对子规则进行标准字段映射分析"""
+    """用户点击「🔍 标准字段映射」— 程序化查询候选 + 直接 LLM 选择最佳映射"""
     user_session = cl.user_session.get("user_session")
     classification = user_session.get("log_classification")
-    team = user_session.get("team")
     logger.info('[ACTION] 用户点击"标准字段映射"按钮')
 
     if not classification or not isinstance(classification, dict):
         await cl.Message(content="❌ 未找到日志分类结果，请先执行日志解析。").send()
-        return
-
-    if not team:
-        await cl.Message(content="❌ Team 未初始化，请刷新页面。").send()
         return
 
     try:
@@ -1057,26 +1052,85 @@ async def on_apply_field_mapping(action: cl.Action):
         mapping_info = extract_sub_rule_mapping_info(sub_rules)
         logger.info(f"[ACTION] 提取 {len(mapping_info)} 条子规则映射信息")
 
-        # 3. 通过 Agent/LLM 进行标准字段映射
-        loading_msg = cl.Message(content="⏳ **正在分析标准字段映射，请稍候...**\n\n🔍 Agent 正在逐字段查询标准字段表...")
+        loading_msg = cl.Message(content="⏳ **正在查询标准字段候选...**")
         await loading_msg.send()
 
-        # 构建 Agent 输入：每条子规则单独请求映射
-        mapping_prompt = (
-            "请对以下日志子规则中的原始字段进行标准字段映射分析。\n\n"
-            "对每条子规则，你需要：\n"
-            "1. 逐个字段调用 lookup_standard_field 工具查询候选标准字段\n"
-            "2. 结合原始日志样本中字段的实际值，判断最佳映射\n"
-            "3. 生成映射表（JSON 数组格式）\n\n"
-            "子规则列表：\n"
-        )
-        for info in mapping_info:
-            mapping_prompt += f"\n---\n**子规则**: {info['rule_name']}\n"
-            mapping_prompt += f"**字段列表**: {json.dumps(info['fields'], ensure_ascii=False)}\n"
-            mapping_prompt += f"**原始日志样本**: ```{info['sample_log'][:500]}```\n"
+        # 3. 程序化查询候选标准字段（复用 standard_mapper 内部函数）
+        from agent.tools.standard_mapper import _load_standard_fields_list, _calculate_similarity
 
-        mapping_prompt += (
-            "\n\n---\n请按以下 JSON 格式返回所有子规则的映射结果（一个 JSON 数组）：\n"
+        fields_table = _load_standard_fields_list()
+        if not fields_table:
+            await loading_msg.remove()
+            await cl.Message(content="❌ 标准字段表为空，无法进行映射。").send()
+            return
+
+        # 对每条子规则的每个字段，查询 top-3 候选
+        all_candidates: dict[str, dict[str, list[dict]]] = {}  # rule_name → {field → [candidates]}
+        for info in mapping_info:
+            rule_name = info["rule_name"]
+            all_candidates[rule_name] = {}
+            for field in info["fields"]:
+                scored: list[tuple[float, dict]] = []
+                for entry in fields_table:
+                    system_name = entry.get("系统属性名称", "")
+                    eng_name = entry.get("字段名称", "")
+                    desc = entry.get("描述", "")
+                    obj = entry.get("对象", "")
+                    score = max(
+                        _calculate_similarity(field, eng_name),
+                        _calculate_similarity(field, system_name) * 0.85,
+                        _calculate_similarity(field, desc) * 0.6,
+                    )
+                    if score > 0.15:
+                        scored.append((score, {
+                            "系统属性名称": system_name,
+                            "字段名称": eng_name,
+                            "对象": obj,
+                            "相似度": round(score, 3),
+                        }))
+                scored.sort(key=lambda x: x[0], reverse=True)
+                # 去重
+                seen: set[str] = set()
+                top_candidates: list[dict] = []
+                for _, item in scored:
+                    name = item["系统属性名称"]
+                    if name not in seen:
+                        seen.add(name)
+                        top_candidates.append(item)
+                    if len(top_candidates) >= 3:
+                        break
+                all_candidates[rule_name][field] = top_candidates
+
+        total_fields = sum(len(f) for f in all_candidates.values())
+        logger.info(f"[ACTION] 候选查询完成：{len(all_candidates)} 条子规则，共 {total_fields} 个字段")
+
+        # 4. 构建直接 LLM prompt（不走 Team，避免调用错误工具）
+        llm_prompt = (
+            "你是日志字段映射专家。请根据以下字段候选列表和原始日志样本，为每个字段选择最佳的标准字段映射。\n\n"
+            "规则：\n"
+            "- 从候选中选择最匹配的系统属性名称\n"
+            "- 如果候选中没有合适的，设为'未匹配'\n"
+            "- 匹配状态只能填'匹配成功'或'未匹配'\n\n"
+        )
+
+        for info in mapping_info:
+            rule_name = info["rule_name"]
+            candidates = all_candidates.get(rule_name, {})
+            llm_prompt += f"\n## 子规则：{rule_name}\n"
+            llm_prompt += f"原始日志样本（截取前300字符）：\n```\n{info['sample_log'][:300]}\n```\n\n"
+            llm_prompt += "字段候选：\n"
+            for field, cands in candidates.items():
+                if cands:
+                    cand_str = " | ".join(
+                        f"{c['系统属性名称']}(相似度={c['相似度']})"
+                        for c in cands
+                    )
+                    llm_prompt += f"- `{field}`: {cand_str}\n"
+                else:
+                    llm_prompt += f"- `{field}`: 无候选\n"
+
+        llm_prompt += (
+            "\n\n请严格按以下 JSON 格式返回结果（不要输出任何其他文字）：\n"
             "```json\n"
             "[\n"
             '  {"rule_name": "子规则名", "mappings": [\n'
@@ -1084,41 +1138,49 @@ async def on_apply_field_mapping(action: cl.Action):
             '    {"原始字段名": "zzz", "系统属性名称": "未匹配", "匹配状态": "未匹配"}\n'
             "  ]}\n"
             "]\n"
-            "```\n"
-            "注意：只返回 JSON 数组，不要包含其他文字。"
+            "```"
         )
 
-        # 调用 Agent
-        from web.llm_client import call_team
-        result = await call_team(team, mapping_prompt, loading_msg, intent="field_mapping")
-        result_text = result.content if hasattr(result, 'content') else str(result)
+        # 5. 直接调用 LLM（复用 _call_llm_direct）
+        loading_msg.content = "⏳ **LLM 正在选择最佳映射...**"
+        try:
+            await loading_msg.update()
+        except Exception:
+            pass
+
+        from agent.tools.pipeline.llm_client import _call_llm_direct
+        import asyncio
+        result_text = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _call_llm_direct(llm_prompt, max_tokens=4000)
+        )
 
         try:
             await loading_msg.remove()
         except Exception:
             pass
 
-        # 4. 解析 LLM 返回的映射表
+        # 6. 解析 LLM 返回的映射表
         mapping_results = _parse_mapping_results(result_text)
         if not mapping_results:
+            logger.warning(f"[ACTION] LLM 输出解析失败，原文前500字符: {result_text[:500]}")
             await cl.Message(content="❌ 无法解析标准字段映射结果，请重试。").send()
             return
 
         logger.info(f"[ACTION] 解析到 {len(mapping_results)} 条子规则映射结果")
 
-        # 5. 加载对象映射（系统属性名称→对象）
+        # 7. 加载对象映射（系统属性名称→对象）
         object_entity_map = _load_object_entity_map()
 
-        # 6. 应用映射到子规则
+        # 8. 应用映射到子规则
         mapped_sub_rules = apply_field_mapping_to_sub_rules(
             sub_rules, mapping_results, object_entity_map
         )
 
-        # 7. 保存到 session state
+        # 9. 保存到 session state
         user_session["mapped_sub_rules"] = mapped_sub_rules
         user_session["sub_rule_mapping_results"] = mapping_results
 
-        # 8. 展示映射结果
+        # 10. 展示映射结果
         render_text = _render_mapping_result(mapping_results, len(sub_rules))
         await cl.Message(
             content=render_text,
@@ -1164,10 +1226,47 @@ async def on_export_mapped_sub_rules(action: cl.Action):
 
 
 def _parse_mapping_results(llm_output: str) -> list[dict] | None:
-    """从 LLM 输出中解析映射结果 JSON 数组。"""
-    parsed = _parse_json_safe(llm_output)
-    if isinstance(parsed, list) and parsed:
-        return parsed
+    """从 LLM 输出中解析映射结果 JSON 数组（健壮解析）。
+
+    尝试顺序：
+    1. 直接 json.loads（LLM 理想输出）
+    2. 去除 markdown 代码块后再解析
+    3. 正则提取 [...] JSON 数组
+    """
+    if not llm_output or not llm_output.strip():
+        return None
+
+    text = llm_output.strip()
+
+    # 尝试 1: 直接解析
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list) and parsed:
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试 2: 去除 markdown 代码块
+    import re as _re
+    code_block_match = _re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, _re.DOTALL)
+    if code_block_match:
+        try:
+            parsed = json.loads(code_block_match.group(1).strip())
+            if isinstance(parsed, list) and parsed:
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # 尝试 3: 正则提取最外层 [...] 
+    bracket_match = _re.search(r"\[.*\]", text, _re.DOTALL)
+    if bracket_match:
+        try:
+            parsed = json.loads(bracket_match.group())
+            if isinstance(parsed, list) and parsed:
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
     return None
 
 
