@@ -1,0 +1,352 @@
+[
+  {
+    "id": "case_001",
+    "raw_field": "src_ip",
+    "expected_standard_field": "源地址",
+    "log_context": "威胁感知安全日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_002",
+    "raw_field": "dst_ip",
+    "expected_standard_field": "目的地址",
+    "log_context": "威胁感知安全日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_003",
+    "raw_field": "src_port",
+    "expected_standard_field": "源端口",
+    "log_context": "网络流量日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_004",
+    "raw_field": "dst_port",
+    "expected_standard_field": "目的端口",
+    "log_context": "网络流量日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_005",
+    "raw_field": "protocol",
+    "expected_standard_field": "协议",
+    "log_context": "网络流量日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_006",
+    "raw_field": "user_name",
+    "expected_standard_field": "用户名称",
+    "log_context": "登录审计日志",
+    "category": "用户"
+  },
+  {
+    "id": "case_007",
+    "raw_field": "event_type",
+    "expected_standard_field": "事件类型",
+    "log_context": "安全设备告警日志",
+    "category": "事件"
+  },
+  {
+    "id": "case_008",
+    "raw_field": "threat_type",
+    "expected_standard_field": "威胁类型",
+    "log_context": "威胁告警日志",
+    "category": "威胁"
+  },
+  {
+    "id": "case_009",
+    "raw_field": "threat_name",
+    "expected_standard_field": "威胁名称",
+    "log_context": "威胁告警日志",
+    "category": "威胁"
+  },
+  {
+    "id": "case_010",
+    "raw_field": "threat_level",
+    "expected_standard_field": "威胁等级",
+    "log_context": "威胁告警日志",
+    "category": "威胁"
+  },
+  {
+    "id": "case_011",
+    "raw_field": "file_name",
+    "expected_standard_field": "文件名称",
+    "log_context": "文件操作审计日志",
+    "category": "文件"
+  },
+  {
+    "id": "case_012",
+    "raw_field": "file_path",
+    "expected_standard_field": "文件路径",
+    "log_context": "文件操作审计日志",
+    "category": "文件"
+  },
+  {
+    "id": "case_013",
+    "raw_field": "file_md5",
+    "expected_standard_field": "文件MD5",
+    "log_context": "文件扫描日志",
+    "category": "文件"
+  },
+  {
+    "id": "case_014",
+    "raw_field": "process_name",
+    "expected_standard_field": "进程名称",
+    "log_context": "进程监控日志",
+    "category": "进程"
+  },
+  {
+    "id": "case_015",
+    "raw_field": "process_path",
+    "expected_standard_field": "进程路径",
+    "log_context": "进程监控日志",
+    "category": "进程"
+  },
+  {
+    "id": "case_016",
+    "raw_field": "pid",
+    "expected_standard_field": "进程pid",
+    "log_context": "进程监控日志",
+    "category": "进程"
+  },
+  {
+    "id": "case_017",
+    "raw_field": "domain_name",
+    "expected_standard_field": "域名",
+    "log_context": "DNS解析日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_018",
+    "raw_field": "login_type",
+    "expected_standard_field": "登录类型",
+    "log_context": "Windows安全日志",
+    "category": "登录"
+  },
+  {
+    "id": "case_019",
+    "raw_field": "http_url",
+    "expected_standard_field": "URL",
+    "log_context": "HTTP代理日志",
+    "category": "http协议"
+  },
+  {
+    "id": "case_020",
+    "raw_field": "http_method",
+    "expected_standard_field": "HTTP请求方法",
+    "log_context": "HTTP代理日志",
+    "category": "http协议"
+  },
+  {
+    "id": "case_021",
+    "raw_field": "http_status",
+    "expected_standard_field": "HTTP响应码",
+    "log_context": "HTTP代理日志",
+    "category": "http协议"
+  },
+  {
+    "id": "case_022",
+    "raw_field": "user_agent",
+    "expected_standard_field": "HTTP用户代理",
+    "log_context": "HTTP代理日志",
+    "category": "http协议"
+  },
+  {
+    "id": "case_023",
+    "raw_field": "mac_address",
+    "expected_standard_field": "主机MAC地址",
+    "log_context": "ARP日志",
+    "category": "主机"
+  },
+  {
+    "id": "case_024",
+    "raw_field": "os_version",
+    "expected_standard_field": "操作系统版本",
+    "log_context": "主机资产日志",
+    "category": "主机"
+  },
+  {
+    "id": "case_025",
+    "raw_field": "ip",
+    "expected_standard_field": "源地址",
+    "log_context": "威胁感知事件日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_026",
+    "raw_field": "event_description",
+    "expected_standard_field": "事件描述",
+    "log_context": "安全事件日志",
+    "category": "事件"
+  },
+  {
+    "id": "case_027",
+    "raw_field": "malware_name",
+    "expected_standard_field": "病毒名称",
+    "log_context": "防病毒日志",
+    "category": "防病毒"
+  },
+  {
+    "id": "case_028",
+    "raw_field": "vul_name",
+    "expected_standard_field": "漏洞名称",
+    "log_context": "漏洞扫描日志",
+    "category": "漏洞"
+  },
+  {
+    "id": "case_029",
+    "raw_field": "session_id",
+    "expected_standard_field": "会话ID",
+    "log_context": "会话审计日志",
+    "category": "会话"
+  },
+  {
+    "id": "case_030",
+    "raw_field": "result",
+    "expected_standard_field": "事件结果",
+    "log_context": "认证审计日志",
+    "category": "事件"
+  },
+  {
+    "id": "case_031",
+    "raw_field": "src_mac",
+    "expected_standard_field": "源MAC",
+    "log_context": "网络流量日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_032",
+    "raw_field": "dst_mac",
+    "expected_standard_field": "目的MAC",
+    "log_context": "网络流量日志",
+    "category": "流量"
+  },
+  {
+    "id": "case_033",
+    "raw_field": "command_line",
+    "expected_standard_field": "进程命令行",
+    "log_context": "进程创建日志",
+    "category": "进程"
+  },
+  {
+    "id": "case_034",
+    "raw_field": "parent_process_name",
+    "expected_standard_field": "父进程名称",
+    "log_context": "进程创建日志",
+    "category": "进程"
+  },
+  {
+    "id": "case_035",
+    "raw_field": "parent_pid",
+    "expected_standard_field": "父进程pid",
+    "log_context": "进程创建日志",
+    "category": "进程"
+  },
+  {
+    "id": "case_036",
+    "raw_field": "sha256",
+    "expected_standard_field": "文件SHA256",
+    "log_context": "文件扫描日志",
+    "category": "文件"
+  },
+  {
+    "id": "case_037",
+    "raw_field": "server_name",
+    "expected_standard_field": "服务器名称",
+    "log_context": "服务端日志",
+    "category": "服务端"
+  },
+  {
+    "id": "case_038",
+    "raw_field": "db_name",
+    "expected_standard_field": "数据库名",
+    "log_context": "数据库审计日志",
+    "category": "数据库"
+  },
+  {
+    "id": "case_039",
+    "raw_field": "sql_query",
+    "expected_standard_field": "数据库命令",
+    "log_context": "数据库审计日志",
+    "category": "数据库"
+  },
+  {
+    "id": "case_040",
+    "raw_field": "threat_score",
+    "expected_standard_field": "威胁分数",
+    "log_context": "威胁评估日志",
+    "category": "威胁"
+  },
+  {
+    "id": "case_041",
+    "raw_field": "recv_time",
+    "expected_standard_field": "UNMATCHED",
+    "log_context": "日志接收时间戳",
+    "category": "负例"
+  },
+  {
+    "id": "case_042",
+    "raw_field": "aggKey",
+    "expected_standard_field": "UNMATCHED",
+    "log_context": "聚合键，内部使用",
+    "category": "负例"
+  },
+  {
+    "id": "case_043",
+    "raw_field": "_id",
+    "expected_standard_field": "UNMATCHED",
+    "log_context": "文档内部ID",
+    "category": "负例"
+  },
+  {
+    "id": "case_044",
+    "raw_field": "_index",
+    "expected_standard_field": "UNMATCHED",
+    "log_context": "ES索引名",
+    "category": "负例"
+  },
+  {
+    "id": "case_045",
+    "raw_field": "parse_status",
+    "expected_standard_field": "UNMATCHED",
+    "log_context": "解析状态标记",
+    "category": "负例"
+  },
+  {
+    "id": "case_046",
+    "raw_field": "app_name",
+    "expected_standard_field": "应用名",
+    "log_context": "应用审计日志",
+    "category": "应用"
+  },
+  {
+    "id": "case_047",
+    "raw_field": "container_name",
+    "expected_standard_field": "容器名称",
+    "log_context": "容器运行日志",
+    "category": "容器"
+  },
+  {
+    "id": "case_048",
+    "raw_field": "dns_query_type",
+    "expected_standard_field": "DNS查询类型",
+    "log_context": "DNS日志",
+    "category": "dns协议"
+  },
+  {
+    "id": "case_049",
+    "raw_field": "ssh_version",
+    "expected_standard_field": "SSH版本",
+    "log_context": "SSH协议日志",
+    "category": "ssh协议"
+  },
+  {
+    "id": "case_050",
+    "raw_field": "tls_version",
+    "expected_standard_field": "TLS协议版本",
+    "log_context": "TLS握手日志",
+    "category": "tls协议"
+  }
+]

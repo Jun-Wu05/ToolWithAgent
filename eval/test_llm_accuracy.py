@@ -1,0 +1,228 @@
+"""阶段2：LLM 选择准确率测试 — 需要 LLM 调用
+
+评估 LLM 从 top-K 候选中选择正确标准字段的能力。
+
+指标：
+- Precision@1（LLM 首选正确率）
+- 负例判断准确率（应标"未匹配"时正确标了）
+
+用法：
+    pytest eval/test_llm_accuracy.py -v
+    pytest eval/test_llm_accuracy.py -v -k "test_llm_precision"
+
+注意：需要配置 LLM API key
+"""
+
+import os
+import sys
+import json
+import re
+from typing import Any
+
+import pytest
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from agent.tools.standard_mapper import _calculate_similarity, _load_standard_fields_list
+from agent.tools.pipeline.llm_client import _call_llm_direct
+
+
+def _query_top_k_candidates(
+    raw_field: str,
+    fields_table: list[dict[str, Any]],
+    k: int = 3,
+    min_score: float = 0.15,
+) -> list[tuple[float, str]]:
+    """复用候选查询逻辑"""
+    scored: list[tuple[float, str]] = []
+    for entry in fields_table:
+        system_name = entry.get("系统属性名称", "")
+        eng_name = entry.get("字段名称", "")
+        desc = entry.get("描述", "")
+
+        score = max(
+            _calculate_similarity(raw_field, eng_name),
+            _calculate_similarity(raw_field, system_name) * 0.85,
+            _calculate_similarity(raw_field, desc) * 0.6,
+        )
+        if score > min_score:
+            scored.append((score, system_name))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    seen: set[str] = set()
+    result: list[tuple[float, str]] = []
+    for score, name in scored:
+        if name not in seen:
+            seen.add(name)
+            result.append((score, name))
+        if len(result) >= k:
+            break
+    return result
+
+
+def _build_llm_prompt(cases: list[dict], fields_table: list[dict]) -> str:
+    """构建 LLM 映射 prompt"""
+    prompt = (
+        "你是日志字段映射专家。请根据以下字段候选列表，为每个字段选择最佳的标准字段映射。\n\n"
+        "规则：\n"
+        "- 从候选中选择最匹配的系统属性名称\n"
+        "- 如果候选中没有合适的，设为'未匹配'\n"
+        "- 匹配状态只能填'匹配成功'或'未匹配'\n\n"
+    )
+
+    for case in cases:
+        raw = case["raw_field"]
+        candidates = _query_top_k_candidates(raw, fields_table, k=3)
+
+        prompt += f"- `{raw}`: "
+        if candidates:
+            cand_str = " | ".join(
+                f"{name}(相似度={score:.3f})"
+                for score, name in candidates
+            )
+            prompt += cand_str + "\n"
+        else:
+            prompt += "无候选\n"
+
+    prompt += (
+        "\n请严格按以下 JSON 格式返回结果（不要输出任何其他文字）：\n"
+        "```json\n"
+        "[\n"
+        '  {"原始字段名": "xxx", "系统属性名称": "yyy", "匹配状态": "匹配成功"},\n'
+        '  {"原始字段名": "zzz", "系统属性名称": "未匹配", "匹配状态": "未匹配"}\n'
+        "]\n"
+        "```"
+    )
+    return prompt
+
+
+def _parse_llm_mapping_result(llm_output: str) -> list[dict] | None:
+    """3 层健壮解析 LLM 输出"""
+    if not llm_output or not llm_output.strip():
+        return None
+    text = llm_output.strip()
+
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if m:
+        try:
+            parsed = json.loads(m.group(1).strip())
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    m = re.search(r"\[.*\]", text, re.DOTALL)
+    if m:
+        try:
+            parsed = json.loads(m.group())
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+@pytest.mark.llm
+class TestLLMAccuracy:
+    """LLM 选择准确率测试（需要 API key，标记 @pytest.mark.llm）"""
+
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self, request):
+        """加载标准字段表"""
+        cls = request.cls
+        cls.fields_table = _load_standard_fields_list()
+        assert cls.fields_table, "标准字段表为空"
+
+    def test_llm_precision_positive(self, positive_cases):
+        """正例：LLM 选择准确率"""
+        prompt = _build_llm_prompt(positive_cases, self.fields_table)
+
+        try:
+            llm_output = _call_llm_direct(prompt, max_tokens=4000)
+        except Exception as e:
+            pytest.skip(f"LLM 调用失败: {e}")
+
+        mappings = _parse_llm_mapping_result(llm_output)
+        if not mappings:
+            pytest.fail(f"LLM 输出解析失败: {llm_output[:200]}")
+
+        llm_map: dict[str, str] = {}
+        for item in mappings:
+            raw = item.get("原始字段名", "")
+            std = item.get("系统属性名称", "")
+            if std == "未匹配":
+                std = "UNMATCHED"
+            llm_map[raw] = std
+
+        hits = 0
+        misses: list[dict] = []
+        for case in positive_cases:
+            raw = case["raw_field"]
+            expected = case["expected_standard_field"]
+            actual = llm_map.get(raw, "(未返回)")
+
+            if actual == expected:
+                hits += 1
+            else:
+                misses.append({"raw": raw, "expected": expected, "actual": actual})
+
+        total = len(positive_cases)
+        precision = hits / total if total else 0
+        print(f"\n[LLM Precision@1] {hits}/{total} = {precision:.1%}")
+        if misses:
+            print(f"  错误 ({len(misses)}):")
+            for m in misses[:15]:
+                print(f"    {m['raw']} → 期望={m['expected']}, 实际={m['actual']}")
+
+        assert precision >= 0.50, f"LLM Precision@1 = {precision:.1%}，低于基线 50%"
+
+    def test_llm_negative_accuracy(self, negative_cases):
+        """负例：LLM 正确标为"未匹配"的比例"""
+        prompt = _build_llm_prompt(negative_cases, self.fields_table)
+
+        try:
+            llm_output = _call_llm_direct(prompt, max_tokens=2000)
+        except Exception as e:
+            pytest.skip(f"LLM 调用失败: {e}")
+
+        mappings = _parse_llm_mapping_result(llm_output)
+        if not mappings:
+            pytest.fail(f"LLM 输出解析失败: {llm_output[:200]}")
+
+        llm_map: dict[str, str] = {}
+        for item in mappings:
+            raw = item.get("原始字段名", "")
+            std = item.get("系统属性名称", "")
+            llm_map[raw] = std
+
+        correct_rejects = 0
+        false_accepts: list[dict] = []
+        for case in negative_cases:
+            raw = case["raw_field"]
+            actual = llm_map.get(raw, "(未返回)")
+
+            if actual == "未匹配":
+                correct_rejects += 1
+            else:
+                false_accepts.append({"raw": raw, "actual": actual})
+
+        total = len(negative_cases)
+        reject_rate = correct_rejects / total if total else 0
+        print(f"\n[负例拒绝率] {correct_rejects}/{total} = {reject_rate:.1%}")
+        if false_accepts:
+            print(f"  误匹配 ({len(false_accepts)}):")
+            for f in false_accepts:
+                print(f"    {f['raw']} → {f['actual']}")
+
+        assert reject_rate >= 0.40, f"负例拒绝率 = {reject_rate:.1%}，低于基线 40%"
