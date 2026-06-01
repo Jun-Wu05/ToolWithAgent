@@ -100,6 +100,13 @@ class SessionState:
     log_classification: Optional[Dict[str, Any]] = None
     """日志解析 Pipeline 的分类结果，供规则导出使用"""
 
+    # ---- 标准字段映射结果 ----
+    mapped_sub_rules: Optional[List[Dict[str, Any]]] = None
+    """映射后的子规则列表，供导出使用"""
+
+    sub_rule_mapping_results: Optional[List[Dict[str, Any]]] = None
+    """标准字段映射结果（每条子规则的映射对照表）"""
+
     # ---- 工厂方法 ----
 
     @classmethod
