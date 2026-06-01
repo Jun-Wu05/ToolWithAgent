@@ -94,8 +94,13 @@ from agent.tools.log_parser_pipeline import _do_identify_log_format, _do_classif
 
 # 加载路由关键词（枚举提取关键词保留，用于枚举提取流触发）
 
-# 规则生成模块（入口/子规则生成 + base64 导出）
-from agent.tools.rule_generator import generate_rules, rules_to_base64_text
+# 规则生成模块（入口/子规则生成 + base64 导出 + 标准字段映射）
+from agent.tools.rule_generator import (
+    generate_rules,
+    rules_to_base64_text,
+    extract_sub_rule_mapping_info,
+    apply_field_mapping_to_sub_rules,
+)
 
 
 # ============= Chainlit 事件处理 =============
@@ -617,6 +622,12 @@ Excel 格式说明：
                     description="生成子类分发规则并导出 base64",
                     payload={}
                 ),
+                cl.Action(
+                    name="apply_field_mapping",
+                    label="🔍 标准字段映射",
+                    description="对子规则进行标准字段映射分析",
+                    payload={}
+                ),
             ],
         ).send()
         # 附加完整 JSON 文件下载
@@ -1012,6 +1023,207 @@ async def on_export_sub_rules(action: cl.Action):
     except Exception as e:
         logger.error(f"[ACTION] 子规则导出异常: {e}")
         await cl.Message(content=f"❌ 子规则导出失败：{e}").send()
+
+
+# ============= 标准字段映射 Action 回调 =============
+
+@cl.action_callback("apply_field_mapping")
+async def on_apply_field_mapping(action: cl.Action):
+    """用户点击「🔍 标准字段映射」— 对子规则进行标准字段映射分析"""
+    user_session = cl.user_session.get("user_session")
+    classification = user_session.get("log_classification")
+    team = user_session.get("team")
+    logger.info('[ACTION] 用户点击"标准字段映射"按钮')
+
+    if not classification or not isinstance(classification, dict):
+        await cl.Message(content="❌ 未找到日志分类结果，请先执行日志解析。").send()
+        return
+
+    if not team:
+        await cl.Message(content="❌ Team 未初始化，请刷新页面。").send()
+        return
+
+    try:
+        # 1. 生成子规则
+        logger.info("[ACTION] 生成子规则用于字段映射")
+        from agent.tools.rule_generator import generate_sub_rules
+        sub_rules = generate_sub_rules(classification)
+
+        if not sub_rules:
+            await cl.Message(content="❌ 未生成任何子规则，无法进行字段映射。").send()
+            return
+
+        # 2. 提取每条子规则的字段列表和原始日志
+        mapping_info = extract_sub_rule_mapping_info(sub_rules)
+        logger.info(f"[ACTION] 提取 {len(mapping_info)} 条子规则映射信息")
+
+        # 3. 通过 Agent/LLM 进行标准字段映射
+        loading_msg = cl.Message(content="⏳ **正在分析标准字段映射，请稍候...**\n\n🔍 Agent 正在逐字段查询标准字段表...")
+        await loading_msg.send()
+
+        # 构建 Agent 输入：每条子规则单独请求映射
+        mapping_prompt = (
+            "请对以下日志子规则中的原始字段进行标准字段映射分析。\n\n"
+            "对每条子规则，你需要：\n"
+            "1. 逐个字段调用 lookup_standard_field 工具查询候选标准字段\n"
+            "2. 结合原始日志样本中字段的实际值，判断最佳映射\n"
+            "3. 生成映射表（JSON 数组格式）\n\n"
+            "子规则列表：\n"
+        )
+        for info in mapping_info:
+            mapping_prompt += f"\n---\n**子规则**: {info['rule_name']}\n"
+            mapping_prompt += f"**字段列表**: {json.dumps(info['fields'], ensure_ascii=False)}\n"
+            mapping_prompt += f"**原始日志样本**: ```{info['sample_log'][:500]}```\n"
+
+        mapping_prompt += (
+            "\n\n---\n请按以下 JSON 格式返回所有子规则的映射结果（一个 JSON 数组）：\n"
+            "```json\n"
+            "[\n"
+            '  {"rule_name": "子规则名", "mappings": [\n'
+            '    {"原始字段名": "xxx", "系统属性名称": "yyy", "匹配状态": "匹配成功"},\n'
+            '    {"原始字段名": "zzz", "系统属性名称": "未匹配", "匹配状态": "未匹配"}\n'
+            "  ]}\n"
+            "]\n"
+            "```\n"
+            "注意：只返回 JSON 数组，不要包含其他文字。"
+        )
+
+        # 调用 Agent
+        from web.llm_client import call_team
+        result = await call_team(team, mapping_prompt, loading_msg, intent="field_mapping")
+        result_text = result.content if hasattr(result, 'content') else str(result)
+
+        try:
+            await loading_msg.remove()
+        except Exception:
+            pass
+
+        # 4. 解析 LLM 返回的映射表
+        mapping_results = _parse_mapping_results(result_text)
+        if not mapping_results:
+            await cl.Message(content="❌ 无法解析标准字段映射结果，请重试。").send()
+            return
+
+        logger.info(f"[ACTION] 解析到 {len(mapping_results)} 条子规则映射结果")
+
+        # 5. 加载对象映射（系统属性名称→对象）
+        object_entity_map = _load_object_entity_map()
+
+        # 6. 应用映射到子规则
+        mapped_sub_rules = apply_field_mapping_to_sub_rules(
+            sub_rules, mapping_results, object_entity_map
+        )
+
+        # 7. 保存到 session state
+        user_session["mapped_sub_rules"] = mapped_sub_rules
+        user_session["sub_rule_mapping_results"] = mapping_results
+
+        # 8. 展示映射结果
+        render_text = _render_mapping_result(mapping_results, len(sub_rules))
+        await cl.Message(
+            content=render_text,
+            actions=[
+                cl.Action(
+                    name="export_mapped_sub_rules",
+                    label="📥 导出映射后子规则",
+                    description="导出带标准字段映射的子规则",
+                    payload={}
+                ),
+            ],
+        ).send()
+
+    except Exception as e:
+        logger.error(f"[ACTION] 标准字段映射异常: {e}")
+        await cl.Message(content=f"❌ 标准字段映射失败：{e}").send()
+
+
+@cl.action_callback("export_mapped_sub_rules")
+async def on_export_mapped_sub_rules(action: cl.Action):
+    """导出带标准字段映射的子规则"""
+    user_session = cl.user_session.get("user_session")
+    mapped_sub_rules = user_session.get("mapped_sub_rules")
+    logger.info('[ACTION] 用户点击"导出映射后子规则"按钮')
+
+    if not mapped_sub_rules:
+        await cl.Message(content="❌ 未找到映射后的子规则，请先执行标准字段映射。").send()
+        return
+
+    try:
+        base64_text = rules_to_base64_text(mapped_sub_rules)
+        date_str = datetime.now().strftime("%Y%m%d")
+        file_name = f"映射后子规则_{date_str}.txt"
+
+        base64_file = cl.File(name=file_name, content=base64_text, mime="text/plain")
+        await cl.Message(
+            content=f"✅ 映射后子规则已导出！共 {len(mapped_sub_rules)} 条规则。\n\n📥 点击下载：",
+            elements=[base64_file],
+        ).send()
+    except Exception as e:
+        logger.error(f"[ACTION] 映射后子规则导出异常: {e}")
+        await cl.Message(content=f"❌ 导出失败：{e}").send()
+
+
+def _parse_mapping_results(llm_output: str) -> list[dict] | None:
+    """从 LLM 输出中解析映射结果 JSON 数组。"""
+    parsed = _parse_json_safe(llm_output)
+    if isinstance(parsed, list) and parsed:
+        return parsed
+    return None
+
+
+def _load_object_entity_map() -> dict[str, str]:
+    """从 config/对象.xlsx 加载 系统属性名称→对象 映射。"""
+    try:
+        from agent.tools.standard_mapper import _load_object_mapping
+        import os
+        excel_path = os.path.join(os.getcwd(), "config", "对象.xlsx")
+        return _load_object_mapping(excel_path)
+    except Exception as e:
+        logger.warning(f"[MAP] 加载对象映射失败: {e}，使用默认 '事件'")
+        return {}
+
+
+def _render_mapping_result(
+    mapping_results: list[dict], total_rule_count: int
+) -> str:
+    """渲染标准字段映射结果（Markdown 表格）。
+
+    默认只展示第 1 条子规则，其余折叠提示。
+    """
+    lines: list[str] = []
+    lines.append(f"## 📋 子规则字段映射结果（共 {total_rule_count} 条子规则）")
+    lines.append("")
+
+    for idx, mr in enumerate(mapping_results):
+        rule_name = mr.get("rule_name", "未知")
+        mappings = mr.get("mappings", [])
+        is_first = idx == 0
+
+        if is_first:
+            lines.append(f"### 子规则 {idx + 1}：{rule_name}")
+        else:
+            lines.append(f"<details><summary>▶ 子规则 {idx + 1}：{rule_name}（点击展开）</summary>\n")
+
+        lines.append("")
+        lines.append("| 原始字段 | 标准字段 | 匹配状态 |")
+        lines.append("|----------|---------|---------|")
+        for m in mappings:
+            orig = m.get("原始字段名", "")
+            std = m.get("系统属性名称", "")
+            status = m.get("匹配状态", "")
+            status_icon = "✅" if "匹配成功" in status else "❌"
+            lines.append(f"| {orig} | {std} | {status_icon} {status} |")
+
+        # 统计
+        matched = sum(1 for m in mappings if "匹配成功" in m.get("匹配状态", ""))
+        total = len(mappings)
+        lines.append(f"\n> 匹配率：{matched}/{total}")
+
+        if not is_first:
+            lines.append("\n</details>\n")
+
+    lines.append("\n💡 点击上方 **📥 导出映射后子规则** 下载带标准字段映射的子规则文件。")
+    return "\n".join(lines)
 
 
 # ============= 日志解析辅助函数 =============
