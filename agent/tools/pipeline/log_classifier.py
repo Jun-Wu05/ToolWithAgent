@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Step 3 — 日志特征分类器。
+Step 2 — 日志特征分类器。
 
 将日志分类路由到相应的提取器策略，
 调用 LLM 进行语义分组，并对结果进行后处理。
 
-路径：
-- Path A: has_header_feature=true  → 头部提取器 (log_header_processor)
-- Path Main: feature_location=body  → JSON 提取器 + LLM
-- Unsupported: feature_location=header 但 has_header_feature=false
+路由逻辑（CHANGED 2026-05-29）：
+- 日志头+JSON 格式 → Step 2a 特征定位 → Path A (header) / Path Main (body)
+- 纯 JSON 格式 → 直接 Path Main
+- 其他格式 → UNSUPPORTED
 """
 
 from __future__ import annotations
@@ -220,60 +220,26 @@ def _do_classify_log_features(
 ) -> str:
     """日志特征分类 —— 纯函数，无需 agno 上下文即可调用。
 
-    路由：
-    - Path A: has_header_feature=true  → log_header_processor
-    - Path Main: feature_location=body  → _classify_json_features
-    - Unsupported: header 但无 has_header_feature → UNSUPPORTED
+    路由逻辑（CHANGED 2026-05-29）：
+    1. 非 JSON 格式 → UNSUPPORTED
+    2. 日志头+JSON → Step 2a 特征定位 → Path A / Path Main
+    3. 纯 JSON → 直接 Path Main
 
     注意:
-        ``header_end_marker`` 会透传给 :func:`_classify_json_features`，
+        ``header_end_marker`` 会透传给下游函数，
         以便 ``match_real_samples`` 能从 ``real_samples`` 中剥离 syslog 头部。
     """
-    # 解析 Step 1 的 format_info
-    info_dict: dict | None = None
-    has_header_feature = False
-    feature_location = "unknown"
-
-    if format_info:
-        try:
-            info_dict = json.loads(format_info) if isinstance(format_info, str) else format_info
-            has_header_feature = bool(info_dict.get("has_header_feature", False))
-            feature_location = str(info_dict.get("feature_location", "unknown")).lower()
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("[_do_classify_log_features] format_info 解析失败，忽略")
-
     ft = (format_type or "").lower()
+    fd = (format_detail or "").lower()
+    has_header = "日志头" in fd or "syslog" in fd
 
-    # Path A: 头部特征分类
-    if has_header_feature and ft == "json":
-        logger.info("[_do_classify_log_features] → Path A (header)")
-        from agent.tools.pipeline.log_header_processor import classify_header_features
-
-        return classify_header_features(
-            logs_str=logs_str,
-            format_type=format_type,
-            format_detail=format_detail,
-        )
-
-    # Path Main: body 特征分类
-    if feature_location == "body" and ft == "json":
-        logger.info("[_do_classify_log_features] → Path Main (body)")
-        return _classify_json_features(
-            logs_str=logs_str,
-            format_type=format_type,
-            format_detail=format_detail,
-            feature_field=feature_field,
-            format_info=info_dict,
-            header_end_marker=header_end_marker,
-        )
-
-    # Unsupported: feature_location=header 但无 has_header_feature
-    if feature_location == "header":
-        logger.warning("[_do_classify_log_features] feature_location=header but has_header_feature=false → UNSUPPORTED")
+    # ---- 非 JSON 格式一律不支持 ----
+    if ft != "json":
+        logger.warning(f"[_do_classify_log_features] 非JSON格式: {format_type}")
         return json.dumps(
             {
                 "status": "UNSUPPORTED",
-                "error": "feature_location=header 且 has_header_feature=false，暂不支持",
+                "error": f"不支持的日志格式: {format_type}",
                 "log_format": normalize_log_format(format_type),
                 "log_format_detail": format_detail or format_type,
                 "feature_field": feature_field,
@@ -286,34 +252,64 @@ def _do_classify_log_features(
             ensure_ascii=False,
         )
 
-    # Fallback: JSON 格式但无具体 location 信息
-    if ft == "json":
-        logger.info("[_do_classify_log_features] → Fallback JSON classification")
-        return _classify_json_features(
+    # ---- 日志头+JSON：执行 Step 2a 特征定位 ----
+    if has_header:
+        from agent.tools.pipeline.log_feature_locator import locate_feature
+
+        logger.info("[_do_classify_log_features] 日志头+JSON → Step 2a 特征定位")
+        locate_result = locate_feature(
             logs_str=logs_str,
-            format_type=format_type,
-            format_detail=format_detail,
             feature_field=feature_field,
-            format_info=info_dict,
-            header_end_marker=header_end_marker,
+            format_detail=format_detail,
+        )
+        located = locate_result.get("feature_location", "body")
+        located_field = locate_result.get("feature_field", feature_field)
+        reason = locate_result.get("reason", "")
+        logger.info(
+            f"[_do_classify_log_features] Step 2a 结果: "
+            f"location={located}, field={located_field}, reason={reason[:80]}"
         )
 
-    # 未知格式
-    logger.warning(f"[_do_classify_log_features] Unsupported format: {format_type}")
-    return json.dumps(
-        {
-            "status": "UNSUPPORTED",
-            "error": f"不支持的日志格式: {format_type}",
-            "log_format": normalize_log_format(format_type),
-            "log_format_detail": format_detail or format_type,
-            "feature_field": feature_field,
-            "feature_identifier": "",
-            "feature_count": 0,
-            "total_valid_lines": 0,
-            "covered_lines": 0,
-            "classification_details": [],
-        },
-        ensure_ascii=False,
+        if located == "header":
+            # Path A: 特征在日志头中
+            logger.info("[_do_classify_log_features] → Path A (header)")
+            from agent.tools.pipeline.log_header_processor import classify_header_features
+
+            return classify_header_features(
+                logs_str=logs_str,
+                format_type=format_type,
+                format_detail=format_detail,
+                header_end_marker=header_end_marker,
+            )
+
+        if located == "body":
+            # Path Main: 特征在 body 中，可能修正了 feature_field
+            logger.info("[_do_classify_log_features] → Path Main (body, via Step 2a)")
+            return _classify_json_features(
+                logs_str=logs_str,
+                format_type=format_type,
+                format_detail=format_detail,
+                feature_field=located_field or feature_field,
+                format_info=None,
+                header_end_marker=header_end_marker,
+            )
+
+        # unknown → FAILED
+        logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
+        return _build_failed_result(
+            format_type, format_detail, feature_field,
+            f"特征定位失败: {reason}",
+        )
+
+    # ---- 纯 JSON：直接走 Path Main ----
+    logger.info("[_do_classify_log_features] → Path Main (纯JSON)")
+    return _classify_json_features(
+        logs_str=logs_str,
+        format_type=format_type,
+        format_detail=format_detail,
+        feature_field=feature_field,
+        format_info=None,
+        header_end_marker=header_end_marker,
     )
 
 

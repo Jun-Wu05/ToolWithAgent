@@ -2,22 +2,24 @@
 """
 日志头特征处理（Path A）。
 
-当日志类型的分类特征位于日志头中时（has_header_feature=true），
-使用此模块处理：提取日志头 -> 脱敏 -> 聚合 -> 调用专用 LLM -> 替换样例日志。
+当日志类型的分类特征位于日志头中时（Step 2a 判定 feature_location=header），
+使用此模块处理：提取日志头 → 脱敏 → 聚合 → 调用专用 LLM → 替换样例日志。
+
+CHANGED (2026-05-29): 集成 HeaderExtractor 消除重复代码；
+                       增加 header_end_marker 传递和 real_samples 提取。
 """
 
 from __future__ import annotations
 
 import json
 import re as _re
-from collections import Counter, defaultdict
-from typing import Any
 
 import httpx
 
 from agent.core.prompts import load_log_header_classify_prompt
 from agent.shared.logger import get_logger
 from agent.tools.enum_extract_tool import sample_logs
+from agent.tools.pipeline.extractors.header_extractor import aggregate_headers
 from agent.tools.pipeline.llm_client import (
     _call_llm_direct,
     _try_parse_json,
@@ -26,80 +28,15 @@ from agent.tools.pipeline.llm_client import (
 
 logger = get_logger("log_parser_pipeline")
 
-
-_HEADER_DESENSITIZE_RE = _re.compile(
-    r'<\d+>|'
-    r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?|'
-    r'[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}|'
-    r'\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}|'
-    r'\d{1,3}(\.\d{1,3}){3}|'
-    r'([0-9a-fA-F]{1,4}:){1,7}[0-9a-fA-F]{1,4}|::|'
-    r'([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})|'
-    r'[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}|'
-    r'[a-zA-Z0-9]{15,}|'
-    r'\b\d+\b|'
-    r'host|server|pid|ppid|uid|gid|sessionid|messageid',
-    _re.IGNORECASE,
-)
-
-# Path A 仅处理格式 format=json 的 syslog+JSON 日志，固定双捕获组正则
+# Path A 仅处理格式 format=json 的 syslog+JSON 日志，固定单捕获组正则
 _JSON_FEATURE_IDENTIFIER = r"(\{[\S\s]*\})"
 
 
-def _extract_header(line: str) -> str:
-    """从日志行中提取日志头部分（{ 之前的文本）。"""
-    json_start = line.find("{")
-    if json_start == -1:
-        json_start = line.find("[")
-    if json_start > 0:
-        return line[:json_start].strip()
-    return line.strip()
-
-
-def _desensitize_header(header: str) -> str:
-    """脱敏日志头，将 IP/时间/UUID 等替换为 '1'。"""
-    desensitized = _HEADER_DESENSITIZE_RE.sub("1", header)
-    desensitized = _re.sub(r'\s+', ' ', desensitized).strip()
-    return desensitized
-
-
-def _aggregate_headers(logs_str: str, max_clusters: int = 50) -> dict:
-    """提取日志头、脱敏、聚合。"""
-    lines = [l for l in logs_str.strip().split("\n") if l.strip()]
-    total_lines = len(lines)
-
-    cluster_map: dict[str, int] = defaultdict(int)
-    header_samples: dict[str, str] = {}
-
-    for line in lines:
-        if len(cluster_map) >= max_clusters:
-            break
-
-        header = _extract_header(line)
-        if not header:
-            continue
-
-        desensitized = _desensitize_header(header)
-        if not desensitized:
-            continue
-
-        cluster_map[desensitized] += 1
-        if desensitized not in header_samples:
-            sample = desensitized[:3000]
-            if len(desensitized) > 3000:
-                sample += "...日志过长已截断"
-            header_samples[desensitized] = sample
-
-    sorted_clusters = sorted(cluster_map.items(), key=lambda x: x[1], reverse=True)
-    clusters = [
-        {"log_header": header_samples[header], "count": count}
-        for header, count in sorted_clusters
-    ]
-
-    return {"clusters": clusters, "total_lines": total_lines}
-
-
-def _replace_samples_with_raw(classification_data: dict, logs_str: str) -> dict:
+def _replace_samples_with_raw(
+    classification_data: dict,
+    logs_str: str,
+    header_end_marker: str = "",
+) -> dict:
     """用 LLM 输出的 matched_regex 从原始日志中匹配真实样例。"""
     log_lines = [l.strip() for l in logs_str.strip().split("\n") if l.strip()]
 
@@ -107,6 +44,7 @@ def _replace_samples_with_raw(classification_data: dict, logs_str: str) -> dict:
         matched_regex = detail.get("matched_regex", "")
         if not matched_regex:
             detail["sample"] = ""
+            detail["real_samples"] = ""
             continue
 
         try:
@@ -114,6 +52,7 @@ def _replace_samples_with_raw(classification_data: dict, logs_str: str) -> dict:
         except _re.error:
             logger.warning(f"[replace_samples] 正则语法错误: {matched_regex}")
             detail["sample"] = ""
+            detail["real_samples"] = ""
             continue
 
         found = ""
@@ -122,10 +61,26 @@ def _replace_samples_with_raw(classification_data: dict, logs_str: str) -> dict:
                 found = line
                 break
 
+        # sample = 完整原始行
         detail["sample"] = found
+
+        # real_samples: syslog+JSON 时仅保留 JSON body 部分
+        if header_end_marker and found:
+            parts = found.split(header_end_marker, 1)
+            detail["real_samples"] = parts[1] if len(parts) == 2 else found
+        elif found and "{" in found:
+            json_start = found.find("{")
+            json_end = found.rfind("}")
+            if json_start != -1 and json_end > json_start:
+                detail["real_samples"] = found[json_start:json_end + 1]
+            else:
+                detail["real_samples"] = found
+        else:
+            detail["real_samples"] = found
+
         if found:
             logger.info(
-                f"[replace_samples] 为 '{detail.get('value', '')}' "
+                f"[replace_samples] 为 '{detail.get('logtype', '')}' "
                 f"匹配到样例 ({len(found)} 字符)"
             )
 
@@ -136,8 +91,12 @@ def classify_header_features(
     logs_str: str,
     format_type: str = "json",
     format_detail: str = "",
+    header_end_marker: str = "",
 ) -> str:
-    """Path A: 日志头分类特征提取主函数。"""
+    """Path A: 日志头分类特征提取主函数。
+
+    CHANGED: 新增 header_end_marker 参数，用于 real_samples 去头。
+    """
     if not logs_str or not logs_str.strip():
         return json.dumps(
             {"status": "FAILED", "error": "日志内容为空",
@@ -150,7 +109,8 @@ def classify_header_features(
         )
 
     try:
-        agg_result = _aggregate_headers(logs_str)
+        # CHANGED: 使用 HeaderExtractor.aggregate_headers() 替代重复实现
+        agg_result = aggregate_headers(logs_str)
         clusters = agg_result["clusters"]
         total_lines = agg_result["total_lines"]
 
@@ -202,24 +162,27 @@ def classify_header_features(
         parsed["log_format"] = normalize_log_format(format_type)
         parsed.setdefault("log_format_detail", format_detail or format_type)
         parsed.setdefault("feature_field", "__header__")
-        parsed.setdefault("feature_identifier", _JSON_FEATURE_IDENTIFIER)
+        # CHANGED: 强制覆盖为统一正则，防止 LLM 输出不一致
+        parsed["feature_identifier"] = _JSON_FEATURE_IDENTIFIER
         parsed.setdefault("feature_count", 0)
         parsed.setdefault("total_valid_lines", total_lines)
         parsed.setdefault("covered_lines", sum(c["count"] for c in clusters[:20]))
         parsed.setdefault("classification_details", [])
         parsed.setdefault("categorical_features", "在日志头中")
-        parsed.setdefault("Diversion_method", "数据匹配再解析")
+        parsed.setdefault("Diversion_method", "日志头特征分类")
         parsed["analysis"] = {
             "has_json_structure": True, "has_cef_prefix": False,
             "has_key_value_pairs": False, "has_delimited_structure": False,
             "delimit": ":", "tab": "space",
         }
-        parsed["header_end_marker"] = ""
+        # CHANGED: 使用传入的 header_end_marker 而非硬编码 ""
+        parsed["header_end_marker"] = header_end_marker
         parsed["feature_body_group"] = 0
         parsed["feature_value_group"] = 0
 
         if parsed.get("status") == "SUCCESS":
-            parsed = _replace_samples_with_raw(parsed, logs_str)
+            # CHANGED: 传入 header_end_marker 以提取 real_samples
+            parsed = _replace_samples_with_raw(parsed, logs_str, header_end_marker)
             parsed["feature_count"] = len(parsed.get("classification_details", []))
 
             try:

@@ -116,6 +116,33 @@ def _new_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def _fill_rule_common(
+    rule: dict[str, Any],
+    *,
+    name: str,
+    description: str,
+    sample: str,
+    date_str: str = "",
+    uuid_str: str = "",
+) -> None:
+    """填充入口/子规则的公共字段（在深拷贝后的 rule dict 上原地修改）。
+
+    统一处理 date_str/uuid_str 默认值、时间戳、id/name/description/sample 等字段，
+    消除 generate_entry_rule 和 generate_sub_rule 的重复代码。
+    """
+    if not date_str:
+        date_str = time.strftime("%Y%m%d")
+    if not uuid_str:
+        uuid_str = _new_uuid()
+    ts = _now_ms()
+    rule["id"] = uuid_str
+    rule["name"] = name
+    rule["description"] = description
+    rule["sample"] = sample
+    rule["createtime"] = ts
+    rule["lasttime"] = ts
+
+
 def _make_addfields_filter() -> dict[str, Any]:
     """构建 additional_fields_filter 节点。"""
     return {
@@ -131,7 +158,7 @@ def _make_addfields_filter() -> dict[str, Any]:
 
 
 def _make_redirect_filter(logtypes: list[str]) -> dict[str, Any]:
-    """构建入口规则的 redirect filter（cases 覆盖所有 logtype）。"""
+    """构建入口规则的 redirect filter（cases 覆盖所有 logtype）— KV/syslog 格式使用。"""
     cases: list[dict[str, Any]] = []
     for lt in logtypes:
         cases.append(
@@ -148,6 +175,42 @@ def _make_redirect_filter(logtypes: list[str]) -> dict[str, Any]:
         "id": "",
         "default": {"name": "none"},
         "cases": cases,
+    }
+
+
+def _make_condition_match_filter(logtypes: list[str]) -> dict[str, Any]:
+    """构建纯 JSON 入口规则的 conditionMatch filter。
+
+    每个 case 的 value 格式固定为 ``original_log like '{logtype}'``，
+    用于匹配包含特定 logtype 的 JSON 日志行。
+    """
+    cases: list[dict[str, Any]] = []
+    for lt in logtypes:
+        cases.append(
+            {
+                "value": f"original_log like '{lt}'",
+                "rule": {"fields": {"1": "1"}, "name": "addFields", "id": ""},
+                "name": "case",
+                "id": "",
+            }
+        )
+    return {
+        "cases": cases,
+        "default": {"name": "none"},
+        "name": "conditionMatch",
+        "id": "",
+    }
+
+
+def _make_feature_field_filter(feature_field: str) -> dict[str, Any]:
+    """构建纯 JSON 入口规则的第三个 filter（将 feature_field 映射为日志类型）。
+
+    key 恒为 ``日志类型``，value 格式固定为 ``%{feature_field}``。
+    """
+    return {
+        "fields": {"日志类型": f"%{{{feature_field}}}"},
+        "name": "addFields",
+        "id": "",
     }
 
 
@@ -183,12 +246,13 @@ def _make_properties(
     ]
 
 
-def _determine_parser_name(analysis: dict[str, Any]) -> str:
+def _resolve_sub_parser_name(analysis: dict[str, Any]) -> str:
     """根据 analysis 判断子规则 parser.name。
 
     Returns:
         "delimitWithKeyMap" / "delimit" / "orgRegex"
     """
+    # 🔮 预留扩展：未来可增加 cef / xml / csv 等格式的 parser 类型判断
     if analysis.get("has_key_value_pairs"):
         return "delimitWithKeyMap"
     if analysis.get("has_delimited_structure"):
@@ -212,37 +276,61 @@ def generate_entry_rule(
         date_str: YYYYMMDD 日期字符串，默认取当天。
         uuid_str: 可复用 UUID，默认自动生成。
     """
-    if not date_str:
-        date_str = time.strftime("%Y%m%d")
-    if not uuid_str:
-        uuid_str = _new_uuid()
-
-    rule_name = f"入口规则_{date_str}"
+    rule_name = f"入口规则_{date_str or time.strftime('%Y%m%d')}"
     details: list[dict[str, Any]] = classification.get(
         "classification_details", []
     )
     logtypes: list[str] = [d.get("logtype", "") for d in details]
     samples: list[str] = [d.get("sample", "") for d in details]
 
-    ts = _now_ms()
-
     # 深拷贝模板
     rule: dict[str, Any] = json.loads(json.dumps(_EMPTY_RULE_TEMPLATE))
 
-    rule["id"] = uuid_str
-    rule["name"] = rule_name
-    rule["description"] = rule_name
-    rule["sample"] = "#next#".join(samples)
-    rule["createtime"] = ts
-    rule["lasttime"] = ts
+    # CHANGED: 使用公共函数填充 id/name/description/sample/createtime/lasttime
+    _fill_rule_common(
+        rule,
+        name=rule_name,
+        description=rule_name,
+        sample="#next#".join(samples),
+        date_str=date_str,
+        uuid_str=uuid_str,
+    )
 
-    # parser
-    rule["parser"]["name"] = "orgRegex"
-    rule["parser"]["value"] = classification.get("feature_identifier", "")
-    rule["parser"]["filter"] = [
-        _make_addfields_filter(),
-        _make_redirect_filter(logtypes),
-    ]
+    # CHANGED: 根据 log_format 判断入口规则的 parser 配置
+    log_format = (classification.get("log_format", "") or "").upper()
+    is_json = "JSON" in log_format
+
+    if is_json:
+        format_detail = (classification.get("log_format_detail", "") or "")
+        is_syslog_json = "日志头" in format_detail
+
+        if is_syslog_json:
+            # syslog+JSON 格式入口规则
+            rule["parser"]["name"] = "orgRegex"
+            rule["parser"]["value"] = r"(\{[\S\s]*\})"
+            rule["parser"]["filter"] = [
+                _make_addfields_filter(),
+                _make_condition_match_filter(logtypes),
+            ]
+        else:
+            # 纯 JSON 格式入口规则
+            feature_field = classification.get("feature_field", "")
+            rule["parser"]["name"] = "json"
+            # JSON 格式不需要 parser.value，删除模板中的默认值
+            rule["parser"].pop("value", None)
+            rule["parser"]["filter"] = [
+                _make_addfields_filter(),
+                _make_condition_match_filter(logtypes),
+                _make_feature_field_filter(feature_field),
+            ]
+    else:
+        # 🔮 预留扩展：KV / syslog / 分隔符格式入口规则（原有逻辑）
+        rule["parser"]["name"] = "orgRegex"
+        rule["parser"]["value"] = classification.get("feature_identifier", "")
+        rule["parser"]["filter"] = [
+            _make_addfields_filter(),
+            _make_redirect_filter(logtypes),
+        ]
     rule["parser"]["subResolver"] = 0
 
     # properties
@@ -252,6 +340,21 @@ def generate_entry_rule(
     for norm in rule.get("normalize", []):
         if norm.get("index") == "original_log":
             norm["result"] = samples
+
+    # CHANGED: 纯 JSON 格式新增日志类型映射 normalize 条目（syslog+JSON 不需要）
+    if is_json and not is_syslog_json:
+        rule["normalize"].append({
+            "mappings": [],
+            "field": "log_type",
+            "sim": True,
+            "result": [],
+            "info": None,
+            "entity": "日志",
+            "required": False,
+            "core": False,
+            "value": "",
+            "index": "日志类型",
+        })
 
     return rule
 
@@ -276,26 +379,24 @@ def generate_sub_rule(
         date_str: YYYYMMDD 日期字符串。
         uuid_str: 可复用 UUID。
     """
-    if not date_str:
-        date_str = time.strftime("%Y%m%d")
-    if not uuid_str:
-        uuid_str = _new_uuid()
-
     logtype = classification_detail.get("logtype", "")
     rule_name = f"{logtype}_{Diversion_method}_子规则"
     # CHANGED: matched_regex 已废弃，改用 real_samples（fill_sample_logs 输出）或 sample 兜底
     sample = classification_detail.get("real_samples") or classification_detail.get("sample", "")
 
-    ts = _now_ms()
-    parser_name = _determine_parser_name(analysis)
+    parser_name = _resolve_sub_parser_name(analysis)
 
     rule: dict[str, Any] = json.loads(json.dumps(_SUB_RULE_TEMPLATE))
-    rule["id"] = uuid_str
-    rule["name"] = rule_name
-    rule["description"] = rule_name
-    rule["sample"] = sample
-    rule["createtime"] = ts
-    rule["lasttime"] = ts
+
+    # CHANGED: 使用公共函数填充 id/name/description/sample/createtime/lasttime
+    _fill_rule_common(
+        rule,
+        name=rule_name,
+        description=rule_name,
+        sample=sample,
+        date_str=date_str,
+        uuid_str=uuid_str,
+    )
     rule["subResolver"] = 1
     rule["parser"]["name"] = parser_name
     rule["parser"]["subResolver"] = 1

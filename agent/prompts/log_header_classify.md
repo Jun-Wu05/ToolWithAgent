@@ -27,7 +27,7 @@
 
 <rule index="3">基数校验：有效特征值的数量必须为 2~20 种。少于2种或多于20种均为分类失败</rule>
 
-<rule index="4">feature_identifier 为全局统一正则，匹配所有特征值（如 (weak_passwd|brute_crack|clear_password)）</rule>
+<rule index="4">feature_identifier 固定为 (\{{[\S\s]*\}})，用于匹配 JSON body，无需自行生成</rule>
 
 <rule index="5">每个 classification_detail 中的 matched_regex 为该特征值的专属匹配字符串（如 weak_passwd），用于从原始日志中匹配样例</rule>
 
@@ -36,5 +36,5 @@
 
 <output>
 严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"status":"SUCCESS|FAIL","categorical_features":"在日志头中","Diversion_method":"数据匹配再解析","log_format":"日志头+JSON","feature_identifier":"全局统一特征提取正则（如 (val1|val2|val3)）","feature_count":N,"classification_details":[{{"value":"特征值","matched_regex":"该特征值的专属匹配字符串","meaning":"该特征值的业务含义","sample":"AAA"}}],"fail_reason":"仅在 FAIL 时填写"}}
+{{"status":"SUCCESS|FAIL","categorical_features":"在日志头中","Diversion_method":"特征字段的中文业务名称（如 告警类型、事件类型）","log_format":"日志头+JSON","feature_identifier":"(\{{[\S\s]*\}})","feature_count":N,"classification_details":[{{"logtype":"特征值","matched_regex":"该特征值的专属匹配字符串","meaning":"该特征值的业务含义","sample":"AAA"}}],"fail_reason":"仅在 FAIL 时填写"}}
 </output>

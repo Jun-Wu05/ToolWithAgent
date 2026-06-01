@@ -57,6 +57,14 @@ def load_log_header_classify_prompt() -> str:
     return ""
 
 
+def load_log_feature_locate_prompt() -> str:
+    """加载特征定位提示词（Step 2a）"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / "log_feature_locate.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding='utf-8')
+    return ""
+
+
 def load_standard_fields() -> str:
     """加载标准字段表"""
     data_path = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
