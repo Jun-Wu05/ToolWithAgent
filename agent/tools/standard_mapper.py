@@ -317,12 +317,20 @@ def _split_compound_field(raw_field: str) -> list[str]:
     return result
 
 
+# ===== Synonyms 缓存（惰性加载） =====
+_synonyms_cache: Optional[dict[str, list[str]]] = None
+
+
 def _load_synonyms() -> dict[str, list[str]]:
-    """从 config/field_synonyms.json 加载缩写→中文映射表（惰性加载）。
+    """从 config/field_synonyms.json 加载缩写→中文映射表（惰性加载，带缓存）。
 
     Returns:
         {"src": ["源", "source"], "dst": ["目的", "destination"], ...}
     """
+    global _synonyms_cache
+    if _synonyms_cache is not None:
+        return _synonyms_cache
+
     synonyms_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "config", "field_synonyms.json"
@@ -331,11 +339,13 @@ def _load_synonyms() -> dict[str, list[str]]:
         if os.path.exists(synonyms_path):
             with open(synonyms_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            logger.info(f"[SYNONYMS] 加载缩写映射表：{len(data)} 条")
-            return data
+            _synonyms_cache = data
+            logger.info(f"[SYNONYMS] 加载缩写映射表：{len(data)} 条（已缓存）")
+            return _synonyms_cache
     except Exception as e:
         logger.warning(f"[SYNONYMS] 加载缩写映射表失败: {e}")
-    return {}
+    _synonyms_cache = {}
+    return _synonyms_cache
 
 
 def query_field_candidates(
@@ -378,30 +388,26 @@ def query_field_candidates(
         eng_name = entry.get("字段名称", "")
         desc = entry.get("描述", "")
 
-        # 原字段完整匹配（最高优先级）
+        # === 策略 A：原字段完整匹配 ===
         best_score = max(
             _calculate_similarity(raw_field, eng_name),
             _calculate_similarity(raw_field, system_name) * 0.85,
             _calculate_similarity(raw_field, desc) * 0.6,
         )
 
-        # 拆分后子部分匹配（权重递减：子部分匹配是辅助信号）
+        # === 策略 B：拆分后子部分逐个匹配 ===
         for part in expanded_parts:
             if part == raw_field:
-                continue  # 跳过原字段自身（已计算）
+                continue
 
             part_lower = part.lower()
-
-            # 英文部分 → 优先匹配英文字段名
             eng_score = _calculate_similarity(part_lower, eng_name.lower())
-            # 中文部分 → 优先匹配中文系统属性名 / 描述
             is_chinese = any('\u4e00' <= c <= '\u9fff' for c in part)
             if is_chinese:
                 cn_score = max(
                     _calculate_similarity(part, system_name),
                     _calculate_similarity(part, desc) * 0.8,
                 )
-                # 中文 synonym 权重更高（来自显式配置的高置信度知识）
                 part_score = max(eng_score, cn_score) * 0.88
             else:
                 part_score = max(
@@ -411,6 +417,23 @@ def query_field_candidates(
                 ) * 0.75
 
             best_score = max(best_score, part_score)
+
+        # === 策略 C：双向 part-to-part 共现加分 ===
+        # 拆分标准字段英文名，与输入字段拆分部分做 part-to-part 精确匹配
+        eng_parts = _split_compound_field(eng_name)
+        input_parts_lower = {p.lower() for p in expanded_parts if p != raw_field and not any('\u4e00' <= c <= '\u9fff' for c in p)}
+
+        if eng_parts and input_parts_lower:
+            eng_lower = {p.lower() for p in eng_parts if p.lower() != eng_name.lower()}
+            # 精确匹配的 part 数量
+            matched_parts = input_parts_lower & eng_lower
+            if matched_parts:
+                # 匹配率 = 匹配的 part 数 / 输入拆分后的总 part 数
+                coverage = len(matched_parts) / max(len(input_parts_lower), 1)
+                # 共现加分：匹配的 part 越多、覆盖率越高，加分越大
+                # 最多 0.92（不超过完整匹配的 1.0）
+                cooccurrence_bonus = 0.65 + 0.27 * coverage
+                best_score = max(best_score, cooccurrence_bonus)
 
         if best_score > min_score:
             scored.append((best_score, system_name))
