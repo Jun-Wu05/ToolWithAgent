@@ -1,13 +1,14 @@
 """阶段2：LLM 选择准确率测试 — 需要 LLM 调用
 
 评估 LLM 从 top-K 候选中选择正确标准字段的能力。
+使用生产环境的 field_weak.md prompt，确保测试结果反映真实表现。
 
 指标：
 - Precision@1（LLM 首选正确率）
 - 负例判断准确率（应标"未匹配"时正确标了）
 
 用法：
-    pytest eval/test_llm_accuracy.py -v
+    pytest eval/test_llm_accuracy.py -v -s
     pytest eval/test_llm_accuracy.py -v -k "test_llm_precision"
 
 注意：需要配置 LLM API key
@@ -27,42 +28,47 @@ if _PROJECT_ROOT not in sys.path:
 
 from agent.tools.standard_mapper import query_field_candidates, _load_standard_fields_list
 from agent.tools.pipeline.llm_client import _call_llm_direct
+from agent.prompts import load_field_weak_prompt
 
 
 def _build_llm_prompt(cases: list[dict], fields_table: list[dict]) -> str:
-    """构建 LLM 映射 prompt"""
-    prompt = (
-        "你是日志字段映射专家。请根据以下字段候选列表，为每个字段选择最佳的标准字段映射。\n\n"
-        "规则：\n"
-        "- 从候选中选择最匹配的系统属性名称\n"
-        "- 如果候选中没有合适的，设为'未匹配'\n"
-        "- 匹配状态只能填'匹配成功'或'未匹配'\n\n"
-    )
+    """构建 LLM 映射 prompt（使用生产环境 field_weak.md + 候选列表）"""
+    # 加载生产 prompt
+    system_prompt = load_field_weak_prompt()
 
+    # 构建字段候选列表（用户输入）
+    field_entries: list[str] = []
     for case in cases:
         raw = case["raw_field"]
+        log_ctx = case.get("log_context", "")
         candidates = query_field_candidates(raw, fields_table, top_k=3)
 
-        prompt += f"- `{raw}`: "
+        entry = {"原始字段": raw}
+        if log_ctx:
+            entry["日志上下文"] = log_ctx
         if candidates:
-            cand_str = " | ".join(
-                f"{name}(相似度={score:.3f})"
-                for score, name in candidates
-            )
-            prompt += cand_str + "\n"
+            cand_list = []
+            for score, name in candidates:
+                # 查找英文字段名
+                eng_name = ""
+                for f in fields_table:
+                    if f.get("系统属性名称") == name:
+                        eng_name = f.get("字段名称", "")
+                        break
+                cand_list.append(f"{name}({score:.2f}, {eng_name})" if eng_name else f"{name}({score:.2f})")
+            entry["标准字段候选"] = cand_list
         else:
-            prompt += "无候选\n"
+            entry["标准字段候选"] = ["无候选"]
+        field_entries.append(json.dumps(entry, ensure_ascii=False))
 
-    prompt += (
-        "\n请严格按以下 JSON 格式返回结果（不要输出任何其他文字）：\n"
-        "```json\n"
-        "[\n"
-        '  {"原始字段名": "xxx", "系统属性名称": "yyy", "匹配状态": "匹配成功"},\n'
-        '  {"原始字段名": "zzz", "系统属性名称": "未匹配", "匹配状态": "未匹配"}\n'
-        "]\n"
-        "```"
+    user_input = (
+        "请为以下字段映射到标准字段：\n\n"
+        + "\n".join(field_entries)
+        + "\n\n请严格按 JSON 数组格式返回结果。"
     )
-    return prompt
+
+    # 拼接 system + user（_call_llm_direct 只支持单条消息）
+    return system_prompt + "\n\n" + user_input
 
 
 def _parse_llm_mapping_result(llm_output: str) -> list[dict] | None:
