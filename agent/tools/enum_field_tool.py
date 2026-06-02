@@ -283,11 +283,10 @@ def apply_enum_fill(
                 index_value = str(norm_item.get("index", "")).strip()
                 field_value = str(norm_item.get("field", "")).strip()
                 
+                # CHANGED: 去掉 in 子字符串匹配，避免 "3" in "13" 误匹配
                 matched = (
                     index_value == field_name
                     or field_value == field_name
-                    or field_name in index_value
-                    or field_name in field_value
                 )
                 
                 if not matched:
