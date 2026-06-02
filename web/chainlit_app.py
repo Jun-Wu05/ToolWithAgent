@@ -1104,69 +1104,91 @@ async def on_apply_field_mapping(action: cl.Action):
         total_fields = sum(len(f) for f in all_candidates.values())
         logger.info(f"[ACTION] 候选查询完成：{len(all_candidates)} 条子规则，共 {total_fields} 个字段")
 
-        # 4. 构建直接 LLM prompt（不走 Team，避免调用错误工具）
-        llm_prompt = (
-            "你是日志字段映射专家。请根据以下字段候选列表和原始日志样本，为每个字段选择最佳的标准字段映射。\n\n"
-            "规则：\n"
-            "- 从候选中选择最匹配的系统属性名称\n"
-            "- 如果候选中没有合适的，设为'未匹配'\n"
-            "- 匹配状态只能填'匹配成功'或'未匹配'\n\n"
-        )
+        # 4. 按子规则分批构建 prompt + 并行调用 LLM（避免单次输出截断）
+        import asyncio
+        from agent.tools.pipeline.llm_client import _call_llm_direct
 
-        for info in mapping_info:
+        loading_msg.content = "⏳ **LLM 正在选择最佳映射（按子规则并行）...**"
+        try:
+            await loading_msg.update()
+        except Exception:
+            pass
+
+        def _build_single_rule_prompt(info: dict, candidates: dict[str, list[dict]]) -> str:
+            """构建单条子规则的 LLM prompt"""
             rule_name = info["rule_name"]
-            candidates = all_candidates.get(rule_name, {})
-            llm_prompt += f"\n## 子规则：{rule_name}\n"
-            llm_prompt += f"原始日志样本（截取前300字符）：\n```\n{info['sample_log'][:300]}\n```\n\n"
-            llm_prompt += "字段候选：\n"
+            prompt = (
+                "你是日志字段映射专家。请根据以下字段候选列表和原始日志样本，为每个字段选择最佳的标准字段映射。\n\n"
+                "规则：\n"
+                "- 从候选中选择最匹配的系统属性名称\n"
+                "- 如果候选中没有合适的，设为'未匹配'\n"
+                "- 匹配状态只能填'匹配成功'或'未匹配'\n\n"
+                f"## 子规则：{rule_name}\n"
+                f"原始日志样本（截取前300字符）：\n```\n{info['sample_log'][:300]}\n```\n\n"
+                "字段候选：\n"
+            )
             for field, cands in candidates.items():
                 if cands:
                     cand_str = " | ".join(
                         f"{c['系统属性名称']}(相似度={c['相似度']})"
                         for c in cands
                     )
-                    llm_prompt += f"- `{field}`: {cand_str}\n"
+                    prompt += f"- `{field}`: {cand_str}\n"
                 else:
-                    llm_prompt += f"- `{field}`: 无候选\n"
+                    prompt += f"- `{field}`: 无候选\n"
 
-        llm_prompt += (
-            "\n\n请严格按以下 JSON 格式返回结果（不要输出任何其他文字）：\n"
-            "```json\n"
-            "[\n"
-            '  {"rule_name": "子规则名", "mappings": [\n'
-            '    {"原始字段名": "xxx", "系统属性名称": "yyy", "匹配状态": "匹配成功"},\n'
-            '    {"原始字段名": "zzz", "系统属性名称": "未匹配", "匹配状态": "未匹配"}\n'
-            "  ]}\n"
-            "]\n"
-            "```"
-        )
+            prompt += (
+                "\n\n请严格按以下 JSON 格式返回结果（不要输出任何其他文字）：\n"
+                "```json\n"
+                "[\n"
+                '  {"rule_name": "子规则名", "mappings": [\n'
+                '    {"原始字段名": "xxx", "系统属性名称": "yyy", "匹配状态": "匹配成功"},\n'
+                '    {"原始字段名": "zzz", "系统属性名称": "未匹配", "匹配状态": "未匹配"}\n'
+                "  ]}\n"
+                "]\n"
+                "```"
+            )
+            return prompt
 
-        # 5. 直接调用 LLM（复用 _call_llm_direct）
-        loading_msg.content = "⏳ **LLM 正在选择最佳映射...**"
-        try:
-            await loading_msg.update()
-        except Exception:
-            pass
+        # 为每条子规则构建独立 prompt
+        rule_prompts: list[tuple[str, str]] = []  # (rule_name, prompt)
+        for info in mapping_info:
+            rule_name = info["rule_name"]
+            candidates = all_candidates.get(rule_name, {})
+            prompt = _build_single_rule_prompt(info, candidates)
+            rule_prompts.append((rule_name, prompt))
 
-        from agent.tools.pipeline.llm_client import _call_llm_direct
-        import asyncio
-        result_text = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: _call_llm_direct(llm_prompt, max_tokens=4000)
-        )
+        # 并行调用 LLM
+        loop = asyncio.get_event_loop()
+        llm_tasks = [
+            loop.run_in_executor(
+                None, lambda p=prompt: _call_llm_direct(p, max_tokens=4000)
+            )
+            for _, prompt in rule_prompts
+        ]
+        logger.info(f"[ACTION] 并行调用 LLM：{len(llm_tasks)} 条子规则")
+        llm_results = await asyncio.gather(*llm_tasks)
 
         try:
             await loading_msg.remove()
         except Exception:
             pass
 
-        # 6. 解析 LLM 返回的映射表
-        mapping_results = _parse_mapping_results(result_text)
+        # 6. 解析每条子规则的 LLM 返回，合并映射结果
+        mapping_results: list[dict] = []
+        for (rule_name, _), result_text in zip(rule_prompts, llm_results):
+            parsed = _parse_mapping_results(result_text)
+            if parsed:
+                mapping_results.extend(parsed)
+                logger.info(f"[ACTION] 子规则 '{rule_name}' 解析到 {len(parsed)} 条映射")
+            else:
+                logger.warning(f"[ACTION] 子规则 '{rule_name}' LLM 输出解析失败，原文前200字符: {result_text[:200]}")
+
         if not mapping_results:
-            logger.warning(f"[ACTION] LLM 输出解析失败，原文前500字符: {result_text[:500]}")
-            await cl.Message(content="❌ 无法解析标准字段映射结果，请重试。").send()
+            await cl.Message(content="❌ 所有子规则的 LLM 映射均解析失败，请重试。").send()
             return
 
-        logger.info(f"[ACTION] 解析到 {len(mapping_results)} 条子规则映射结果")
+        logger.info(f"[ACTION] 共解析到 {len(mapping_results)} 条子规则映射结果")
 
         # 7. 加载对象映射（系统属性名称→对象）
         object_entity_map = _load_object_entity_map()
