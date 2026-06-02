@@ -273,16 +273,203 @@ def _load_standard_fields_list() -> list[dict]:
     return fields
 
 
+import re
+
+
+def _split_compound_field(raw_field: str) -> list[str]:
+    """自动拆分复合字段名为子部分，支持多种命名风格。
+
+    拆分策略（零硬编码）：
+    1. 点号拆分: detail.srcIp → ["detail", "srcIp"]
+    2. 下划线拆分: src_ip → ["src", "ip"]
+    3. 驼峰拆分（递归应用到每个子部分）: srcIp → ["src", "Ip"]
+
+    Returns:
+        包含原字段 + 所有拆分后子部分的列表（去重保序）
+    """
+    parts: list[str] = [raw_field]
+
+    # 1. 点号拆分（嵌套字段 a.b.c）
+    if "." in raw_field:
+        parts.extend(raw_field.split("."))
+
+    # 2. 下划线拆分（snake_case）
+    if "_" in raw_field:
+        parts.extend(raw_field.split("_"))
+
+    # 3. 驼峰拆分（对每个已有部分递归拆分）
+    camel_parts: list[str] = []
+    for p in list(parts):  # 复制一份避免遍历时修改
+        camel_split = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", p)
+        if "_" in camel_split and camel_split != p:
+            camel_parts.extend(camel_split.split("_"))
+    parts.extend(camel_parts)
+
+    # 去重保序，过滤空串
+    seen: set[str] = set()
+    result: list[str] = []
+    for p in parts:
+        p = p.strip()
+        if p and p not in seen:
+            seen.add(p)
+            result.append(p)
+
+    return result
+
+
+# ===== Synonyms 缓存（惰性加载） =====
+_synonyms_cache: Optional[dict[str, list[str]]] = None
+
+
+def _load_synonyms() -> dict[str, list[str]]:
+    """从 config/field_synonyms.json 加载缩写→中文映射表（惰性加载，带缓存）。
+
+    Returns:
+        {"src": ["源", "source"], "dst": ["目的", "destination"], ...}
+    """
+    global _synonyms_cache
+    if _synonyms_cache is not None:
+        return _synonyms_cache
+
+    synonyms_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config", "field_synonyms.json"
+    )
+    try:
+        if os.path.exists(synonyms_path):
+            with open(synonyms_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            _synonyms_cache = data
+            logger.info(f"[SYNONYMS] 加载缩写映射表：{len(data)} 条（已缓存）")
+            return _synonyms_cache
+    except Exception as e:
+        logger.warning(f"[SYNONYMS] 加载缩写映射表失败: {e}")
+    _synonyms_cache = {}
+    return _synonyms_cache
+
+
+def query_field_candidates(
+    raw_field: str,
+    fields_table: list[dict[str, Any]],
+    top_k: int = 3,
+    min_score: float = 0.15,
+) -> list[tuple[float, str]]:
+    """统一候选查询入口（封装拆分 + synonyms + 相似度匹配）。
+
+    优化层：
+    - Layer 1: 复合词自动拆分（_split_compound_field）
+    - Layer 2: 缩写→中文扩展（field_synonyms.json）
+    - Layer 3: 多维度相似度计算（字段名 / 系统属性名 / 描述）
+
+    Args:
+        raw_field: 原始字段名（如 "src_ip", "detail.srcPort"）
+        fields_table: 标准字段表（_load_standard_fields_list() 的返回值）
+        top_k: 返回 top-K 候选
+        min_score: 最低相似度阈值
+
+    Returns:
+        [(score, 系统属性名称), ...] 按 score 降序，去重
+    """
+    # Layer 1: 复合词拆分
+    parts = _split_compound_field(raw_field)
+
+    # Layer 2: 缩写扩展
+    synonyms = _load_synonyms()
+    expanded_parts: list[str] = list(parts)
+    for part in parts:
+        part_lower = part.lower()
+        if part_lower in synonyms:
+            expanded_parts.extend(synonyms[part_lower])
+
+    # 对每个扩展后的部分 + 原字段，分别计算相似度
+    scored: list[tuple[float, str]] = []
+    for entry in fields_table:
+        system_name = entry.get("系统属性名称", "")
+        eng_name = entry.get("字段名称", "")
+        desc = entry.get("描述", "")
+
+        # === 策略 A：原字段完整匹配 ===
+        best_score = max(
+            _calculate_similarity(raw_field, eng_name),
+            _calculate_similarity(raw_field, system_name) * 0.85,
+            _calculate_similarity(raw_field, desc) * 0.6,
+        )
+
+        # === 策略 B：拆分后子部分逐个匹配 ===
+        for part in expanded_parts:
+            if part == raw_field:
+                continue
+
+            part_lower = part.lower()
+            eng_score = _calculate_similarity(part_lower, eng_name.lower())
+            is_chinese = any('\u4e00' <= c <= '\u9fff' for c in part)
+            if is_chinese:
+                cn_score = max(
+                    _calculate_similarity(part, system_name),
+                    _calculate_similarity(part, desc) * 0.8,
+                )
+                part_score = max(eng_score, cn_score) * 0.88
+            else:
+                part_score = max(
+                    eng_score,
+                    _calculate_similarity(part_lower, system_name.lower()) * 0.7,
+                    _calculate_similarity(part_lower, desc.lower()) * 0.5,
+                ) * 0.75
+
+            best_score = max(best_score, part_score)
+
+        # === 策略 C：双向 part-to-part 共现加分 ===
+        # 拆分标准字段英文名，与输入字段拆分部分做 part-to-part 精确匹配
+        eng_parts = _split_compound_field(eng_name)
+        input_parts_lower = {p.lower() for p in expanded_parts if p != raw_field and not any('\u4e00' <= c <= '\u9fff' for c in p)}
+
+        if eng_parts and input_parts_lower:
+            eng_lower = {p.lower() for p in eng_parts if p.lower() != eng_name.lower()}
+            # 精确匹配的 part 数量
+            matched_parts = input_parts_lower & eng_lower
+            if matched_parts:
+                # 匹配率 = 匹配的 part 数 / 输入拆分后的总 part 数
+                coverage = len(matched_parts) / max(len(input_parts_lower), 1)
+                # 共现加分：匹配的 part 越多、覆盖率越高，加分越大
+                # 最多 0.92（不超过完整匹配的 1.0）
+                cooccurrence_bonus = 0.65 + 0.27 * coverage
+                best_score = max(best_score, cooccurrence_bonus)
+
+        if best_score > min_score:
+            scored.append((best_score, system_name))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # 去重（按系统属性名称，保留最高分）
+    seen: set[str] = set()
+    result: list[tuple[float, str]] = []
+    for score, name in scored:
+        if name not in seen:
+            seen.add(name)
+            result.append((score, name))
+        if len(result) >= top_k:
+            break
+
+    return result
+
+
 def _calculate_similarity(a: str, b: str) -> float:
     """Simple normalized Levenshtein similarity (0.0 - 1.0, higher = more similar)"""
     a_lower = a.lower()
     b_lower = b.lower()
     
-    # Direct containment bonus
+    # Direct exact match
     if a_lower == b_lower:
         return 1.0
+
+    # Containment with length-ratio penalty:
+    # "src_ip" in "src_ip_list" → ratio=0.5 → 0.70 (penalized)
+    # "源地址" in "源地址" → exact → 1.0 (handled above)
     if a_lower in b_lower or b_lower in a_lower:
-        return 0.95
+        shorter_len = min(len(a_lower), len(b_lower))
+        longer_len = max(len(a_lower), len(b_lower))
+        ratio = shorter_len / longer_len
+        return max(0.40, 0.40 + 0.55 * ratio)
     
     # Levenshtein distance
     len_a, len_b = len(a_lower), len(b_lower)
