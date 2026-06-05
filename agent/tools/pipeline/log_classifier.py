@@ -268,6 +268,31 @@ def _classify_kv_features(
     total_lines = aggregation.get("total_lines", 0)
     matched_lines = aggregation.get("matched_lines", 0)
 
+    # CHANGED: 如果使用默认分隔符匹配失败，尝试另一种分隔符（2026-06-05 修复数据3失败问题）
+    if matched_lines == 0 and field_delimit == " " and kv_delimit == "=":
+        logger.warning(
+            f"[_classify_kv_features] 使用默认分隔符（空格+等号）匹配失败，尝试冒号分隔符"
+        )
+        extractor = KvExtractor(field_delimit=field_delimit, kv_delimit=":")
+        aggregation = extractor.extract_and_aggregate(logs_str, feature_field)
+        matched_lines = aggregation.get("matched_lines", 0)
+        # 如果冒号分隔符成功，更新 kv_delimit
+        if matched_lines > 0:
+            kv_delimit = ":"
+            logger.info(f"[_classify_kv_features] 冒号分隔符成功，匹配到 {matched_lines} 行")
+
+    if matched_lines == 0 and field_delimit == " " and kv_delimit == ":":
+        logger.warning(
+            f"[_classify_kv_features] 冒号分隔符也失败，尝试等号分隔符"
+        )
+        extractor = KvExtractor(field_delimit=field_delimit, kv_delimit="=")
+        aggregation = extractor.extract_and_aggregate(logs_str, feature_field)
+        matched_lines = aggregation.get("matched_lines", 0)
+        # 如果等号分隔符成功，更新 kv_delimit
+        if matched_lines > 0:
+            kv_delimit = "="
+            logger.info(f"[_classify_kv_features] 等号分隔符成功，匹配到 {matched_lines} 行")
+
     if matched_lines == 0:
         logger.warning(
             f"[_classify_kv_features] 未匹配到任何 feature_field='{feature_field}' 的日志行"

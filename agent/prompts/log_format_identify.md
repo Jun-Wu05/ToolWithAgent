@@ -23,6 +23,26 @@
 - 实在找不到分类字段时 feature_field 才留空
 </important_rules>
 
+<kv_separator_rules>
+**KV 格式特殊要求（必须遵守）**：
+
+如果 format="kv" 或 format_detail 包含 "KV"，必须填写以下字段：
+
+1. **kv_connector**：键值分隔符（键和值之间的连接符）
+   - 常见值："="、":"、
+   - 示例：`key=value` → kv_connector="="
+   - 示例：`日志类型:Authentication Server` → kv_connector=":"
+
+2. **kv_separator**：字段分隔符（键值对之间的分隔符）
+   - 常见值："space"、"||"、";"、","
+   - 示例：`key=value key2=value2` → kv_separator="space"
+   - 示例：`key=value||key2=value2` → kv_separator="||"
+
+**禁止**：
+- ❌ KV 格式时 kv_connector 或 kv_separator 留空
+- ❌ KV 格式时不填写这两个字段
+</kv_separator_rules>
+
 <header_detection>
 判断日志是否有"日志头"——即日志行前半部分为固定格式的时间戳、主机名、进程名等系统前缀。
 在 format_detail 中描述完整格式，例如"日志头+KV"、"日志头+JSON"、"纯KV"、"纯JSON"等。

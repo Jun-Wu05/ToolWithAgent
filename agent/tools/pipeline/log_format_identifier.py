@@ -74,12 +74,24 @@ def _do_identify_log_format(logs_str: str) -> str:
         parsed.setdefault("kv_connector", None)
         parsed.setdefault("kv_separator", None)
         parsed.setdefault("has_header", False)
+        
+        # CHANGED: KV 格式验证分隔符（2026-06-05 修复数据3失败问题）
+        fmt = parsed.get("format", "").lower()
+        if fmt == "kv":
+            if "kv_connector" not in parsed or parsed["kv_connector"] is None:
+                logger.warning("[identify_log_format] KV 格式但 LLM 未返回 kv_connector，将使用默认值尝试两种分隔符")
+            if "kv_separator" not in parsed or parsed["kv_separator"] is None:
+                logger.warning("[identify_log_format] KV 格式但 LLM 未返回 kv_separator，将使用默认值")
+        
         # CHANGED: 将 LLM 返回的 kv_connector/kv_separator 映射为 tab/delimit
         # 语义：delimit=字段分隔符，tab=键值分隔符
         # kv_connector（LLM 输出）= 键值分隔符（如 = 或 :）→ tab
         # kv_separator（LLM 输出）= 字段分隔符（如 space、pipe）→ delimit
         if "kv_connector" in parsed and parsed["kv_connector"] is not None:
             parsed["tab"] = parsed["kv_connector"]  # 键值分隔符
+        else:
+            # CHANGED: LLM 未返回时，不设置 tab，让 Step 2 尝试两种分隔符
+            pass
         
         # CHANGED: kv_separator 值映射（支持中文描述和代码格式）
         # 注意："space" 保持为字符串 "space"，让 KvExtractor 自动转为 \s+
@@ -99,6 +111,9 @@ def _do_identify_log_format(logs_str: str) -> str:
             parsed["delimit"] = separator_map[parsed["kv_separator"]]  # 字段分隔符
         elif "kv_separator" in parsed and parsed["kv_separator"] is not None:
             parsed["delimit"] = parsed["kv_separator"]
+        else:
+            # CHANGED: LLM 未返回时，不设置 delimit，让 Step 2 使用默认值
+            pass
         parsed.setdefault("header_end_marker", "")
         parsed.setdefault("has_header_feature", False)  # CHANGED: 新增字段
         parsed.setdefault("feature_field", "")  # CHANGED: 新增字段
