@@ -43,6 +43,51 @@
 </rules>
 
 <output>
-严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"status":"SUCCESS|FAIL","categorical_features":"在日志头中","Diversion_method":"特征字段的中文业务名称（如 告警类型、事件类型）","log_format":"日志头+JSON 或 日志头+KV","feature_identifier":"JSON时为(\\{{[\\S\\s]*\\}})，KV时为空字符串","feature_count":N,"classification_details":[{{"logtype":"特征值","matched_regex":"该特征值的专属匹配字符串","meaning":"该特征值的业务含义","sample":"AAA"}}],"analysis":{{"delimit":"字段连接符或判断失败","tab":"键值分隔符或判断失败"}},"fail_reason":"仅在 FAIL 时填写"}}
+严格输出 JSON 格式，必须符合以下 Schema：
+
+```json
+{{
+  "type": "object",
+  "properties": {{
+    "status": {{"type": "string", "enum": ["SUCCESS", "FAILED"]}},
+    "categorical_features": {{"type": "string", "const": "在日志头中"}},
+    "Diversion_method": {{"type": "string"}},
+    "log_format": {{"type": "string"}},
+    "feature_identifier": {{"type": "string"}},
+    "feature_count": {{"type": "number"}},
+    "classification_details": {{
+      "type": "array",
+      "items": {{
+        "type": "object",
+        "properties": {{
+          "logtype": {{"type": "string"}},
+          "matched_regex": {{"type": "string"}},
+          "meaning": {{"type": "string"}},
+          "sample": {{"type": "string"}}
+        }},
+        "required": ["logtype", "matched_regex", "meaning"]
+      }}
+    }},
+    "analysis": {{
+      "type": "object",
+      "properties": {{
+        "delimit": {{"type": "string"}},
+        "tab": {{"type": "string"}}
+      }}
+    }},
+    "fail_reason": {{"type": "string"}}
+  }},
+  "required": ["status", "categorical_features", "Diversion_method", "log_format", "feature_identifier", "feature_count", "classification_details", "analysis"]
+}}
+```
+
+**输出要求**：
+1. 确保输出**完整的 JSON**（包含闭合的 `}}` 和 `]`）
+2. 所有字段名使用**双引号**
+3. **不要**使用 markdown 围栏（```json ... ```）
+4. **不要**添加任何额外文字或注释
+5. **不要**截断任何字段，确保 JSON 结构完整
+
+示例输出：
+{{"status":"SUCCESS","categorical_features":"在日志头中","Diversion_method":"告警类型","log_format":"日志头+KV","feature_identifier":"","feature_count":3,"classification_details":[{{"logtype":"AUDIT","matched_regex":"AUDIT","meaning":"审计日志","sample":""}}],"analysis":{{"delimit":":","tab":" "}}}}
 </output>

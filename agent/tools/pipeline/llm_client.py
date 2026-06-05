@@ -45,6 +45,8 @@ def _call_llm_direct(
     temperature: float = 0.1,
     max_tokens: int = 2000,
     timeout: float = 60.0,
+    # CHANGED: 新增 force_json 参数，强制 JSON 输出
+    force_json: bool = True,
 ) -> str:
     """
     直接调 LLM API（httpx），跳过 Agno，零 Agent 路由开销。
@@ -55,6 +57,7 @@ def _call_llm_direct(
         temperature: 温度，默认 0.1 保证格式稳定
         max_tokens: 最大输出 token
         timeout: 超时秒数
+        force_json: 是否强制 JSON 输出（默认 True）
 
     Returns:
         LLM 返回的文本内容
@@ -73,6 +76,15 @@ def _call_llm_direct(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    
+    # CHANGED: 条件性添加 response_format，强制 JSON 输出
+    # 支持的 API：DeepSeek、OpenAI 兼容接口（如硅基流动）
+    # 不支持的 API：智谱 GLM 系列（需要在 prompt 中明确要求）
+    if force_json:
+        supports_json_format = ModelConfig.MODEL_PROVIDER in ("deepseek", "siliconflow")
+        if supports_json_format:
+            payload["response_format"] = {"type": "json_object"}
+            logger.debug(f"[_call_llm_direct] 使用 response_format 强制 JSON 输出")
 
     logger.info(
         f"[LLM_DIRECT] 调用 {_LLM_API_URL}, model={model_id}, prompt_len={len(prompt)}"

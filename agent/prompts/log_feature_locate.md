@@ -29,8 +29,33 @@
 </rules>
 
 <output>
-严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"feature_location":"body|header|unknown","feature_field":"字段名（header时为空字符串）","header_distinct_count":N,"body_best_candidate":"最佳body字段名 (N种唯一值)","reason":"判断依据的简明说明"}}
+严格输出 JSON 格式，必须符合以下 Schema：
+
+```json
+{{
+  "type": "object",
+  "properties": {{
+    "feature_location": {{"type": "string", "enum": ["body", "header", "unknown"]}},
+    "feature_field": {{"type": "string"}},
+    "header_distinct_count": {{"type": "number"}},
+    "body_best_candidate": {{"type": "string"}},
+    "reason": {{"type": "string"}}
+  }},
+  "required": ["feature_location", "feature_field", "reason"]
+}}
+```
+
+**输出要求**：
+1. 确保输出**完整的 JSON**（包含闭合的 `}}` 和 `]`）
+2. 所有字段名使用**双引号**
+3. **不要**使用 markdown 围栏（```json ... ```）
+4. **不要**添加任何额外文字或注释
+5. **不要**截断任何字段，确保 JSON 结构完整
+6. `feature_location="body"` 时 `feature_field` 必须填写具体字段名
+7. `feature_location="header"` 时 `feature_field` 为空字符串 `""`
+
+示例输出：
+{{"feature_location":"header","feature_field":"","header_distinct_count":38,"body_best_candidate":"","reason":"header中存在log_type=1/2等分类特征，且body_analysis无候选字段，header模式数量38但实际分类特征（如log_type、event_type等）唯一值在2~20范围"}}
 </output>
 
 <context>

@@ -30,6 +30,42 @@
 </requirements>
 
 <output>
-严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
-{{"status":"SUCCESS","categorical_features":"分类特征名称","Diversion_method":"日志分流方法","log_format":"JSON","feature_field":"{feature_field}","feature_count":N,"classification_details":[{{"logtype":"值","meaning":"业务含义描述"}}]}}
+严格输出 JSON 格式，必须符合以下 Schema：
+
+```json
+{{
+  "type": "object",
+  "properties": {{
+    "status": {{"type": "string", "enum": ["SUCCESS", "FAILED", "PARTIAL"]}},
+    "categorical_features": {{"type": "string"}},
+    "Diversion_method": {{"type": "string"}},
+    "log_format": {{"type": "string"}},
+    "feature_field": {{"type": "string"}},
+    "feature_count": {{"type": "number"}},
+    "classification_details": {{
+      "type": "array",
+      "items": {{
+        "type": "object",
+        "properties": {{
+          "logtype": {{"type": "string"}},
+          "meaning": {{"type": "string"}}
+        }},
+        "required": ["logtype", "meaning"]
+      }}
+    }}
+  }},
+  "required": ["status", "categorical_features", "Diversion_method", "log_format", "feature_field", "feature_count", "classification_details"]
+}}
+```
+
+**输出要求**：
+1. 确保输出**完整的 JSON**（包含闭合的 `}}` 和 `]`）
+2. 所有字段名使用**双引号**
+3. **不要**使用 markdown 围栏（```json ... ```）
+4. **不要**添加任何额外文字或注释
+5. **不要**截断任何字段，确保 JSON 结构完整
+6. `feature_count` 必须严格等于 `classification_details` 数组的长度
+
+示例输出：
+{{"status":"SUCCESS","categorical_features":"告警类型","Diversion_method":"告警类型","log_format":"JSON","feature_field":"categoryName","feature_count":4,"classification_details":[{{"logtype":"WEAK_PASSWD","meaning":"弱密码告警"}},{{"logtype":"MALWARE","meaning":"恶意软件告警"}},{{"logtype":"PHISHING","meaning":"钓鱼网站告警"}},{{"logtype":"DDOS","meaning":"DDoS攻击告警"}}]}}
 </output>
