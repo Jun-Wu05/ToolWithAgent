@@ -103,7 +103,8 @@ def _generate_kv_feature_identifier(logs_str: str) -> str:
     # CHANGED: 使用 .replace() 替代 .format()，彻底避免花括号冲突（正则中的 \d{2} 等不会误解析）
     prompt = load_kv_feature_identifier_prompt().replace('{sample_log}', sample_line)
     try:
-        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=500, timeout=30)
+        # CHANGED: force_json=False，因为 prompt 要求输出正则表达式，不是 JSON
+        response = _call_llm_direct(prompt, temperature=0.1, max_tokens=500, timeout=30, force_json=False)
     except Exception as e:
         raise ValueError(f"LLM API 调用失败: {e}")
     
