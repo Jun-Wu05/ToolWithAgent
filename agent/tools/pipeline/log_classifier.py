@@ -251,18 +251,18 @@ def _classify_kv_features(
     if not feature_field or not feature_field.strip():
         return _build_failed_result(format_type, format_detail, feature_field, "feature_field 为空，Step1 未识别出分类字段")
 
-    # 1. 从 format_info 解析 delimit/tab
-    delimit = "="
-    tab = " "
+    # 1. 从 format_info 解析 delimit/tab（语义：delimit=字段分隔符，tab=键值分隔符）
+    field_delimit = " "
+    kv_delimit = "="
     if format_info:
         try:
-            delimit = format_info.get("delimit", "=") or "="
-            tab = format_info.get("tab", " ") or " "
+            field_delimit = format_info.get("delimit", " ") or " "  # 字段分隔符
+            kv_delimit = format_info.get("tab", "=") or "="          # 键值分隔符
         except Exception:
             logger.warning(f"[_classify_kv_features] 解析 format_info 失败，使用默认值")
 
-    # 2. 使用 KvExtractor 提取 + 聚合
-    extractor = KvExtractor(delimit, tab)
+    # 2. 使用 KvExtractor 提取 + 聚合（使用新参数名）
+    extractor = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
     aggregation = extractor.extract_and_aggregate(logs_str, feature_field)
 
     total_lines = aggregation.get("total_lines", 0)
@@ -349,14 +349,14 @@ def _classify_kv_features(
         "total_valid_lines": total_lines,
         "covered_lines": matched_lines,
         "classification_details": parsed.get("classification_details", []),
-        # CHANGED: 添加 analysis 字段（纯 KV 格式）
+        # CHANGED: 添加 analysis 字段（纯 KV 格式），语义：delimit=字段分隔符，tab=键值分隔符
         "analysis": {
             "has_json_structure": False,
             "has_cef_prefix": False,
             "has_key_value_pairs": True,
             "has_delimited_structure": False,
-            "delimit": delimit or "判断失败",
-            "tab": tab or "判断失败",
+            "delimit": field_delimit or "判断失败",  # 字段分隔符
+            "tab": kv_delimit or "判断失败",          # 键值分隔符
         },
         "categorical_features": feature_field,
         "Diversion_method": "日志类型",

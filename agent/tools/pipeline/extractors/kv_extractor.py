@@ -18,9 +18,9 @@ class KvExtractor(ValueExtractor):
     """从 KV 格式日志行中提取特征值，支持多种分隔符。
 
     支持的格式：
-    - delimit="=", tab=" " → key=value key2=value2
-    - delimit=":", tab=" " → key:value key2:value2
-    - delimit=":", tab="||" → key:value||key2:value2
+    - field_delimit=" ", kv_delimit="=" → key=value key2=value2
+    - field_delimit=" ", kv_delimit=":" → key:value key2:value2
+    - field_delimit="||", kv_delimit=":" → key:value||key2:value2
     - 支持引号内的值（可包含分隔符）
 
     示例：
@@ -28,26 +28,50 @@ class KvExtractor(ValueExtractor):
         src_ip="192.168.1.1" action="block" level="high
         tag:waf_log_deface site_id:1351218462
         ver:2.0||mid:36658229b1914e6ffaf4c0ed84f1696c
+
+    参数说明：
+        field_delimit: 字段分隔符（如 " " 或 "||"）
+        kv_delimit: 键值分隔符（如 "=" 或 ":"）
     """
 
-    def __init__(self, delimit: str = "=", tab: str = " "):
+    def __init__(
+        self,
+        delimit: str = None,      # CHANGED: 旧参数名（向后兼容），实际语义是 kv_delimit
+        tab: str = None,          # CHANGED: 旧参数名（向后兼容），实际语义是 field_delimit
+        field_delimit: str = " ",  # CHANGED: 新参数名，字段分隔符
+        kv_delimit: str = "=",     # CHANGED: 新参数名，键值分隔符
+    ):
         """初始化 KV 提取器。
 
         Args:
-            delimit: key-value 连接符（如 "=" 或 ":"）。
-            tab: key-value 分隔符（如 " " 或 "||"）。
+            delimit: （已废弃）键值分隔符，请使用 kv_delimit
+            tab: （已废弃）字段分隔符，请使用 field_delimit
+            field_delimit: 字段分隔符（如 " " 或 "||"）
+            kv_delimit: 键值分隔符（如 "=" 或 ":"）
         """
-        self.delimit = delimit
-        self.tab = tab
-        # 构建 tab 分隔符模式
-        tab_pattern = r'\s+' if tab == "space" else _re.escape(tab)
-        # 构建 delimit 分隔符模式（转义特殊字符）
-        delimit_pattern = _re.escape(delimit)
+        # CHANGED: 向后兼容：如果使用旧参数名，映射到新参数名
+        if delimit is not None:
+            kv_delimit = delimit
+        if tab is not None:
+            field_delimit = tab
+
+        self.field_delimit = field_delimit
+        self.kv_delimit = kv_delimit
+
+        # CHANGED: 修改参数名，但保留 self.delimit 和 self.tab 以兼容旧代码
+        self.delimit = kv_delimit    # 键值分隔符（向后兼容）
+        self.tab = field_delimit     # 字段分隔符（向后兼容）
+
+        # CHANGED: 构建 field_delimit 分隔符模式（字段分隔符）
+        field_pattern = r'\s+' if field_delimit == "space" else _re.escape(field_delimit)
+        # CHANGED: 构建 kv_delimit 分隔符模式（键值分隔符）
+        kv_pattern = _re.escape(kv_delimit)
+
         # CHANGED: 使用 \S+ 替代 \w+ 支持非 ASCII 字符（如中文 key）
-        # 构建动态正则：(行首或tab分隔符) + key + delimit + "值" 或 非分隔符值
+        # 构建动态正则：(行首或field_delimit分隔符) + key + kv_delimit + "值" 或 非分隔符值
         self._pattern = _re.compile(
-            rf'(?:^|{tab_pattern})(\S+)\s*{delimit_pattern}'
-            rf'(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^{tab_pattern}"]+))'
+            rf'(?:^|{field_pattern})(\S+)\s*{kv_pattern}'
+            rf'(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^{field_pattern}"]+))'
         )
 
     def extract_value(self, line: str, feature_field: str) -> Any:

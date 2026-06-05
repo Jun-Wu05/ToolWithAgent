@@ -37,8 +37,8 @@
 <rule index="6">feature_count 必须严格等于 classification_details 数组的长度</rule>
 
 <rule index="7">analysis 字段用于描述日志 body 的结构特征：
-- tab：键值连接符（如 = 或 :），无法判断时输出"判断失败"
-- delimit：键值对之间的分隔符（如 space、comma、pipe），无法判断时输出"判断失败"
+- delimit：字段分隔符，即键值对之间的分隔符（如 space、comma、pipe、||），无法判断时输出"判断失败"
+- tab：键值分隔符，即键和值之间的连接符（如 = 或 :），无法判断时输出"判断失败"
 </rule>
 </rules>
 

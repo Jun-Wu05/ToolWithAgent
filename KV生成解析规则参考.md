@@ -41,14 +41,15 @@ syslog+kv时遇到的问题：
 
 
 1、纯KV格式的日志入口规则的生成
-name恒为json，
-filter里面增加case，
-name为conditionMatch的json数组，value值格式固定为original_log like ' '，引号里面的值遍历classification_details的logtype，其余结构不变
+1）parser的name恒为delimitWithKeyMap，
+2）tab取json输出结果里面的tab,delimit取json输出结果里面的delimit，
+3）filter里面增加case，value值格式固定为feature_field like ' '，like前面的字段动态取feature_field里面的值，引号里面的值遍历classification_details的logtype，其余结构不变。
 name为addFields的json里"fields": {
-                "日志类型": "%{payload_index}"
+                "日志类型": "%{type}"
             }，key值恒为日志类型，后面格式%{}固定，里面的值动态取值feature_field
 {
-    "name": "json",
+    "name": "delimitWithKeyMap",
+    "tab": "=",
     "resolverType": "event",
     "unmappingKeep": false,
     "deviceType": "1",
@@ -64,21 +65,16 @@ name为addFields的json里"fields": {
             "id": "additional_fields_filter"
         },
         {
+            "fields": {
+                "日志类型": "%{type}"
+            },
+            "name": "addFields",
+            "id": ""
+        },
+        {
             "cases": [
                 {
-                    "value": "original_log like 'detect_webshell'",
-                    "rule": {
-                        "fields": {
-                            "1": "1"
-                        },
-                        "name": "addFields",
-                        "id": ""
-                    },
-                    "name": "case",
-                    "id": ""
-                },
-                {
-                    "value": "original_log like 'vul_patch_business_impact'",
+                    "value": "type like 'ac'",
                     "rule": {
                         "fields": {
                             "1": "1"
@@ -95,19 +91,69 @@ name为addFields的json里"fields": {
             },
             "name": "conditionMatch",
             "id": ""
-        },
-        {
-            "fields": {
-                "日志类型": "%{payload_index}"
-            },
-            "name": "addFields",
-            "id": ""
         }
     ],
+    "delimit": "\\s",
     "subResolver": 0
 }
+4）normalize添加json结构固定为：
+{
+    "mappings": [],
+    "field": "log_type",
+    "sim": true,
+    "result": [
+        "ac"
+    ],
+    "info": null,
+    "entity": "日志",
+    "required": false,
+    "core": false,
+    "value": "",
+    "index": "日志类型"
+}
 
+参考json：
 
+{
+  "status": "SUCCESS",
+  "log_format": "KV",
+  "log_format_detail": "纯KV",
+  "feature_field": "type",
+  "feature_identifier": "",
+  "feature_count": 3,
+  "total_valid_lines": 2000,
+  "covered_lines": 2000,
+  "classification_details": [
+    {
+      "logtype": "ac",
+      "sample": "id=tos time=\"2026-06-01 10:04:20\" fw=TopsecOS  pri=6 type=ac  recorder=FW-NAT src=10.32.12.200 dst=172.26.18.66 sport=42218 dport=80 smac=00:25:9e:92:6e:89 dmac=94:a6:d8:cc:72:78 proto=tcp indev=eth14 outdev=eth15 user= rule=���� connid=138383122 parentid=0 dpiid=0 natid=0 policyid=8121 msg=\"null\"",
+      "real_samples": "id=tos time=\"2026-06-01 10:04:20\" fw=TopsecOS  pri=6 type=ac  recorder=FW-NAT src=10.32.12.200 dst=172.26.18.66 sport=42218 dport=80 smac=00:25:9e:92:6e:89 dmac=94:a6:d8:cc:72:78 proto=tcp indev=eth14 outdev=eth15 user= rule=���� connid=138383122 parentid=0 dpiid=0 natid=0 policyid=8121 msg=\"null\""
+    },
+    {
+      "logtype": "conn",
+      "sample": "id=tos time=\"2026-06-01 10:04:07\" fw=TopsecOS  pri=6 type=conn  recorder=session src=10.32.9.166 dst=172.26.18.66 proto=tcp sport=36794 dport=80 inpkt=6 outpkt=4 sent=376 rcvd=372 duration=20 connid=196924573 parent=0 op=ɾ�� msg=\"null\"",
+      "real_samples": "id=tos time=\"2026-06-01 10:04:07\" fw=TopsecOS  pri=6 type=conn  recorder=session src=10.32.9.166 dst=172.26.18.66 proto=tcp sport=36794 dport=80 inpkt=6 outpkt=4 sent=376 rcvd=372 duration=20 connid=196924573 parent=0 op=ɾ�� msg=\"null\""
+    },
+    {
+      "logtype": "vpn",
+      "sample": "id=tos time=\"2026-06-01 10:04:19\" fw=TopsecOS  pri=7 type=vpn recorder=vpn msg=\"Line 0 registeration mutex is locked.\"",
+      "real_samples": "id=tos time=\"2026-06-01 10:04:19\" fw=TopsecOS  pri=7 type=vpn recorder=vpn msg=\"Line 0 registeration mutex is locked.\""
+    }
+  ],
+  "analysis": {
+    "has_json_structure": false,
+    "has_cef_prefix": false,
+    "has_key_value_pairs": true,
+    "has_delimited_structure": false,
+    "delimit": "=",
+    "tab": "space"
+  },
+  "categorical_features": "type",
+  "Diversion_method": "日志类型",
+  "fail_reason": "",
+  "feature_body_group": 0,
+  "feature_value_group": 0
+}
 
 2、syslog头+KV的入口规则生成：
 log_format_detail为日志头+KV时，
