@@ -452,12 +452,44 @@ def _do_classify_log_features(
             tab=tab,
         )
         located = locate_result.get("feature_location", "body")
-        located_field = locate_result.get("feature_field", feature_field)
+        located_field = locate_result.get("feature_field", "")
         reason = locate_result.get("reason", "")
+        body_candidates = locate_result.get("body_candidates", 0)
         logger.info(
             f"[_do_classify_log_features] Step 2a 结果: "
-            f"location={located}, field={located_field}, reason={reason[:80]}"
+            f"location={located}, field={located_field}, reason={reason[:80]}, body_candidates={body_candidates}"
         )
+
+        # CHANGED: 添加验证逻辑（无兜底策略）
+        if located == "body":
+            # body 路径必须有 feature_field
+            if not located_field:
+                logger.error("[_do_classify_log_features] feature_location=body 但 feature_field 为空")
+                return _build_failed_result(
+                    format_type, format_detail, feature_field,
+                    "Step 2a 判断错误：body 路径必须有 feature_field"
+                )
+        elif located == "header":
+            # header 路径必须有正确的 feature_field
+            if located_field != "__header__":
+                logger.error(f"[_do_classify_log_features] feature_location=header 但 feature_field={located_field}")
+                return _build_failed_result(
+                    format_type, format_detail, feature_field,
+                    f"Step 2a 判断错误：header 路径 feature_field 必须为 __header__（实际为 {located_field}）"
+                )
+            # body 有候选字段但选择 header，判断错误
+            if body_candidates > 0:
+                logger.error(f"[_do_classify_log_features] feature_location=header 但 body 有 {body_candidates} 个候选")
+                return _build_failed_result(
+                    format_type, format_detail, feature_field,
+                    f"Step 2a 判断错误：body 有 {body_candidates} 个候选字段但选择 header"
+                )
+        elif located == "unknown":
+            logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
+            return _build_failed_result(
+                format_type, format_detail, feature_field,
+                f"特征定位失败: {reason}"
+            )
 
         if located == "header":
             # Path A: 特征在日志头中

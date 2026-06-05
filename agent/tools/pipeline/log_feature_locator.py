@@ -108,10 +108,10 @@ def locate_feature(
 
     返回:
         {"feature_location": "body"|"header"|"unknown",
-         "feature_field": str, "reason": str}
+         "feature_field": str, "reason": str, "body_candidates": int}
     """
     if not logs_str or not logs_str.strip():
-        return {"feature_location": "unknown", "feature_field": "", "reason": "日志为空"}
+        return {"feature_location": "unknown", "feature_field": "", "reason": "日志为空", "body_candidates": 0}
 
     try:
         # 1. 准备分析数据
@@ -120,6 +120,7 @@ def locate_feature(
 
         header_clusters = header_analysis.get("clusters", [])
         header_distinct = len(header_clusters)
+        body_candidates_count = len(body_analysis.get('candidates', []))
 
         # 2. 构建 prompt
         # CHANGED: 转义花括号，防止 str.format() 误解析
@@ -140,18 +141,19 @@ def locate_feature(
         logger.info(
             f"[locate_feature] 调用 LLM, "
             f"header_patterns={header_distinct}, "
-            f"body_candidates={len(body_analysis.get('candidates', []))}"
+            f"body_candidates={body_candidates_count}"
         )
 
-        # 3. 调用 LLM（短超时，失败时快速降级）
+        # 3. 调用 LLM（无兜底策略）
         response = _call_llm_direct(prompt, temperature=0.1, max_tokens=300, timeout=30)
         parsed = _try_parse_json(response)
 
         if parsed and parsed.get("feature_location") in ("body", "header", "unknown"):
             result = {
                 "feature_location": parsed["feature_location"],
-                "feature_field": parsed.get("feature_field", feature_field),
+                "feature_field": parsed.get("feature_field", ""),
                 "reason": parsed.get("reason", ""),
+                "body_candidates": body_candidates_count,
             }
             logger.info(
                 f"[locate_feature] LLM 判定: location={result['feature_location']}, "
@@ -160,9 +162,9 @@ def locate_feature(
             return result
 
         logger.warning(f"[locate_feature] LLM 返回无效: {response[:200]}")
-        return {"feature_location": "unknown", "feature_field": feature_field, "reason": "LLM返回无效"}
+        return {"feature_location": "unknown", "feature_field": "", "reason": "LLM返回无效", "body_candidates": body_candidates_count}
 
     except Exception as e:
-        logger.warning(f"[locate_feature] 异常: {type(e).__name__}: {e}")
-        # 降级：保持 Step 1 建议，走 body 路径
-        return {"feature_location": "body", "feature_field": feature_field, "reason": f"定位异常降级: {e}"}
+        logger.error(f"[locate_feature] 异常: {type(e).__name__}: {e}")
+        # CHANGED: 无兜底策略，直接返回 unknown
+        return {"feature_location": "unknown", "feature_field": "", "reason": f"定位异常: {e}", "body_candidates": 0}

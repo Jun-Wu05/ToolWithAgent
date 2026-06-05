@@ -4,16 +4,16 @@ syslog+kv时遇到的问题：
 3、feature_field的值时怎么生成的？feature_field判断不准确，日志类型的特征值明明在body里，为什么会输出__header__？
 {
   "status": "SUCCESS",
-  "categorical_features": "日志类型",
+  "categorical_features": "在日志头中",
   "Diversion_method": "日志类型",
   "log_format": "KV",
   "feature_identifier": "<\\d+>\\S+:\\s*(.*)",
   "feature_count": 1,
   "classification_details": [
     {
-      "logtype": "1",
+      "logtype": "包过滤日志",
       "sample": "<5>kernel: devid=2 date=\"2026/06/01 18:04:17\" dname=themis logtype=1 pri=5 ver=0.3.0 rule_name=pf67 mod=pf sa=10.32.37.72 sport=32758 type=NULL da=192.168.28.130 dport=6999 code=NULL proto=IPPROTO_TCP policy=允许 duration=0 rcvd=60 sent=60 fwlog=0 dsp_msg=\"包过滤日志\"",
-      "real_samples": "<5>kernel: devid=2 date=\"2026/06/01 18:04:17\" dname=themis logtype=1 pri=5 ver=0.3.0 rule_name=pf67 mod=pf sa=10.32.37.72 sport=32758 type=NULL da=192.168.28.130 dport=6999 code=NULL proto=IPPROTO_TCP policy=允许 duration=0 rcvd=60 sent=60 fwlog=0 dsp_msg=\"包过滤日志\""
+      "real_samples": "devid=2 date=\"2026/06/01 18:04:17\" dname=themis logtype=1 pri=5 ver=0.3.0 rule_name=pf67 mod=pf sa=10.32.37.72 sport=32758 type=NULL da=192.168.28.130 dport=6999 code=NULL proto=IPPROTO_TCP policy=允许 duration=0 rcvd=60 sent=60 fwlog=0 dsp_msg=\"包过滤日志\""
     }
   ],
   "analysis": {
@@ -24,7 +24,6 @@ syslog+kv时遇到的问题：
     "delimit": "space",
     "tab": "="
   },
-  "fail_reason": "",
   "log_format_detail": "日志头+KV",
   "feature_field": "__header__",
   "feature_body_group": 1,
