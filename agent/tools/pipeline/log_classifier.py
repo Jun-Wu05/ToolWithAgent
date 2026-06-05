@@ -502,12 +502,11 @@ def _do_classify_log_features(
                     format_type, format_detail, feature_field,
                     f"Step 2a 判断错误：header 路径 feature_field 必须为 __header__（实际为 {located_field}）"
                 )
-            # body 有候选字段但选择 header，判断错误
-            if body_candidates > 0:
-                logger.error(f"[_do_classify_log_features] feature_location=header 但 body 有 {body_candidates} 个候选")
-                return _build_failed_result(
-                    format_type, format_detail, feature_field,
-                    f"Step 2a 判断错误：body 有 {body_candidates} 个候选字段但选择 header"
+            # CHANGED: 仅在 body 有大量候选（≥10）时记录警告，不强制失败（2026-06-05 修复数据1）
+            if body_candidates >= 10:
+                logger.warning(
+                    f"[_do_classify_log_features] feature_location=header 但 body 有 {body_candidates} 个候选（可能误判），"
+                    f"LLM 理由: {reason}，已信任 LLM 判断继续处理"
                 )
         elif located == "unknown":
             logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
