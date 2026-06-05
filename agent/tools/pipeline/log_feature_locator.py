@@ -19,23 +19,59 @@ from agent.tools.pipeline.llm_client import _call_llm_direct, _try_parse_json
 logger = get_logger("log_parser_pipeline")
 
 
-def _prepare_header_analysis(logs_str: str) -> dict:
-    """用 HeaderExtractor 聚合日志头模式。"""
+def _escape_format_braces(text: str) -> str:
+    """转义字符串中的花括号，防止 str.format() 误解析。
+    
+    Python str.format() 将 { } 解释为格式化占位符，但用户数据
+    （如 JSON、日志样例）可能包含花括号。将它们转义为 {{ }}。
+    
+    Args:
+        text: 待转义的字符串。
+    
+    Returns:
+        转义后的字符串。
+    """
+    return text.replace('{', '{{').replace('}', '}}')
+
+
+def _prepare_header_analysis(logs_str: str, format_type: str = "json", delimit: str = "=") -> dict:
+    """用 HeaderExtractor 聚合日志头模式。
+
+    Args:
+        logs_str: 原始日志字符串。
+        format_type: 日志格式（"json" 或 "kv"）。
+        delimit: KV 格式的 key-value 连接符。
+    """
     from agent.tools.pipeline.extractors.header_extractor import (
         HeaderExtractor,
         aggregate_headers,
     )
-    return aggregate_headers(logs_str)
+    return aggregate_headers(logs_str, format_type, delimit)
 
 
 def _prepare_body_analysis(
     logs_str: str,
     feature_field: str,
+    format_type: str = "json",
+    delimit: str = "=",
+    tab: str = " ",
 ) -> dict:
-    """用 JsonExtractor 分析 body 字段候选。"""
-    from agent.tools.pipeline.extractors.json_extractor import JsonExtractor
+    """用 JsonExtractor 或 KvExtractor 分析 body 字段候选。
 
-    extractor = JsonExtractor()
+    Args:
+        logs_str: 原始日志字符串。
+        feature_field: Step 1 建议的特征字段。
+        format_type: 日志格式（"json" 或 "kv"）。
+        delimit: KV 格式的 key-value 连接符。
+        tab: KV 格式的 key-value 分隔符。
+    """
+    if format_type == "kv":
+        from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
+        extractor = KvExtractor(delimit, tab)
+    else:
+        from agent.tools.pipeline.extractors.json_extractor import JsonExtractor
+        extractor = JsonExtractor()
+
     lines = [l for l in logs_str.strip().split("\n") if l.strip()][:200]
 
     # 分析 Step 1 建议的 feature_field
@@ -63,7 +99,10 @@ def _prepare_body_analysis(
 def locate_feature(
     logs_str: str,
     feature_field: str = "",
+    format_type: str = "json",
     format_detail: str = "",
+    delimit: str = "=",
+    tab: str = " ",
 ) -> dict:
     """判断分类特征位置（header / body）。
 
@@ -76,19 +115,20 @@ def locate_feature(
 
     try:
         # 1. 准备分析数据
-        header_analysis = _prepare_header_analysis(logs_str)
-        body_analysis = _prepare_body_analysis(logs_str, feature_field)
+        header_analysis = _prepare_header_analysis(logs_str, format_type, delimit)
+        body_analysis = _prepare_body_analysis(logs_str, feature_field, format_type, delimit, tab)
 
         header_clusters = header_analysis.get("clusters", [])
         header_distinct = len(header_clusters)
 
         # 2. 构建 prompt
-        header_json = json.dumps(
+        # CHANGED: 转义花括号，防止 str.format() 误解析
+        header_json = _escape_format_braces(json.dumps(
             {"unique_patterns": header_distinct, "patterns": header_clusters[:10]},
             ensure_ascii=False,
-        )
-        body_json = json.dumps(body_analysis, ensure_ascii=False)
-        sampled = sample_logs(logs_str, 5)
+        ))
+        body_json = _escape_format_braces(json.dumps(body_analysis, ensure_ascii=False))
+        sampled = _escape_format_braces(sample_logs(logs_str, 5))
 
         prompt = load_log_feature_locate_prompt().format(
             header_analysis=header_json,

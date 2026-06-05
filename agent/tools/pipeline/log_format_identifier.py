@@ -74,6 +74,29 @@ def _do_identify_log_format(logs_str: str) -> str:
         parsed.setdefault("kv_connector", None)
         parsed.setdefault("kv_separator", None)
         parsed.setdefault("has_header", False)
+        # CHANGED: 将 LLM 返回的 kv_connector/kv_separator 映射为 delimit/tab
+        # 下游代码使用 delimit/tab 字段名（log_classifier.py）
+        if "kv_connector" in parsed and parsed["kv_connector"] is not None:
+            parsed["delimit"] = parsed["kv_connector"]
+        
+        # CHANGED: kv_separator 值映射（支持中文描述和代码格式）
+        # 注意："space" 保持为字符串 "space"，让 KvExtractor 自动转为 \s+
+        separator_map = {
+            "空格": "space",     # 映射为 "space"，KvExtractor 会自动转为 \s+
+            "space": "space",    # 保持为 "space"，KvExtractor 自动转为 \s+
+            "分号": ";",
+            "semicolon": ";",
+            "逗号": ",",        # 英文逗号
+            "comma": ",",
+            "中文逗号": "，",   # 中文逗号
+            "管道": "||",
+            "pipe": "||",
+            "tab": "\t",
+        }
+        if "kv_separator" in parsed and parsed["kv_separator"] in separator_map:
+            parsed["tab"] = separator_map[parsed["kv_separator"]]
+        elif "kv_separator" in parsed and parsed["kv_separator"] is not None:
+            parsed["tab"] = parsed["kv_separator"]
         parsed.setdefault("header_end_marker", "")
         parsed.setdefault("has_header_feature", False)  # CHANGED: 新增字段
         parsed.setdefault("feature_field", "")  # CHANGED: 新增字段

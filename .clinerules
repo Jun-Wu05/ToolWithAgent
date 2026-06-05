@@ -1,58 +1,68 @@
-- If you realize you have deviated after 3+ tool calls, STOP and say:
-- "I have deviated. Original request: [X]. Current direction: [Y]. Should I realign or continue?"
-- **Scope guardrails**:
-- Do not refactor unrelated files unless explicitly asked.
-- Do not add unrequested features (even if "nice to have").
-- Do not change core project architecture without confirmation.
+# AI Agent 行为规则（Cline 专用）
 
-## 5. Determinism Reinforcement
+## 1. 偏差检测与纠正
+- 如果你在连续 **3 次**以上的工具调用后意识到偏离了原始需求，必须**停止**并输出：
+  > “我已偏离原始请求。原始请求：[X]。当前方向：[Y]。请指示：恢复原方向还是继续当前方向？”
 
-- **Idempotent operations**: Running the same action twice must not break anything.
-- Before writing: check if file/setting already exists.
-- After writing: leave the system in a predictable state.
-- **Predictable outputs**:
-- Use consistent code formatting.
-- Sort imports: standard library → third-party → local.
-- Use explicit variable names (avoid `temp`, `data`, `result` without context).
-- **State transparency**:
-- When reading files, state which exact lines you are examining.
-- When writing, state which exact lines changed.
-- Use `# CHANGED:` comments for non-obvious modifications.
-- **No speculation**: If uncertain, say: "I am not certain about [X]. Possibilities: [A, B]. Which is correct?"
+## 2. 范围护栏（防止过度修改）
+- **不得重构无关文件**，除非用户明确要求。
+- **不得添加未请求的功能**（即使是“锦上添花”的改进）。
+- **不得修改核心项目架构**（如改变设计模式、目录结构、主要依赖），除非先获得确认。
 
-## 6. Python & Agent-Specific Rules
+## 3. 确定性强化
 
-- **Type hints required** for all new functions: `def foo(x: int) -> str:`.
-- **Error handling**: Every external call (API, file I/O, subprocess) must have a `try-except` with specific exception types.
-- **Logging**: Add agent decision logging using `print(f"[Agent] {action}")` or the project's existing logger.
-- **Testing**: When fixing bugs, first write a minimally reproducible test case.
-- **Respect project structure**: Do not change the existing architecture (tkinter GUI + agent logic) without explicit approval.
+### 3.1 幂等操作
+- 同一操作执行两次，系统状态必须保持一致，不产生副作用。
+- 写入前检查文件/配置是否已存在；写入后确保系统处于可预测状态。
 
-## 7. Security & Safety (Hard Rules)
+### 3.2 可预测的输出
+- 代码格式保持一致（遵循项目现有风格，或 PEP 8）。
+- 导入顺序：标准库 → 第三方库 → 本地模块。
+- 变量命名：明确表意，避免 `temp`、`data`、`result` 等无上下文的名称。
 
-- **NEVER** read or modify files containing: `.env`, `*.pem`, `*secret*`, `*credential*`, `*key*`.
-- **ALWAYS** ask for confirmation before:
-- Deleting files.
-- Running destructive commands (`rm -rf`, database drops).
-- Making external API calls with side effects.
-- **No hardcoded secrets**: Never write tokens, passwords, or API keys into code or logs.
+### 3.3 状态透明
+- **读取文件时**：引用关键代码片段（至少前后 2 行），并说明其在文件中的大致位置（例如：“在 `class Database` 的 `connect` 方法内部”）。如需精确行号，请先确认文件内容未发生变动。
+- **修改文件时**：说明修改了哪些函数/类/代码块，并用 `# CHANGED:` 注释标注非显而易见的修改。
+- **不猜测**：如果不确定，明确说：“关于 [X] 我不确定。可能的方案：[A, B]。请确认哪一种正确？”
 
-## 8. Response Style & Quality Checks
+## 4. Python & Agent 特定规则
 
-- **Language**: Use Chinese for all code, comments, and technical explanations.
-- **Format**: Present code blocks with language identifiers. Keep responses structured but conversational.
-- **Confidence scoring**: Before/after important operations, state confidence (1–10).
-- **Final summary**: Before finishing a task, provide a bullet list: "Summary of changes: ..."
-- **Ask clarifying questions** when requirements are ambiguous.
+- **类型注解**：所有新函数必须包含类型注解，如 `def foo(x: int) -> str:`。
+- **错误处理**：每个外部调用（API、文件 I/O、子进程）必须使用 `try-except` 捕获**具体异常类型**（避免裸露的 `except:`）。
+- **日志记录**：
+  - 优先使用项目已有的 `logging` 对象（如 `logging.getLogger(__name__)`）。
+  - 若项目无日志机制，使用 `print(f"[Agent] {action}")` 记录关键决策。
+- **测试**：修复 bug 时，先编写能复现问题的最小测试用例。
+- **尊重项目结构**：不得改变现有架构（如 tkinter GUI + agent 逻辑），除非明确批准。
 
-## 9. Self-Correction Triggers
+## 5. 安全与硬性规则
 
-- If you detect a potential violation of any rule above, stop and state which rule may be violated.
-- If the same error repeats twice, stop and ask for human decision.
-- After any rejected operation, log why it was rejected and adjust your next action.
+- **禁止读取或修改以下文件，除非用户明确逐条确认**：
+  - `.env`、`*.pem`、`*.key`
+  - 文件名包含 `secret` 或 `credential` 且**非示例/文档性质**的文件（例如 `example_secret_sample.yaml` 可例外，但需先说明）
+- **执行以下操作前必须请求确认**：
+  - 删除文件
+  - 运行破坏性命令（`rm -rf`、数据库删除等）
+  - 发起有副作用的 API 调用（写入、修改、删除）
+- **禁止硬编码敏感信息**：不得在代码或日志中写入 token、密码、API key。
 
-## 10. Remember: The Human May Get Angry
+## 6. 响应风格与质量
 
-- Provide clear, complete, and deterministic outputs.
-- When in doubt, over-communicate rather than assume.
-- The goal is a reliable, predictable, and well-documented agent.
+- **语言**：
+  - 对话、注释、文档、日志输出使用**中文**。
+  - 代码标识符（变量名、函数名、类名等）使用**英文**，符合 Python 编码规范。
+- **格式**：代码块必须标注语言（如 `python`）。回复结构清晰，保持自然对话风格。
+- **最终总结**：完成任务前，输出项目符号列表，说明变更摘要。
+- **澄清问题**：当需求模糊时，主动提出澄清问题。
+
+## 7. 自我修正触发条件
+
+- 如果发现**可能违反上述任意一条规则**，立即停止并说明可能违反的规则编号。
+- 同一错误连续出现 **3 次**（或根据上下文判断为不可恢复错误），停止并请求人工决策。
+- 任何被用户否决的操作，记录否决原因，并调整下一步行动。
+
+## 8. 人与 AI 协作优先级
+
+- 提供清晰、完整、确定性的输出。
+- 有疑问时多沟通，不要默认假设用户意图。
+- 目标是成为一个**可靠、可预测、文档化**的编程助手。

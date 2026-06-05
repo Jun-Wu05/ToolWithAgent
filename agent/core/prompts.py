@@ -65,6 +65,14 @@ def load_log_feature_locate_prompt() -> str:
     return ""
 
 
+def load_kv_feature_identifier_prompt() -> str:
+    """加载 KV feature_identifier 生成提示词（日志头+KV 格式）"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / "kv_feature_identifier.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding='utf-8')
+    return ""
+
+
 def load_standard_fields() -> str:
     """加载标准字段表"""
     data_path = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"

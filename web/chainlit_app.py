@@ -707,6 +707,21 @@ Excel 格式说明：
                 matched_count = sum(1 for item in all_mapping_data if item.get("匹配状态") == "匹配成功")
                 unmatched_count = len(all_mapping_data) - matched_count
 
+                # CHANGED: 保存批量映射数据供 Excel 导出使用（转换为 sub_rule_mapping_results 格式）
+                # 包装成与 on_apply_field_mapping 兼容的格式
+                batch_mapping_results = [{
+                    "rule_name": "批量映射",
+                    "mappings": [
+                        {
+                            "原始字段名": item.get("原始字段名", ""),
+                            "系统属性名称": item.get("系统属性名称", ""),
+                            "匹配状态": item.get("匹配状态", "")
+                        }
+                        for item in all_mapping_data
+                    ]
+                }]
+                user_session["batch_mapping_results"] = batch_mapping_results
+
                 summary = f"""✅ **字段映射完成！（分 {total_batches} 批处理）**
 
 📊 **映射统计：**
@@ -732,7 +747,13 @@ Excel 格式说明：
                         content="**📋 字段映射表：**\n\n请确认映射结果，点击下方按钮填充到原始数据中。",
                         elements=elements,
                         actions=[
-                            cl.Action(name="confirm_fill", label="✅ 确认填充", description="确认后将映射结果填充到原始数据", payload={})
+                            cl.Action(name="confirm_fill", label="✅ 确认填充", description="确认后将映射结果填充到原始数据", payload={}),
+                            cl.Action(
+                                name="export_batch_field_mapping_excel",
+                                label="📥 导出字段映射 Excel",
+                                description="下载字段映射表为 Excel 文件",
+                                payload={}
+                            ),
                         ]
                     ).send()
                 return
@@ -1238,6 +1259,12 @@ async def on_apply_field_mapping(action: cl.Action):
             elements=elements,
             actions=[
                 cl.Action(
+                    name="export_field_mapping_excel",
+                    label="📥 导出字段映射 Excel",
+                    description="下载字段映射表为 Excel 文件",
+                    payload={}
+                ),
+                cl.Action(
                     name="export_mapped_sub_rules",
                     label="📥 导出映射后子规则",
                     description="导出带标准字段映射的子规则",
@@ -1275,6 +1302,128 @@ async def on_export_mapped_sub_rules(action: cl.Action):
     except Exception as e:
         logger.error(f"[ACTION] 映射后子规则导出异常: {e}")
         await cl.Message(content=f"❌ 导出失败：{e}").send()
+
+
+@cl.action_callback("export_field_mapping_excel")
+async def on_export_field_mapping_excel(action: cl.Action):
+    """导出字段映射结果为 Excel 文件（日志解析→标准字段映射路径）"""
+    user_session = cl.user_session.get("user_session")
+    mapping_results = user_session.get("sub_rule_mapping_results")
+    logger.info('[ACTION] 用户点击"导出字段映射 Excel"按钮')
+
+    if not mapping_results:
+        await cl.Message(content="❌ 未找到字段映射结果，请先执行标准字段映射。").send()
+        return
+
+    try:
+        # 构建 Excel 数据
+        excel_data = []
+        for mr in mapping_results:
+            rule_name = mr.get("rule_name", "未知")
+            for m in mr.get("mappings", []):
+                excel_data.append({
+                    "子规则": rule_name,
+                    "原始字段": m.get("原始字段名", ""),
+                    "标准字段": m.get("系统属性名称", ""),
+                    "匹配状态": m.get("匹配状态", ""),
+                })
+
+        # 使用 pandas 转换为 Excel
+        import pandas as pd
+        import io
+        
+        df = pd.DataFrame(excel_data)
+        
+        # 创建 Excel 文件内容
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='字段映射')
+        
+        output.seek(0)
+        
+        # 生成文件名
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"字段映射_{date_str}.xlsx"
+        
+        # 发送 Excel 文件
+        excel_file = cl.File(
+            name=file_name,
+            content=output.getvalue(),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
+        await cl.Message(
+            content=f"✅ 字段映射表已导出！共 {len(excel_data)} 条映射。\n\n📥 点击下载：",
+            elements=[excel_file],
+        ).send()
+        
+    except ImportError:
+        logger.error("[ACTION] pandas 或 openpyxl 未安装")
+        await cl.Message(content="❌ 系统缺少 Excel 导出库 (pandas/openpyxl)，请联系管理员。").send()
+    except Exception as e:
+        logger.error(f"[ACTION] 字段映射 Excel 导出异常: {e}")
+        await cl.Message(content=f"❌ Excel 导出失败：{e}").send()
+
+
+@cl.action_callback("export_batch_field_mapping_excel")
+async def on_export_batch_field_mapping_excel(action: cl.Action):
+    """导出批量字段映射结果为 Excel 文件（聊天输入"映射"路径）"""
+    user_session = cl.user_session.get("user_session")
+    mapping_results = user_session.get("batch_mapping_results")
+    logger.info('[ACTION] 用户点击"批量字段映射导出Excel"按钮')
+
+    if not mapping_results:
+        await cl.Message(content="❌ 未找到批量映射结果，请先执行字段映射。").send()
+        return
+
+    try:
+        # 构建 Excel 数据
+        excel_data = []
+        for mr in mapping_results:
+            rule_name = mr.get("rule_name", "批量映射")
+            for m in mr.get("mappings", []):
+                excel_data.append({
+                    "子规则": rule_name,
+                    "原始字段": m.get("原始字段名", ""),
+                    "标准字段": m.get("系统属性名称", ""),
+                    "匹配状态": m.get("匹配状态", ""),
+                })
+
+        # 使用 pandas 转换为 Excel
+        import pandas as pd
+        import io
+        
+        df = pd.DataFrame(excel_data)
+        
+        # 创建 Excel 文件内容
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='字段映射')
+        
+        output.seek(0)
+        
+        # 生成文件名
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"字段映射_批量_{date_str}.xlsx"
+        
+        # 发送 Excel 文件
+        excel_file = cl.File(
+            name=file_name,
+            content=output.getvalue(),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
+        await cl.Message(
+            content=f"✅ 批量字段映射表已导出！共 {len(excel_data)} 条映射。\n\n📥 点击下载：",
+            elements=[excel_file],
+        ).send()
+        
+    except ImportError:
+        logger.error("[ACTION] pandas 或 openpyxl 未安装")
+        await cl.Message(content="❌ 系统缺少 Excel 导出库 (pandas/openpyxl)，请联系管理员。").send()
+    except Exception as e:
+        logger.error(f"[ACTION] 批量字段映射 Excel 导出异常: {e}")
+        await cl.Message(content=f"❌ Excel 导出失败：{e}").send()
 
 
 def _parse_mapping_results(llm_output: str) -> list[dict] | None:

@@ -135,6 +135,8 @@ def match_real_samples(
     对每个 classification detail，找到第一条特征字段值与 logtype 匹配的原始日志行，
     将 ``sample`` 和 ``real_samples`` 设为该原始行。
 
+    CHANGED (2026-06-05): 新增对 KV 格式的支持，使用 feature_identifier 正则提取 body。
+
     Args:
         parsed:            解析后的 LLM 响应字典（原地修改）。
         logs_str:          原始多行日志字符串。
@@ -148,13 +150,46 @@ def match_real_samples(
     ff = feature_field or parsed.get("feature_field", "log_type")
     log_lines = [l for l in logs_str.strip().split("\n") if l.strip()]
     details = parsed.get("classification_details", [])
+    
+    # CHANGED: 获取 feature_identifier 和 feature_body_group，用于 KV 格式 body 提取
+    feature_identifier = parsed.get("feature_identifier", "")
+    feature_body_group = parsed.get("feature_body_group", 0)
+    has_feature_identifier = bool(feature_identifier and feature_body_group > 0)
+    
+    # CHANGED: 如果有 feature_identifier 正则，预编译
+    import re as _re
+    feature_pattern = None
+    if has_feature_identifier:
+        try:
+            feature_pattern = _re.compile(feature_identifier)
+            logger.info(
+                f"[llm_postprocessor] 使用 feature_identifier 提取 body: "
+                f"regex={feature_identifier[:50]}..., body_group={feature_body_group}"
+            )
+        except _re.error as e:
+            logger.warning(f"[llm_postprocessor] feature_identifier 正则编译失败: {e}")
 
     sample_matched: dict[str, str] = {}
     for line in log_lines:
         if len(sample_matched) >= len(details):
             break
         body = line
-        if header_end_marker:
+        
+        # CHANGED: 优先使用 feature_identifier 正则提取 body（KV 格式）
+        if feature_pattern:
+            match = feature_pattern.search(line)
+            if match and len(match.groups()) >= feature_body_group:
+                body = match.group(feature_body_group)
+            else:
+                # 正则匹配失败，降级使用 header_end_marker
+                if header_end_marker:
+                    parts = line.split(header_end_marker, 1)
+                    if len(parts) == 2:
+                        body = parts[1]
+                else:
+                    body = line
+        elif header_end_marker:
+            # 无 feature_identifier，使用 header_end_marker 分割（JSON 格式）
             parts = line.split(header_end_marker, 1)
             if len(parts) == 2:
                 body = parts[1]

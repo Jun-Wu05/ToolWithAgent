@@ -120,9 +120,11 @@ def _try_parse_json(text: str) -> dict | None:
 def normalize_log_format(format_type: str) -> str:
     """将格式类型映射为固定枚举值。
 
-    当前仅支持 JSON 格式，其他格式统一返回 UNKNOWN。
+    支持的格式：JSON、KV、UNKNOWN
     """
     type_lower = (format_type or "").lower()
     if type_lower in ("json",):
         return "JSON"
+    if type_lower in ("kv", "key-value", "keyvalue"):
+        return "KV"
     return "UNKNOWN"

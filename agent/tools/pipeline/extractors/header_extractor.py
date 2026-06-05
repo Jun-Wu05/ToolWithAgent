@@ -26,20 +26,33 @@ _HEADER_DESENSITIZE_RE = _re.compile(
 )
 
 
-def extract_header(line: str) -> str:
-    """提取日志行的头部部分（第一个 `{` 或 `[` 之前的文本）。
+def extract_header(line: str, format_type: str = "json", delimit: str = "=") -> str:
+    """提取日志行的头部部分（JSON/数组/KV 分隔符之前的文本）。
 
     Args:
         line: 单条日志行。
+        format_type: 日志格式（"json" 或 "kv"）。
+        delimit: KV 格式的 key-value 连接符（如 "=" 或 ":"）。
 
     Returns:
-        头部文本，未找到 JSON 分隔符时返回整行。
+        头部文本，未找到分隔符时返回整行。
     """
+    # 1. JSON 分割：找 { 或 [
     json_start = line.find("{")
     if json_start == -1:
         json_start = line.find("[")
     if json_start > 0:
         return line[:json_start].strip()
+
+    # 2. KV 分割：用 delimit 字符定位第一个 KV 对
+    if format_type == "kv" and delimit:
+        # 匹配：空格/行首 + word + delimit
+        pattern = rf'(?:^|\s)(\w+)\s*{_re.escape(delimit)}'
+        match = _re.search(pattern, line)
+        if match:
+            # 如果 match 在行首，说明无 header
+            return line[:match.start()].strip() if match.start() > 0 else ""
+
     return line.strip()
 
 
@@ -59,6 +72,8 @@ def desensitize_header(header: str) -> str:
 
 def aggregate_headers(
     logs_str: str,
+    format_type: str = "json",
+    delimit: str = "=",
     max_clusters: int = 50,
     max_header_len: int = 3000,
 ) -> dict:
@@ -66,6 +81,8 @@ def aggregate_headers(
 
     Args:
         logs_str:       原始多行日志字符串。
+        format_type:    日志格式（"json" 或 "kv"）。
+        delimit:        KV 格式的 key-value 连接符。
         max_clusters:   最大唯一头部聚类数。
         max_header_len: 每条头部样本的最大字符数。
 
@@ -88,7 +105,7 @@ def aggregate_headers(
         if len(cluster_map) >= max_clusters:
             break
 
-        header = extract_header(line)
+        header = extract_header(line, format_type, delimit)
         if not header:
             continue
 

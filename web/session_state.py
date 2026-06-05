@@ -107,6 +107,9 @@ class SessionState:
     sub_rule_mapping_results: Optional[List[Dict[str, Any]]] = None
     """标准字段映射结果（每条子规则的映射对照表）"""
 
+    batch_mapping_results: Optional[List[Dict[str, Any]]] = None
+    """批量字段映射结果（聊天输入"映射"路径），供 Excel 导出使用"""
+
     # ---- 工厂方法 ----
 
     @classmethod
