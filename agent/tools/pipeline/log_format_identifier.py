@@ -136,11 +136,22 @@ def _do_identify_log_format(logs_str: str) -> str:
             parsed["status"] = "UNSUPPORTED"
             parsed["reason"] = "无法识别日志格式"
 
+        # CHANGED: 增强日志输出，显示 Step 1 识别的分隔符信息（2026-06-08 修复）
         logger.info(
             f"[identify_log_format] format={parsed['format']}, "
             f"has_header={parsed.get('has_header')}, "
-            f"header_end_marker='{parsed.get('header_end_marker', '')}'"
+            f"header_end_marker='{parsed.get('header_end_marker', '')}', "
+            f"delimit='{parsed.get('delimit', '未识别')}', "
+            f"tab='{parsed.get('tab', '未识别')}'"
         )
+
+        # 如果是 KV 格式，额外输出原始字段
+        if parsed['format'] == "kv":
+            logger.info(
+                f"[identify_log_format] KV 格式详细信息: "
+                f"kv_connector='{parsed.get('kv_connector', '未返回')}', "
+                f"kv_separator='{parsed.get('kv_separator', '未返回')}'"
+            )
 
         return json.dumps(parsed, ensure_ascii=False)
 

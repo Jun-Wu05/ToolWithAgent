@@ -74,6 +74,12 @@ def _prepare_body_analysis(
 
     lines = [l for l in logs_str.strip().split("\n") if l.strip()][:200]
 
+    # CHANGED: 添加日志，输出日志体示例（2026-06-08 调试）
+    sample_lines = lines[:3]
+    logger.info(f"[_prepare_body_analysis] 日志体示例（前3行）：")
+    for i, line in enumerate(sample_lines, 1):
+        logger.info(f"  行{i}: {line[:200]}")
+
     # 分析 Step 1 建议的 feature_field
     field_values: dict[str, set[str]] = {}
     if feature_field:

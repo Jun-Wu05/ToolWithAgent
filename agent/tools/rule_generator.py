@@ -383,6 +383,188 @@ def _build_json_normalize_entries(
     return entries
 
 
+def _build_kv_normalize_entries(
+    real_samples_str: str,
+    logtype: str = "",
+    delimit: str = " ",
+    tab: str = "=",
+) -> list[dict[str, Any]]:
+    """解析KV格式字符串，只提取key值构建normalize条目。
+
+    处理流程：
+    1. delimit语义化名称转义（"space" → " "）
+    2. 按delimit分割成key=value对
+    3. 对每个对，找第一个tab位置提取key
+    4. 构建normalize条目（按字母序，result为空数组）
+    5. 追加日志类型条目（永远最后）
+
+    Args:
+        real_samples_str: KV格式字符串（如 "user=admin method=ssh"）
+        logtype: 日志类型名称
+        delimit: 字段分隔符（如"space"、";"）
+        tab: 键值分隔符（如"="）
+
+    Returns:
+        normalize条目列表
+    """
+    # delimit语义化名称转义
+    delimiter = " " if delimit == "space" else delimit
+
+    entries: list[dict[str, Any]] = []
+    keys: set[str] = set()  # 去重
+
+    # 按delimit分割
+    for pair in real_samples_str.split(delimiter):
+        pair = pair.strip()
+        if not pair:
+            continue
+
+        # 找到第一个tab的位置，提取key
+        tab_pos = pair.find(tab)
+        if tab_pos > 0:
+            key = pair[:tab_pos].strip()
+            if key and key not in keys:
+                keys.add(key)
+                # 构建空result的条目
+                entries.append(_make_kv_normalize_entry(key, None))
+
+    # 按字母序排列
+    entries.sort(key=lambda e: e["index"])
+
+    # 追加日志类型条目（永远最后）
+    entries.append(_make_log_type_entry(logtype))
+
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# KV 格式辅助函数（2026-06-08 新增）
+# ---------------------------------------------------------------------------
+
+def _escape_delimit(delimit: str) -> str:
+    """转义 delimit 字段中的特殊字符。
+
+    当前转义规则：
+    - "space" → \\s（空格）
+    - "\\t" → \\t（制表符）
+    - 其他（";", ",", "||" 等）→ 保持原样
+
+    🔮 边界情况待处理：
+    - 如果 Step 1 返回语义化名称（如 "comma", "semicolon"），需要扩展映射表
+
+    Args:
+        delimit: 字段分隔符（键值对之间的分隔符）
+
+    Returns:
+        转义后的分隔符字符串
+    """
+    if delimit == "space":
+        return "\\s"
+    if delimit == "\\t":
+        return "\\t"
+    return delimit
+
+
+def _make_kv_logtype_filter(feature_field: str) -> dict[str, Any]:
+    """构建纯 KV 入口规则的日志类型映射 addFields filter。
+
+    key 恒为 "日志类型"，value 格式固定为 "%{feature_field}"。
+
+    Args:
+        feature_field: 特征字段名（如 "type"、"level"）
+
+    Returns:
+        addFields filter 字典
+    """
+    return {
+        "fields": {"日志类型": f"%{{{feature_field}}}"},
+        "name": "addFields",
+        "id": "",
+    }
+
+
+def _make_kv_condition_match_filter(
+    logtypes: list[str], feature_field: str
+) -> dict[str, Any]:
+    """构建纯 KV 入口规则的 conditionMatch filter。
+
+    每个 case 的 value 格式固定为 "{feature_field} like '{logtype}'"。
+
+    Args:
+        logtypes: 日志类型列表
+        feature_field: 特征字段名（如 "type"、"level"）
+
+    Returns:
+        conditionMatch filter 字典
+    """
+    cases: list[dict[str, Any]] = []
+    for lt in logtypes:
+        cases.append({
+            "value": f"{feature_field} like '{lt}'",
+            "rule": {"fields": {"1": "1"}, "name": "addFields", "id": ""},
+            "name": "case",
+            "id": "",
+        })
+    return {
+        "cases": cases,
+        "default": {"name": "none"},
+        "name": "conditionMatch",
+        "id": "",
+    }
+
+
+def _make_syslog_kv_condition_match_filter(logtypes: list[str]) -> dict[str, Any]:
+    """构建 syslog+KV 入口规则的 conditionMatch filter。
+
+    每个 case 的 value 格式固定为 "original_log like '{logtype}'"。
+
+    Args:
+        logtypes: 日志类型列表
+
+    Returns:
+        conditionMatch filter 字典
+    """
+    cases: list[dict[str, Any]] = []
+    for lt in logtypes:
+        cases.append({
+            "value": f"original_log like '{lt}'",
+            "rule": {"fields": {"1": "1"}, "name": "addFields", "id": ""},
+            "name": "case",
+            "id": "",
+        })
+    return {
+        "cases": cases,
+        "default": {"name": "none"},
+        "name": "conditionMatch",
+        "id": "",
+    }
+
+
+def _make_log_type_normalize_entry(logtypes: list[str]) -> dict[str, Any]:
+    """构建日志类型 normalize 条目（纯 KV 入口规则使用）。
+
+    result 为空数组，表示不提供样本值。
+
+    Args:
+        logtypes: 日志类型列表（未使用，保留参数以保持接口一致性）
+
+    Returns:
+        normalize 条目字典
+    """
+    return {
+        "mappings": [],
+        "field": "log_type",
+        "sim": True,
+        "result": [],
+        "info": None,
+        "entity": "日志",
+        "required": False,
+        "core": False,
+        "value": "",
+        "index": "日志类型",
+    }
+
+
 # ---------------------------------------------------------------------------
 # 入口规则
 # ---------------------------------------------------------------------------
@@ -419,14 +601,16 @@ def generate_entry_rule(
         uuid_str=uuid_str,
     )
 
-    # CHANGED: 根据 log_format 判断入口规则的 parser 配置
+    # CHANGED: 根据 log_format 判断入口规则的 parser 配置（2026-06-08 扩展 KV 支持）
     log_format = (classification.get("log_format", "") or "").upper()
+    format_detail = (classification.get("log_format_detail", "") or "")
     is_json = "JSON" in log_format
+    is_kv = "KV" in log_format
+    is_syslog_json = is_json and ("日志头" in format_detail)
+    is_syslog_kv = is_kv and ("日志头" in format_detail)
+    is_pure_kv = is_kv and not is_syslog_kv
 
     if is_json:
-        format_detail = (classification.get("log_format_detail", "") or "")
-        is_syslog_json = "日志头" in format_detail
-
         if is_syslog_json:
             # syslog+JSON 格式入口规则
             rule["parser"]["name"] = "orgRegex"
@@ -446,8 +630,31 @@ def generate_entry_rule(
                 _make_condition_match_filter(logtypes),
                 _make_feature_field_filter(feature_field),
             ]
+    elif is_pure_kv:
+        # CHANGED: 纯 KV 格式入口规则（2026-06-08 新增）
+        feature_field = classification.get("feature_field", "")
+        analysis = classification.get("analysis", {})
+        tab = analysis.get("tab", "=")
+        delimit = _escape_delimit(analysis.get("delimit", " "))
+        
+        rule["parser"]["name"] = "delimitWithKeyMap"
+        rule["parser"]["tab"] = tab
+        rule["parser"]["delimit"] = delimit
+        rule["parser"]["filter"] = [
+            _make_addfields_filter(),
+            _make_kv_logtype_filter(feature_field),
+            _make_kv_condition_match_filter(logtypes, feature_field),
+        ]
+    elif is_syslog_kv:
+        # CHANGED: syslog+KV 格式入口规则（2026-06-08 新增）
+        rule["parser"]["name"] = "orgRegex"
+        rule["parser"]["value"] = classification.get("feature_identifier", "")
+        rule["parser"]["filter"] = [
+            _make_addfields_filter(),
+            _make_syslog_kv_condition_match_filter(logtypes),
+        ]
     else:
-        # 🔮 预留扩展：KV / syslog / 分隔符格式入口规则（原有逻辑）
+        # 保留原有逻辑：其他格式使用 orgRegex + redirect（非 JSON 且非 KV 的日志）
         rule["parser"]["name"] = "orgRegex"
         rule["parser"]["value"] = classification.get("feature_identifier", "")
         rule["parser"]["filter"] = [
@@ -464,8 +671,9 @@ def generate_entry_rule(
         if norm.get("index") == "original_log":
             norm["result"] = samples
 
-    # CHANGED: 纯 JSON 格式新增日志类型映射 normalize 条目（syslog+JSON 不需要）
-    if is_json and not is_syslog_json:
+    # CHANGED: 纯 JSON 或纯 KV 格式新增日志类型映射 normalize 条目（2026-06-08 扩展 KV 支持）
+    # syslog+JSON 和 syslog+KV 不需要（已在子规则中处理）
+    if (is_json and not is_syslog_json) or is_pure_kv:
         rule["normalize"].append({
             "mappings": [],
             "field": "log_type",
@@ -496,6 +704,7 @@ def generate_sub_rule(
     is_json: bool = False,
     is_syslog_json: bool = False,
     is_pure_json: bool = False,
+    is_kv: bool = False,
     feature_field: str = "",
 ) -> dict[str, Any]:
     """为单条 classification_detail 生成一条子规则。
@@ -509,13 +718,16 @@ def generate_sub_rule(
         is_json: 是否为 JSON 格式（纯JSON 或 syslog+JSON）。
         is_syslog_json: 是否为 syslog+JSON 格式。
         is_pure_json: 是否为纯 JSON 格式。
+        is_kv: 是否为 KV 格式（纯KV 或 syslog+KV）。
         feature_field: 特征字段名（如 "categoryName"、"type"）。
     """
     logtype = classification_detail.get("logtype", "")
 
-    # CHANGED: JSON 格式子规则 name 用 feature_field + "json"，非 JSON 用 Diversion_method
+    # CHANGED: JSON 格式子规则 name 用 feature_field + "json"，KV 格式统一用 "kv_子规则"
     if is_json:
         rule_name = f"{logtype}_{feature_field}_json_子规则"
+    elif is_kv:
+        rule_name = f"{logtype}_kv_子规则"
     else:
         rule_name = f"{logtype}_{Diversion_method}_子规则"
 
@@ -543,19 +755,19 @@ def generate_sub_rule(
     rule["parser"]["name"] = parser_name
     rule["parser"]["subResolver"] = 1
 
-    # CHANGED: JSON parser 无附加配置；delimitWithKeyMap 需要 tab/delimit，delimit 需要 delimit/fields
+    # CHANGED: JSON parser 无附加配置；delimitWithKeyMap 需要 tab/delimit（转义），delimit 需要 delimit/fields
     if parser_name == "json":
         pass  # JSON parser 不需要 tab/delimit/fields
     elif parser_name == "delimitWithKeyMap":
         rule["parser"]["tab"] = analysis.get("tab", ":")
-        rule["parser"]["delimit"] = analysis.get("delimit", ";")
+        rule["parser"]["delimit"] = _escape_delimit(analysis.get("delimit", ";"))  # CHANGED: 转义 delimit
     elif parser_name == "delimit":
         rule["parser"]["delimit"] = analysis.get("delimit", "")
         # delimit 类型的 parser 可能需要 fields 数组
         rule["parser"]["fields"] = []
 
-    # CHANGED: syslog+JSON 子规则在 filter 中追加日志类型 addFields
-    if is_syslog_json:
+    # CHANGED: syslog+JSON 或 KV 格式子规则在 filter 中追加日志类型 addFields
+    if is_syslog_json or is_kv:
         rule["parser"]["filter"].append({
             "fields": {"日志类型": logtype},
             "name": "addFields",
@@ -563,12 +775,20 @@ def generate_sub_rule(
         })
 
     # CHANGED: JSON 格式子规则通过 _build_json_normalize_entries 构建完整 normalize
-    # KV/syslog 格式 normalize 保持空
+    # KV 格式子规则通过 _build_kv_normalize_entries 构建完整 normalize
+    # 其他格式 normalize 保持空
     if is_json:
         rule["normalize"] = _build_json_normalize_entries(
             real_samples_str=sample,
             logtype=logtype,
             is_syslog_json=is_syslog_json,
+        )
+    elif is_kv:
+        rule["normalize"] = _build_kv_normalize_entries(
+            real_samples_str=sample,
+            logtype=logtype,
+            delimit=analysis.get("delimit", " "),
+            tab=analysis.get("tab", "="),
         )
     else:
         rule["normalize"] = []
@@ -593,6 +813,7 @@ def generate_sub_rules(
     # CHANGED: 提取 format 标记，传递给 generate_sub_rule 做格式特定处理
     log_format = (classification.get("log_format", "") or "").upper()
     is_json = "JSON" in log_format
+    is_kv = "KV" in log_format
     format_detail = (classification.get("log_format_detail", "") or "")
     is_syslog_json = is_json and ("日志头" in format_detail)
     is_pure_json = is_json and not is_syslog_json
@@ -608,6 +829,7 @@ def generate_sub_rules(
             is_json=is_json,
             is_syslog_json=is_syslog_json,
             is_pure_json=is_pure_json,
+            is_kv=is_kv,
             feature_field=feature_field,
         )
         rules.append(rule)

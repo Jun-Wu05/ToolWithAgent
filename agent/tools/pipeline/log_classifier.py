@@ -260,10 +260,43 @@ def _classify_kv_features(
             kv_delimit = format_info.get("tab", "=") or "="          # 键值分隔符
         except Exception:
             logger.warning(f"[_classify_kv_features] 解析 format_info 失败，使用默认值")
+            # CHANGED: 如果有日志头，使用 header_end_marker 提取日志体（2026-06-08 修复）
+        # 符合规范 5：数据流向设计（上游数据格式 → 中间处理 → 下游使用）
+        body_logs = logs_str
+        if header_end_marker:
+            lines = logs_str.strip().split('\n')
+            body_lines = []
+            extracted_count = 0
+            for line in lines:
+                # 使用 rpartition 从右到左分割，匹配最后一个 header_end_marker
+                # 这样会正确处理日志中有多个 header_end_marker 的情况（如时间戳）
+                header, sep, body = line.rpartition(header_end_marker)
+                if sep:  # 如果找到了 header_end_marker
+                    stripped_body = body.strip()
+                    if stripped_body:  # 确保日志体不为空
+                        body_lines.append(stripped_body)
+                        extracted_count += 1
+                    else:
+                        # 日志体为空，保留原始行（兼容性）
+                        body_lines.append(line)
+                        logger.warning(
+                            f"[_classify_kv_features] 日志体为空，保留原始行: {line[:100]}"
+                        )
+                else:
+                    # 如果匹配失败，保留原始行（兼容性）
+                    body_lines.append(line)
+            body_logs = '\n'.join(body_lines)
+            logger.info(
+                f"[_classify_kv_features] 使用 header_end_marker='{header_end_marker}' 提取日志体: "
+                f"成功={extracted_count}/{len(lines)}, "
+                f"日志体示例（前50字符）: {body_logs[:50]}"
+            )
+
+
 
     # 2. 使用 KvExtractor 提取 + 聚合（使用新参数名）
     extractor = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
-    aggregation = extractor.extract_and_aggregate(logs_str, feature_field)
+    aggregation = extractor.extract_and_aggregate(body_logs, feature_field)
 
     total_lines = aggregation.get("total_lines", 0)
     matched_lines = aggregation.get("matched_lines", 0)
@@ -274,7 +307,7 @@ def _classify_kv_features(
             f"[_classify_kv_features] 使用默认分隔符（空格+等号）匹配失败，尝试冒号分隔符"
         )
         extractor = KvExtractor(field_delimit=field_delimit, kv_delimit=":")
-        aggregation = extractor.extract_and_aggregate(logs_str, feature_field)
+        aggregation = extractor.extract_and_aggregate(body_logs, feature_field)
         matched_lines = aggregation.get("matched_lines", 0)
         # 如果冒号分隔符成功，更新 kv_delimit
         if matched_lines > 0:
@@ -286,7 +319,7 @@ def _classify_kv_features(
             f"[_classify_kv_features] 冒号分隔符也失败，尝试等号分隔符"
         )
         extractor = KvExtractor(field_delimit=field_delimit, kv_delimit="=")
-        aggregation = extractor.extract_and_aggregate(logs_str, feature_field)
+        aggregation = extractor.extract_and_aggregate(body_logs, feature_field)
         matched_lines = aggregation.get("matched_lines", 0)
         # 如果等号分隔符成功，更新 kv_delimit
         if matched_lines > 0:
@@ -389,6 +422,35 @@ def _classify_kv_features(
         "feature_body_group": 0,
         "feature_value_group": 0,
     }
+    
+    has_header = "日志头" in (format_detail or "").lower()
+    if has_header:
+        try:
+            from agent.tools.pipeline.log_header_processor import _generate_kv_feature_identifier
+            feature_identifier = _generate_kv_feature_identifier(logs_str)
+            result["feature_identifier"] = feature_identifier
+            result["feature_body_group"] = 1
+            result["feature_value_group"] = 0
+            logger.info(
+                f"[_classify_kv_features] feature_identifier 生成成功: {feature_identifier}"
+            )
+        except ValueError as e:
+            # 符合规范 7：错误处理原则（立即报错，不兜底）
+            logger.error(
+                f"[_classify_kv_features] feature_identifier 生成失败: {e}. "
+                f"logs_str 前 100 字符: {logs_str[:100]}"
+            )
+            # 快速失败：标记为 PARTIAL，而不是继续使用空字符串
+            result["status"] = "PARTIAL"
+            result["fail_reason"] = f"feature_identifier 生成失败: {e}"
+            result["feature_identifier"] = ""
+            result["feature_body_group"] = 0
+            result["feature_value_group"] = 0
+    else:
+        # 纯 KV 格式，不需要 feature_identifier
+        result["feature_identifier"] = ""
+        result["feature_body_group"] = 0
+        result["feature_value_group"] = 0
 
     # 7. 存入知识库
     if result["status"] == "SUCCESS":

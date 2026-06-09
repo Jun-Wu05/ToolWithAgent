@@ -26,6 +26,9 @@ def aggregate_by_field(
     max_lines: int = 2000,
     sample_limit: int = 3,
     sample_max_chars: int = 300,
+    kv_delimit: str | None = None,
+    field_delimit: str | None = None,
+    header_end_marker: str = "",
 ) -> dict:
     """使用可插拔的提取器按特征字段值对日志行分组。
 
@@ -38,6 +41,9 @@ def aggregate_by_field(
         max_lines:        最大处理行数。
         sample_limit:     每个值保留的最大样本行数。
         sample_max_chars: 每条样本行的最大字符数（超出截断）。
+        kv_delimit:       KV 格式的键值分隔符（可选）。
+        field_delimit:    KV 格式的字段分隔符（可选）。
+        header_end_marker: 日志头与 body 的分隔符（用于剥离日志头）。
 
     Returns:
         {
@@ -49,12 +55,31 @@ def aggregate_by_field(
             "top_values": [str, ...],
         }
     """
-    lines = [l for l in logs_str.strip().split("\n") if l.strip()][:max_lines]
+    # CHANGED: 使用 header_end_marker 剥离日志头（2026-06-08 修复 syslog 头部干扰问题）
+    lines = []
+    for line in logs_str.strip().split("\n"):
+        if not line.strip():
+            continue
+        if header_end_marker:
+            # 使用 header_end_marker 分割，取第二部分（body）
+            parts = line.split(header_end_marker, 1)
+            stripped_line = parts[1].strip() if len(parts) == 2 else line.strip()
+        else:
+            stripped_line = line.strip()
+        lines.append(stripped_line)
+    
+    lines = lines[:max_lines]
     total_lines = len(lines)
     matched_lines = 0
 
     value_counter: Counter[str] = Counter()
     value_samples: dict[str, list[str]] = {}
+
+    # CHANGED: 添加日志，显示是否剥离了日志头
+    if header_end_marker:
+        logger.info(
+            f"[aggregator] 使用 header_end_marker='{header_end_marker}' 剥离日志头"
+        )
 
     for line in lines:
         feature_value = extractor(line, feature_field)
@@ -79,10 +104,15 @@ def aggregate_by_field(
             "samples": value_samples.get(val, []),
         }
 
+    # CHANGED: 增强日志输出，显示聚合结果和分隔符信息（2026-06-08 修复）
+    kv_delimit_str = kv_delimit if kv_delimit is not None else "unknown"
+    field_delimit_str = field_delimit if field_delimit is not None else "unknown"
     logger.info(
         f"[aggregator] Aggregation complete: "
         f"total={total_lines}, matched={matched_lines}, "
-        f"unique_values={len(value_counter)}, field='{feature_field}'"
+        f"unique_values={len(value_counter)}, field='{feature_field}', "
+        f"kv_delimit='{kv_delimit_str}', "
+        f"field_delimit='{field_delimit_str}'"
     )
 
     return {

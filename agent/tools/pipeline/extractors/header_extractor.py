@@ -20,6 +20,7 @@ _HEADER_DESENSITIZE_RE = _re.compile(
     r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})|"
     r"[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}|"
     r"[a-zA-Z0-9]{15,}|"
+    r"\b\d+[kKmMgGtTbB%]+\b|"  # 数字+单位后缀（250k, 50GB, 98%）
     r"\b\d+\b|"
     r"host|server|pid|ppid|uid|gid|sessionid|messageid",
     _re.IGNORECASE,

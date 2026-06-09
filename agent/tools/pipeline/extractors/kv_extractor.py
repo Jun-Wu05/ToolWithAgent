@@ -38,22 +38,37 @@ class KvExtractor(ValueExtractor):
         self,
         delimit: str = None,      # CHANGED: 旧参数名（向后兼容），实际语义是 kv_delimit
         tab: str = None,          # CHANGED: 旧参数名（向后兼容），实际语义是 field_delimit
-        field_delimit: str = " ",  # CHANGED: 新参数名，字段分隔符
-        kv_delimit: str = "=",     # CHANGED: 新参数名，键值分隔符
+        field_delimit: str = None,  # CHANGED: 新参数名，字段分隔符，删除硬编码默认值（2026-06-08 修复）
+        kv_delimit: str = None,     # CHANGED: 新参数名，键值分隔符，删除硬编码默认值（2026-06-08 修复）
     ):
         """初始化 KV 提取器。
 
         Args:
             delimit: （已废弃）键值分隔符，请使用 kv_delimit
             tab: （已废弃）字段分隔符，请使用 field_delimit
-            field_delimit: 字段分隔符（如 " " 或 "||"）
-            kv_delimit: 键值分隔符（如 "=" 或 ":"）
+            field_delimit: 字段分隔符（如 " " 或 "||"），必须由上游提供
+            kv_delimit: 键值分隔符（如 "=" 或 ":"），必须由上游提供
+        
+        Raises:
+            ValueError: 如果 field_delimit 或 kv_delimit 为 None
         """
         # CHANGED: 向后兼容：如果使用旧参数名，映射到新参数名
         if delimit is not None:
             kv_delimit = delimit
         if tab is not None:
             field_delimit = tab
+
+        # CHANGED: 添加参数校验，强制上游提供完整信息（2026-06-08 修复）
+        if field_delimit is None:
+            raise ValueError(
+                "field_delimit 不能为 None。"
+                "请从 format_info 中获取，或使用已废弃的 tab 参数。"
+            )
+        if kv_delimit is None:
+            raise ValueError(
+                "kv_delimit 不能为 None。"
+                "请从 format_info 中获取，或使用已废弃的 delimit 参数。"
+            )
 
         self.field_delimit = field_delimit
         self.kv_delimit = kv_delimit
@@ -68,9 +83,10 @@ class KvExtractor(ValueExtractor):
         kv_pattern = _re.escape(kv_delimit)
 
         # CHANGED: 使用 \S+ 替代 \w+ 支持非 ASCII 字符（如中文 key）
-        # 构建动态正则：(行首或field_delimit分隔符) + key + kv_delimit + "值" 或 非分隔符值
+        # CHANGED: 在字段分隔符后面添加 \s*（可选空格），兼容分隔符后面有空格或没有空格的情况（2026-06-08 修复）
+        # 构建动态正则：(行首或field_delimit分隔符+可选空格) + key + kv_delimit + "值" 或 非分隔符值
         self._pattern = _re.compile(
-            rf'(?:^|{field_pattern})(\S+)\s*{kv_pattern}'
+            rf'(?:^|{field_pattern}\s*)(\S+)\s*{kv_pattern}'
             rf'(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^{field_pattern}"]+))'
         )
 
@@ -94,6 +110,39 @@ class KvExtractor(ValueExtractor):
                 # 组2是引号内的值，组3是未引用的值
                 quoted_value = match.group(2)
                 unquoted_value = match.group(3)
-                return quoted_value if quoted_value is not None else unquoted_value
+                value = quoted_value if quoted_value is not None else unquoted_value
+                return value
 
         return None
+
+    def extract_and_aggregate(
+        self,
+        logs_str: str,
+        feature_field: str,
+        max_lines: int = 2000,
+        header_end_marker: str = "",
+    ) -> dict:
+        """从所有行中提取特征值并按值聚合。
+
+        重写基类方法，传递分隔符参数给聚合器。
+
+        Args:
+            logs_str:         原始多行日志字符串。
+            feature_field:    要聚合的字段名。
+            max_lines:        最大处理行数。
+            header_end_marker: 日志头与 body 的分隔符（用于剥离日志头）。
+
+        Returns:
+            聚合结果字典。
+        """
+        from agent.tools.pipeline.common.aggregator import aggregate_by_field
+
+        return aggregate_by_field(
+            logs_str=logs_str,
+            feature_field=feature_field,
+            extractor=self.extract_value,
+            max_lines=max_lines,
+            kv_delimit=self.kv_delimit,
+            field_delimit=self.field_delimit,
+            header_end_marker=header_end_marker,
+        )
