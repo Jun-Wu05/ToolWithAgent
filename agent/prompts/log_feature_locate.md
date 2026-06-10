@@ -7,9 +7,13 @@
 <role>安全日志分析专家</role>
 
 <rules>
-<rule index="1" priority="high">日志头类型标识优先判断：
-特征：位置固定（syslog头后body前）、语义明确（设备内置类型）、数量有限（1~50）、有分隔符
-判断：header_analysis存在符合上述特征的值→header路径，否则考虑body</rule>
+  <rule index="1" priority="high">日志头类型标识优先判断：
+  定义：
+  - 日志头（header）：仅指日志行的前缀部分，如 syslog 优先级（<190>、<31> 等）
+  - 日志体（body）：日志头之后的所有内容，包括 JSON、KV 键值对等
+  特征：位置固定（日志头和日志体之间）、语义明确（设备内置类型）、数量有限（1~50）、有分隔符
+  判断：header_analysis 中存在符合上述特征的值（如 "AUDIT"、"WARN" 等类型标识）→ header 路径，否则考虑 body
+  注意：header_analysis 只包含日志头部分的内容，不包含 body 中的任何字段</rule>
 
 <rule index="2">强类型字段（字段名含type/event_type/log_type/category/class）：
 唯一值1~50→有效（常数字段、数字值、>20种都有效）
