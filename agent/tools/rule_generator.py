@@ -383,6 +383,66 @@ def _build_json_normalize_entries(
     return entries
 
 
+def _build_kv_normalize_entries_from_all_logs(
+    all_logs_str: str,
+    logtype: str = "",
+    delimit: str = " ",
+    tab: str = "=",
+) -> list[dict[str, Any]]:
+    """从所有日志中聚合字段（解决样本代表性不足问题）。
+
+    处理流程：
+    1. delimit语义化名称转义（"space" → " "）
+    2. 遍历所有日志行，按delimit分割成key=value对
+    3. 对每个对，找第一个tab位置提取key
+    4. 构建normalize条目（按字母序，result为空数组）
+    5. 追加日志类型条目（永远最后）
+
+    Args:
+        all_logs_str: 所有日志字符串（多行KV格式）
+        logtype: 日志类型名称
+        delimit: 字段分隔符（如"space"、";"）
+        tab: 键值分隔符（如"="）
+
+    Returns:
+        normalize条目列表
+    """
+    # delimit语义化名称转义
+    delimiter = " " if delimit == "space" else delimit
+
+    entries: list[dict[str, Any]] = []
+    keys: set[str] = set()  # 去重
+
+    # 遍历所有日志行
+    for line in all_logs_str.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        
+        # 按delimit分割
+        for pair in line.split(delimiter):
+            pair = pair.strip()
+            if not pair:
+                continue
+
+            # 找到第一个tab的位置，提取key
+            tab_pos = pair.find(tab)
+            if tab_pos > 0:
+                key = pair[:tab_pos].strip()
+                if key and key not in keys:
+                    keys.add(key)
+                    # 构建空result的条目
+                    entries.append(_make_kv_normalize_entry(key, None))
+
+    # 按字母序排列
+    entries.sort(key=lambda e: e["index"])
+
+    # 追加日志类型条目（永远最后）
+    entries.append(_make_log_type_entry(logtype))
+
+    return entries
+
+
 def _build_kv_normalize_entries(
     real_samples_str: str,
     logtype: str = "",
@@ -698,6 +758,7 @@ def generate_sub_rule(
     classification_detail: dict[str, Any],
     Diversion_method: str,
     analysis: dict[str, Any],
+    all_logs_str: str = "",  # 新增：完整日志字符串（用于聚合字段）
     date_str: str = "",
     uuid_str: str = "",
     *,
@@ -713,6 +774,7 @@ def generate_sub_rule(
         classification_detail: classification_details 数组中的单个元素。
         Diversion_method: 分类依据字段名（如 "日志类型"）。
         analysis: classification 顶层的 analysis 对象。
+        all_logs_str: 完整日志字符串（用于KV格式聚合字段，解决样本代表性不足）。
         date_str: YYYYMMDD 日期字符串。
         uuid_str: 可复用 UUID。
         is_json: 是否为 JSON 格式（纯JSON 或 syslog+JSON）。
@@ -784,12 +846,22 @@ def generate_sub_rule(
             is_syslog_json=is_syslog_json,
         )
     elif is_kv:
-        rule["normalize"] = _build_kv_normalize_entries(
-            real_samples_str=sample,
-            logtype=logtype,
-            delimit=analysis.get("delimit", " "),
-            tab=analysis.get("tab", "="),
-        )
+        # CHANGED: 如果提供了完整日志字符串，使用聚合字段逻辑
+        if all_logs_str:
+            rule["normalize"] = _build_kv_normalize_entries_from_all_logs(
+                all_logs_str=all_logs_str,
+                logtype=logtype,
+                delimit=analysis.get("delimit", " "),
+                tab=analysis.get("tab", "="),
+            )
+        else:
+            # 兜底：使用单条样本逻辑
+            rule["normalize"] = _build_kv_normalize_entries(
+                real_samples_str=sample,
+                logtype=logtype,
+                delimit=analysis.get("delimit", " "),
+                tab=analysis.get("tab", "="),
+            )
     else:
         rule["normalize"] = []
 
@@ -801,9 +873,19 @@ def generate_sub_rule(
 
 def generate_sub_rules(
     classification: dict[str, Any],
+    all_logs_str: str = "",  # 新增：完整日志字符串（用于聚合字段）
     date_str: str = "",
 ) -> list[dict[str, Any]]:
-    """遍历 classification_details 生成所有子规则列表。"""
+    """遍历 classification_details 生成所有子规则列表。
+    
+    Args:
+        classification: 日志解析输出的完整 JSON（dict）。
+        all_logs_str: 完整日志字符串（用于KV格式聚合字段，解决样本代表性不足）。
+        date_str: YYYYMMDD 日期字符串。
+    
+    Returns:
+        子规则列表。
+    """
     Diversion_method = classification.get("Diversion_method", "")
     analysis = classification.get("analysis", {})
     details: list[dict[str, Any]] = classification.get(
@@ -825,6 +907,7 @@ def generate_sub_rules(
             classification_detail=detail,
             Diversion_method=Diversion_method,
             analysis=analysis,
+            all_logs_str=all_logs_str,  # 传递完整日志字符串
             date_str=date_str,
             is_json=is_json,
             is_syslog_json=is_syslog_json,

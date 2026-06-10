@@ -1050,7 +1050,7 @@ async def on_export_sub_rules(action: cl.Action):
 
 @cl.action_callback("apply_field_mapping")
 async def on_apply_field_mapping(action: cl.Action):
-    """用户点击「🔍 标准字段映射」— 程序化查询候选 + 直接 LLM 选择最佳映射"""
+    """用户点击「🔍 标准字段映射」—— 复用路径1逻辑，并行处理"""
     user_session = cl.user_session.get("user_session")
     classification = user_session.get("log_classification")
     logger.info('[ACTION] 用户点击"标准字段映射"按钮')
@@ -1060,174 +1060,138 @@ async def on_apply_field_mapping(action: cl.Action):
         return
 
     try:
-        # 1. 生成子规则
+        # 1. 生成子规则（用于获取字段列表）
         logger.info("[ACTION] 生成子规则用于字段映射")
         from agent.tools.rule_generator import generate_sub_rules
-        sub_rules = generate_sub_rules(classification)
+        
+        # 获取完整日志字符串（用于聚合字段）
+        raw_log_lines = user_session.get("raw_log_lines", [])
+        all_logs_str = "\n".join(str(line) for line in raw_log_lines) if raw_log_lines else ""
+        
+        sub_rules = generate_sub_rules(classification, all_logs_str=all_logs_str)
 
         if not sub_rules:
             await cl.Message(content="❌ 未生成任何子规则，无法进行字段映射。").send()
             return
 
-        # 2. 提取每条子规则的字段列表和原始日志
-        mapping_info = extract_sub_rule_mapping_info(sub_rules)
-        logger.info(f"[ACTION] 提取 {len(mapping_info)} 条子规则映射信息")
+        # 2. 提取所有字段（不区分子规则）
+        all_fields = []
+        for rule in sub_rules:
+            fields = [
+                entry.get("index", "")
+                for entry in rule.get("normalize", [])
+                if entry.get("index", "") not in ("original_log", "日志类型")
+            ]
+            all_fields.extend(fields)
+        
+        # 去重
+        all_fields = list(set(all_fields))
+        all_fields.sort()  # 排序，保证顺序一致
+        
+        logger.info(f"[ACTION] 共提取 {len(all_fields)} 个唯一字段")
 
-        loading_msg = cl.Message(content="⏳ **正在查询标准字段候选...**")
+        # 3. 添加日志样例（直接使用原始日志文本）
+        sample_logs_text = "\n".join(str(line) for line in raw_log_lines[:10]) if raw_log_lines else ""
+        simplified_data = {
+            "fields": all_fields,
+            "original_log_sample": sample_logs_text
+        }
+        user_session["simplified_data"] = simplified_data
+
+        # 4. 直接调用路径1的 process_batched_mapping（并行处理）
+        logger.info(f"[ACTION] 开始标准字段映射，字段数: {len(all_fields)}")
+        
+        BATCH_SIZE = 25
+        
+        def build_batch_fn(u_text, u_sess, batch, idx, total):
+            return build_batch_llm_input(u_text, u_sess, batch, idx, total)
+
+        async def call_team_fn(t, input_text, _loading, intent):
+            return await call_team(t, input_text, loading_msg, intent=intent)
+
+        async def on_batch_complete(batch_idx: int, total: int, batch_count: int, total_count: int):
+            loading_msg.content = f"⏳ **正在处理字段映射（第 {batch_idx + 1}/{total} 批）...**"
+            try:
+                await loading_msg.update()
+            except Exception:
+                pass
+
+        loading_msg = cl.Message(content="⏳ **正在处理字段映射...**")
         await loading_msg.send()
 
-        # 3. 程序化查询候选标准字段（复用 standard_mapper 内部函数）
-        from agent.tools.standard_mapper import _load_standard_fields_list, _calculate_similarity
-
-        fields_table = _load_standard_fields_list()
-        if not fields_table:
-            await loading_msg.remove()
-            await cl.Message(content="❌ 标准字段表为空，无法进行映射。").send()
-            return
-
-        # 对每条子规则的每个字段，查询 top-3 候选
-        all_candidates: dict[str, dict[str, list[dict]]] = {}  # rule_name → {field → [candidates]}
-        for info in mapping_info:
-            rule_name = info["rule_name"]
-            all_candidates[rule_name] = {}
-            for field in info["fields"]:
-                scored: list[tuple[float, dict]] = []
-                for entry in fields_table:
-                    system_name = entry.get("系统属性名称", "")
-                    eng_name = entry.get("字段名称", "")
-                    desc = entry.get("描述", "")
-                    obj = entry.get("对象", "")
-                    score = max(
-                        _calculate_similarity(field, eng_name),
-                        _calculate_similarity(field, system_name) * 0.85,
-                        _calculate_similarity(field, desc) * 0.6,
-                    )
-                    if score > 0.15:
-                        scored.append((score, {
-                            "系统属性名称": system_name,
-                            "字段名称": eng_name,
-                            "对象": obj,
-                            "相似度": round(score, 3),
-                        }))
-                scored.sort(key=lambda x: x[0], reverse=True)
-                # 去重
-                seen: set[str] = set()
-                top_candidates: list[dict] = []
-                for _, item in scored:
-                    name = item["系统属性名称"]
-                    if name not in seen:
-                        seen.add(name)
-                        top_candidates.append(item)
-                    if len(top_candidates) >= 3:
-                        break
-                all_candidates[rule_name][field] = top_candidates
-
-        total_fields = sum(len(f) for f in all_candidates.values())
-        logger.info(f"[ACTION] 候选查询完成：{len(all_candidates)} 条子规则，共 {total_fields} 个字段")
-
-        # 4. 按子规则分批构建 prompt + 并行调用 LLM（避免单次输出截断）
-        import asyncio
-        from agent.tools.pipeline.llm_client import _call_llm_direct
-
-        loading_msg.content = "⏳ **LLM 正在选择最佳映射（按子规则并行）...**"
-        try:
-            await loading_msg.update()
-        except Exception:
-            pass
-
-        def _build_single_rule_prompt(info: dict, candidates: dict[str, list[dict]]) -> str:
-            """构建单条子规则的 LLM prompt"""
-            rule_name = info["rule_name"]
-            prompt = (
-                "你是日志字段映射专家。请根据以下字段候选列表和原始日志样本，为每个字段选择最佳的标准字段映射。\n\n"
-                "规则：\n"
-                "- 从候选中选择最匹配的系统属性名称\n"
-                "- 如果候选中没有合适的，设为'未匹配'\n"
-                "- 匹配状态只能填'匹配成功'或'未匹配'\n\n"
-                f"## 子规则：{rule_name}\n"
-                f"原始日志样本（截取前300字符）：\n```\n{info['sample_log'][:300]}\n```\n\n"
-                "字段候选：\n"
-            )
-            for field, cands in candidates.items():
-                if cands:
-                    cand_str = " | ".join(
-                        f"{c['系统属性名称']}(相似度={c['相似度']})"
-                        for c in cands
-                    )
-                    prompt += f"- `{field}`: {cand_str}\n"
-                else:
-                    prompt += f"- `{field}`: 无候选\n"
-
-            prompt += (
-                "\n\n请严格按以下 JSON 格式返回结果（不要输出任何其他文字）：\n"
-                "```json\n"
-                "[\n"
-                '  {"rule_name": "子规则名", "mappings": [\n'
-                '    {"原始字段名": "xxx", "系统属性名称": "yyy", "匹配状态": "匹配成功"},\n'
-                '    {"原始字段名": "zzz", "系统属性名称": "未匹配", "匹配状态": "未匹配"}\n'
-                "  ]}\n"
-                "]\n"
-                "```"
-            )
-            return prompt
-
-        # 为每条子规则构建独立 prompt
-        rule_prompts: list[tuple[str, str]] = []  # (rule_name, prompt)
-        for info in mapping_info:
-            rule_name = info["rule_name"]
-            candidates = all_candidates.get(rule_name, {})
-            prompt = _build_single_rule_prompt(info, candidates)
-            rule_prompts.append((rule_name, prompt))
-
-        # 并行调用 LLM
-        loop = asyncio.get_event_loop()
-        llm_tasks = [
-            loop.run_in_executor(
-                None, lambda p=prompt: _call_llm_direct(p, max_tokens=4000)
-            )
-            for _, prompt in rule_prompts
-        ]
-        logger.info(f"[ACTION] 并行调用 LLM：{len(llm_tasks)} 条子规则")
-        llm_results = await asyncio.gather(*llm_tasks)
-
-        try:
-            await loading_msg.remove()
-        except Exception:
-            pass
-
-        # 6. 解析每条子规则的 LLM 返回，合并映射结果
-        mapping_results: list[dict] = []
-        for (rule_name, _), result_text in zip(rule_prompts, llm_results):
-            parsed = _parse_mapping_results(result_text)
-            if parsed:
-                mapping_results.extend(parsed)
-                logger.info(f"[ACTION] 子规则 '{rule_name}' 解析到 {len(parsed)} 条映射")
-            else:
-                logger.warning(f"[ACTION] 子规则 '{rule_name}' LLM 输出解析失败，原文前200字符: {result_text[:200]}")
-
-        if not mapping_results:
-            await cl.Message(content="❌ 所有子规则的 LLM 映射均解析失败，请重试。").send()
-            return
-
-        logger.info(f"[ACTION] 共解析到 {len(mapping_results)} 条子规则映射结果")
-
-        # 7. 加载对象映射（系统属性名称→对象）
-        object_entity_map = _load_object_entity_map()
-
-        # 8. 应用映射到子规则
-        mapped_sub_rules = apply_field_mapping_to_sub_rules(
-            sub_rules, mapping_results, object_entity_map
+        mapping_data, total_batches = await process_batched_mapping(
+            team=user_session.get("team"),
+            fields_list=all_fields,
+            user_text="标准字段映射",
+            user_session=user_session,
+            build_batch_fn=build_batch_fn,
+            call_team_fn=call_team_fn,
+            parse_fn=parse_json_mapping_result,
+            batch_size=BATCH_SIZE,
+            on_batch_complete=on_batch_complete,
         )
 
-        # 9. 保存到 session state
-        user_session["mapped_sub_rules"] = mapped_sub_rules
-        user_session["sub_rule_mapping_results"] = mapping_results
+        try:
+            await loading_msg.remove()
+        except Exception:
+            pass
 
-        # 10. 展示映射结果（可排序 DataFrame）
+        if not mapping_data:
+            await cl.Message(content="❌ 字段映射失败，请重试。").send()
+            return
+
+        # 5. 将结果按子规则分组（用于展示）
+        field_to_mapping = {
+            item.get("原始字段名", ""): item
+            for item in mapping_data
+        }
+        
+        all_sub_rule_results = []
+        for rule in sub_rules:
+            rule_name = rule.get("name", "")
+            rule_fields = [
+                entry.get("index", "")
+                for entry in rule.get("normalize", [])
+                if entry.get("index", "") not in ("original_log", "日志类型")
+            ]
+            
+            rule_mappings = []
+            for field in rule_fields:
+                mapping = field_to_mapping.get(field)
+                if mapping:
+                    rule_mappings.append({
+                        "原始字段名": mapping.get("原始字段名", ""),
+                        "系统属性名称": mapping.get("系统属性名称", ""),
+                        "匹配状态": mapping.get("匹配状态", "")
+                    })
+            
+            all_sub_rule_results.append({
+                "rule_name": rule_name,
+                "mappings": rule_mappings
+            })
+
+        # 6. 保存到 session state
+        user_session["sub_rule_mapping_results"] = all_sub_rule_results
+        
+        # 7. 应用映射到子规则（用于导出）
+        from agent.tools.standard_mapper import _load_object_mapping
+        import os
+        excel_path = os.path.join(os.getcwd(), "config", "对象.xlsx")
+        object_entity_map = _load_object_mapping(excel_path)
+        
+        mapped_sub_rules = apply_field_mapping_to_sub_rules(
+            sub_rules, all_sub_rule_results, object_entity_map
+        )
+        
+        user_session["mapped_sub_rules"] = mapped_sub_rules
+        logger.info(f"[ACTION] 映射后的子规则已保存，共 {len(mapped_sub_rules)} 条")
+        
+        # 8. 展示结果
         total_matched = 0
         total_fields = 0
-        flat_mappings: list[dict] = []
-        for mr in mapping_results:
+        flat_mappings = []
+        
+        for mr in all_sub_rule_results:
             rule_name = mr.get("rule_name", "未知")
             for m in mr.get("mappings", []):
                 flat_mappings.append({
@@ -1243,14 +1207,14 @@ async def on_apply_field_mapping(action: cl.Action):
         summary = (
             f"✅ **标准字段映射完成！**\n\n"
             f"📊 **映射统计：**\n"
-            f"- 子规则数量：{len(mapping_results)}\n"
+            f"- 子规则数量：{len(all_sub_rule_results)}\n"
             f"- 总字段数：{total_fields}\n"
             f"- 匹配成功：{total_matched} 个\n"
             f"- 未匹配：{total_fields - total_matched} 个\n\n"
             f"✨ **表格功能：**\n"
             f"- 📌 点击列标题排序\n"
             f"- 🔍 使用搜索框筛选\n\n"
-            f"💡 点击下方 **📥 导出映射后子规则** 下载带标准字段映射的子规则文件。"
+            f"💡 点击下方按钮导出结果。"
         )
 
         elements = create_dataframe_elements(flat_mappings)
