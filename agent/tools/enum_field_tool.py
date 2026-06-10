@@ -159,12 +159,18 @@ def read_enum_mappings_from_excel(excel_path: str) -> Dict[str, List[Dict]]:
                 if not org_value:
                     continue
                 
-                # 对于 REGULAR 类型，添加通配符
+                # 对于 REGULAR 类型，智能添加通配符
                 if mapping_type == "REGULAR":
-                    if not org_value.startswith(".*"):
-                        org_value = ".*" + org_value
-                    if not org_value.endswith(".*"):
-                        org_value = org_value + ".*"
+                    # 如果已经以 .* 开头（包括 .* 和 (?i).*），则不添加
+                    if org_value.startswith(".*") or org_value.startswith("(?i).*"):
+                        # 已经是完整正则，不做任何修改
+                        pass
+                    else:
+                        # 简单文本，添加通配符
+                        if not org_value.startswith(".*"):
+                            org_value = ".*" + org_value
+                        if not org_value.endswith(".*"):
+                            org_value = org_value + ".*"
                 
                 sheet_mappings.append({
                     "mappingType": mapping_type,
