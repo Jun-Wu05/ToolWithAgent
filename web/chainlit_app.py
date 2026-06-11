@@ -128,66 +128,10 @@ async def start():
     user_session = SessionState.create_default()
     cl.user_session.set("user_session", user_session)
 
-    # ===== 新增：API Key 引导流程 =====
-    api_key = None
-    env_api_key = ModelConfig.get_api_key()
-    
-    # 如果没有环境变量，询问用户是否配置
-    if not env_api_key:
-        try:
-            res = await cl.AskActionMessage(
-                content="""🔑 **检测到未配置 API Key**
-
-未配置 API Key 将使用静态模型列表，可能无法获取最新模型。
-
-是否现在配置 API Key？""",
-                actions=[
-                    cl.Action(
-                        name="configure_api",
-                        payload={"action": "configure"},
-                        label="✅ 配置 API Key"
-                    ),
-                    cl.Action(
-                        name="use_static",
-                        payload={"action": "static"},
-                        label="⏭️ 使用静态列表"
-                    ),
-                ],
-                timeout=60  # 60 秒超时
-            ).send()
-            
-            # 处理用户选择
-            if res and res.get("payload").get("action") == "configure":
-                # 弹出输入框获取 API Key
-                api_key_input = await cl.AskUserMessage(
-                    content="请输入您的 **DeepSeek API Key**：",
-                    timeout=120
-                ).send()
-                
-                if api_key_input:
-                    api_key = api_key_input["output"].strip()
-                    if api_key:
-                        # 保存到会话状态
-                        user_session.api_key = api_key
-                        logger.info("[START] 用户已配置 API Key")
-                    else:
-                        logger.warning("[START] 用户输入为空，使用静态列表")
-                        api_key = None
-                else:
-                    logger.warning("[START] 用户取消输入，使用静态列表")
-                    api_key = None
-            else:
-                # 用户选择使用静态列表
-                api_key = None
-                logger.info("[START] 用户选择使用静态列表")
-        except Exception as e:
-            logger.warning(f"[START] API Key 引导流程异常: {e}，使用默认配置")
-            api_key = env_api_key
-    else:
-        # 使用环境变量
-        api_key = env_api_key
+    # 获取 API Key（环境变量或留空）
+    api_key = ModelConfig.get_api_key()
+    if api_key:
         logger.info("[START] 使用环境变量 API Key")
-    # ===== 新增结束 =====
 
     # 初始化Team并预热
     try:
