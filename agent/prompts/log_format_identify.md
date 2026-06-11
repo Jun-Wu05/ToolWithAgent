@@ -43,20 +43,25 @@
 - ❌ KV 格式时不填写这两个字段
 </kv_separator_rules>
 
-<header_detection>
-判断日志是否有"日志头"——即日志行前半部分为固定格式的时间戳、主机名、进程名等系统前缀。
-在 format_detail 中描述完整格式，例如"日志头+KV"、"日志头+JSON"、"纯KV"、"纯JSON"等。
+  <header_detection>
+  判断日志是否有"日志头"——即日志行前半部分为固定格式的时间戳、主机名、进程名等系统前缀。
+  在 format_detail 中描述完整格式，例如"日志头+KV"、"日志头+JSON"、"纯KV"、"纯JSON"等。
 
-如果存在日志头，还需识别日志头与 body 之间的分界标记（header_end_marker）：
-- 定义：紧接在系统前缀之后、body 开始之前的一个固定字符串
-- 识别方法：查看日志行中系统前缀结束的位置，通常是一个或多个特殊字符（如冒号、空格、破折号等）
-- 示例：
-  - RFC5424 格式：`<14>1 2026-04-14T05:57:55Z host app 1 type - body_content` → header_end_marker=" - "
-  - BSD syslog 格式：`<132>May 18 10:48:52 sfos-x86_64 fwlog[7992]: 日志类型:IPS防护日志` → header_end_marker=": "
-  - 自定义格式：`[2026-06-08] [INFO] log content` → header_end_marker="] "
+  如果存在日志头，还需识别日志头与 body 之间的分界标记（header_end_marker）：
+  - 定义：紧接在系统前缀之后、body 开始之前的一个固定字符串
+  - 识别方法：查看日志行中系统前缀结束的位置，通常是一个或多个特殊字符（如冒号、空格、破折号等）
+  - 示例：
+    - RFC5424 格式：`<14>1 2026-04-14T05:57:55Z host app 1 type - body_content` → header_end_marker=" - "
+    - BSD syslog 格式：`<132>May 18 10:48:52 sfos-x86_64 fwlog[7992]: 日志类型:IPS防护日志` → header_end_marker=": "
+    - 自定义格式：`[2026-06-08] [INFO] log content` → header_end_marker="] "
+    - Syslog 前缀直接跟 KV：`<190>timestamp=123 type=event` → header_end_marker=""（注意：日志头是 <190>，后面直接是 KV body，没有分隔符）
 
-如果无日志头（纯 JSON / 纯 KV），header_end_marker 为空字符串。
-</header_detection>
+  特殊规则：
+  - 如果日志行以 <数字> 开头（如 <190>、<31>），且后面直接跟 KV 键值对（不是标准 syslog 格式），则 header_end_marker 必须为空字符串 ""
+  - 如果日志头只是 syslog 优先级（如 <190>），后面没有标准 syslog 格式的时间戳、主机名等，则 header_end_marker 必须为空字符串 ""
+
+  如果无日志头（纯 JSON / 纯 KV），header_end_marker 为空字符串。
+  </header_detection>
   +++++++ REPLACE
 
 

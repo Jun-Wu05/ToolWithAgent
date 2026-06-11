@@ -69,6 +69,10 @@ logger.info("=" * 60)
 # 会话状态管理
 from web.session_state import SessionState
 
+# 模型管理
+from web.model_manager import ModelManager
+from agent.core.model_config import ModelConfig
+
 # ============= 从拆分模块导入业务函数 =============
 
 # 路由与解析
@@ -155,6 +159,50 @@ async def start():
         logger.error(f"[START] Team初始化异常: {e}")
         await cl.Message(content=f"⚠️ Team初始化异常: {str(e)}").send()
 
+    # ===== 新增：初始化模型设置界面 =====
+    try:
+        # 获取当前供应商和 API Key
+        current_provider = ModelConfig.get_provider()
+        api_key = ModelConfig.get_api_key()
+        
+        # 异步获取模型列表
+        models = await ModelManager.get_models(current_provider, api_key)
+        logger.info(f"[START] 获取到 {len(models)} 个 {current_provider} 模型")
+        
+        # 构建设置界面
+        settings = [
+            cl.input_settings.InputSettings(
+                id="provider",
+                label="供应商",
+                type="select",
+                choices=["deepseek", "siliconflow"],
+                initial=current_provider,
+            ),
+            cl.input_settings.InputSettings(
+                id="model_name",
+                label="模型名称",
+                type="select",
+                choices=models,
+                initial=ModelConfig.MAIN_MODEL if ModelConfig.MAIN_MODEL in models else (models[0] if models else ""),
+            ),
+            cl.input_settings.InputSettings(
+                id="api_key",
+                label="API Key（可选）",
+                type="password",
+                initial="",
+                placeholder="留空则使用环境变量",
+            ),
+        ]
+        
+        await cl.ChatSettings(settings).send()
+        
+    except Exception as e:
+        logger.error(f"[START] 初始化模型设置失败: {e}")
+        await cl.Message(
+            content=f"⚠️ 模型设置初始化失败，将使用默认配置：{str(e)}"
+        ).send()
+    # ===== 新增结束 =====
+
     # 发送欢迎消息
     await cl.Message(
         content="""👋 **数据映射智能助手已就绪！**
@@ -175,6 +223,89 @@ async def start():
 
 请上传数据文件或直接发送消息开始对话。""",
     ).send()
+
+
+@cl.on_settings_update
+async def on_settings_update(settings: dict):
+    """
+    当用户修改设置时触发
+    
+    功能：
+    1. 获取用户配置的供应商、模型、API Key
+    2. 测试 DeepSeek API 连通性
+    3. 测试成功后应用配置，失败则不应用
+    4. 重新初始化 Team 实例
+    """
+    user_session = cl.user_session.get("user_session")
+    
+    # 获取新的配置
+    provider = settings.get("provider", "").strip()
+    model = settings.get("model_name", "").strip()
+    api_key = settings.get("api_key", "").strip()
+    
+    # 使用界面的 API Key 或环境变量
+    test_key = api_key if api_key else ModelConfig.get_api_key()
+    
+    # 发送测试中消息
+    loading_msg = cl.Message(content="🔌 **正在测试连接...**")
+    await loading_msg.send()
+    
+    # 测试连接
+    result = await ModelManager.test_connection(provider, test_key)
+    
+    # 移除加载消息
+    await loading_msg.remove()
+    
+    if result["success"]:
+        # 测试成功，应用配置
+        # 更新会话状态
+        user_session.current_provider = provider if provider else None
+        user_session.model_name = model if model else None
+        user_session.api_key = api_key if api_key else None
+        
+        # 应用运行时配置
+        ModelConfig.set_runtime_config(
+            provider=user_session.current_provider,
+            api_key=user_session.api_key,
+            model=user_session.model_name
+        )
+        
+        # 清除单例缓存并重新初始化 Team
+        from agent.core.team import get_team_instance, reset_team_instance
+        reset_team_instance()
+        user_session.team = get_team_instance()
+        
+        logger.info("[SETTINGS] Team 已重新初始化")
+        
+        await cl.Message(
+            content=f"""✅ **配置更新成功！**
+
+📊 **测试结果：**
+- {result['message']}
+- 可用模型：{result['models_count']} 个
+
+🤖 **当前配置：**
+- 供应商：{provider or '使用默认'}
+- 模型：{model or '使用默认'}
+- API Key：{'✅ 界面配置' if api_key else '✅ 环境变量'}
+"""
+        ).send()
+        
+    else:
+        # 测试失败，不应用配置
+        await cl.Message(
+            content=f"""❌ **配置测试失败**
+
+📊 **测试结果：**
+- {result['message']}
+
+💡 请检查：
+1. API Key 是否正确
+2. 网络连接是否正常
+3. 是否需要配置代理
+
+💡 配置未应用，请修正后重试。"""
+        ).send()
 
 
 @cl.on_message

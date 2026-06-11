@@ -207,13 +207,29 @@ def match_real_samples(
         lt = detail.get("logtype", "")
         matched_line = sample_matched.get(lt, "")
         detail["sample"] = matched_line
-        # real_samples: syslog+JSON 时仅保留 JSON body 部分
-        if header_end_marker and matched_line:
-            # 方式1: 用明确的分隔符切割
+        
+        # real_samples: 优先使用 feature_identifier 正则提取 body（KV 格式）
+        if has_feature_identifier and feature_pattern and matched_line:
+            match = feature_pattern.search(matched_line)
+            if match and len(match.groups()) >= feature_body_group:
+                detail["real_samples"] = match.group(feature_body_group)
+                logger.info(
+                    f"[llm_postprocessor] 为 '{lt}' "
+                    f"使用正则提取 body ({len(detail['real_samples'])} 字符)"
+                )
+            else:
+                # 正则匹配失败，降级使用 header_end_marker
+                if header_end_marker:
+                    parts = matched_line.split(header_end_marker, 1)
+                    detail["real_samples"] = parts[1] if len(parts) == 2 else matched_line
+                else:
+                    detail["real_samples"] = matched_line
+        elif header_end_marker and matched_line:
+            # 无 feature_identifier，使用 header_end_marker 分割（JSON 格式）
             parts = matched_line.split(header_end_marker, 1)
             detail["real_samples"] = parts[1] if len(parts) == 2 else matched_line
         elif matched_line and "{" in matched_line:
-            # 方式2 (fallback): header_end_marker 为空时，自动提取 JSON body
+            # fallback: header_end_marker 为空时，自动提取 JSON body
             json_start = matched_line.find("{")
             json_end = matched_line.rfind("}")
             if json_start != -1 and json_end > json_start:

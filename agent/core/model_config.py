@@ -28,6 +28,11 @@ class ModelConfig:
     # AGNO_MODEL_PROVIDER: "siliconflow"（默认） | "deepseek"
     MODEL_PROVIDER = os.getenv("AGNO_MODEL_PROVIDER", "siliconflow").lower().strip()
 
+    # ===== 运行时配置（会话级别） =====
+    _runtime_provider: Optional[str] = None
+    _runtime_api_key: Optional[str] = None
+    _runtime_model: Optional[str] = None
+
     # ===== 模型 ID =====
     # SiliconFlow 上使用 deepseek-ai/DeepSeek-V3.1-Terminus
     # DeepSeek 原生使用 deepseek-chat
@@ -45,10 +50,62 @@ class ModelConfig:
     # 是否启用 fallback
     FALLBACK_ENABLED = os.getenv("FALLBACK_ENABLED", "true").lower() == "true"
 
+    @classmethod
+    def set_runtime_config(
+        cls,
+        provider: str = None,
+        api_key: str = None,
+        model: str = None
+    ):
+        """
+        设置运行时配置（会话级别）
+        
+        Args:
+            provider: 供应商名称
+            api_key: API 密钥
+            model: 模型名称
+        """
+        if provider:
+            cls._runtime_provider = provider.lower().strip()
+        if api_key:
+            cls._runtime_api_key = api_key
+        if model:
+            cls._runtime_model = model
+    
+    @classmethod
+    def clear_runtime_config(cls):
+        """清除运行时配置，回退到环境变量"""
+        cls._runtime_provider = None
+        cls._runtime_api_key = None
+        cls._runtime_model = None
+    
+    @staticmethod
+    def get_provider() -> str:
+        """
+        获取当前供应商：运行时配置 > 环境变量
+        
+        Returns:
+            供应商名称（"deepseek" | "siliconflow"）
+        """
+        if ModelConfig._runtime_provider:
+            return ModelConfig._runtime_provider
+        return ModelConfig.MODEL_PROVIDER
+    
     @staticmethod
     def get_api_key() -> str:
-        """从环境变量获取当前 Provider 对应的 API Key"""
-        if ModelConfig.MODEL_PROVIDER == "deepseek":
+        """
+        获取 API Key：运行时配置 > 环境变量
+        
+        Returns:
+            API 密钥字符串
+        """
+        # 优先使用运行时配置
+        if ModelConfig._runtime_api_key:
+            return ModelConfig._runtime_api_key
+        
+        # 回退到环境变量
+        provider = ModelConfig.get_provider()
+        if provider == "deepseek":
             primary = os.getenv("DEEPSEEK_API_KEY", "")
             if primary:
                 return primary
@@ -60,17 +117,20 @@ class ModelConfig:
     @staticmethod
     def _build_model(
         model_id: str,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        provider: Optional[str] = None
     ) -> Union[Siliconflow, DeepSeek]:
         """
-        根据 AGNO_MODEL_PROVIDER 动态构建模型实例。
+        根据供应商动态构建模型实例。
 
         - siliconflow → Siliconflow(id=model_id, api_key=key)
         - deepseek    → DeepSeek(id=model_id, api_key=key, base_url=...)
         """
+        # 优先使用传入的参数，否则使用运行时配置或环境变量
         key = api_key or ModelConfig.get_api_key()
+        current_provider = provider or ModelConfig.get_provider()
 
-        if ModelConfig.MODEL_PROVIDER == "deepseek":
+        if current_provider == "deepseek":
             if not key:
                 raise ValueError("请设置环境变量 DEEPSEEK_API_KEY")
             base_url = os.getenv(
@@ -88,8 +148,15 @@ class ModelConfig:
 
     @staticmethod
     def get_main_model() -> Union[Siliconflow, DeepSeek]:
-        """获取主模型"""
-        return ModelConfig._build_model(ModelConfig.MAIN_MODEL)
+        """
+        获取主模型：运行时配置 > 环境变量
+        
+        Returns:
+            模型实例
+        """
+        # 优先使用运行时配置的模型
+        model_id = ModelConfig._runtime_model or ModelConfig.MAIN_MODEL
+        return ModelConfig._build_model(model_id)
 
     @staticmethod
     def get_fallback_model() -> Union[Siliconflow, DeepSeek]:

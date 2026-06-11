@@ -110,6 +110,16 @@ class SessionState:
     batch_mapping_results: Optional[List[Dict[str, Any]]] = None
     """批量字段映射结果（聊天输入"映射"路径），供 Excel 导出使用"""
 
+    # ---- 模型配置 ----
+    current_provider: Optional[str] = None
+    """当前供应商（"deepseek" | "siliconflow"）"""
+
+    api_key: Optional[str] = None
+    """API Key（界面输入，覆盖环境变量）"""
+
+    model_name: Optional[str] = None
+    """模型名称（界面选择，覆盖环境变量）"""
+
     # ---- 工厂方法 ----
 
     @classmethod
