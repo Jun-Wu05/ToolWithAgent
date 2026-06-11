@@ -155,13 +155,20 @@ async def start():
         env_api_key = ModelConfig.get_api_key()
         
         # 启动时显示空模型列表（等待用户配置）
+        # 根据 current_provider 设置 initial_index（重置选项永远在第一位）
+        provider_initial_index = 0
+        if current_provider == "deepseek":
+            provider_initial_index = 1
+        elif current_provider == "siliconflow":
+            provider_initial_index = 2
+        
         await cl.ChatSettings(
             [
                 Select(
                     id="provider",
                     label="供应商",
                     values=["--- 重置设置 ---", "deepseek", "siliconflow"],  # 重置永远第一位
-                    initial_index=0,  # 默认指向重置
+                    initial_index=provider_initial_index,  # 根据当前供应商设置
                 ),
                 Select(
                     id="model_name",
@@ -303,13 +310,20 @@ async def on_settings_update(settings: dict):
     
     # 如果供应商切换了，先清空模型列表
     if provider_changed:
+        # 根据 provider 设置 initial_index（重置选项永远在第一位）
+        provider_initial_index = 0
+        if provider == "deepseek":
+            provider_initial_index = 1
+        elif provider == "siliconflow":
+            provider_initial_index = 2
+        
         await cl.ChatSettings(
             [
                 Select(
                     id="provider",
                     label="供应商",
                     values=["--- 重置设置 ---", "deepseek", "siliconflow"],
-                    initial_index=0 if provider == "deepseek" else 1,
+                    initial_index=provider_initial_index,
                 ),
                 Select(
                     id="model_name",
@@ -377,13 +391,20 @@ async def on_settings_update(settings: dict):
         models = result.get("models", [])
         
         # 重新发送设置界面（更新模型列表）
+        # 根据 provider 设置 initial_index（重置选项永远在第一位）
+        provider_initial_index = 0
+        if provider == "deepseek":
+            provider_initial_index = 1
+        elif provider == "siliconflow":
+            provider_initial_index = 2
+        
         await cl.ChatSettings(
             [
                 Select(
                     id="provider",
                     label="供应商",
                     values=["--- 重置设置 ---", "deepseek", "siliconflow"],  # 添加重置选项
-                    initial_index=0,  # 默认指向重置
+                    initial_index=provider_initial_index,
                 ),
                 Select(
                     id="model_name",
