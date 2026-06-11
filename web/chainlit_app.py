@@ -160,8 +160,8 @@ async def start():
                 Select(
                     id="provider",
                     label="供应商",
-                    values=["deepseek", "siliconflow"],
-                    initial_index=0 if current_provider == "deepseek" else 1,
+                    values=["--- 重置设置 ---", "deepseek", "siliconflow"],  # 重置永远第一位
+                    initial_index=0,  # 默认指向重置
                 ),
                 Select(
                     id="model_name",
@@ -245,6 +245,62 @@ async def on_settings_update(settings: dict):
     # 检测供应商是否切换
     provider_changed = old_provider and provider and old_provider != provider
     
+    # 检测是否点击了重置选项
+    if provider == "--- 重置设置 ---":
+        # 重置配置
+        user_session.current_provider = None
+        user_session.model_name = None
+        user_session.api_key = None
+        
+        # 清除运行时配置
+        ModelConfig.clear_runtime_config()
+        
+        # 清除 Team 缓存
+        from agent.core.team import reset_team_instance
+        reset_team_instance()
+        user_session.team = None
+        
+        logger.info("[SETTINGS] 设置已重置")
+        
+        # 重新发送设置界面（恢复默认）
+        await cl.ChatSettings(
+            [
+                Select(
+                    id="provider",
+                    label="供应商",
+                    values=["--- 重置设置 ---", "deepseek", "siliconflow"],
+                    initial_index=0,  # 默认指向重置
+                ),
+                Select(
+                    id="model_name",
+                    label="模型名称",
+                    values=["请先配置 API Key 后获取模型列表"],
+                    initial_index=0,
+                ),
+                TextInput(
+                    id="api_key",
+                    label="API Key（可选）",
+                    placeholder="DeepSeek 必需，SiliconFlow 可选",
+                    initial="",
+                ),
+            ]
+        ).send()
+        
+        await cl.Message(
+            content="""🔄 **设置已重置为默认值**
+
+💡 请重新配置模型：
+1. 选择供应商（DeepSeek 或 SiliconFlow）
+2. 输入 API Key（SiliconFlow 可选）
+3. 点击保存自动测试连接
+
+⚙️ **当前默认配置：**
+- 供应商：deepseek
+- API Key：清空
+- Team：未初始化（配置后自动初始化）"""
+        ).send()
+        return
+    
     # 如果供应商切换了，先清空模型列表
     if provider_changed:
         await cl.ChatSettings(
@@ -252,7 +308,7 @@ async def on_settings_update(settings: dict):
                 Select(
                     id="provider",
                     label="供应商",
-                    values=["deepseek", "siliconflow"],
+                    values=["--- 重置设置 ---", "deepseek", "siliconflow"],
                     initial_index=0 if provider == "deepseek" else 1,
                 ),
                 Select(
@@ -326,8 +382,8 @@ async def on_settings_update(settings: dict):
                 Select(
                     id="provider",
                     label="供应商",
-                    values=["deepseek", "siliconflow"],
-                    initial_index=0 if provider == "deepseek" else 1,
+                    values=["--- 重置设置 ---", "deepseek", "siliconflow"],  # 添加重置选项
+                    initial_index=0,  # 默认指向重置
                 ),
                 Select(
                     id="model_name",
@@ -1587,75 +1643,6 @@ async def on_export_batch_field_mapping_excel(action: cl.Action):
     except Exception as e:
         logger.error(f"[ACTION] 批量字段映射 Excel 导出异常: {e}")
         await cl.Message(content=f"❌ Excel 导出失败：{e}").send()
-
-
-@cl.action_callback("reset_settings")
-async def on_reset_settings(action: cl.Action):
-    """用户点击"重置设置"按钮 — 恢复默认配置"""
-    user_session = cl.user_session.get("user_session")
-    logger.info('[ACTION] 用户点击"重置设置"按钮')
-    
-    try:
-        # 重置会话状态
-        user_session.current_provider = None
-        user_session.model_name = None
-        user_session.api_key = None
-        
-        # 清除运行时配置，回退到环境变量
-        ModelConfig.clear_runtime_config()
-        
-        # 清除 Team 缓存
-        from agent.core.team import reset_team_instance
-        reset_team_instance()
-        user_session.team = None
-        
-        logger.info("[ACTION] 设置已重置")
-        
-        # 获取默认供应商
-        current_provider = ModelConfig.get_provider()
-        env_api_key = ModelConfig.get_api_key()
-        
-        # 重置设置界面
-        await cl.ChatSettings(
-            [
-                Select(
-                    id="provider",
-                    label="供应商",
-                    values=["deepseek", "siliconflow"],
-                    initial_index=0 if current_provider == "deepseek" else 1,
-                ),
-                Select(
-                    id="model_name",
-                    label="模型名称",
-                    values=["请先配置 API Key 后获取模型列表"],
-                    initial_index=0,
-                ),
-                TextInput(
-                    id="api_key",
-                    label="API Key（可选）",
-                    placeholder="DeepSeek 必需，SiliconFlow 可选",
-                    initial=env_api_key or "",
-                ),
-            ]
-        ).send()
-        
-        await cl.Message(
-            content="""🔄 **设置已重置为默认值**
-
-💡 请重新配置模型：
-1. 选择供应商（DeepSeek 或 SiliconFlow）
-2. 输入 API Key（SiliconFlow 可选）
-3. 点击保存自动测试连接
-
-⚙️ **当前默认配置：**
-- 供应商：使用环境变量或默认
-- API Key：使用环境变量
-- Team：未初始化（配置后自动初始化）"""
-        ).send()
-        
-    except Exception as e:
-        logger.error(f"[ACTION] 重置设置失败: {e}")
-        await cl.Message(content=f"❌ 重置失败：{e}").send()
 
 
 def _parse_mapping_results(llm_output: str) -> list[dict] | None:
