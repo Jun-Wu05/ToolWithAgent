@@ -91,7 +91,7 @@ class ModelManager:
                 "siliconflow",
                 api_key or "",
                 force_refresh,
-                lambda _: ModelManager._fetch_siliconflow_models()
+                lambda k: ModelManager._fetch_siliconflow_models(k)
             )
         else:
             logger.warning(f"[MODEL] 未知供应商: {provider}")
@@ -169,14 +169,26 @@ class ModelManager:
             return DEEPSEEK_DEFAULT_MODELS.copy()
     
     @staticmethod
-    async def _fetch_siliconflow_models() -> List[str]:
+    async def _fetch_siliconflow_models(api_key: str = None) -> List[str]:
         """从 SiliconFlow API 获取模型列表（私有方法）"""
-        # 先尝试从 API 获取
+        
+        # 没有 API Key，直接使用静态列表
+        if not api_key or not api_key.strip():
+            logger.info("[API] SiliconFlow 未提供 API Key，使用静态列表")
+            all_models = []
+            for models in SILICONFLOW_MODELS.values():
+                all_models.extend(models)
+            return all_models
+        
+        # 有 API Key，尝试从 API 获取
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     "https://api.siliconflow.cn/v1/models",
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
                     params={
                         "type": "text",
                         "sub_type": "chat"
@@ -189,6 +201,16 @@ class ModelManager:
                 models = [m for m in models if m]  # 过滤空值
                 logger.info(f"[API] SiliconFlow API 返回 {len(models)} 个模型")
                 return models
+                
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                logger.warning("[API] SiliconFlow API Key 无效，使用静态列表")
+            else:
+                logger.warning(f"[API] SiliconFlow API 请求失败 ({e.response.status_code})，使用静态列表")
+        except httpx.TimeoutException:
+            logger.warning("[API] SiliconFlow 请求超时，使用静态列表")
+        except httpx.ConnectError:
+            logger.warning("[API] SiliconFlow 网络连接失败，使用静态列表")
         except Exception as e:
             logger.warning(f"[API] SiliconFlow API 请求失败: {e}，使用静态列表")
         
