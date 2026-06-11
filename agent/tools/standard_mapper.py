@@ -563,7 +563,7 @@ def lookup_standard_field_tool(keyword: str, limit: int = 5) -> str:
 
 
 def _load_object_mapping(excel_path: str) -> dict:
-    """读取 Excel 模板的"对应关系" Sheet"""
+    """读取 Excel 模板的"对应关系"Sheet，只取第一个对象"""
     mapping = {}
     try:
         wb = load_workbook(excel_path, data_only=True)
@@ -573,6 +573,8 @@ def _load_object_mapping(excel_path: str) -> dict:
                 if len(row) >= 3 and row[0] and row[2]:
                     system_property = str(row[0]).strip()
                     obj = str(row[2]).strip()
+                    # 🔧 修复：只取第一个对象（逗号分隔）
+                    obj = obj.split(',')[0].strip()
                     mapping[system_property] = obj
     except Exception:
         pass
