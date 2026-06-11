@@ -74,7 +74,7 @@ from web.model_manager import ModelManager
 from agent.core.model_config import ModelConfig
 
 # Chainlit 输入组件
-from chainlit.input_widget import Select, Password
+from chainlit.input_widget import Select, TextInput
 
 # ============= 从拆分模块导入业务函数 =============
 
@@ -187,7 +187,7 @@ async def start():
                     values=models,
                     initial_index=0,
                 ),
-                Password(
+                TextInput(
                     id="api_key",
                     label="API Key（可选）",
                     placeholder="留空则使用环境变量",
