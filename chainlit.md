@@ -16,3 +16,10 @@
 - 支持筛选
 - 支持一键复制
 - 支持Excel导出
+
+<style>
+/* 隐藏设置界面的重置按钮 */
+.settings-reset {
+    display: none !important;
+}
+</style>
