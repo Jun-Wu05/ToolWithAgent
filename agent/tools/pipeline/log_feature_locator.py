@@ -152,7 +152,15 @@ def locate_feature(
 
         # 3. 调用 LLM（无兜底策略）
         response = _call_llm_direct(prompt, temperature=0.1, max_tokens=300, timeout=30)
+        
+        # 🔧 新增：记录 LLM 响应和解析结果
+        logger.info(f"[locate_feature] LLM 原始响应（完整）: {response}")
         parsed = _try_parse_json(response)
+
+        if parsed:
+            logger.info(f"[locate_feature] JSON 解析成功: {parsed}")
+        else:
+            logger.error(f"[locate_feature] JSON 解析失败！原始响应: {response}")
 
         if parsed and parsed.get("feature_location") in ("body", "header", "unknown"):
             result = {

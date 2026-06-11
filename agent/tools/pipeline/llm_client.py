@@ -25,6 +25,10 @@ logger = get_logger("log_parser_pipeline")
 _LLM_API_URL: str = ""
 _LLM_API_KEY: str = ""
 
+# 🔧 修复：需要禁用思考模式的 Thinking Model 列表
+# 这些模型默认启用思考模式，会导致 JSON 输出时 content 为空
+_THINKING_DISABLED_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+
 
 def _init_llm_config() -> None:
     """懒加载 LLM API 配置"""
@@ -77,6 +81,13 @@ def _call_llm_direct(
         "max_tokens": max_tokens,
     }
     
+    # 🔧 修复：对 Thinking Model 禁用思考模式
+    # Thinking Model（deepseek-v4-flash, deepseek-v4-pro）默认启用思考模式
+    # 会导致 JSON 输出时 content 为空（所有 token 被思考内容占用）
+    if model_id in _THINKING_DISABLED_MODELS:
+        payload["thinking"] = {"type": "disabled"}
+        logger.debug(f"[_call_llm_direct] 已禁用思考模式：{model_id}")
+    
     # CHANGED: 条件性添加 response_format，强制 JSON 输出
     # 支持的 API：DeepSeek、OpenAI 兼容接口（如硅基流动）
     # 不支持的 API：智谱 GLM 系列（需要在 prompt 中明确要求）
@@ -100,6 +111,12 @@ def _call_llm_direct(
     content: str = data["choices"][0]["message"]["content"]
     elapsed = time.time() - start
     usage = data.get("usage", {})
+    
+    # 🔧 新增：记录 LLM 原始响应内容
+    logger.info(f"[LLM_DIRECT] 原始响应内容（前500字符）: {content[:500]}")
+    if not content or not content.strip():
+        logger.error(f"[LLM_DIRECT] LLM 返回空内容！完整响应: {data}")
+    
     logger.info(
         f"[LLM_DIRECT] 完成, elapsed={elapsed:.2f}s, "
         f"input_tokens={usage.get('prompt_tokens', '?')}, "
@@ -111,22 +128,33 @@ def _call_llm_direct(
 def _try_parse_json(text: str) -> dict | None:
     """尝试从 LLM 响应中提取 JSON"""
     text = text.strip()
+    
+    # 🔧 新增：记录原始文本
+    logger.debug(f"[_try_parse_json] 原始文本长度: {len(text)}, 前200字符: {text[:200]}")
+    
     # 去掉可能的 markdown 代码块包装
     if text.startswith("```"):
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines).strip()
+        logger.debug(f"[_try_parse_json] 去除 markdown 后: {text[:200]}")
+    
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
+        result = json.loads(text)
+        logger.debug(f"[_try_parse_json] JSON 解析成功: {result}")
+        return result
+    except json.JSONDecodeError as e:
+        logger.warning(f"[_try_parse_json] JSON 解析失败: {e}, 文本: {text[:500]}")
         # 尝试提取第一个 { ... } 块
         m = _re.search(r"\{.*\}", text, _re.DOTALL)
         if m:
             try:
-                return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
-    return None
+                result = json.loads(m.group())
+                logger.debug(f"[_try_parse_json] 提取 JSON 块成功: {result}")
+                return result
+            except json.JSONDecodeError as e2:
+                logger.warning(f"[_try_parse_json] 提取 JSON 块失败: {e2}")
+        return None
 
 
 def normalize_log_format(format_type: str) -> str:
