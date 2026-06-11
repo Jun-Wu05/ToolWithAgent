@@ -238,10 +238,10 @@ async def on_settings_update(settings: dict):
     """
     user_session = cl.user_session.get("user_session")
     
-    # 获取新的配置
-    provider = settings.get("provider", "").strip()
-    model = settings.get("model_name", "").strip()
-    api_key = settings.get("api_key", "").strip()
+    # 获取新的配置（使用 or 确保返回字符串，避免 None.strip() 报错）
+    provider = (settings.get("provider") or "").strip()
+    model = (settings.get("model_name") or "").strip()
+    api_key = (settings.get("api_key") or "").strip()
     
     # 获取旧配置
     old_provider = user_session.current_provider
