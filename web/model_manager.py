@@ -2,17 +2,24 @@
 模型管理器 - 支持多供应商（DeepSeek + SiliconFlow）
 
 功能：
-1. 从 DeepSeek API 动态获取模型列表
-2. 支持 SiliconFlow 静态模型列表（预留）
-3. 测试 API 连通性
-4. 统一的模型获取接口
+1. 从 API 动态获取模型列表（带10天缓存）
+2. 测试 API 连通性
+3. 统一的模型获取接口
 """
 
 import httpx
-from typing import List, Dict
+import time
+from typing import List, Dict, Tuple, Optional
 from agent.shared.logger import get_logger
 
 logger = get_logger("model_manager")
+
+# ============= 缓存配置 =============
+
+_models_cache: Dict[str, Tuple[List[str], float]] = {}
+"""模型列表缓存: {cache_key: (models_list, timestamp)}"""
+
+CACHE_TTL = 10 * 24 * 60 * 60  # 10 天 = 864000 秒
 
 # 默认模型列表（API 失败时回退）
 DEEPSEEK_DEFAULT_MODELS = [
@@ -52,14 +59,16 @@ class ModelManager:
     @staticmethod
     async def get_models(
         provider: str,
-        api_key: str = None
+        api_key: str = None,
+        force_refresh: bool = False
     ) -> List[str]:
         """
-        获取指定供应商的模型列表
+        获取指定供应商的模型列表（带10天缓存）
         
         Args:
             provider: 供应商名称（"deepseek" | "siliconflow"）
             api_key: API 密钥（DeepSeek 需要，SiliconFlow 暂不需要）
+            force_refresh: 是否强制刷新缓存
         
         Returns:
             模型 ID 列表
@@ -67,20 +76,76 @@ class ModelManager:
         provider = provider.lower().strip()
         
         if provider == "deepseek":
-            return await ModelManager.get_deepseek_models(api_key)
+            if not api_key:
+                logger.warning("[MODEL] DeepSeek 需要 API Key")
+                return DEEPSEEK_DEFAULT_MODELS.copy()
+            return await ModelManager._get_cached_models(
+                "deepseek", 
+                api_key, 
+                force_refresh,
+                lambda k: ModelManager._fetch_deepseek_models(k)
+            )
         elif provider == "siliconflow":
-            # SiliconFlow 使用静态列表
-            all_models = []
-            for models in SILICONFLOW_MODELS.values():
-                all_models.extend(models)
-            return all_models
+            # SiliconFlow 也使用缓存
+            return await ModelManager._get_cached_models(
+                "siliconflow",
+                api_key or "",
+                force_refresh,
+                lambda _: ModelManager._fetch_siliconflow_models()
+            )
         else:
             logger.warning(f"[MODEL] 未知供应商: {provider}")
             return []
     
     @staticmethod
-    async def get_deepseek_models(api_key: str) -> List[str]:
-        """从 DeepSeek API 获取模型列表"""
+    async def _get_cached_models(
+        provider: str,
+        api_key: str,
+        force_refresh: bool,
+        fetch_fn
+    ) -> List[str]:
+        """
+        获取模型列表（带缓存逻辑）
+        
+        Args:
+            provider: 供应商名称
+            api_key: API 密钥（用于生成缓存键）
+            force_refresh: 是否强制刷新
+            fetch_fn: 获取模型列表的异步函数
+        
+        Returns:
+            模型 ID 列表
+        """
+        # 生成缓存键（避免缓存完整 API Key）
+        cache_key = f"{provider}_{api_key[:8] if api_key else 'no_key'}"
+        
+        # 检查缓存
+        if not force_refresh:
+            cached_data = _models_cache.get(cache_key)
+            if cached_data:
+                models, timestamp = cached_data
+                cache_age_days = (time.time() - timestamp) / (24 * 60 * 60)
+                
+                if time.time() - timestamp < CACHE_TTL:
+                    logger.info(f"[CACHE] 使用缓存模型列表: {provider}, 缓存年龄: {cache_age_days:.1f} 天")
+                    return models
+                else:
+                    logger.info(f"[CACHE] 缓存已过期: {provider} (缓存 {cache_age_days:.1f} 天), 重新获取")
+        
+        # 缓存失效或强制刷新，重新获取
+        logger.info(f"[API] 获取模型列表: {provider}")
+        models = await fetch_fn(api_key)
+        
+        # 更新缓存
+        if models:
+            _models_cache[cache_key] = (models, time.time())
+            logger.info(f"[CACHE] 已缓存 {len(models)} 个模型: {provider}, 有效期: 10 天")
+        
+        return models
+    
+    @staticmethod
+    async def _fetch_deepseek_models(api_key: str) -> List[str]:
+        """从 DeepSeek API 获取模型列表（私有方法）"""
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -91,11 +156,68 @@ class ModelManager:
                 response.raise_for_status()
                 data = response.json()
                 models = [model["id"] for model in data.get("data", [])]
-                logger.info(f"[MODEL] DeepSeek API 返回 {len(models)} 个模型")
+                logger.info(f"[API] DeepSeek API 返回 {len(models)} 个模型")
+                return models
+        except httpx.TimeoutException:
+            logger.error("[API] DeepSeek 请求超时，使用默认列表")
+            return DEEPSEEK_DEFAULT_MODELS.copy()
+        except httpx.ConnectError:
+            logger.error("[API] DeepSeek 网络连接失败，使用默认列表")
+            return DEEPSEEK_DEFAULT_MODELS.copy()
+        except Exception as e:
+            logger.error(f"[API] 获取 DeepSeek 模型列表失败: {e}，使用默认列表")
+            return DEEPSEEK_DEFAULT_MODELS.copy()
+    
+    @staticmethod
+    async def _fetch_siliconflow_models() -> List[str]:
+        """从 SiliconFlow API 获取模型列表（私有方法）"""
+        # 先尝试从 API 获取
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://api.siliconflow.cn/v1/models",
+                    headers={"Content-Type": "application/json"},
+                    params={
+                        "type": "text",
+                        "sub_type": "chat"
+                    },
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                data = response.json()
+                models = [model.get("id", "") for model in data.get("data", [])]
+                models = [m for m in models if m]  # 过滤空值
+                logger.info(f"[API] SiliconFlow API 返回 {len(models)} 个模型")
                 return models
         except Exception as e:
-            logger.error(f"[MODEL] 获取 DeepSeek 模型列表失败: {e}，使用默认列表")
-            return DEEPSEEK_DEFAULT_MODELS.copy()
+            logger.warning(f"[API] SiliconFlow API 请求失败: {e}，使用静态列表")
+        
+        # API 失败，使用静态列表
+        all_models = []
+        for models in SILICONFLOW_MODELS.values():
+            all_models.extend(models)
+        logger.info(f"[API] SiliconFlow 使用静态列表: {len(all_models)} 个模型")
+        return all_models
+    
+    @staticmethod
+    def clear_cache() -> None:
+        """清空所有缓存"""
+        global _models_cache
+        count = len(_models_cache)
+        _models_cache.clear()
+        logger.info(f"[CACHE] 已清空 {count} 个缓存条目")
+    
+    @staticmethod
+    def clear_cache_by_provider(provider: str) -> None:
+        """清空指定供应商的缓存"""
+        global _models_cache
+        provider = provider.lower().strip()
+        count = 0
+        for key in list(_models_cache.keys()):
+            if key.startswith(f"{provider}_"):
+                del _models_cache[key]
+                count += 1
+        logger.info(f"[CACHE] 已清空 {provider} 的 {count} 个缓存条目")
     
     @staticmethod
     async def test_connection(
