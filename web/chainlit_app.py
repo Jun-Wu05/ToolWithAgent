@@ -149,26 +149,17 @@ async def start():
     threading.Thread(target=_background_init_cache, daemon=True, name="cache_init").start()
 
     # ===== 初始化模型设置界面（启动时不获取模型列表） =====
+    # 安全提示：不读取环境变量，不自动保存，每次需要手动输入
     try:
-        # 获取当前供应商
-        current_provider = ModelConfig.get_provider()
-        env_api_key = ModelConfig.get_api_key()
-        
         # 启动时显示空模型列表（等待用户配置）
-        # 根据 current_provider 设置 initial_index（重置选项永远在第一位）
-        provider_initial_index = 0
-        if current_provider == "deepseek":
-            provider_initial_index = 1
-        elif current_provider == "siliconflow":
-            provider_initial_index = 2
-        
+        # 供应商默认指向重置选项
         await cl.ChatSettings(
             [
                 Select(
                     id="provider",
                     label="供应商",
                     values=["--- 重置设置 ---", "deepseek", "siliconflow"],  # 重置永远第一位
-                    initial_index=provider_initial_index,  # 根据当前供应商设置
+                    initial_index=0,  # 默认指向重置
                 ),
                 Select(
                     id="model_name",
@@ -180,7 +171,7 @@ async def start():
                     id="api_key",
                     label="API Key（可选）",
                     placeholder="DeepSeek 必需，SiliconFlow 可选",
-                    initial=env_api_key or "",
+                    initial="",  # 不读取环境变量，永远为空
                 ),
             ]
         ).send()
@@ -201,7 +192,7 @@ async def start():
 ⚙️ **请先配置模型**
 - 点击侧边栏 **"⚙️ 设置"** 按钮
 - 选择供应商（DeepSeek 或 SiliconFlow）
-- 输入 API Key（SiliconFlow 可选）
+- 输入 API Key（每次启动需要重新输入）
 - 点击保存自动测试连接
 
 📋 **功能说明：**
@@ -217,6 +208,10 @@ async def start():
 - 支持Excel导出
 
 💡 如需切换文件，发送 **"清空数据"** 即可快速重置会话。
+
+⚠️ **安全提示：**
+- API Key 不会自动保存，每次重启需要重新输入
+- 请勿在公共设备上使用
 
 请配置模型后上传数据文件或直接发送消息开始对话。"""
     ).send()
