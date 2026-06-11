@@ -239,12 +239,19 @@ def create_data_mapping_team() -> Team:
     Returns:
         Team实例
     """
-    # 验证 API Key 已配置
+    # 验证 API Key 已配置（DeepSeek 必需，SiliconFlow 可选）
     api_key = ModelConfig.get_api_key()
-    if not api_key:
+    provider = ModelConfig.get_provider()
+    
+    if provider == "deepseek" and not api_key:
         raise ValueError(
-            f"请设置环境变量 {'DEEPSEEK_API_KEY' if ModelConfig.MODEL_PROVIDER == 'deepseek' else 'SILICONFLOW_API_KEY'}"
+            "DeepSeek 需要 API Key，请设置环境变量 DEEPSEEK_API_KEY 或在侧边栏配置"
         )
+    
+    # SiliconFlow 允许无 API Key（使用静态模型列表）
+    if provider == "siliconflow" and not api_key:
+        import logging
+        logging.warning("[TEAM] SiliconFlow 未配置 API Key，将使用静态模型列表")
     
     # 创建专业Agent
     field_mapping_agent = create_field_mapping_agent()

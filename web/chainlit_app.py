@@ -236,9 +236,10 @@ async def on_settings_update(settings: dict):
     
     功能：
     1. 获取用户配置的供应商、模型、API Key
-    2. 测试 DeepSeek API 连通性
+    2. 测试 API 连通性
     3. 测试成功后应用配置，失败则不应用
     4. 重新初始化 Team 实例
+    5. 更新设置界面的模型列表
     """
     user_session = cl.user_session.get("user_session")
     
@@ -281,6 +282,33 @@ async def on_settings_update(settings: dict):
         
         logger.info("[SETTINGS] Team 已重新初始化")
         
+        # 获取最新的模型列表
+        models = result.get("models", [])
+        
+        # 重新发送设置界面（更新模型列表）
+        await cl.ChatSettings(
+            [
+                Select(
+                    id="provider",
+                    label="供应商",
+                    values=["deepseek", "siliconflow"],
+                    initial_index=0 if provider == "deepseek" else 1,
+                ),
+                Select(
+                    id="model_name",
+                    label="模型名称",
+                    values=models,
+                    initial_index=0,
+                ),
+                TextInput(
+                    id="api_key",
+                    label="API Key（可选）",
+                    placeholder="留空则使用环境变量",
+                    initial=api_key or "",
+                ),
+            ]
+        ).send()
+        
         await cl.Message(
             content=f"""✅ **配置更新成功！**
 
@@ -292,7 +320,8 @@ async def on_settings_update(settings: dict):
 - 供应商：{provider or '使用默认'}
 - 模型：{model or '使用默认'}
 - API Key：{'✅ 界面配置' if api_key else '✅ 环境变量'}
-"""
+
+💡 模型列表已更新，请从侧边栏选择模型。"""
         ).send()
         
     else:
