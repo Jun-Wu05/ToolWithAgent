@@ -273,13 +273,7 @@ class ModelManager:
                 }
             return await ModelManager._test_deepseek_connection(api_key)
         elif provider == "siliconflow":
-            # SiliconFlow 暂不支持连通性测试
-            return {
-                "success": True,
-                "message": "✅ SiliconFlow 预留（暂不支持连通性测试）",
-                "models_count": len(await ModelManager.get_models("siliconflow")),
-                "models": await ModelManager.get_models("siliconflow")
-            }
+            return await ModelManager._test_siliconflow_connection(api_key)
         else:
             return {
                 "success": False,
@@ -302,6 +296,79 @@ class ModelManager:
                 if response.status_code == 200:
                     data = response.json()
                     models = [model["id"] for model in data.get("data", [])]
+                    return {
+                        "success": True,
+                        "message": "✅ 连接成功",
+                        "models_count": len(models),
+                        "models": models
+                    }
+                elif response.status_code == 401:
+                    return {
+                        "success": False,
+                        "message": "❌ API Key 无效",
+                        "models_count": 0,
+                        "models": []
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"❌ 请求失败 (HTTP {response.status_code})",
+                        "models_count": 0,
+                        "models": []
+                    }
+                    
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "message": "❌ 请求超时，请检查网络连接",
+                "models_count": 0,
+                "models": []
+            }
+        except httpx.ConnectError:
+            return {
+                "success": False,
+                "message": "❌ 网络连接失败，请检查代理设置",
+                "models_count": 0,
+                "models": []
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"❌ 未知错误: {str(e)}",
+                "models_count": 0,
+                "models": []
+            }
+    
+    @staticmethod
+    async def _test_siliconflow_connection(api_key: str = None) -> Dict:
+        """测试 SiliconFlow API 连通性"""
+        # 如果没有 API Key，直接返回成功（SiliconFlow 可以使用静态列表）
+        if not api_key or not api_key.strip():
+            models = await ModelManager.get_models("siliconflow")
+            return {
+                "success": True,
+                "message": "✅ 使用静态模型列表（无需 API Key）",
+                "models_count": len(models),
+                "models": models
+            }
+        
+        # 有 API Key，测试 API 连通性
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://api.siliconflow.cn/v1/models",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    params={"type": "text", "sub_type": "chat"},
+                    timeout=10.0
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    models = [model.get("id", "") for model in data.get("data", [])]
+                    models = [m for m in models if m]
                     return {
                         "success": True,
                         "message": "✅ 连接成功",
