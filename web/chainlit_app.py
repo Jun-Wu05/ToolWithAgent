@@ -128,55 +128,33 @@ async def start():
     user_session = SessionState.create_default()
     cl.user_session.set("user_session", user_session)
 
-    # 获取 API Key（环境变量或留空）
-    api_key = ModelConfig.get_api_key()
-    if api_key:
-        logger.info("[START] 使用环境变量 API Key")
+    # CHANGED: 启动时不初始化 Team，等用户配置后再初始化
+    # 用户首次使用需要先配置模型
+    logger.info("[START] 启动时不初始化 Team，等待用户配置")
+    
+    # 后台线程初始化语义检索 embedding 缓存，不阻塞 Chat 启动
+    import threading
+    from agent.core.field_retriever import init_field_cache
 
-    # 初始化Team并预热
-    try:
-        import sys, os
-        _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        if _root not in sys.path:
-            sys.path.insert(0, _root)
+    def _background_init_cache() -> None:
+        try:
+            cache_ready = init_field_cache()
+            if cache_ready:
+                logger.info("[START] 后台：语义检索缓存就绪")
+            else:
+                logger.info("[START] 后台：语义检索缓存未就绪，将降级为无候选模式")
+        except Exception as bg_e:
+            logger.error(f"[START] 后台缓存初始化异常: {bg_e}")
 
-        from agent.core.team import get_team_instance
-        user_session.team = get_team_instance()
-        logger.info("[START] Team初始化成功")
+    threading.Thread(target=_background_init_cache, daemon=True, name="cache_init").start()
 
-        # 后台线程初始化语义检索 embedding 缓存，不阻塞 Chat 启动
-        # 有缓存时 ~50ms 即完成，无缓存时在后台生成（首个请求降级为无候选模式）
-        import threading
-        from agent.core.field_retriever import init_field_cache
-
-        def _background_init_cache() -> None:
-            try:
-                cache_ready = init_field_cache()
-                if cache_ready:
-                    logger.info("[START] 后台：语义检索缓存就绪")
-                else:
-                    logger.info("[START] 后台：语义检索缓存未就绪，将降级为无候选模式")
-            except Exception as bg_e:
-                logger.error(f"[START] 后台缓存初始化异常: {bg_e}")
-
-        threading.Thread(target=_background_init_cache, daemon=True, name="cache_init").start()
-    except ValueError as e:
-        logger.error(f"[START] Team初始化失败: {e}")
-        await cl.Message(content=f"⚠️ Team初始化失败: {str(e)}").send()
-    except Exception as e:
-        logger.error(f"[START] Team初始化异常: {e}")
-        await cl.Message(content=f"⚠️ Team初始化异常: {str(e)}").send()
-
-    # ===== 新增：初始化模型设置界面 =====
+    # ===== 初始化模型设置界面（启动时不获取模型列表） =====
     try:
         # 获取当前供应商
         current_provider = ModelConfig.get_provider()
+        env_api_key = ModelConfig.get_api_key()
         
-        # 异步获取模型列表
-        models = await ModelManager.get_models(current_provider, api_key)
-        logger.info(f"[START] 获取到 {len(models)} 个 {current_provider} 模型")
-        
-        # 构建设置界面（使用 Chainlit 2.x 正确的 API）
+        # 启动时显示空模型列表（等待用户配置）
         await cl.ChatSettings(
             [
                 Select(
@@ -188,28 +166,36 @@ async def start():
                 Select(
                     id="model_name",
                     label="模型名称",
-                    values=models,
+                    values=["请先配置 API Key 后获取模型列表"],
                     initial_index=0,
                 ),
                 TextInput(
                     id="api_key",
                     label="API Key（可选）",
-                    placeholder="留空则使用环境变量",
-                    initial=api_key or "",
+                    placeholder="DeepSeek 必需，SiliconFlow 可选",
+                    initial=env_api_key or "",
                 ),
             ]
         ).send()
         
+        logger.info("[START] 模型设置界面已初始化（等待用户配置）")
+        
     except Exception as e:
         logger.error(f"[START] 初始化模型设置失败: {e}")
         await cl.Message(
-            content=f"⚠️ 模型设置初始化失败，将使用默认配置：{str(e)}"
+            content=f"⚠️ 模型设置初始化失败：{str(e)}"
         ).send()
-    # ===== 新增结束 =====
+    # ===== 初始化结束 =====
 
     # 发送欢迎消息
     await cl.Message(
         content="""👋 **数据映射智能助手已就绪！**
+
+⚙️ **请先配置模型**
+- 点击侧边栏 **"⚙️ 设置"** 按钮
+- 选择供应商（DeepSeek 或 SiliconFlow）
+- 输入 API Key（SiliconFlow 可选）
+- 点击保存自动测试连接
 
 📋 **功能说明：**
 - **上传文件**：支持拖拽或点击上传 Base64/TXT/JSON/Excel 文件
@@ -225,7 +211,7 @@ async def start():
 
 💡 如需切换文件，发送 **"清空数据"** 即可快速重置会话。
 
-请上传数据文件或直接发送消息开始对话。""",
+请配置模型后上传数据文件或直接发送消息开始对话。"""
     ).send()
 
 
@@ -236,10 +222,12 @@ async def on_settings_update(settings: dict):
     
     功能：
     1. 获取用户配置的供应商、模型、API Key
-    2. 测试 API 连通性
-    3. 测试成功后应用配置，失败则不应用
-    4. 重新初始化 Team 实例
-    5. 更新设置界面的模型列表
+    2. 检测供应商是否切换
+    3. 如果切换供应商，清空模型列表并提示
+    4. 测试 API 连通性
+    5. 测试成功后应用配置，失败则不应用
+    6. 重新初始化 Team 实例
+    7. 更新设置界面的模型列表
     """
     user_session = cl.user_session.get("user_session")
     
@@ -248,8 +236,55 @@ async def on_settings_update(settings: dict):
     model = settings.get("model_name", "").strip()
     api_key = settings.get("api_key", "").strip()
     
+    # 获取旧配置
+    old_provider = user_session.current_provider
+    
     # 使用界面的 API Key 或环境变量
     test_key = api_key if api_key else ModelConfig.get_api_key()
+    
+    # 检测供应商是否切换
+    provider_changed = old_provider and provider and old_provider != provider
+    
+    # 如果供应商切换了，先清空模型列表
+    if provider_changed:
+        await cl.ChatSettings(
+            [
+                Select(
+                    id="provider",
+                    label="供应商",
+                    values=["deepseek", "siliconflow"],
+                    initial_index=0 if provider == "deepseek" else 1,
+                ),
+                Select(
+                    id="model_name",
+                    label="模型名称",
+                    values=["请配置 API Key 后获取模型列表"],
+                    initial_index=0,
+                ),
+                TextInput(
+                    id="api_key",
+                    label="API Key（可选）",
+                    placeholder="DeepSeek 必需，SiliconFlow 可选",
+                    initial=api_key or "",
+                ),
+            ]
+        ).send()
+        
+        await cl.Message(
+            content=f"""🔄 **供应商已切换为 {provider.upper()}**
+
+💡 请配置 API Key 后点击保存，自动测试连接并获取模型列表。"""
+        ).send()
+        return  # 切换供应商后，等待用户再次点击保存
+    
+    # 如果没有配置 API Key 且选择了 DeepSeek，提示错误
+    if provider == "deepseek" and not test_key:
+        await cl.Message(
+            content="""❌ **DeepSeek 需要配置 API Key**
+
+💡 请在设置界面输入 API Key，或设置环境变量 DEEPSEEK_API_KEY。"""
+        ).send()
+        return
     
     # 发送测试中消息
     loading_msg = cl.Message(content="🔌 **正在测试连接...**")
@@ -303,7 +338,7 @@ async def on_settings_update(settings: dict):
                 TextInput(
                     id="api_key",
                     label="API Key（可选）",
-                    placeholder="留空则使用环境变量",
+                    placeholder="DeepSeek 必需，SiliconFlow 可选",
                     initial=api_key or "",
                 ),
             ]
