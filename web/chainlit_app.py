@@ -73,6 +73,9 @@ from web.session_state import SessionState
 from web.model_manager import ModelManager
 from agent.core.model_config import ModelConfig
 
+# Chainlit 输入组件
+from chainlit.input_widget import Select, Password
+
 # ============= 从拆分模块导入业务函数 =============
 
 # 路由与解析
@@ -169,32 +172,28 @@ async def start():
         models = await ModelManager.get_models(current_provider, api_key)
         logger.info(f"[START] 获取到 {len(models)} 个 {current_provider} 模型")
         
-        # 构建设置界面
-        settings = [
-            cl.input_settings.InputSettings(
-                id="provider",
-                label="供应商",
-                type="select",
-                choices=["deepseek", "siliconflow"],
-                initial=current_provider,
-            ),
-            cl.input_settings.InputSettings(
-                id="model_name",
-                label="模型名称",
-                type="select",
-                choices=models,
-                initial=ModelConfig.MAIN_MODEL if ModelConfig.MAIN_MODEL in models else (models[0] if models else ""),
-            ),
-            cl.input_settings.InputSettings(
-                id="api_key",
-                label="API Key（可选）",
-                type="password",
-                initial="",
-                placeholder="留空则使用环境变量",
-            ),
-        ]
-        
-        await cl.ChatSettings(settings).send()
+        # 构建设置界面（使用 Chainlit 2.x 正确的 API）
+        await cl.ChatSettings(
+            [
+                Select(
+                    id="provider",
+                    label="供应商",
+                    values=["deepseek", "siliconflow"],
+                    initial_index=0 if current_provider == "deepseek" else 1,
+                ),
+                Select(
+                    id="model_name",
+                    label="模型名称",
+                    values=models,
+                    initial_index=0,
+                ),
+                Password(
+                    id="api_key",
+                    label="API Key（可选）",
+                    placeholder="留空则使用环境变量",
+                ),
+            ]
+        ).send()
         
     except Exception as e:
         logger.error(f"[START] 初始化模型设置失败: {e}")
