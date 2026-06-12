@@ -1,0 +1,23 @@
+# 数据映射解析工具 - 依赖列表
+# 安装: pip install -r requirements.txt
+
+# Agent 核心
+agno>=1.1.0
+openai>=1.0.0
+
+# Web 前端
+chainlit>=1.0.0
+python-dotenv>=1.0.0
+
+# 数据处理
+openpyxl>=3.1.0
+pandas>=2.0.0
+agno==2.5.17
+openai==2.32.0
+SQLAlchemy==2.0.49
+
+# 混合检索
+rank_bm25>=2.0
+
+# HTTP 客户端（DeepSeek API 调用）
+httpx>=0.24.0
