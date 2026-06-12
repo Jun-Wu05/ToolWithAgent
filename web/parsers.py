@@ -30,6 +30,52 @@ def _is_refusal_response(content: str) -> bool:
     return False
 
 
+def _extract_items_from_pydantic(content, logger_name: str) -> list:
+    """
+    从 Pydantic 对象或字典中提取 items 列表（通用函数）
+    
+    支持三种输入类型：
+    1. Pydantic 对象（有 items 属性）
+    2. 字典（有 items 键，output_schema 格式）
+    3. 列表（已经是数组格式）
+    
+    Args:
+        content: 可能是 Pydantic 对象、字典或列表
+        logger_name: 日志前缀（"PARSER" 或 "THREAT_PARSER"）
+    
+    Returns:
+        list: 提取的 items 列表（字典格式），失败返回空列表
+    """
+    # 检查是否有 items 属性（Pydantic 对象）
+    if hasattr(content, 'items') and isinstance(content.items, list):
+        logger.info(f"[{logger_name}] 检测到 Pydantic 对象，直接提取 items")
+        # 将 Pydantic 对象转换为字典列表
+        result = []
+        for item in content.items:
+            if hasattr(item, 'model_dump'):
+                # Pydantic v2
+                result.append(item.model_dump())
+            elif hasattr(item, 'dict'):
+                # Pydantic v1
+                result.append(item.dict())
+            else:
+                # 其他情况，尝试转换为字典
+                result.append(dict(item))
+        return result
+    
+    # 如果是字典且有 items 键（output_schema 格式）
+    if isinstance(content, dict) and "items" in content and isinstance(content["items"], list):
+        logger.info(f"[{logger_name}] 检测到 output_schema 格式，自动解包 items")
+        return content["items"]
+    
+    # 如果是列表（已经是数组格式）
+    if isinstance(content, list):
+        logger.info(f"[{logger_name}] 检测到列表格式，直接使用")
+        return content
+    
+    return []
+
+
 def parse_json_mapping_result(content: str) -> list:
     """
     解析Agent返回的JSON映射结果
@@ -64,10 +110,18 @@ def parse_json_mapping_result(content: str) -> list:
             item["匹配状态"] = "未匹配"
         return True
     
-    # 记录原始内容（完整输出）
+    # 记录原始内容（完整输出）- 移到 Pydantic 处理之前，确保所有情况都能记录
     logger.info(f"[PARSER] 收到内容:\n{content}")
     
-    content_stripped = content.strip()
+    # CHANGED: 优先处理 Pydantic 对象（output_schema 模式）
+    items = _extract_items_from_pydantic(content, "PARSER")
+    if items:
+        valid_result = [item for item in items if validate_item(item)]
+        if valid_result:
+            logger.info(f"[PARSER] Pydantic 对象解析成功，获得 {len(valid_result)} 条有效记录")
+            return valid_result
+    
+    content_stripped = str(content).strip()  # CHANGED: 使用 str() 确保是字符串
     
     # 方法1：去除前后空白后直接尝试解析
     try:
@@ -169,15 +223,6 @@ def parse_json_threat_result(content: str) -> list:
     # 威胁类型只有3列
     VALID_COLUMNS = {"mappingType", "orgValue", "mappingValue"}
 
-    def _unwrap_items(parsed) -> list:
-        """提取 items 列表：兼容 output_schema 的 {"items": [...]} 和纯数组 [...]"""
-        if isinstance(parsed, list):
-            return parsed
-        if isinstance(parsed, dict) and "items" in parsed and isinstance(parsed["items"], list):
-            logger.info("[THREAT_PARSER] 检测到 output_schema 格式 {\"items\": [...]}，自动解包")
-            return parsed["items"]
-        return []
-
     def validate_item(item: dict) -> bool:
         """验证单条记录是否符合格式要求"""
         if not isinstance(item, dict):
@@ -193,14 +238,22 @@ def parse_json_threat_result(content: str) -> list:
             return False
         return True
     
+    # CHANGED: 优先处理 Pydantic 对象（output_schema 模式）
+    items = _extract_items_from_pydantic(content, "THREAT_PARSER")
+    if items:
+        valid_result = [item for item in items if validate_item(item)]
+        if valid_result:
+            logger.info(f"[THREAT_PARSER] Pydantic 对象解析成功，获得 {len(valid_result)} 条有效记录")
+            return valid_result
+    
     # 记录原始内容（完整输出）
     logger.info(f"[THREAT_PARSER] 收到内容:\n{content}")
     
     # 方法1：去除前后空白后直接尝试解析
-    content_stripped = content.strip()
+    content_stripped = str(content).strip()  # CHANGED: 使用 str() 确保是字符串
     try:
         result = json.loads(content_stripped)
-        items = _unwrap_items(result)
+        items = _extract_items_from_pydantic(result, "THREAT_PARSER")  # CHANGED: 使用通用函数
         if items:
             valid_result = [item for item in items if validate_item(item)]
             if valid_result:
@@ -219,7 +272,7 @@ def parse_json_threat_result(content: str) -> list:
         logger.info(f"[THREAT_PARSER] 方法2找到JSON候选，长度: {len(json_candidate)}")
         try:
             result = json.loads(json_candidate)
-            items = _unwrap_items(result)
+            items = _extract_items_from_pydantic(result, "THREAT_PARSER")  # CHANGED: 使用通用函数
             if items:
                 valid_result = [item for item in items if validate_item(item)]
                 if valid_result:
@@ -256,7 +309,7 @@ def parse_json_threat_result(content: str) -> list:
     for match in matches:
         try:
             result = json.loads(match.strip())
-            items = _unwrap_items(result)
+            items = _extract_items_from_pydantic(result, "THREAT_PARSER")  # CHANGED: 使用通用函数
             if items:
                 valid_result = [item for item in items if validate_item(item)]
                 if valid_result:
