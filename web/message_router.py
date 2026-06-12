@@ -12,17 +12,17 @@ logger = get_logger("message_router")
 
 
 # 延迟导入避免循环依赖
-_upload_handlers = None
+_file_handlers = None
 _user_message_handlers = None
 
 
-def get_upload_handlers():
-    """延迟导入 upload_handlers 避免循环依赖"""
-    global _upload_handlers
-    if _upload_handlers is None:
-        from web import upload_handlers
-        _upload_handlers = upload_handlers
-    return _upload_handlers
+def get_file_handlers():
+    """延迟导入 file_handlers 避免循环依赖"""
+    global _file_handlers
+    if _file_handlers is None:
+        from web import file_handlers
+        _file_handlers = file_handlers
+    return _file_handlers
 
 
 def get_user_message_handlers():
@@ -41,7 +41,7 @@ async def on_message(message: cl.Message):
     处理用户消息 - 纯UI层
     
     职责：
-    1. 分发文件上传到 upload_handlers
+    1. 分发文件上传到 file_handlers
     2. 分发文本消息到 user_message_handlers
     """
     user_session = cl.user_session.get("user_session")
@@ -53,10 +53,10 @@ async def on_message(message: cl.Message):
 
     # 处理上传的文件
     if message.elements:
-        upload_handlers = get_upload_handlers()
+        file_handlers = get_file_handlers()
         for element in message.elements:
             if hasattr(element, 'type') and element.type == "file":
-                await upload_handlers.handle_file_upload(user_session, element)
+                await file_handlers.handle_file_upload(user_session, element)
 
     # 处理文本消息
     user_text = message.content.strip()
