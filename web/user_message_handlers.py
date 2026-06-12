@@ -22,7 +22,7 @@ from web.route_config import (
 )
 from web.llm_client import call_team
 from web.input_builder import build_llm_input, build_batch_llm_input
-from web.response_handler import process_team_response, check_session_action
+from web.response_handler import process_team_response, _check_session_action
 from web.threat_handler import handle_threat_fill_flow
 from web.enum_handler import handle_enum_fill_flow, handle_enum_extract_flow
 from web.log_parser_handler import handle_log_parser
@@ -278,9 +278,9 @@ Excel 格式说明：
             
             # 7.5 Agent 自决清空：检测 [SESSION_ACTION:clear] 标记
             result_content = result.content if hasattr(result, 'content') else str(result)
-            session_action_cleared = await check_session_action(result_content, user_session, loading_msg)
+            session_action_cleared = await _check_session_action(result_content, user_session, loading_msg)
             if session_action_cleared:
-                # Agent 判定需要清空会话，已通过 check_session_action 发送通知
+                # Agent 判定需要清空会话，已通过 _check_session_action 发送通知
                 try:
                     await loading_msg.remove()
                 except Exception:
