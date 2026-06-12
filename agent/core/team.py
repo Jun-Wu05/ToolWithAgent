@@ -98,6 +98,19 @@ class ThreatMappingList(BaseModel):
     items: List[ThreatMappingItem]
 
 
+# ============= 字段映射结构化输出模型 =============
+
+class FieldMappingItem(BaseModel):
+    """字段映射单条记录"""
+    原始字段名: str
+    系统属性名称: str
+    匹配状态: str  # "匹配成功" | "未匹配"
+
+class FieldMappingList(BaseModel):
+    """字段映射列表（Agno output_schema 要求 BaseModel 包装）"""
+    items: List[FieldMappingItem]
+
+
 # ============= ThreatAgent =============
 
 def _get_threat_instructions() -> str:
@@ -141,8 +154,9 @@ def create_field_mapping_agent() -> Agent:
         tools=[
             field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
         ],
+        output_schema=FieldMappingList,   # v4: API 层强制输出 JSON 且符合 schema，杜绝非规范格式
         tool_call_limit=1,                # v2: 仅 1 个工具，1 次足够
-        markdown=True,
+        markdown=False,                   # v4: 配合 output_schema JSON 输出，禁止 Markdown 包装
         debug_mode=False,
     )
 
