@@ -52,4 +52,4 @@ tmp/
 tests/
 archive/
 context_summary/
-eval/
+eval/"docs/"  
