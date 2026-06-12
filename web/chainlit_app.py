@@ -393,6 +393,11 @@ async def on_settings_update(settings: dict):
         elif provider == "siliconflow":
             provider_initial_index = 2
         
+        # 计算当前模型的索引
+        model_initial_index = 0
+        if model and model in models:
+            model_initial_index = models.index(model)
+        
         await cl.ChatSettings(
             [
                 Select(
@@ -405,7 +410,7 @@ async def on_settings_update(settings: dict):
                     id="model_name",
                     label="模型名称",
                     values=models,
-                    initial_index=0,
+                    initial_index=model_initial_index,  # # CHANGED: 根据当前模型设置索引
                 ),
                 TextInput(
                     id="api_key",
