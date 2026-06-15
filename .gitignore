@@ -52,7 +52,11 @@ tmp/
 tests/
 archive/
 context_summary/
-eval/docs/
+
+# 评估文档和脚本（运行时生成，不提交）
+eval/
+docs/
 
 # GitHub Copilot Skills（自动生成，不提交）
 .github/
+ +++++++ REPLACE
