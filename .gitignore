@@ -52,4 +52,7 @@ tmp/
 tests/
 archive/
 context_summary/
-eval/"docs/"  
+eval/
+docs/
+.clinerules
+
