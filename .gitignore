@@ -41,11 +41,6 @@ config/标准字段_records.json
 # 向量知识库（运行时生成，不提交）
 *.db
 
-
-.github/
-.trae/
-archive/
-
 # pytest 缓存
 .pytest_cache/
 
@@ -56,10 +51,5 @@ archive/
 tmp/
 tests/
 archive/
-docs/
 context_summary/
-eval/
-
-
-
-
+eval/"docs/"  

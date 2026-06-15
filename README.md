@@ -23,16 +23,26 @@ toolswithagent/
 ├── CHANGELOG.md                     # 变更日志
 │
 ├── web/                             # Chainlit Web 界面
-│   ├── chainlit_app.py              # 入口：生命周期钩子 + 薄编排
+│   ├── chainlit_app.py              # 薄入口（~60行）：生命周期钩子 + 转发
+│   ├── start_handler.py             # @cl.on_chat_start 实现
+│   ├── settings_handler.py          # @cl.on_settings_update 实现
+│   ├── message_router.py            # @cl.on_message 路由分发
+│   ├── upload_handlers.py           # 文件上传处理（含 Excel 检测）
+│   ├── user_message_handlers.py     # 用户文本消息处理
+│   ├── log_parser_handler.py        # 日志解析 Pipeline（独立）
+│   ├── action_callbacks.py          # 9个 Action 回调（按钮交互）
+│   ├── utils.py                     # 纯辅助函数（JSON 解析、渲染）
+│   ├── global_state.py              # 全局状态管理
 │   ├── route_config.py              # 路由关键词匹配（字段映射/威胁/枚举/日志解析）
 │   ├── llm_client.py                # LLM 客户端（Team 调用 + CircuitBreaker）
 │   ├── input_builder.py             # LLM 输入构造
 │   ├── response_handler.py          # 响应解析 + cl.Dataframe 渲染
 │   ├── threat_handler.py            # 威胁填充模式分流
 │   ├── enum_handler.py              # 枚举填充/提取分流
-│   ├── file_handler.py              # 文件上传处理
+│   ├── file_handler.py              # 底层文件处理（数据层）
 │   ├── parsers.py                   # JSON 解析
-│   └── session_state.py             # 会话状态管理
+│   ├── session_state.py             # 会话状态管理
+│   └── model_manager.py             # 模型管理
 │
 ├── agent/                           # AI Agent 系统
 │   ├── core/                        # 核心层
@@ -115,9 +125,36 @@ chainlit run web/chainlit_app.py
 |------|------|
 | [架构概览](docs/architecture/20260514_架构概览.md) | 系统架构图、核心流程、外部依赖、错误处理策略 |
 | [代码级设计说明](docs/architecture/20260514_代码级设计说明.md) | 模块依赖图、函数签名、关键算法、数据流、配置结构 |
+| [chainlit_app模块说明](docs/architecture/chainlit_app模块说明.md) | Web UI 层模块职责、调用关系、数据流 |
 | [CHANGELOG](CHANGELOG.md) | 按版本整理的完整变更记录 |
 | [项目概要](docs/20260514_项目概要.md) | 项目背景、目标、功能全景 |
 | [文档维护规范](docs/文档维护规范.md) | 文档编写、命名、更新标准 |
+
+## 重构历史
+
+### 2026-06-12 - chainlit_app.py 重构
+
+**目标**：提升代码可读性和可维护性
+
+**变更**：
+- 将 1400 行的 `chainlit_app.py` 拆分为 9 个平级模块
+- 主文件精简至 60 行（减少 96%）
+- 保持向后兼容，无需修改已有业务代码
+
+**新增模块**：
+- `start_handler.py` - 聊天开始初始化
+- `settings_handler.py` - 模型设置更新
+- `message_router.py` - 消息路由分发
+- `upload_handlers.py` - 文件上传处理
+- `user_message_handlers.py` - 用户文本消息处理
+- `log_parser_handler.py` - 日志解析 Pipeline
+- `action_callbacks.py` - Action 回调（按钮交互）
+- `utils.py` - 纯辅助函数
+- `global_state.py` - 全局状态管理
+
+**详细文档**：
+- [重构方案](chainlit_app重构方案.md)
+- [完成报告](chainlit_app重构方案_完成版.md)
 
 ## 技术栈
 
