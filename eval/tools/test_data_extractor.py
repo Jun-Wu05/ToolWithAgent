@@ -69,16 +69,17 @@ class TestExtractor:
         except Exception as e:
             raise ValueError(f"base64解码或JSON解析失败: {str(e)}")
     
-    def _filter_fields(self, normalize_list: List[Dict]) -> List[Dict]:
+    def _filter_fields(self, normalize_list: List[Dict], seen_indexes: set) -> List[Dict]:
         """
         过滤和去重字段
         
         规则：
         1. 过滤掉field为null或空的记录
-        2. 对index进行去重，保留第一个出现的记录
+        2. 对index进行去重，保留第一个出现的记录（全局去重）
         
         Args:
             normalize_list: normalize数组
+            seen_indexes: 已见过的index集合（用于全局去重）
             
         Returns:
             过滤后的字段列表
@@ -87,7 +88,6 @@ class TestExtractor:
             return []
         
         filtered_fields = []
-        seen_indexes = set()
         
         for item in normalize_list:
             if not isinstance(item, dict):
@@ -100,7 +100,7 @@ class TestExtractor:
             if field_value is None or str(field_value).strip() == '':
                 continue
             
-            # 规则2：index去重，保留第一个
+            # 规则2：index去重，保留第一个（全局去重）
             if index_value in seen_indexes:
                 continue
             
@@ -109,13 +109,14 @@ class TestExtractor:
         
         return filtered_fields
     
-    def _extract_single_sample(self, parser_config: Dict, sample_id: int) -> Optional[Dict]:
+    def _extract_single_sample(self, parser_config: Dict, sample_id: int, seen_indexes: set) -> Optional[Dict]:
         """
         提取单个样本
         
         Args:
             parser_config: 解析器配置
             sample_id: 样本ID
+            seen_indexes: 已见过的index集合（用于全局去重）
             
         Returns:
             样本数据字典，如果提取失败返回None
@@ -128,7 +129,7 @@ class TestExtractor:
             
             # 提取normalize数组
             normalize_list = parser_config.get('normalize', [])
-            filtered_fields = self._filter_fields(normalize_list)
+            filtered_fields = self._filter_fields(normalize_list, seen_indexes)
             
             if not filtered_fields:
                 return None
@@ -164,13 +165,17 @@ class TestExtractor:
             else:
                 parser_configs = [json_data]
             
+            # 全局去重集合：在所有样本之间共享
+            seen_indexes = set()
+            
             # 提取每个样本
             samples = []
             total_fields = 0
             unique_fields = set()
             
             for idx, config in enumerate(parser_configs, 1):
-                sample_data = self._extract_single_sample(config, idx)
+                # 传递全局的seen_indexes集合
+                sample_data = self._extract_single_sample(config, idx, seen_indexes)
                 if sample_data:
                     samples.append(sample_data)
                     total_fields += len(sample_data['fields'])
