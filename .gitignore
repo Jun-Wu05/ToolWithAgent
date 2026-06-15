@@ -52,4 +52,7 @@ tmp/
 tests/
 archive/
 context_summary/
-eval/"docs/"  
+eval/docs/
+
+# GitHub Copilot Skills（自动生成，不提交）
+.github/
