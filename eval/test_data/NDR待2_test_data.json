@@ -966,6 +966,23 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "<128>CEF:0|Asiainfo security|TDA|3.83.1023|0|HKTL_ASPXSHELL - HTTP (Request)|6|dvc=21.38.28.6 dvcmac=B4:96:91:30:53:B4 dvchost=TDA deviceExternalId=54CF1D2FFF87-4EFF95C9-1595-63FF-6615 rt=Feb 29 2024 16:03:34 GMT+08:00 app=HTTP deviceDirection=0 dhost=21.38.28.32 dst=21.38.28.32 dpt=80 dmac=7c:00:4d:bd:ff:01 shost=20.38.132.94 src=20.38.132.94 spt=48369 smac=90:03:25:2d:ef:7a cs3Label=HostName_Ext cs3=21.38.28.32 cs2Label=DetectionName cs2=HKTL_ASPXSHELL fname=aes.asp fileType=1835011 fsize=327 requestClientApplication=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36 act=not blocked cn3Label=Threat Type cn3=0 destinationTranslatedAddress=20.38.132.94 fileHash=6C006E0B6D0ED999EEB87E3398B43552BC8887F2 sourceTranslatedAddress=21.38.28.32 cnt=1 cat=Grayware cs6Label=pAttackPhase cs6=Point of Entry flexNumber1Label=vLANId flexNumber1=4095",
+            "<128>CEF:0|Asiainfo security|TDA|3.83.1023|4434|CVE-2020-9484 - Apache Tomcat Deserialization Remote Code Execution - HTTP (Request)|6|dvc=21.38.28.6 dvcmac=B4:96:91:30:53:B4 dvchost=TDA deviceExternalId=54CF1D2FFF87-4EFF95C9-1595-63FF-6615 rt=Feb 29 2024 16:04:50 GMT+08:00 app=HTTP deviceDirection=0 dhost=21.38.28.32 dst=21.38.28.32 dpt=80 dmac=7c:00:4d:bd:ff:01 shost=20.38.132.94 src=20.38.132.94 spt=48535 smac=90:03:25:2d:ef:7a cs3Label=HostName_Ext cs3=21.38.28.32 fileType=-65536 fsize=0 requestClientApplication=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36 act=not blocked cn3Label=Threat Type cn3=3 destinationTranslatedAddress=20.38.132.94 sourceTranslatedAddress=21.38.28.32 cnt=1 cat=Exploit cs6Label=pAttackPhase cs6=Point of Entry flexNumber1Label=vLANId flexNumber1=4095",
+            "<128>CEF:0|Asiainfo security|TDA|3.83.1023|611|Archive Upload|2|dvc=21.38.28.6 dvcmac=B4:96:91:30:53:B4 dvchost=TDA deviceExternalId=54CF1D2FFF87-4EFF95C9-1595-63FF-6615 rt=Feb 29 2024 16:03:48 GMT+08:00 app=HTTP deviceDirection=1 dhost=25.39.68.87 dst=25.39.68.87 dpt=80 dmac=90:03:25:2d:ef:7a shost=24.38.130.71 src=24.38.130.71 spt=53405 smac=7c:00:4d:bd:ff:01 cs3Label=HostName_Ext cs3=25.39.68.87 fname=月度计划导入模板(10.xlsx fileType=265093122 fsize=26540 requestClientApplication=Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4238.2 Safari/537.36 act=not blocked cn3Label=Threat Type cn3=2 destinationTranslatedAddress=25.39.68.87 fileHash=52F9DF55C55DE0CEC74B6FD26E5CE536B63CFAA5 sourceTranslatedAddress=24.38.130.71 cnt=1 cat=Suspicious Traffic cs6Label=pAttackPhase cs6=Data Exfiltration flexNumber1Label=vLANId flexNumber1=4095",
+            "<156>CEF:0|Asiainfo security|TDA|3.83.1023|2898|Weblogic Unauthenticated RCE Exploit- HTTP (Request)|6|dvc=21.38.28.6 dvcmac=B4:96:91:30:53:B4 dvchost=TDA deviceExternalId=54CF1D2FFF87-4EFF95C9-1595-63FF-6615 rt=Feb 29 2024 14:42:43 GMT+08:00 app=HTTP deviceDirection=0 dhost=21.38.28.32 dst=21.38.28.32 dpt=80 dmac=7c:00:4d:bd:ff:01 shost=20.38.132.94 src=20.38.132.94 spt=44897 smac=90:03:25:2d:ef:7a cs3Label=HostName_Ext cs3=21.38.28.32 fileType=-65536 fsize=0 requestClientApplication=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36 act=not blocked cn3Label=Threat Type cn3=1 destinationTranslatedAddress=20.38.132.94 sourceTranslatedAddress=21.38.28.32 cnt=1 cat=Exploit cs6Label=pAttackPhase cs6=Point of Entry flexNumber1Label=vLANId flexNumber1=4095"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "http协议",
           "field": "http_ua",
           "index": "requestClientApplication",
@@ -1127,6 +1144,20 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{ \"uid\": \"CjoVgbIWFDJ64bSRD57ux5e\", \"start_time\": 1691388725, \"ts\": 1691388725, \"src_ip\": \"10.68.233.233\", \"src_port\": 50818, \"dst_ip\": \"10.68.12.16\", \"dst_port\": 3389, \"cookie\": \"\", \"client_req_proto\": 0, \"selected_proto\": 0, \"last_neg_type\": 0, \"last_s2c_tls_type\": 0, \"download_pkts_over_1k\": 0, \"download_pkts\": 0, \"downflow_bits_over_1k\": 0, \"downflow_bits\": 0, \"logtype\": \"rdp_burst\", \"devname\": \"SANGFOR  态势感知探针\", \"ds\": \"20230807\", \"hh\": \"14\", \"vendor\": \"sangfor\", \"logid\": 91388725541143, \"iptype\": 4, \"appproto\": \"RDP\", \"transproto\": \"TCP\" }"
+          ],
+          "sim": false,
+          "value": null
         },
         {
           "core": true,
@@ -1568,34 +1599,6 @@
         },
         {
           "core": false,
-          "entity": "位置",
-          "field": "location_latitude",
-          "index": "field0",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "34.7732"
-          ],
-          "sim": false,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "位置",
-          "field": "location_longitude",
-          "index": "field1",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "113.722"
-          ],
-          "sim": false,
-          "value": null
-        },
-        {
-          "core": false,
           "entity": "威胁",
           "field": "attack_killchain",
           "index": "kill_chain",
@@ -1938,204 +1941,17 @@
         },
         {
           "core": false,
-          "entity": "事件",
-          "field": "event_time",
-          "index": "field3",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "TIME",
-              "mappingValue": "yyyy-MM-dd HH:mm:ss",
-              "orgValue": ""
-            }
-          ],
-          "required": false,
-          "result": [
-            "2021-01-11 13:45:46"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "日志",
-          "field": "log_type",
-          "index": "field6",
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
           "info": null,
           "mappings": [],
           "required": false,
           "result": [
-            "隧道通信"
+            "January 11 13:46:34 2021 dbapp APT~30~1~2021-01-11 13:45:46~192.168.10.124:0~192.168.10.201:53~隧道通信~~~高~2101111345460000020~~涉及域名:abcd.com~~~0~5~0~a4:5d:36:6e:38:74~00:0c:29:5b:42:e8~1~Host: abcd.com~~~~成功~27~5~0~5005"
           ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "事件",
-          "field": "event_level",
-          "index": "field9",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "1",
-              "orgValue": "低"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "2",
-              "orgValue": "中"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "3",
-              "orgValue": "高"
-            }
-          ],
-          "required": false,
-          "result": [
-            "高"
-          ],
-          "sim": true,
-          "value": "1"
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "threat_feature",
-          "index": "field12",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "涉及域名:abcd.com"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "attack_killchain",
-          "index": "field16",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "弱点探测",
-              "orgValue": "1"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "渗透入侵",
-              "orgValue": "2"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "获取权限",
-              "orgValue": "3"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "命令与控制",
-              "orgValue": "4"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "数据盗取",
-              "orgValue": "5"
-            }
-          ],
-          "required": false,
-          "result": [
-            "5"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "flow_direction",
-          "index": "field17",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "目的IP向源IP攻击",
-              "orgValue": "0"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "源IP向目的IP攻击",
-              "orgValue": "1"
-            }
-          ],
-          "required": false,
-          "result": [
-            "0"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "src_mac",
-          "index": "field18",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "a4:5d:36:6e:38:74"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "dst_mac",
-          "index": "field19",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "00:0c:29:5b:42:e8"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "威胁",
-          "field": "attack_result",
-          "index": "field25",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击成功",
-              "orgValue": "成功"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击失败",
-              "orgValue": "失败"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击成功",
-              "orgValue": "失陷"
-            }
-          ],
-          "required": false,
-          "result": [
-            "成功"
-          ],
-          "sim": true,
-          "value": "未知"
+          "sim": false,
+          "value": null
         },
         {
           "core": true,
@@ -2324,6 +2140,20 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"kill_chain\":\"actions-objectives\",\"dst_ip_geoloc\":\"34.381,-118.6164\",\"victim_geoloc\":\"39.9047,116.4072\",\"hostip\":\"10.1.0.180\",\"dst_ip_country_code\":\"US\",\"event_source\":\"NDE\",\"rid\":\"11000017\",\"icmp\":{\"downstream_pktlen\":3079,\"pktlens\":\"LEN_64[count]:1\\nLEN_1472[count]:1\\nLEN_482[count]:1\\nLEN_52[count]:4\\nLEN_1013[count]:1\\nLEN_60[count]:2\",\"upstream_pktlen\":280,\"upstream_pktnum\":5,\"downstream_pktnum\":5,\"keywords\":\"tunnel_tool\",\"count\":5,\"dstips\":\"172.15.255.35[count]:5\",\"max_pktlen\":1472},\"uuid\":\"ce03761e-51c6-4322-8376-1e51c69322e5\",\"number\":1,\"hostname\":\"ATD\",\"enrichments.src_ip.host_type\":\"2\",\"payload\":\"VGhlIHBheWxvYWQgbGlzdCBpbiBkZXRlY3Rpb24gd2luZG93IGlzIGFzIGZvbGxvd3M6CglFLi5ALi5ALkAuLi5cbi4uLlxuLi4uLiouLi4uLi4uSy4uLi4uLi4uLi4uLi5cbi4uLi5lLi51Li4uXG4uSy5fLksuIAoJRS4uPC4uQC49LiIuXG4uLi5cbi4uLi4uLiouSy4kLi4uby4ucSAuLi4uLi4uLi4uLlxuZS4ubS4uLlouLi4uCglFLi40Li5ALkAuLi5cbi4uLlxuLi4uLiouLi4uLi4uSy4gLi4uLi5PLi4uLi5cbi4uLi5lLi4uCglFLi40aS5ALj0uLk1cbi4uLlxuLi4uLi4uKi5LLiUuLi4uLi4uLi4uLi4uLi5cbmUuLi4uLi5yCglFLi40Li5ALkAuLi5cbi4uLlxuLi4uLiouLi4uLi4uSy4gLi4uLi5HLi4uLi5cbi4uLi5lLi4uCglFLi4uaS5ALj0uLi5cbi4uLlxuLi4uLi4uKi5LLiUuLi4uLi4uLi5ULi4uLi5cbmUuLnUuLi5ySFRUUC8xLjEgMjAwIE9LXHJcbkFjY2VwdC1SYW5nZXM6IGJ5dGVzXHJcbkNhY2hlLUNvbnRyb2w6IHByaXZhdGUsIG5vLWNhY2hlLCBuby1zdG9yZSwgcHJveHktcmV2YWxpZGF0ZSwgbm8tdHJhbnNmb3JtXHJcbkNvbm5lY3Rpb246IGtlZXAtYWxpdmVcclxuQ29udGVudC1MZW5ndGg6IDIzODFcclxuQ29udGVudC1UeXBlOiB0ZXh0L2h0bWxcclxuRGF0ZTogV2VkLCAxNSBTZXAgMjAyMSAwNjo1OToyMiBHTVRcclxuRXRhZzogIjU4ODYwNGVjLTk0ZCJcclxuTGFzdC1Nb2RpZmllZDogTW9uLCAyMyBKYW4gMjAxNyAxMzoyODoxMiBHTVRcclxuUHJhZ21hOiBuby1jYWNoZVxyXG5TZXJ2ZXI6IGJmZS8xLjAuOC4xOFxyXG5TZXQtQ29va2llOiBCRE9SWj0yNzMxNTsgbWF4LWFnZT04NjQwMDsgZG9tYWluPS5iYWlkdS5jb207IHBhdGg9L1xyXG5Qcm94eS1Db25uZWN0aW9uOiBrZWVwLWFsaXZlXHJcblxyXG4KCUUuLjwuLkAuQC4uLlxuLi4uIy5vLi5ULlAuLjcuLi4uLi4uLi4uYi4uLi4uLi4uLlxuWi4uaC4uLi4uLi4uCglFLi4uaS5ALj0uLi5cbi4uLlxuLi4uLi4uKi5LLl8uLi4uLi4uLmouLi4uLi5cbmUuLi4uLi57Li4uLjwvYT4gPG5vc2NyaXB0PiA8YSBocmVmPWh0dHA6Ly93d3cuYmFpZHUuY29tL2Jkb3J6L2xvZ2luLmdpZj9sb2dpbiZhbXA7dHBsPW1uJmFtcDt1PWh0dHAlM0ElMkYlMkZ3d3cuYmFpZHUuY29tJTJmJTNmYmRvcnpfY29tZSUzZDEgbmFtZT10al9sb2dpbiBjbGFzcz1sYj4uLi4uLi48L2E+IDwvbm9zY3JpcHQ+IDxzY3JpcHQ+ZG9jdW1lbnQud3JpdGUoJzxhIGhyZWY9Imh0dHA6Ly93d3cuYmFpZHUuY29tL2Jkb3J6L2xvZ2luLmdpZj9sb2dpbiZ0cGw9bW4mdT0nKyBlbmNvZGVVUklDb21wb25lbnQod2luZG93LmxvY2F0aW9uLmhyZWYrICh3aW5kb3cubG9jYXRpb24uc2VhcmNoID09PSAiIiA/ICI/IiA6ICImIikrICJiZG9yel9jb21lPTEiKSsgJyIgbmFtZT0idGpfbG9naW4iIGNsYXNzPSJsYiI+Li4uLi4uPC9hPicpOzwvc2NyaXB0PiA8YSBocmVmPS8vd3d3LmJhaWR1LmNvbS9tb3JlLyBuYW1lPXRqX2JyaWljb24gY2xhc3M9YnJpIHN0eWxlPSJkaXNwbGF5OiBibG9jazsiPi4uLi4uLi4uLi4uLjwvYT4gPC9kaXY+IDwvZGl2PiA8L2Rpdj4gPGRpdiBpZD1mdENvbj4gPGRpdiBpZD1mdENvbnc+IDxwIGlkPWxoPiA8YSBocmVmPWh0dHA6Ly9ob21lLmJhaWR1LmNvbT4uLi4uLi4uLi4uLi48L2E+IDxhIGhyZWY9aHR0cDovL2lyLmJhaWR1LmNvbT5BYm91dCBCYWlkdTwvYT4gPC9wPiA8cCBpZD1jcD4mY29weTsyMDE3Jm5ic3A7QmFpZHUmbmJzcDs8YSBocmVmPWh0dHA6Ly93d3cuYmFpZHUuY29tL2R1dHkvPi4uLi4uLi4uLi4uLi4uLi4uLi4uLjwvYT4mbmJzcDsgPGEgaHJlZj1odHRwOi8vamlhbnlpLmJhaWR1LmNvbS8gY2xhc3M9Y3AtZmVlZGJhY2s+Li4uLi4uLi4uLi4uPC9hPiZuYnNwOy4uLklDUC4uLjAzMDE3My4uLiZuYnNwOyA8aW1nIHNyYz0vL3d3dy5iYWlkdS5jb20vaW1nL2dzLmdpZj4gPC9wPiA8L2Rpdj4gPC9kaXY+IDwvZGl2PiA8L2JvZHk+IDwvaHRtbD5cclxuCglFLi4uaS5ALj0uLi5cbi4uLlxuLi4uLi4uKi5LLi4uLi4uLi4uLiwvLi4uLi5cbmUuLi4uLi4uPCFET0NUWVBFIGh0bWw+XHJcbjwhLS1TVEFUVVMgT0stLT48aHRtbD4gPGhlYWQ+PG1ldGEgaHR0cC1lcXVpdj1jb250ZW50LXR5cGUgY29udGVudD10ZXh0L2h0bWw7Y2hhcnNldD11dGYtOD48bWV0YSBodHRwLWVxdWl2PVgtVUEtQ29tcGF0aWJsZSBjb250ZW50PUlFPUVkZ2U+PG1ldGEgY29udGVudD1hbHdheXMgbmFtZT1yZWZlcnJlcj48bGluayByZWw9c3R5bGVzaGVldCB0eXBlPXRleHQvY3NzIGhyZWY9aHR0cDovL3MxLmJkc3RhdGljLmNvbS9yL3d3dy9jYWNoZS9iZG9yei9iYWlkdS5taW4uY3NzPjx0aXRsZT4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi48L3RpdGxlPjwvaGVhZD4gPGJvZHkgbGluaz0jMDAwMGNjPiA8ZGl2IGlkPXdyYXBwZXI+IDxkaXYgaWQ9aGVhZD4gPGRpdiBjbGFzcz1oZWFkX3dyYXBwZXI+IDxkaXYgY2xhc3M9c19mb3JtPiA8ZGl2IGNsYXNzPXNfZm9ybV93cmFwcGVyPiA8ZGl2IGlkPWxnPiA8aW1nIGhpZGVmb2N1cz10cnVlIHNyYz0vL3d3dy5iYWlkdS5jb20vaW1nL2JkX2xvZ28xLnBuZyB3aWR0aD0yNzAgaGVpZ2h0PTEyOT4gPC9kaXY+IDxmb3JtIGlkPWZvcm0gbmFtZT1mIGFjdGlvbj0vL3d3dy5iYWlkdS5jb20vcyBjbGFzcz1mbT4gPGlucHV0IHR5cGU9aGlkZGVuIG5hbWU9YmRvcnpfY29tZSB2YWx1ZT0xPiA8aW5wdXQgdHlwZT1oaWRkZW4gbmFtZT1pZSB2YWx1ZT11dGYtOD4gPGlucHV0IHR5cGU9aGlkZGVuIG5hbWU9ZiB2YWx1ZT04PiA8aW5wdXQgdHlwZT1oaWRkZW4gbmFtZT1yc3ZfYnAgdmFsdWU9MT4gPGlucHV0IHR5cGU9aGlkZGVuIG5hbWU9cnN2X2lkeCB2YWx1ZT0xPiA8aW5wdXQgdHlwZT1oaWRkZW4gbmFtZT10biB2YWx1ZT1iYWlkdT48c3BhbiBjbGFzcz0iYmcgc19pcHRfd3IiPjxpbnB1dCBpZD1rdyBuYW1lPXdkIGNsYXNzPXNfaXB0IHZhbHVlIG1heGxlbmd0aD0yNTUgYXV0b2NvbXBsZXRlPW9mZiBhdXRvZm9jdXM+PC9zcGFuPjxzcGFuIGNsYXNzPSJiZyBzX2J0bl93ciI+PGlucHV0IHR5cGU9c3VibWl0IGlkPXN1IHZhbHVlPS4uLi4uLi4uLi4uLiBjbGFzcz0iYmcgc19idG4iPjwvc3Bhbj4gPC9mb3JtPiA8L2Rpdj4gPC9kaXY+IDxkaXYgaWQ9dTE+IDxhIGhyZWY9aHR0cDovL25ld3MuYmFpZHUuY29tIG5hbWU9dGpfdHJuZXdzIGNsYXNzPW1uYXY+Li4uLi4uPC9hPiA8YSBocmVmPWh0dHA6Ly93d3cuaGFvMTIzLmNvbSBuYW1lPXRqX3RyaGFvMTIzIGNsYXNzPW1uYXY+aGFvMTIzPC9hPiA8YSBocmVmPWh0dHA6Ly9tYXAuYmFpZHUuY29tIG5hbWU9dGpfdHJtYXAgY2xhc3M9bW5hdj4uLi4uLi48L2E+IDxhIGhyZWY9aHR0cDovL3YuYmFpZHUuY29tIG5hbWU9dGpfdHJ2aWRlbyBjbGFzcz1tbmF2Pi4uLi4uLjwvYT4gPGEgaHJlZj1odHRwOi8vdGllYmEuYmFpZHUuY29tIG5hbWU9dGpfdHJ0aWViYSBjbGFzcz1tbmF2Pi4uCglFLi40Li5ALkAuLi5cbi4uLiMuby4uVC5QLi43LjFHfS4uLi4uLi4uLi4uLlxuWi4uLi4uLjM=\",\"dst_ip_isHost\":0,\"commid\":\"1:6igb9YFogKorzJjilVBcrRsGDhE=\",\"attack_status\":\"attempt\",\"victim_city\":\"北京市\",\"dst_ip_country\":\"United States\",\"victim_country_code\":\"CN\",\"enrichments.src_ip.host_group\":\"Default Terminal Group\",\"proto\":\"icmp\",\"enrichments.src_ip.malicious\":\"2\",\"src_ip_isHost\":1,\"desc\":\"\",\"sub_category\":\"icmp-tunnel-aimodel-suspicious-behavior\",\"src_ip_city\":\"北京市\",\"visit_direction_detail\":\"12\",\"reliability\":8,\"classtype\":\"covert-channel\",\"interface\":\"ens5\",\"dst_ip\":\"172.15.255.35\",\"enrichments.dst_ip.malicious\":\"2\",\"src_ip\":\"172.16.3.168\",\"dst_ip_city\":\"Stevenson Ranch\",\"victim\":\"172.16.3.168\",\"sensor_ip\":\"10.1.0.180\",\"visit_direction\":\"1\",\"timestamp\":\"1690343464882\",\"severity\":3,\"enrichments.src_ip.in_range\":1,\"victim_hostName\":\"\",\"victim_country\":\"China\",\"message\":\"[9e2184f6-0e74-47a3-9e7d-b213241b42db] ICMP隐蔽隧道是将其他协议的内容封装在ICMP Echo请求和响应数据中，实现违规web访问、建立反向shell、数据泄露的技术\",\"app_proto\":\"other\",\"target\":\"icmp tunnel tool:DhavalKapil\",\"src_port\":\"8\",\"engine_type\":\"ai\",\"src_ip_country_code\":\"CN\",\"victim_isHost\":1,\"dst_port\":\"0\",\"src_ip_geoloc\":\"39.9047,116.4072\",\"src_ip_country\":\"China\",\"family\":\"\",\"attack_tool\":\"DhavalKapil\",\"category\":\"icmp-tunnel\",\"resp_data\":\"\",\"ts\":\"1690343408.453\",\"sensor_name\":\"ATD\"}"
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": false,
@@ -2661,6 +2491,20 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"assets\":{\"group_branch\":\"\",\"group_name\":\"\",\"ip\":\"172.16.0.0/12\",\"mac\":\"\",\"name\":\"(manual)\",\"section\":\"终端\",\"sub_type\":\"\"},\"attacker\":\"172.19.26.171\",\"behave_uuid\":\"shm1840247590580037\",\"data\":\"procure.oa.unionpayintl.com/admin/vendor/lib/bootstrap/v3.3.7/css/bootstrap.min.css\",\"dest_assets\":{\"ip\":\"172.16.0.0/12\",\"name\":\"(manual)\",\"section\":\"终端\",\"sub_type\":\"\"},\"direction\":\"lateral\",\"external_ip\":\"172.19.215.11\",\"external_port\":80,\"geo_data\":{\"ChinaCode\":\"\",\"City\":\"局域网\",\"Continent\":\"\",\"Country\":\"局域网\",\"ISO2\":\"\",\"Isp\":\"\",\"Latitude\":\"\",\"Longitude\":\"\",\"Org\":\"\",\"PhoneCode\":\"\",\"Province\":\"局域网\",\"TimeZone\":\"\",\"UTC\":\"\"},\"incident_id\":\"\",\"machine\":\"172.19.26.171\",\"machine_port\":55067,\"net\":{\"dest_ip\":\"172.19.215.11\",\"dest_port\":80,\"dns\":{\"flags\":\"\",\"id\":0,\"rcode\":\"\",\"rdata\":\"\",\"rrname\":\"\",\"rrtype\":\"\",\"type\":\"\"},\"flow\":null,\"http\":{\"method\":\"GET\",\"protocol\":\"HTTP/1.1\",\"reqs_body\":\"/*!\\r\\n * Bootstrap v3.3.7 (http://getbootstrap.com)\\r\\n * Copyright 2011-2016 Twitter, Inc.\\r\\n * License\",\"reqs_content_length\":0,\"reqs_header\":\"Accept: text/css, */*\\r\\nReferer: http://procure.oa.unionpayintl.com/admin/from-oa/project/?mode=view\\u0026projectCode=CGXM-20211022-297\\u0026workFlowId=cgjgsblc_B87DB6096E1367C6482587AD000EC65D\\u0026oaDetailUrl=http://oa.unionpayintl.com/idealcore/oacore.nsf/agtOpenDoc?openagent\\u0026dbpath=unionpayoa/application/cgjgsblc.nsf\\u0026unid=B87DB6096E1367C6482587AD000EC65D\\u0026currentNode=project_result\\u0026deptCode=1020812\\u0026resultSerialNo=1\\u0026deptCode=1020812\\u0026ssoKey=AF7288A85876BF8F8D77CF6B3C61F30C167A68616E676C69616E67311348ACCH25571\\r\\nAccept-Language: zh-Hans-CN,zh-Hans;q=0.8,en-US;q=0.5,en;q=0.3\\r\\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko\\r\\nAccept-Encoding: gzip, deflate\\r\\nHost: procure.oa.unionpayintl.com\\r\\nConnection: Keep-Alive\\r\\nCookie: JSESSIONID=b2ca2145-32f9-4b37-ab6d-46c4b4ecfa3b; SignOnDefault=zhangliang1; PS_DEVICEFEATURES=width:1920 height:1200 pixelratio:1 touch:0 geolocation:1 websockets:1 webworkers:1 datepicker:1 dtpicker:1 timepicker:1 dnd:1 sessionstorage:1 localstorage:1 history:1 canvas:1 svg:1 postmessage:1 hc:0; ExpirePage=http://hr.unionpayintl.com:8080/psc/ps/; PS_LOGINLIST=http://hr.unionpayintl.com:8080/ps; PS_TOKEN=qgAAAAQDAgEBAAAAvAIAAAAAAAAsAAAABABTaGRyAk4Adwg4AC4AMQAwABTo55uGH05cWVcqB3oPWQ2+H2lEimoAAAAFAFNkYXRhXnicLYg7DkBAFEWPIUqlXZgYfxsQpaDSiAqJaCXWZnGeiXuTcz8X4LnKcSQfhVV4s7FwsnKw/83gT7QMBJ2gYWSW2ZMlxCTiSDITGirLEi2vEX6/pqYgJ7WLF4ADDiw=; Lang=CN; session=b7068cb1-b08a-4ff7-92c6-6f6abe133a25; aulnkt=61t7YdfgZcQx3xpKWteSB4xNN3o; LtpaToken3=Ylxt1HB5NQBZyf4BlTRLUWzDh511zMlgHVKHhTEIrW6SCYn0bJ6c6FicBpfFqAFBHPnQmMit4MGdy6BLHaa9wtwl8FFCVGvXzmfZOamkWNTRJOsSYMHhpqsbg4KGaLjtYe4paV0tVbDKx5vq7coY7VZhmdCSimXH44MbZaM+dyovxeF6X1blVeIhpot2s5yjlyZe0AChQ7t335/ZiwkcoHIg30DxVN2D79za+yFPRO4556xtuQS/AqR/uKyOqyfXYsWGcDhhCExPo/p7anrixdtougQR2bjiORRqui727c0HE9spB572psljnJNRDDDjUpvgyZIAyvgAuTOBmsc4Q9tK9vK5cQEQb29vmVTGDnA=; LtpaToken2=JWtx6Qq3I7+JwOGQ9W7Icam80/lK3eraAA5LM4IUfKwZHCzssEOLOgFv+aij5lcyB/9F6/QZ2/rF3yhXdxgHM4c1B3rSeQJ+ShCJiOzOEnchM6ZPnaokyXrKw+2pcq6tHdY96Em1t/u5666o1gPZ1Vc/kzFAlB7kOmXT9pkqUJg+L5ozdljDF40wUBjhaYMKCxuwdGkc5dPXOuSOtWY5e7+zmsP/tsZfySkQV1ywxu1mMTL/alnz35JS+8rhP5hz0+NeiY8qDEZ10AXXvNZwtA6uCyUQvAnt2yTeAR6GY1TdhQZ5LqzUKA2JHZyiljiG3HWEbTbxa68ZyEFtodIZij215jAS1L4MTeNHM+SejWnFes2vkBw4yQZZ+LbjpEFFjDKgW4S/d3MSRuW4B4eVnh71REroda2xHDIMKvYOGi2KRpIK3W9IC+bGi4v1mCx09e8YO98nwiuO31OqzrdNCaFeKfvWHZDPwFFkiV3TD8IYmlO5Eld7KatDij9U9HmZmxdBZ8yjQfNsBxrRhZcyGr2lT4TOeaXKjDFHYkBGPePsVMc166R90VsTWOwHMu5QHgkMeXusZerO316WLQXZsVgo0YvKa1lMunDC6Fm3jy5vYZ5MwvzVxgUKBZibzhKyxPW3dakKeH6AASDEaz/K37jHGGCVfibBkSgDS27L9O5t/10L/z1wd4PdDcmKlDO4nrGgm2oyvJ1/URHkx2zZ6g==; LtpaToken=Ylxt1HB5NQBZyf4BlTRLUWzDh511zMlgHVKHhTEIrW6SCYn0bJ6c6FicBpfFqAFBHPnQmMit4MGdy6BLHaa9wtwl8FFCVGvXzmfZOamkWNToBNu1eTcfOhqp5+N/15SEYe4paV0tVbDKx5vq7coY7VZhmdCSimXH44MbZaM+dyovxeF6X1blVeIhpot2s5yjlyZe0AChQ7t335/ZiwkcoHIg30DxVN2D79za+yFPRO4556xtuQS/AqR/uKyOqyfXYsWGcDhhCExPo/p7anrixdtougQR2bjiORRqui727c0HE9spB572psljnJNRDDDjUpvgyZIAyvgAuTOBmsc4Q9tK9vK5cQEQb29vmVTGDnA=; PS_TOKENEXPIRE=21_Apr_2022_06:46:35_GMT; tgw_l7_route=4e9e1ba986e91633d6f450bb45240d30; rememberMe=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\\r\\n\\r\\n\",\"reqs_host\":\"procure.oa.unionpayintl.com\",\"reqs_line\":\"GET /admin/vendor/lib/bootstrap/v3.3.7/css/bootstrap.min.css HTTP/1.1\",\"reqs_user_agent\":\"Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko\",\"resp_body\":\"/*!\\r\\n * Bootstrap v3.3.7 (http://getbootstrap.com)\\r\\n * Copyright 2011-2016 Twitter, Inc.\\r\\n * License\",\"resp_content_length\":121205,\"resp_header\":\"Date: Thu, 21 Apr 2022 07:29:56 GMT\\r\\nContent-Type: text/css\\r\\nContent-Length: 121205\\r\\nConnection: keep-alive\\r\\nVary: Origin\\r\\nVary: Access-Control-Request-Method\\r\\nVary: Access-Control-Request-Headers\\r\\nLast-Modified: Wed, 09 Mar 2022 09:49:14 GMT\\r\\nAccept-Ranges: bytes\\r\\n\\r\\n\",\"resp_line\":\"HTTP/1.1 200\",\"resp_set_cookie\":\"\",\"status\":200,\"url\":\"/admin/vendor/lib/bootstrap/v3.3.7/css/bootstrap.min.css\"},\"proto\":\"TCP\",\"real_src_ip\":\"172.19.26.171\",\"src_ip\":\"172.19.26.171\",\"src_port\":55067,\"type\":\"http\"},\"threat\":{\"ioc\":\"\",\"is_apt\":0,\"level\":\"risk\",\"module\":\"autocc\",\"msg\":\"\",\"name\":\"尝试使用Shiro公开密钥\",\"phase\":\"post_exploit\",\"result\":\"unknown\",\"severity\":2,\"suuid\":\"S3000010736\",\"tag\":[\"危险配置\"],\"type\":\"post_exploit\"},\"time\":1650526204,\"timeStr\":\"2022-04-21T15:30:04+08:00\",\"victim\":\"172.19.215.11\"}"
+          ],
+          "sim": false,
+          "value": null
         },
         {
           "core": false,
@@ -3130,6 +2974,25 @@
         },
         {
           "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"attack_time\":\"2024-07-24 10:41:53\",\"attack_type\":\"brute_force\",\"desc\":\"FTP爆破\",\"direction\":[\"in2in\"],\"killer_chain\":[\"横向移动\"],\"level\":\"L\",\"origin_ip\":\"192.168.205.220\",\"origin_ip_location\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"},\"origin_ip_tags\":[\"inner\"],\"rule_id\":9115025,\"target_ip\":[\"10.163.200.97\"],\"target_ip_location\":{\"10.163.200.97\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.163.200.97\":\"inner\"},\"target_ports\":[21],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.163.200.97\":\"normal\"}}",
+            "{\"attack_time\":\"2024-07-24 10:41:01\",\"attack_type\":\"brute_force\",\"desc\":\"Redis爆破\",\"direction\":[\"out2in\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"L\",\"origin_ip\":\"10.132.240.81\",\"origin_ip_location\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"},\"origin_ip_tags\":[\"outer\"],\"rule_id\":9145019,\"target_ip\":[\"10.163.200.15\"],\"target_ip_location\":{\"10.163.200.15\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.163.200.15\":\"inner\"},\"target_ports\":[6379],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.163.200.15\":\"normal\"}}",
+            "{\"attack_time\":\"2024-07-24 10:38:26\",\"attack_type\":\"brute_force\",\"desc\":\"MySQL爆破\",\"direction\":[\"out2in\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"L\",\"origin_ip\":\"106.14.207.158\",\"origin_ip_location\":{\"latitude\":\"31.2222\",\"longitude\":\"121.4581\",\"country\":\"中国\",\"city\":\"上海\",\"code\":\"CN\",\"desc\":\"中国-上海\"},\"origin_ip_tags\":[\"outer\"],\"rule_id\":9140003,\"target_ip\":[\"10.128.89.35\"],\"target_ip_location\":{\"10.128.89.35\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.128.89.35\":\"inner\"},\"target_ports\":[61122],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.128.89.35\":\"normal\"}}",
+            "{\"attack_time\":\"2024-07-24 10:16:03\",\"attack_type\":\"brute_force\",\"desc\":\"SMTP爆破\",\"direction\":[\"in2out\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"L\",\"origin_ip\":\"10.163.204.195\",\"origin_ip_location\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"},\"origin_ip_tags\":[\"inner\"],\"rule_id\":9170001,\"target_ip\":[\"112.90.80.126\"],\"target_ip_location\":{\"112.90.80.126\":{\"latitude\":\"34.7732\",\"longitude\":\"113.722\",\"country\":\"中国\",\"city\":\"\",\"code\":\"CN\",\"desc\":\"中国\"}},\"target_ip_tags\":{\"112.90.80.126\":\"outer\"},\"target_ports\":[25],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"112.90.80.126\":\"normal\"}}",
+            "{\"attack_time\":\"2024-07-24 10:36:41\",\"attack_type\":\"brute_force\",\"desc\":\"其他\",\"direction\":[\"out2in\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"L\",\"origin_ip\":\"10.165.11.105\",\"origin_ip_location\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"},\"origin_ip_tags\":[\"outer\"],\"rule_id\":9180007,\"target_ip\":[\"10.160.21.182\"],\"target_ip_location\":{\"10.160.21.182\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.160.21.182\":\"inner\"},\"target_ports\":[1521],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.160.21.182\":\"normal\"}}",
+            "{\"attack_time\":\"2024-07-24 09:24:39\",\"attack_type\":\"brute_force\",\"desc\":\"其他\",\"direction\":[\"in2in\"],\"killer_chain\":[\"横向移动\"],\"level\":\"L\",\"origin_ip\":\"10.163.203.53\",\"origin_ip_location\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"},\"origin_ip_tags\":[\"inner\"],\"rule_id\":9180007,\"target_ip\":[\"10.128.145.136\"],\"target_ip_location\":{\"10.128.145.136\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.128.145.136\":\"inner\"},\"target_ports\":[1521],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.128.145.136\":\"normal\"}}"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "威胁",
           "field": "threat_rule_id",
           "index": "rule_id",
@@ -3312,18 +3175,18 @@
       "original_log": "January 11 16:25:36 2021 dbapp APT~30~1~2021-01-11 16:24:46~192.168.10.102:51619~202.101.172.35:53~扫描行为~ARP~~低~2101111615140000020~~扫描192.168.33.2,192.168.33.3,192.168.33.4,192.168.33.5,192.168.33.6,192.168.33.7,192.168.33.8,192.168.33.9,192.168.33.10,192.168.33.12~~~0~1~1~70:57:bf:23:56:01~00:00:00:00:00:00~0~~~~~尝试~37~0~0~5009",
       "fields": [
         {
-          "core": true,
-          "entity": "流量",
-          "field": "protocol",
-          "index": "field7",
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
           "info": null,
           "mappings": [],
           "required": false,
           "result": [
-            "ARP"
+            "January 11 16:25:36 2021 dbapp APT~30~1~2021-01-11 16:24:46~192.168.10.102:51619~202.101.172.35:53~扫描行为~ARP~~低~2101111615140000020~~扫描192.168.33.2,192.168.33.3,192.168.33.4,192.168.33.5,192.168.33.6,192.168.33.7,192.168.33.8,192.168.33.9,192.168.33.10,192.168.33.12~~~0~1~1~70:57:bf:23:56:01~00:00:00:00:00:00~0~~~~~尝试~37~0~0~5009"
           ],
-          "sim": true,
-          "value": ""
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -3333,220 +3196,18 @@
       "fields": [
         {
           "core": false,
-          "entity": "http协议",
-          "field": "http_host",
-          "index": "field2",
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
           "info": [],
           "mappings": [],
           "required": false,
           "result": [
-            "tklm-front",
-            "tklm-front"
+            "webshell_alert|!30015|!tklm-front|!/config/FileUploadServices/MOBFileUpload.ashx|!048a0b811d01875e32fd706c9de8553c|!172.16.20.15|!47006|!172.16.2.201|!8008|!后门上传程序|!1676659116|!2|!发现存在潜在风险的ASP/ASPX文件。该文件存在设计错误或逻辑缺陷。|!此类文件存在一定的设计或逻辑缺陷，危害较小，可能会导致服务异常，以及特定场景下与其他漏洞结合的进一步利用，可能将危害放大。|!50|!upload|!server|!true|!172.16.20.15|!172.16.2.201|!0|!0x02010000|!发现ASP/ASPX风险文件（机器学习）",
+            "webshell_alert|!30015|!tklm-front|!/FileUploadServices/MOBFileUpload.ashx|!347a3852580407033f6ba5da81dbbb24|!172.16.20.15|!57844|!172.16.2.201|!8008|!后门上传程序|!1676662877|!2|!发现存在潜在风险的ASP/ASPX文件。该文件存在设计错误或逻辑缺陷。|!此类文件存在一定的设计或逻辑缺陷，危害较小，可能会导致服务异常，以及特定场景下与其他漏洞结合的进一步利用，可能将危害放大。|!50|!upload|!server|!true|!172.16.20.15|!172.16.2.201|!0|!0x02010000|!发现ASP/ASPX风险文件（机器学习）"
           ],
           "sim": false,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "文件",
-          "field": "file_md5",
-          "index": "field4",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "048a0b811d01875e32fd706c9de8553c",
-            "347a3852580407033f6ba5da81dbbb24"
-          ],
-          "sim": false,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "流量",
-          "field": "src_address",
-          "index": "field5",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "172.16.20.15",
-            "172.16.20.15"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "流量",
-          "field": "dst_port",
-          "index": "field8",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "8008",
-            "8008"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "事件",
-          "field": "event_time",
-          "index": "field10",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "1676659116000",
-            "1676662877000"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "事件",
-          "field": "event_level",
-          "index": "field11",
-          "info": [],
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "1",
-              "orgValue": "3"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "2",
-              "orgValue": "5"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "3",
-              "orgValue": "8"
-            }
-          ],
-          "required": false,
-          "result": [
-            "2",
-            "2"
-          ],
-          "sim": true,
-          "value": "1"
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "threat_harm",
-          "index": "field13",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "此类文件存在一定的设计或逻辑缺陷，危害较小，可能会导致服务异常，以及特定场景下与其他漏洞结合的进一步利用，可能将危害放大。",
-            "此类文件存在一定的设计或逻辑缺陷，危害较小，可能会导致服务异常，以及特定场景下与其他漏洞结合的进一步利用，可能将危害放大。"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "threat_score",
-          "index": "field14",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "50",
-            "50"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "flow_direction",
-          "index": "field15",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "upload",
-            "upload"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "威胁",
-          "field": "attack_result",
-          "index": "field20",
-          "info": [],
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "未知",
-              "orgValue": "0"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击成功",
-              "orgValue": "1"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击成功",
-              "orgValue": "2"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击失败",
-              "orgValue": "3"
-            }
-          ],
-          "required": false,
-          "result": [
-            "0",
-            "0"
-          ],
-          "sim": true,
-          "value": "未知"
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "attack_killchain",
-          "index": "field21",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "0x02010000",
-            "0x02010000"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "threat_rule_name",
-          "index": "field22",
-          "info": [],
-          "mappings": [],
-          "required": false,
-          "result": [
-            "发现ASP/ASPX风险文件（机器学习）",
-            "发现ASP/ASPX风险文件（机器学习）"
-          ],
-          "sim": true,
-          "value": ""
+          "value": null
         }
       ]
     },
@@ -3595,6 +3256,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"kill_chain\":\"remote-control\",\"dst_ip_geoloc\":\"37.751,-97.822\",\"victim_geoloc\":\"39.9047,116.4072\",\"hostip\":\"10.1.0.180\",\"dst_ip_country_code\":\"US\",\"event_source\":\"NDE\",\"rid\":\"5100090\",\"mat_off\":[44,58],\"uuid\":\"852fff32-4bb9-4856-afff-324bb99856fa\",\"number\":1,\"hostname\":\"ATD\",\"enrichments.src_ip.host_type\":\"2\",\"payload\":\"WyJDZ0FuQUFBQUNBQW4vais1Q0FCRkFBQmZDbFVBQUlBUkp4dkFxRGhtQ0FnSUNNQjhBRFVBUzhzYjZmUUJBQUFCQUFBQUFBQUFBM2QzZHlscGRYRmxjbVp6YjJSd09XbG1hbUZ3YjNOa1ptcG9aMjl6ZFhKcGFtWmhaWGR5ZDJWeVozZGxZUU5qYjIwQUFBRUFBUT09Il0=\",\"dst_ip_isHost\":0,\"commid\":\"1:S0p6T2X9pZLKZr6SCSYWQ2FPsIg=\",\"attack_status\":\"attempt\",\"victim_city\":\"北京市\",\"dns\":{\"qtype_name\":\"A\",\"origin_answers\":\"\",\"query\":\"www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com\",\"answers\":\"1.2.3.4\"},\"dst_ip_country\":\"United States\",\"victim_country_code\":\"CN\",\"enrichments.src_ip.host_group\":\"Default Terminal Group\",\"proto\":\"udp\",\"enrichments.src_ip.malicious\":\"2\",\"src_ip_isHost\":1,\"mat_fid\":[\"payload0\",\"payload0\"],\"desc\":\"query:www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com;answers:;qtype_name:A;\",\"sub_category\":\"\",\"src_ip_city\":\"北京市\",\"visit_direction_detail\":\"12\",\"reliability\":8,\"classtype\":\"trojan-activity\",\"interface\":\"ens5\",\"dst_ip\":\"8.8.8.8\",\"enrichments.dst_ip.malicious\":\"2\",\"src_ip\":\"192.168.56.102\",\"dst_ip_city\":\"\",\"pcap_record\":\"/2023-07-26/10/35/11/1773248222021074.pcap\",\"victim\":\"192.168.56.102\",\"sensor_ip\":\"10.1.0.180\",\"visit_direction\":\"1\",\"timestamp\":\"1690343842431\",\"direction\":\"up\",\"severity\":4,\"mat_end\":[54,105],\"enrichments.src_ip.in_range\":1,\"victim_hostName\":\"\",\"victim_country\":\"China\",\"message\":\" wCry Ransomware - Termination URL Call\",\"app_proto\":\"dns\",\"target\":\" wCry Ransomware - Termination URL Call\",\"src_port\":\"49276\",\"engine_type\":\"sde\",\"src_ip_country_code\":\"CN\",\"victim_isHost\":1,\"dst_port\":\"53\",\"src_ip_geoloc\":\"39.9047,116.4072\",\"src_ip_country\":\"China\",\"category\":\"ransomware\",\"resp_data\":\"\",\"family\":\"\",\"ts\":\"1690343827.748\",\"sensor_name\":\"ATD\"}"
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": false,
@@ -3671,6 +3346,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"assets\":{\"ip\":\"188.188.3.245\",\"name\":\"188.188.3.245\",\"section\":\"服务器\",\"sub_type\":\"dns\"},\"attacker\":\"\",\"behave_uuid\":\"unix-socket-1464698195878153\",\"data\":\"ns1.dnslog.cn\",\"dest_assets\":{\"ip\":\"188.188.3.245\",\"name\":\"188.188.3.245\",\"section\":\"服务器\",\"sub_type\":\"dns\"},\"direction\":\"out\",\"external_ip\":\"\",\"external_port\":0,\"geo_data\":{\"ChinaCode\":\"\",\"City\":\"\",\"Continent\":\"\",\"Country\":\"比利时\",\"ISO2\":\"BE\",\"Isp\":\"\",\"Latitude\":\"50.501011\",\"Longitude\":\"4.47684\",\"Org\":\"\",\"PhoneCode\":\"\",\"Province\":\"比利时\",\"TimeZone\":\"\",\"UTC\":\"\"},\"incident_id\":\"\",\"machine\":\"188.188.3.245\",\"machine_port\":56680,\"net\":{\"dest_ip\":\"188.188.3.245\",\"dest_port\":56680,\"dns\":{\"rrname\":\"ns1.dnslog.cn\",\"id\":23758,\"type\":\"answer\",\"rrtype\":\"\",\"rcode\":\"SERVFAIL\",\"flags\":\"\",\"rdata\":\"\"},\"flow\":null,\"http\":null,\"proto\":\"UDP\",\"real_src_ip\":\"119.29.29.29\",\"src_ip\":\"119.29.29.29\",\"src_port\":53,\"type\":\"dns\"},\"threat\":{\"ioc\":\"dnslog.cn\",\"is_apt\":0,\"level\":\"attack\",\"module\":\"threatbook_ioc\",\"msg\":\"\",\"name\":\"DNSLog\",\"phase\":\"control\",\"result\":\"success\",\"severity\":3,\"suuid\":\"Tdc03e1e2a7077f2\",\"tag\":[],\"type\":\"dnslog\"},\"time\":1625530284,\"timeStr\":\"2021-07-06T08:11:24+08:00\",\"victim\":\"188.188.3.245\"}"
+          ],
+          "sim": false,
+          "value": null
         },
         {
           "core": false,
@@ -3765,6 +3454,46 @@
       ]
     },
     {
+      "sample_id": 15,
+      "original_log": "January 11 13:42:40 2021 dbapp APT~20~1~2021-01-11 13:41:42~192.168.198.204:50975~192.168.198.203:445~SMB 远程溢出攻击~SMB 远程命令执行成功（MS17-010）~~高~2101111341420000260~~trans2 request, session setup~~~0xC0000002~2~1~00:0c:29:a3:01:b7~00:0c:29:68:24:5a~0~~~~~成功~21~0~2~5002",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "January 11 13:42:40 2021 dbapp APT~20~1~2021-01-11 13:41:42~192.168.198.204:50975~192.168.198.203:445~SMB 远程溢出攻击~SMB 远程命令执行成功（MS17-010）~~高~2101111341420000260~~trans2 request, session setup~~~0xC0000002~2~1~00:0c:29:a3:01:b7~00:0c:29:68:24:5a~0~~~~~成功~21~0~2~5002"
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 16,
+      "original_log": "January 11 16:25:36 2021 dbapp APT~30~1~2021-01-11 16:24:46~192.168.10.102:51619~202.101.172.35:53~挖矿~已知恶意域名请求 ltc.give-me-coins.com~7f 39 01 00 00 01 00 00 00 00 00 00 03 6c 74 63 0d 67 69 76 65 2d 6d 65 2d 63 6f 69 6e 73 03 63 6f 6d 00 00 01 00 01 ~低~2101111624460000200~~~~~0~5~0~24:b6:fd:30:fc:2c~b0:f9:63:39:42:f7~0~~~~~成功~29~4~5200006~5008",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "January 11 16:25:36 2021 dbapp APT~30~1~2021-01-11 16:24:46~192.168.10.102:51619~202.101.172.35:53~挖矿~已知恶意域名请求 ltc.give-me-coins.com~7f 39 01 00 00 01 00 00 00 00 00 00 03 6c 74 63 0d 67 69 76 65 2d 6d 65 2d 63 6f 69 6e 73 03 63 6f 6d 00 00 01 00 01 ~低~2101111624460000200~~~~~0~5~0~24:b6:fd:30:fc:2c~b0:f9:63:39:42:f7~0~~~~~成功~29~4~5200006~5008"
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 17,
       "original_log": "January 11 16:25:36 2021 dbapp APT~8~1~2021-01-11 16:24:45~94.23.64.0:55311~115.238.103.94:25~邮件社工攻击~~真实 MailFrom:lifeng.gong@dbappsecurity.com.cn~中~2101111624450000220~~主题:test<br/>发件人:\"lifeng.gong@dbappsecurity.com.cn\" <lifenW.gong@dbappsecurity.com.cn><br/>收件人:陈华才<huacai.cheng@dbappsecurity.com.cn><br/>日期:Sun, 16 Mar 2014 19:18:26 +0800<br/>~~~~2~1~24:b6:fd:33:50:9e~00:23:89:8d:29:f1~0~lifenW.gong@dbappsecurity.com.cn~邮件内容:<br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/>http://www.taobao.com/gagag?%20salegoauwu<br/><br/><br/><br/>lifeng.gong@dbappsecurity.com.cn<br/><br/><br/>邮件内容:<br/><HTML><br/><br/><br/><br/><br/><br/><br/>(链接:http://www.taobao2.com/gagag?%20salegoauwu)http://www.taobao.com/gagag?%20salegoauwu<br/><br/>lifeng.gong@dbappsecurity.com.cn<br/><br/>附件:fc8ee45507fe3f808cdf720bf0fc4c1c.doc(445209)~~~尝试~40~0~0~0",
       "fields": [
@@ -3795,6 +3524,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "January 11 16:25:36 2021 dbapp APT~8~1~2021-01-11 16:24:45~94.23.64.0:55311~115.238.103.94:25~邮件社工攻击~~真实 MailFrom:lifeng.gong@dbappsecurity.com.cn~中~2101111624450000220~~主题:test<br/>发件人:\"lifeng.gong@dbappsecurity.com.cn\" <lifenW.gong@dbappsecurity.com.cn><br/>收件人:陈华才<huacai.cheng@dbappsecurity.com.cn><br/>日期:Sun, 16 Mar 2014 19:18:26 +0800<br/>~~~~2~1~24:b6:fd:33:50:9e~00:23:89:8d:29:f1~0~lifenW.gong@dbappsecurity.com.cn~邮件内容:<br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/>http://www.taobao.com/gagag?%20salegoauwu<br/><br/><br/><br/>lifeng.gong@dbappsecurity.com.cn<br/><br/><br/>邮件内容:<br/><HTML><br/><br/><br/><br/><br/><br/><br/>(链接:http://www.taobao2.com/gagag?%20salegoauwu)http://www.taobao.com/gagag?%20salegoauwu<br/><br/>lifeng.gong@dbappsecurity.com.cn<br/><br/>附件:fc8ee45507fe3f808cdf720bf0fc4c1c.doc(445209)~~~尝试~40~0~0~0"
+          ],
+          "sim": false,
+          "value": null
         },
         {
           "core": true,
@@ -4024,6 +3767,22 @@
         },
         {
           "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"time\":1718865955,\"sip\":\"172.123.123.112\",\"smac\":\"5c:c9:99:6b:0d:ca\",\"sport\":56337,\"dip\":\"10.123.7.6\",\"dmac\":\"5c:c9:99:6b:10:e1\",\"dport\":53,\"proto\":\"UDP\",\"app_protocol\":\"dns\",\"attacker\":\"172.123.123.112\",\"victim\":\"10.123.7.6\",\"threat_id\":\"600201\",\"threat_name\":\"疑似DNS回显攻击\",\"threat_type\":\"疑似DNS回显攻击\",\"confidence\":\"\",\"severity\":\"low\",\"desc\":\"检测到疑似DNS回显攻击\",\"cve_id\":\"\",\"cvvnd_id\":\"\",\"payload\":\"dWRwY2FjaGUuZ252aXAubmV0\",\"alert_info\":{\"domain\":\"\",\"id\":54625,\"rrname\":\"udpcache.gnvip.net\",\"rrtype\":\"A\",\"times\":0,\"tx_id\":0,\"type\":\"answer\"},\"scountry_name\":\"日本\",\"sregion_name\":\"\",\"scity_name\":\"\",\"slongitude\":138.252924,\"slatitude\":36.204824,\"dcountry_name\":\"局域网\",\"dregion_name\":\"\",\"dcity_name\":\"\",\"dlongitude\":0,\"dlatitude\":0,\"g_type\":\"3\",\"alert_type\":\"dns\",\"alert_tag\":\"server\",\"tags\":\"[\\\"其他攻击\\\"]\",\"risk_score\":3.5}",
+            "{\"time\":1718643110,\"sip\":\"10.123.115.57\",\"smac\":\"5c:c9:99:6b:08:fa\",\"sport\":60301,\"dip\":\"10.123.7.6\",\"dmac\":\"88:df:9e:30:30:01\",\"dport\":53,\"proto\":\"UDP\",\"app_protocol\":\"dns\",\"attacker\":\"10.123.115.57\",\"victim\":\"10.123.7.6\",\"threat_id\":\"600201\",\"threat_name\":\"疑似DNS回显攻击\",\"threat_type\":\"疑似DNS回显攻击\",\"confidence\":\"\",\"severity\":\"low\",\"desc\":\"检测到疑似DNS回显攻击\",\"cve_id\":\"\",\"cvvnd_id\":\"\",\"payload\":\"dWRwY2FjaGUuZ252aXAubmV0\",\"alert_info\":{\"domain\":\"\",\"id\":31181,\"rrname\":\"udpcache.gnvip.net\",\"rrtype\":\"A\",\"times\":0,\"tx_id\":0,\"type\":\"answer\"},\"scountry_name\":\"局域网\",\"sregion_name\":\"\",\"scity_name\":\"\",\"slongitude\":0,\"slatitude\":0,\"dcountry_name\":\"局域网\",\"dregion_name\":\"\",\"dcity_name\":\"\",\"dlongitude\":0,\"dlatitude\":0,\"g_type\":\"3\",\"alert_type\":\"dns\",\"alert_tag\":\"server\",\"tags\":\"[\\\"其他攻击\\\"]\",\"risk_score\":3.5}",
+            "{\"time\":1718810793,\"sip\":\"172.123.123.117\",\"smac\":\"5c:c9:99:6b:10:e8\",\"sport\":50039,\"dip\":\"10.123.7.6\",\"dmac\":\"04:a9:59:37:fe:c7\",\"dport\":53,\"proto\":\"UDP\",\"app_protocol\":\"dns\",\"attacker\":\"172.123.123.117\",\"victim\":\"10.123.7.6\",\"threat_id\":\"600201\",\"threat_name\":\"疑似DNS回显攻击\",\"threat_type\":\"疑似DNS回显攻击\",\"confidence\":\"\",\"severity\":\"low\",\"desc\":\"检测到疑似DNS回显攻击\",\"cve_id\":\"\",\"cvvnd_id\":\"\",\"payload\":\"dWRwY2FjaGUuZ252aXAubmV0\",\"alert_info\":{\"domain\":\"\",\"id\":63551,\"rrname\":\"udpcache.gnvip.net\",\"rrtype\":\"A\",\"times\":0,\"tx_id\":0,\"type\":\"answer\"},\"scountry_name\":\"日本\",\"sregion_name\":\"\",\"scity_name\":\"\",\"slongitude\":138.252924,\"slatitude\":36.204824,\"dcountry_name\":\"局域网\",\"dregion_name\":\"\",\"dcity_name\":\"\",\"dlongitude\":0,\"dlatitude\":0,\"g_type\":\"3\",\"alert_type\":\"dns\",\"alert_tag\":\"server\",\"tags\":\"[\\\"其他攻击\\\"]\",\"risk_score\":3.5}"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "位置",
           "field": "src_location_city",
           "index": "scity_name",
@@ -4185,6 +3944,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"assets\":{\"ip\":\"188.188.0.0/16\",\"name\":\"上海\",\"section\":\"服务器\",\"sub_type\":\"\"},\"attacker\":\"101.84.20.91\",\"behave_uuid\":\"unix_socket1116308864745239\",\"data\":\"weixin.sh.sgcc.com.cn/.modman/\",\"dest_assets\":{\"ip\":\"188.188.0.0/16\",\"name\":\"上海\",\"section\":\"服务器\",\"sub_type\":\"\"},\"direction\":\"in\",\"external_ip\":\"101.84.20.91\",\"external_port\":1811,\"geo_data\":{\"ChinaCode\":\"\",\"City\":\"上海\",\"Continent\":\"\",\"Country\":\"中国\",\"ISO2\":\"CN\",\"Isp\":\"\",\"Latitude\":\"31.224349\",\"Longitude\":\"121.476753\",\"Org\":\"\",\"PhoneCode\":\"\",\"Province\":\"上海\",\"TimeZone\":\"\",\"UTC\":\"\"},\"incident_id\":\"c4e37f1e9ae79dd56e075efd265812de-1626073408\",\"machine\":\"188.188.8.23\",\"machine_port\":8080,\"net\":{\"dest_ip\":\"188.188.8.23\",\"dest_port\":8080,\"dns\":null,\"flow\":null,\"http\":{\"method\":\"GET\",\"reqs_header\":\"\",\"reqs_line\":\"GET /.modman/ HTTP/1.1\",\"reqs_body\":\"\",\"reqs_host\":\"weixin.sh.sgcc.com.cn\",\"reqs_content_length\":0,\"reqs_user_agent\":\"Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.5; ko; rv:1.9.1b2) Gecko/20081201 Firefox/3.1b2\",\"resp_header\":\"\",\"resp_set_cookie\":\"\",\"resp_body\":\"\",\"resp_content_length\":1164,\"url\":\"/.modman/\",\"protocol\":\"HTTP/1.1\",\"status\":404},\"proto\":\"TCP\",\"real_src_ip\":\"101.84.20.91\",\"src_ip\":\"188.188.6.156\",\"src_port\":1811,\"type\":\"http\"},\"threat\":{\"ioc\":\"\",\"is_apt\":0,\"level\":\"attack\",\"module\":\"tdps\",\"msg\":\"检测到爆破URL路径获取敏感文件路径\",\"name\":\"爆破敏感文件\",\"phase\":\"recon\",\"result\":\"failed\",\"severity\":1,\"suuid\":\"DH50b31634c7\",\"tag\":[\"猜测敏感文件\"],\"type\":\"recon\"},\"time\":1626073431,\"timeStr\":\"2021-07-12T15:03:51+08:00\",\"victim\":\"188.188.8.23\"}"
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4193,57 +3966,20 @@
       "original_log": "ips_alert|!22951|!疑似SSH账号暴力猜解|!1677216471|!暴力猜解|!172.16.2.202|!50160|!172.16.9.42|!9118|!4|!|!|!6|!远程|!146|!SSH 是 Secure Shell 的缩写，由 IETF 的网络小组（Network Working Group）所制定；SSH  为建立在应用层基础上的安全协议。  SSH暴力破解是指攻击者通过密码字典或随机组合密码的方式尝试登陆服务器（针对的是全网机器），这种攻击行为一般不会有明确攻击目标，多数是通过扫描软件直接扫描整个广播域或网段。|!为了您的帐户安全，请尽量设置复杂密码，不要有规律。您容易记忆的密码，同时也很可能被轻易猜出来。请参考以下建议： 1、密码长度为6到16个字符； 2、密码安全性级别说明： a.当您仅使用英文字母、数字、特殊字符中的其中一种来设置密码时，如sqpofeHWESIS、54894565、%$#!%@等，系统会提示您密码的安全性级别为“不安全”； b.当您使用英文字母、数字、特殊字符的任意两种组合时，如uTEh47dy61、dg%ah$aj、25$2*04!63等，系统会提示您密码的安全性级别为“普通”； c.当您使用英文字母+数字+特殊字符的组合时，如sd8bjh*dh、sge352%ds等，系统会提示您密码的安全性级别为“安全”。|!50|!server|!true|!172.16.2.202|!172.16.9.42|!|!0|!0x02040000|!1.0#next#ips_alert|!13646|!SSL3.0 加密协议信息泄露漏洞|!1677137727|!信息泄露|!172.16.220.1|!63865|!172.16.9.214|!8189|!2|!12272|!|!6|!远程|!19|!SSL protocol是美国网景（Netscape）公司研发的安全套接层协议（Secure Socket Layer）的缩写，为互联网通信提供安全及数据完整性保障。#012OpenSSL 1.0.1i及之前版本中使用的SSL protocol 3.0版本中存在安全漏洞，该漏洞源于程序使用非确定性的CBC填充。攻击者可借助padding-oracle攻击利用该漏洞实施中间人攻击，获取明文数据。|!目前厂商已经发布了升级补丁以修复此安全问题，补丁获取链接：#012https://www.openssl.org/news/|!50|!client|!true|!172.16.9.214|!172.16.220.1|!CNNVD-201410-267|!0|!0x02010000|!1.0#next#ips_alert|!22623|!DCSync_DCShadow疑似攻击|!1719884102|!其他|!172.30.1.7|!59118|!192.168.1.8|!49672|!4|!|!|!6|!远程|!88|!DCSync或DCshadow通过高权限进行域内hash的远程导出，或者是对域控的复制。如果存在多个域控的情况那么域控与域控之间会通过这种方式进行信息的同步，如果是内网中的其他主机与域控之间存在此类告警则为攻击。|!不具备高权限的攻击者无法使用该方法来提升权限，也无法获取目标AD的管理访问权限。|!80|!server|!true|!172.30.1.7|!192.168.1.8|!|!1|!0x04040000|!1.0",
       "fields": [
         {
-          "core": true,
-          "entity": "威胁",
-          "field": "attack_result",
-          "index": "field23",
-          "info": [],
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "未知",
-              "orgValue": "0"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击成功",
-              "orgValue": "1"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击成功",
-              "orgValue": "2"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "攻击失败",
-              "orgValue": "3"
-            }
-          ],
-          "required": false,
-          "result": [
-            "0",
-            "0",
-            "1"
-          ],
-          "sim": true,
-          "value": "未知"
-        },
-        {
           "core": false,
-          "entity": "威胁",
-          "field": "attack_killchain",
-          "index": "field24",
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
           "info": [],
           "mappings": [],
           "required": false,
           "result": [
-            "0x02040000",
-            "0x02010000",
-            "0x04040000"
+            "ips_alert|!22951|!疑似SSH账号暴力猜解|!1677216471|!暴力猜解|!172.16.2.202|!50160|!172.16.9.42|!9118|!4|!|!|!6|!远程|!146|!SSH 是 Secure Shell 的缩写，由 IETF 的网络小组（Network Working Group）所制定；SSH  为建立在应用层基础上的安全协议。  SSH暴力破解是指攻击者通过密码字典或随机组合密码的方式尝试登陆服务器（针对的是全网机器），这种攻击行为一般不会有明确攻击目标，多数是通过扫描软件直接扫描整个广播域或网段。|!为了您的帐户安全，请尽量设置复杂密码，不要有规律。您容易记忆的密码，同时也很可能被轻易猜出来。请参考以下建议： 1、密码长度为6到16个字符； 2、密码安全性级别说明： a.当您仅使用英文字母、数字、特殊字符中的其中一种来设置密码时，如sqpofeHWESIS、54894565、%$#!%@等，系统会提示您密码的安全性级别为“不安全”； b.当您使用英文字母、数字、特殊字符的任意两种组合时，如uTEh47dy61、dg%ah$aj、25$2*04!63等，系统会提示您密码的安全性级别为“普通”； c.当您使用英文字母+数字+特殊字符的组合时，如sd8bjh*dh、sge352%ds等，系统会提示您密码的安全性级别为“安全”。|!50|!server|!true|!172.16.2.202|!172.16.9.42|!|!0|!0x02040000|!1.0",
+            "ips_alert|!13646|!SSL3.0 加密协议信息泄露漏洞|!1677137727|!信息泄露|!172.16.220.1|!63865|!172.16.9.214|!8189|!2|!12272|!|!6|!远程|!19|!SSL protocol是美国网景（Netscape）公司研发的安全套接层协议（Secure Socket Layer）的缩写，为互联网通信提供安全及数据完整性保障。#012OpenSSL 1.0.1i及之前版本中使用的SSL protocol 3.0版本中存在安全漏洞，该漏洞源于程序使用非确定性的CBC填充。攻击者可借助padding-oracle攻击利用该漏洞实施中间人攻击，获取明文数据。|!目前厂商已经发布了升级补丁以修复此安全问题，补丁获取链接：#012https://www.openssl.org/news/|!50|!client|!true|!172.16.9.214|!172.16.220.1|!CNNVD-201410-267|!0|!0x02010000|!1.0",
+            "ips_alert|!22623|!DCSync_DCShadow疑似攻击|!1719884102|!其他|!172.30.1.7|!59118|!192.168.1.8|!49672|!4|!|!|!6|!远程|!88|!DCSync或DCshadow通过高权限进行域内hash的远程导出，或者是对域控的复制。如果存在多个域控的情况那么域控与域控之间会通过这种方式进行信息的同步，如果是内网中的其他主机与域控之间存在此类告警则为攻击。|!不具备高权限的攻击者无法使用该方法来提升权限，也无法获取目标AD的管理访问权限。|!80|!server|!true|!172.30.1.7|!192.168.1.8|!|!1|!0x04040000|!1.0"
           ],
-          "sim": true,
-          "value": ""
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4478,6 +4214,20 @@
           "value": "其他"
         },
         {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"netlink\":\"2\",\"host_name\":\"\",\"log_type\":\"ALARM\",\"ip_country_id1\":\"0\",\"ip_country_id2\":\"0\",\"client_ip_addr\":\"192.168.254.150\\u0000\",\"server_ip_addr\":\"192.168.254.97\\u0000\\u0000\",\"ipver\":\"4\",\"client_port\":\"7946\",\"server_port\":\"80\",\"app\":\"WEB\",\"protocol\":\"HTTP\",\"unique_id\":\"99\",\"alarm_id\":\"15\",\"real_stat_time\":\"2022-03-25 16:58:48\",\"real_trigger_time\":\"2022-03-25 16:58:48\",\"duration\":\"0\",\"alarm_type\":\"16777216\",\"alarm_level\":\"4\",\"category_code\":\"10030001\",\"person\":\"\",\"description\":\"\",\"name\":\"漏洞利用-通用-SQL注入-其它时间盲注\",\"category\":\"SQL注入\",\"trigger_condition\":\"\",\"ws_attack_ip\":\"192.168.254.150\",\"ws_attack_ipver\":\"4\",\"ws_attack_port\":\"7946\",\"ws_victim_ip\":\"192.168.254.97\",\"ws_victim_ipver\":\"4\",\"ws_victim_port\":\"80\",\"ws_result\":\"\",\"ws_req_method\":\"GET\",\"ws_req_url\":\"/pikachu.com/vul/xss/xss_01.php?message=(select*from(select+sleep(0)union/**/select+1)a)&submit=submit\",\"ws_req_real_ip\":\"\",\"ws_resp_code\":\"200\",\"ws_handle_desc\":\"\",\"ws_req_payload_size\":\"0\",\"ws_resp_payload_size\":\"0\",\"ws_req_payload\":\"\",\"ws_resp_payload\":\"\"}"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "dst_address",
@@ -4532,6 +4282,26 @@
           ],
           "sim": false,
           "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 24,
+      "original_log": "January 11 15:26:34 2021 dbapp APT~49~1~2021-01-11 15:25:32~192.168.33.109:46592~192.168.33.79:3389~暴力破解~RDP~~中~2101111525320000040~~异常连接数：69~~~0~1~1~00:50:56:8f:45:15~00:50:56:8f:23:26~0~~当前连接数: 0<br/> 新连接数: 69<br/>活动连接数: 69<br/>短周期连接数：69<br/>连接平均发包数：12<br/>数据包平均字节数：141~~~尝试~28~0~0~5007",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "January 11 15:26:34 2021 dbapp APT~49~1~2021-01-11 15:25:32~192.168.33.109:46592~192.168.33.79:3389~暴力破解~RDP~~中~2101111525320000040~~异常连接数：69~~~0~1~1~00:50:56:8f:45:15~00:50:56:8f:23:26~0~~当前连接数: 0<br/> 新连接数: 69<br/>活动连接数: 69<br/>短周期连接数：69<br/>连接平均发包数：12<br/>数据包平均字节数：141~~~尝试~28~0~0~5007"
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4955,6 +4725,23 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\n\t\"eventId\": \"626771453345267729\",\n\t\"deviceReceiptTime\": \"2022-07-15 13:32:05\",\n\t\"startTime\": \"2022-07-15 13:32:05\",\n\t\"endTime\": \"2022-07-15 13:32:05\",\n\t\"collectorReceiptTime\": \"2022-07-15 13:32:05\",\n\t\"logType\": \"anomalous\",\n\t\"transProtocol\": \"TCP\",\n\t\"appProtocol\": \"imap\",\n\t\"srcAddress\": \"172.17.16.100\",\n\t\"destAddress\": \"180.153.21.179\",\n\t\"srcMacAddress\": \"10-8C-CF-3E-A8-C5\",\n\t\"destMacAddress\": \"00-09-0F-09-00-03\",\n\t\"interfaceName\": \"eth0\",\n\t\"srcPort\": \"59700\",\n\t\"destPort\": \"143\",\n\t\"logSessionId\": \"519489109433130\",\n\t\"txId\": \"0\",\n\t\"eventCount\": \"1\",\n\t\"machineCode\": \"B15AF556D2A6A3DABA4F24144C140041\",\n\t\"ruleName\": \"邮箱账号(IMAP)弱口令\",\n\t\"name\": \"邮箱账号(IMAP)弱口令\",\n\t\"message\": \"邮箱账号(IMAP)弱口令。来源：172.17.16.100/59700，目的：180.153.21.179/143\",\n\t\"dataType\": \"ids\",\n\t\"dataSubType\": \"attackAlert\",\n\t\"deviceCat\": \"/IDS/Network\",\n\t\"catObject\": \"/Host/Application/Service\",\n\t\"catOutcome\": \"OK\",\n\t\"severity\": \"5\",\n\t\"catSignificance\": \"/Infomational/Alert\",\n\t\"catBehavior\": \"/Access\",\n\t\"catTechnique\": \"/Exploit/WeakConfiguration\",\n\t\"deviceName\": \"安恒AiNTA\",\n\t\"deviceVersion\": \"AiNTA-v1.2.3_release_ctag_2.3.16-202206272301\",\n\t\"sendHostAddress\": \"172.17.242.122\",\n\t\"deviceAddress\": \"172.17.242.122\",\n\t\"productVendorName\": \"安恒\",\n\t\"deviceSendProductName\": \"AiNTA\",\n\t\"deviceProductType\": \"入侵检测系统\",\n\t\"ruleType\": \"/ConfigRisk/WeakPassword\",\n\t\"ruleId\": \"93007521\",\n\t\"confidence\": \"High\",\n\t\"gid\": \"1\",\n\t\"attackSource\": \"172.17.16.100\",\n\t\"attacker\": [\n\t\t\"172.17.16.100\"\n\t],\n\t\"victim\": [\n\t\t\"180.153.21.179\"\n\t],\n\t\"killChain\": \"KC_Reconnaissance\",\n\t\"tacticId\": \"TA0043\",\n\t\"techniquesId\": \"T1592\",\n\t\"subTechniquesId\": \"T1592.004\",\n\t\"srcUserName\": \"xuwei@srtvn.com\",\n\t\"passwd\": \"qwertyui\",\n\t\"srcGeoCountry\": \"局域网\",\n\t\"srcGeoRegion\": \"局域网\",\n\t\"srcGeoCity\": \"局域网\",\n\t\"destGeoCountry\": \"中国\",\n\t\"destGeoRegion\": \"上海\",\n\t\"destGeoCity\": \"上海\",\n\t\"destGeoLatitude\": \"31.164686\",\n\t\"destGeoLongitude\": \"121.435235\",\n\t\"srcSecurityZone\": \"inner_c75349c6-f5cc-11ec-ba7d-02424e76011b_1656302040\",\n\t\"destSecurityZone\": \"outer\",\n\t\"direction\": \"01\"\n}",
+            "{\"eventId\":\"657112741004902417\",\"deviceReceiptTime\":\"2022-07-20 16:10:48\",\"startTime\":\"2022-07-20 16:10:48\",\"endTime\":\"2022-07-20 16:10:48\",\"collectorReceiptTime\":\"2022-07-20 16:10:48\",\"logType\":\"anomalous\",\"transProtocol\":\"TCP\",\"appProtocol\":\"pop3\",\"srcAddress\":\"172.17.5.47\",\"destAddress\":\"218.78.214.52\",\"srcMacAddress\":\"10-8C-CF-3E-A8-C5\",\"destMacAddress\":\"00-09-0F-09-00-03\",\"interfaceName\":\"eth0\",\"srcPort\":\"50169\",\"destPort\":\"110\",\"logSessionId\":\"79717688938123\",\"txId\":\"0\",\"eventCount\":\"1\",\"machineCode\":\"B15AF556D2A6A3DABA4F24144C140041\",\"ruleName\":\"邮箱账号(POP3)弱口令\",\"name\":\"邮箱账号(POP3)弱口令\",\"message\":\"邮箱账号(POP3)弱口令。来源：172.17.5.47\\/50169，目的：218.78.214.52\\/110\",\"dataType\":\"ids\",\"dataSubType\":\"attackAlert\",\"deviceCat\":\"\\/IDS\\/Network\",\"catObject\":\"\\/Host\\/Application\\/Service\",\"catOutcome\":\"OK\",\"severity\":\"5\",\"catSignificance\":\"\\/Infomational\\/Alert\",\"catBehavior\":\"\\/Access\",\"catTechnique\":\"\\/Exploit\\/WeakConfiguration\",\"deviceName\":\"AiNTA流量分析系统\",\"deviceVersion\":\"AiNTA-v1.2.3_release_ctag_2.3.16-202206272301\",\"sendHostAddress\":\"172.17.242.122\",\"deviceAddress\":\"172.17.242.122\",\"productVendorName\":\"安恒\",\"deviceSendProductName\":\"AiNTA\",\"deviceProductType\":\"入侵检测系统\",\"ruleType\":\"\\/ConfigRisk\\/WeakPassword\",\"ruleId\":\"93007520\",\"confidence\":\"High\",\"gid\":\"1\",\"attackSource\":\"172.17.5.47\",\"attacker\":[\"172.17.5.47\"],\"victim\":[\"218.78.214.52\"],\"killChain\":\"KC_Reconnaissance\",\"tacticId\":\"TA0043\",\"techniquesId\":\"T1592\",\"subTechniquesId\":\"T1592.004\",\"srcUserName\":\"mikle10@mail.sh.cn\",\"passwd\":\"211758\",\"srcGeoCountry\":\"局域网\",\"srcGeoRegion\":\"局域网\",\"srcGeoCity\":\"局域网\",\"destGeoCountry\":\"中国\",\"destGeoRegion\":\"上海\",\"destGeoCity\":\"上海\",\"destGeoLatitude\":\"31.232382\",\"destGeoLongitude\":\"121.468973\",\"srcSecurityZone\":\"inner_c75349c6-f5cc-11ec-ba7d-02424e76011b_1656302040\",\"destSecurityZone\":\"outer\",\"direction\":\"01\"}",
+            "{\"sendHostAddress\":\"111.115.200.33\", \"machineCode\":\"e8611f41f747\", \"interfaceName\":\"eth8\", \"transProtocol\":\"UDP\", \"logSessionId\":\"2405230821420745684\", \"srcAddress\":\"10.150.53.228\", \"srcPort\":\"16083\", \"srcMacAddress\":\"00-74-9C-57-00-3F\", \"destMacAddress\":\"00-74-9C-86-D4-D5\", \"destAddress\":\"111.115.199.180\", \"destPort\":\"10968\", \"vlanId\":\"2000\", \"vxlanId\":\"256\", \"productVendorName\":\"安恒\", \"deviceAddress\":\"111.115.200.33\", \"eventCount\":\"1\", \"deviceSendProductName\":\"安恒APT攻击（网络战）预警机\", \"deviceProductType\":\"入侵检测系统\", \"deviceName\":\"devicename\", \"deviceVersion\":\"2.0.75.77272.240328_ruletag_2.0.29099.240517.1\", \"srcGeoCountry\":\"中国\", \"srcGeoRegion\":\"青海\", \"srcGeoCity\":\"西宁\", \"srcGeoLongitude\":\"101.747947\", \"srcGeoLatitude\":\"36.658865\", \"destGeoCountry\":\"中国\", \"destGeoRegion\":\"青海\", \"destGeoCity\":\"西宁\", \"destGeoLongitude\":\"101.747947\", \"destGeoLatitude\":\"36.658865\", \"direction\":\"11\", \"victimAddress\":\"srcAddress\", \"victim\":[\"10.150.53.228\"], \"srcSecurityZone\":\"outer\", \"destSecurityZone\":\"outer\", \"logType\":\"alert\", \"dataType\":\"ids\", \"dataSubType\":\"attackAlert\", \"deviceCat\":\"/IDS/Network\", \"catObject\":\"/Host/Application/Service\", \"catBehavior\":\"/Access\", \"catOutcome\":\"Attempt\", \"catTechnique\":\"/UNKNOW\", \"severity\":\"3\", \"catSignificance\":\"/Informational\", \"eventId\":\"240523140730000006423151552002\", \"startTime\":\"2024-05-23 14:07:30\", \"endTime\":\"2024-05-23 14:07:30\", \"deviceReceiptTime\":\"2024-05-23 14:07:30\", \"collectorReceiptTime\":\"2024-05-23 14:07:30\", \"ruleId\":\"93011450\", \"ruleName\":\"检测到远程工具向日葵通信\", \"alarmType\":\"异常访问->违规应用\", \"ruleType\":\"/Audit/IllegalSoft\", \"payload\":\"oray.<br/>.. ..*.>..........0..+.A<.v..9/.nj.......[C2...8...+\", \"rawPayload\":\"6F726179030D02182000D82AD33E0001010000000000000030DEA52B0E413C11769118392FEF6E6AAFE789DED1BD825B4332C8F2C138D0BCF32B\", \"HLShift\":\"[0-24][16]\", \"name\":\"检测到远程工具向日葵通信\", \"txId\":\"0\", \"confidence\":\"Low\", \"attackStage\":\"1\", \"attackStatus\":\"2\", \"groupByFields\":\"10.150.53.228\", \"isAPT\":\"false\", \"message\":\"检测到远程工具向日葵通信. 来源：10.150.53.228/16083, 目的：111.115.199.180/10968\"}",
+            "{\"eventId\":\"4894822204832809090\",\"deviceReceiptTime\":\"2024-07-03 09:50:37\",\"startTime\":\"2024-07-03 09:50:37\",\"endTime\":\"2024-07-03 09:50:37\",\"collectorReceiptTime\":\"2024-07-03 09:50:37\",\"logType\":\"alert\",\"transProtocol\":\"TCP\",\"appProtocol\":\"http\",\"srcAddress\":\"10.100.131.205\",\"destAddress\":\"172.28.25.72\",\"srcMacAddress\":\"00-09-0F-09-00-20\",\"destMacAddress\":\"00-00-0C-9F-F0-69\",\"interfaceName\":\"eth13\",\"vlanId\":\"\",\"srcPort\":\"2251\",\"destPort\":\"9090\",\"logSessionId\":\"603415766741388\",\"txId\":\"0\",\"eventCount\":\"1\",\"machineCode\":\"09D1161B5DF91FBDCFFD684008F89E39\",\"ruleName\":\"Web服务暴力破解(尝试次数)\",\"name\":\"Web服务暴力破解(尝试次数)\",\"message\":\"Web服务暴力破解(尝试次数)。来源：10.100.131.205\\/2251，目的：172.28.25.72\\/9090\",\"dataType\":\"ids\",\"dataSubType\":\"attackAlert\",\"deviceCat\":\"\\/IDS\\/Network\",\"catObject\":\"\\/Host\\/Application\\/Service\",\"catOutcome\":\"OK\",\"severity\":\"5\",\"catSignificance\":\"\\/Infomational\\/Alert\",\"catBehavior\":\"\\/Access\",\"catTechnique\":\"\\/BruteForce\\/Login\",\"deviceName\":\"ZJ_CORE_AiNTA\",\"deviceVersion\":\"v1.2.5_release_ctag_2.5.15_ruletag_1.1.1463\",\"sendHostAddress\":\"172.30.90.32\",\"deviceAddress\":\"172.30.90.32\",\"productVendorName\":\"安恒\",\"deviceSendProductName\":\"AiNTA\",\"deviceProductType\":\"入侵检测系统\",\"ruleType\":\"\\/AccountRisk\\/BruteForce\",\"ruleId\":\"93007804\",\"confidence\":\"High\",\"gid\":\"1\",\"attacker\":[\"10.100.131.205\"],\"victim\":[\"172.28.25.72\"],\"killChain\":\"KC_Reconnaissance\",\"tacticId\":\"TA0006\",\"techniquesId\":\"T1110\",\"subTechniquesId\":\"T1110.002\",\"pcapRecord\":true,\"srcUserName\":\"admin\",\"passwd\":\"\",\"loginType\":\"Digest认证\",\"requestMethod\":\"POST\",\"httpVersion\":\"HTTP\\/1.1\",\"accessAgent\":\"CPE Netcwmp Agent\",\"requestBody\":\"<SOAP-ENV:Envelope xmlns:SOAP-ENV=\\\"http:\\/\\/schemas.xmlsoap.org\\/soap\\/envelope\\/\\\" xmlns:SOAP-ENC=\\\"http:\\/\\/schemas.xmlsoap.org\\/soap\\/encoding\\/\\\" xmlns:xsi=\\\"http:\\/\\/www.w3.org\\/1999\\/XMLSchema-instance\\\" xmlns:xsd=\\\"http:\\/\\/www.w3.org\\/1999\\/XMLSchema\\\" xmlns:cwmp=\\\"urn:dslforum-org:cwmp-1-0\\\">\\n<SOAP-ENV:Header>\\n<cwmp:ID SOAP-ENV:mustUnderstand=\\\"1\\\">744<\\/cwmp:ID>\\n<\\/SOAP-ENV:Header>\\n<SOAP-ENV:Body>\\n<cwmp:Inform>\\n<DeviceId xsi:type=\\\"cwmp:DeviceIdStruct\\\">\\n<Manufacturer xsi:type=\\\"xsd:string\\\">BStar<\\/Manufacturer>\\n<OUI xsi:type=\\\"xsd:string\\\">000c43<\\/OUI>\\n<ProductClass xsi:type=\\\"xsd:string\\\">MT7688<\\/ProductClass>\\n<SerialNumber xsi:type=\\\"xsd:string\\\">1817532104854<\\/SerialNumber>\\n<\\/DeviceId>\\n<Event SOAP-ENC:arrayType=\\\"cwmp:EventStruct[1]\\\">\\n<EventStruct>\\n<EventCode xsi:type=\\\"xsd:string\\\">2 PERIODIC<\\/EventCode>\\n<CommandKey><\\/CommandKey>\\n<\\/EventStruct>\\n<\\/Event>\\n<MaxEnvelopes xsi:type=\\\"xsd:unsignedInt\\\">1<\\/MaxEnvelopes>\\n<CurrentTime xsi:type=\\\"xsd:dateTime\\\">1970-01-10T11:27:37<\\/CurrentTime>\\n<RetryCount xsi:type=\\\"xsd:unsignedInt\\\">1<\\/RetryCount>\\n<ParameterList SOAP-ENC:arrayType=\\\"cwmp:ParameterValueStruct[17]\\\">\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceSummary<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">InternetGatewayDevice:1.0[](Baseline:1, IPPing:1, WiFiLAN:1)<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.Manufacturer<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">BStar<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.ManufacturerOUI<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">000c43<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.ProductClass<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">MT7688<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.SerialNumber<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">1817532104854<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.SpecVersion<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">V1.0<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.HardwareVersion<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">A.2.0.0<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.SoftwareVersion<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">1.7.0.4<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.DeviceInfo.ProvisioningCode<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">soap<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.ManagementServer.ConnectionRequestURL<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">http:\\/\\/10.184.128.41:7547<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.ManagementServer.ParameterKey<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">parameterkey<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.ManagementServer.Username<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">admin<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.ManagementServer.Password<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">admin<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.ManagementServer.ConnectionRequestUsername<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">hmg<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.ManagementServer.ConnectionRequestPassword<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">hmg<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.ManagementServer.URL<\\/Name>\\n<Value xsi:type=\\\"xsd:string\\\">http:\\/\\/211.167.101.45:9090\\/cwmp\\/Acs<\\/Value>\\n<\\/ParameterValueStruct>\\n<ParameterValueStruct>\\n<Name xsi:type=\\\"xsd:string\\\">InternetGatewayDevice.WANDevice.1.WANCon\",\"responseMsg\":\"\\n\\n<SOAP-ENV:Envelope xmlns:SOAP-ENV=\\\"http:\\/\\/schemas.xmlsoap.org\\/soap\\/envelope\\/\\\" xmlns:SOAP-ENC=\\\"http:\\/\\/schemas.xmlsoap.org\\/soap\\/encoding\\/\\\" xmlns:cwmp=\\\"urn:dslforum-org:cwmp-1-0\\\" xmlns:xsd=\\\"http:\\/\\/www.w3.org\\/2001\\/XMLSchema\\\" xmlns:xsi=\\\"http:\\/\\/www.w3.org\\/2001\\/XMLSchema-instance\\\" SOAP-ENV:encodingStyle=\\\"http:\\/\\/schemas.xmlsoap.org\\/soap\\/encoding\\/\\\">\\n  <SOAP-ENV:Header>\\n    <cwmp:ID SOAP-ENV:mustUnderstand=\\\"1\\\">744<\\/cwmp:ID>\\n    <cwmp:NoMoreRequests>0<\\/cwmp:NoMoreRequests>\\n  <\\/SOAP-ENV:Header>\\n  <SOAP-ENV:Body>\\n    <cwmp:InformResponse>\\n      <cwmp:MaxEnvelopes>1<\\/cwmp:MaxEnvelopes>\\n    <\\/cwmp:InformResponse>\\n  <\\/SOAP-ENV:Body>\\n<\\/SOAP-ENV:Envelope>\\n\",\"requestHeader\":\"POST \\/cwmp\\/Acs HTTP\\/1.1\\r\\nHost: 211.167.101.45:9090\\r\\nUser-Agent: CPE Netcwmp Agent\\r\\nAccept: *\\/*\\r\\nContent-Type: text\\/xml; charset=utf-8\\r\\nContent-Length: 4299\\r\\nAuthorization: Digest username=\\\"admin\\\", realm=\\\"my realm\\\", nonce=\\\"34fec5b3e490e30b1cc5f2b130009811\\\", uri=\\\"\\/cwmp\\/Acs\\\", response=\\\"730febf7c6bd7d0775ff48b87a311745\\\", qop=auth, nc=, cnonce=\\\"\\\"\\r\\n\\r\\n\",\"responseHeader\":\"HTTP\\/1.1 200 OK\\r\\nSet-Cookie: JSESSIONID=6bf9d62a3a3b6bca1ec1617d8fd55cae;Path=\\/cwmp\\r\\nContent-Type: application\\/xml;charset=UTF-8 \\r\\nConnection: Keep-alive, close\\r\\nContent-Length: 648\\r\\n\\r\\n\",\"requestUrlQuery\":\"\\/cwmp\\/Acs\",\"requestUrl\":\"\\/cwmp\\/Acs\",\"destHostName\":\"172.28.25.72:9090\",\"srcGeoCountry\":\"局域网\",\"srcGeoRegion\":\"局域网\",\"srcGeoCity\":\"局域网\",\"destGeoCountry\":\"局域网\",\"destGeoRegion\":\"局域网\",\"destGeoCity\":\"局域网\",\"srcSecurityZone\":\"outer\",\"destSecurityZone\":\"outer\",\"direction\":\"00\"}"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "用户",
           "field": "userpass",
           "index": "passwd",
@@ -5367,6 +5154,68 @@
       ]
     },
     {
+      "sample_id": 26,
+      "original_log": "{\"attack_time\":\"2024-07-24 09:27:42\",\"attack_type\":\"crimson\",\"desc\":\"僵尸主机\",\"direction\":[\"out2in\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"S\",\"origin_ip\":\"45.141.215.239\",\"origin_ip_location\":{\"latitude\":\"52.2296\",\"longitude\":\"21.0067\",\"country\":\"波兰\",\"city\":\"华沙\",\"code\":\"PL\",\"desc\":\"波兰-华沙\"},\"origin_ip_tags\":[\"outer\",\"foreign\"],\"rule_id\":200006,\"target_ip\":[\"10.130.23.133\"],\"target_ip_location\":{\"10.130.23.133\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.130.23.133\":\"inner\"},\"target_ports\":[443],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.130.23.133\":\"normal\"}}#next#{\"attack_time\":\"2024-07-24 09:41:12\",\"attack_type\":\"crimson\",\"desc\":\"恶意软件\",\"direction\":[\"out2in\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"S\",\"origin_ip\":\"117.248.163.235\",\"origin_ip_location\":{\"latitude\":\"23.7285\",\"longitude\":\"92.7188\",\"country\":\"印度\",\"city\":\"艾藻尔\",\"code\":\"IN\",\"desc\":\"印度-艾藻尔\"},\"origin_ip_tags\":[\"outer\",\"foreign\"],\"rule_id\":109058,\"target_ip\":[\"10.130.248.57\"],\"target_ip_location\":{\"10.130.248.57\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.130.248.57\":\"inner\"},\"target_ports\":[8043],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.130.248.57\":\"normal\"}}",
+      "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"attack_time\":\"2024-07-24 09:27:42\",\"attack_type\":\"crimson\",\"desc\":\"僵尸主机\",\"direction\":[\"out2in\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"S\",\"origin_ip\":\"45.141.215.239\",\"origin_ip_location\":{\"latitude\":\"52.2296\",\"longitude\":\"21.0067\",\"country\":\"波兰\",\"city\":\"华沙\",\"code\":\"PL\",\"desc\":\"波兰-华沙\"},\"origin_ip_tags\":[\"outer\",\"foreign\"],\"rule_id\":200006,\"target_ip\":[\"10.130.23.133\"],\"target_ip_location\":{\"10.130.23.133\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.130.23.133\":\"inner\"},\"target_ports\":[443],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.130.23.133\":\"normal\"}}",
+            "{\"attack_time\":\"2024-07-24 09:41:12\",\"attack_type\":\"crimson\",\"desc\":\"恶意软件\",\"direction\":[\"out2in\"],\"killer_chain\":[\"恶意行为\"],\"level\":\"S\",\"origin_ip\":\"117.248.163.235\",\"origin_ip_location\":{\"latitude\":\"23.7285\",\"longitude\":\"92.7188\",\"country\":\"印度\",\"city\":\"艾藻尔\",\"code\":\"IN\",\"desc\":\"印度-艾藻尔\"},\"origin_ip_tags\":[\"outer\",\"foreign\"],\"rule_id\":109058,\"target_ip\":[\"10.130.248.57\"],\"target_ip_location\":{\"10.130.248.57\":{\"latitude\":\"0\",\"longitude\":\"0\",\"country\":\"\",\"city\":\"\",\"code\":\"\",\"desc\":\"-\"}},\"target_ip_tags\":{\"10.130.248.57\":\"inner\"},\"target_ports\":[8043],\"origin_ip_types\":[\"normal\"],\"target_ip_types\":{\"10.130.248.57\":\"normal\"}}"
+          ],
+          "sim": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 27,
+      "original_log": "January 12 10:25:49 2021 dbapp APT~30~1~2021-01-12 10:25:03~192.168.24.25:0~202.101.172.46:53~DGA 域名请求~DGA 家族：conficker.b，感染病毒类型：蠕虫~conficker.b~高~2101121025030000020~~请求解析域名：ycyfzk.info,vdxlgb.com,gqlxei.org,kjijye.biz,owlvmf.biz,tgxgmb.net,mbsqzs.biz,epxrwt.org,nuzjcd.info,nqvwov.org,dwvbgu.net,vxhpjcv.cc,ujkfqef.net,dkqelwm.org,ivvzkmw.biz,uwvmlyo.net,okwmwfk.info,smnfkzx.net,zhvuhvs.org,gfrrrqn.cc,kbfvnsz.net,jwbdxatg.info,xxsnahzg.biz,mjbcmuof.cc,lxbhybvh.info,wcmtsjyc.net,wfquzblh.info,wxmywbnx.biz,nwqqwznd.biz,xvuylmyz.cc,pmxjeaqn.cc,moqvsxqs.cc,oowydjqh.org,syifxrmg.org,pyhuucqb.org,pbsqkztk.com,bdfahkbf.net,yjotxnqh.info,qswwyvxvw.biz,mlywswkke.net,eyhjdoxjx.net,gkdcmjzua.org,flegzkgff.net,ymfojzkuh.net,ywdyrwmjv.info,asjgujnuo.com,jqnmkdyxc.org,dlrhncvvk.info,tfshzgphfe.biz,jonqhnazyk.info,anuzgmyhpc.org,rpcjdnqlxx.info,axjqxnsdue.cc,kaezrnfppv.com,kvvcguddgj.biz,dqirugmlrq.cc,uplhoqgtju.com,yowrakxefn.com,jkctohnwtb.biz,iohtdzvghc.biz,utdqwobrlv.com,cykspohqtjd.biz,stuwmipzpno.info,khjiwtkdaio.org,hrloicwwmwu.cc,jgsmujzxtjo.net,utuvthtxzzt.cc,npjtkgpekgb.org,vrcpfytztoq.biz,ychyqyvrqjz.org~~~3~4~0~b0:f9:63:39:42:f5~90:f1:b0:00:ce:80~0~~~~~成功~20~0~0~5001#next#<128>April 17 15:44:17 2024 dbapp APT~30~1~2024-04-17 15:44:17~31.0.49.119:0~31.0.179.8:53~DGA域名请求~~~中~2404171544170000070~~请求解析域名：b5e21205-170a-4b94-81bb-e29083057425.local,c075e543-c334-42c4-a38f-eebb4d9d24f4.local,828f150a-8b37-49b8-8e08-fe2aef422995.local,b18d45a0-8a17-4791-8692-257ce3e9a890.local,b4d6a2b1-fde4-44d2-aced-3c1a69735ed3.local,d124c21a-55eb-4349-b1fd-d0ab8b84207e.local,cc0053f2-12de-4852-82f6-2635ad1e24f2.local,8d9d8718-3f1e-458d-a46f-39ff2bdd50cb.local,5a9c90e8-aed2-411c-a791-838a6dedc8a4.local,0cf0a235-9eaf-4602-8160-843fb985232d.local~~~3~4~1~08:e8:4f:68:59:1f~00:50:56:9f:04:ea~0~~~~~成功~20~0~0~220001",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "January 12 10:25:49 2021 dbapp APT~30~1~2021-01-12 10:25:03~192.168.24.25:0~202.101.172.46:53~DGA 域名请求~DGA 家族：conficker.b，感染病毒类型：蠕虫~conficker.b~高~2101121025030000020~~请求解析域名：ycyfzk.info,vdxlgb.com,gqlxei.org,kjijye.biz,owlvmf.biz,tgxgmb.net,mbsqzs.biz,epxrwt.org,nuzjcd.info,nqvwov.org,dwvbgu.net,vxhpjcv.cc,ujkfqef.net,dkqelwm.org,ivvzkmw.biz,uwvmlyo.net,okwmwfk.info,smnfkzx.net,zhvuhvs.org,gfrrrqn.cc,kbfvnsz.net,jwbdxatg.info,xxsnahzg.biz,mjbcmuof.cc,lxbhybvh.info,wcmtsjyc.net,wfquzblh.info,wxmywbnx.biz,nwqqwznd.biz,xvuylmyz.cc,pmxjeaqn.cc,moqvsxqs.cc,oowydjqh.org,syifxrmg.org,pyhuucqb.org,pbsqkztk.com,bdfahkbf.net,yjotxnqh.info,qswwyvxvw.biz,mlywswkke.net,eyhjdoxjx.net,gkdcmjzua.org,flegzkgff.net,ymfojzkuh.net,ywdyrwmjv.info,asjgujnuo.com,jqnmkdyxc.org,dlrhncvvk.info,tfshzgphfe.biz,jonqhnazyk.info,anuzgmyhpc.org,rpcjdnqlxx.info,axjqxnsdue.cc,kaezrnfppv.com,kvvcguddgj.biz,dqirugmlrq.cc,uplhoqgtju.com,yowrakxefn.com,jkctohnwtb.biz,iohtdzvghc.biz,utdqwobrlv.com,cykspohqtjd.biz,stuwmipzpno.info,khjiwtkdaio.org,hrloicwwmwu.cc,jgsmujzxtjo.net,utuvthtxzzt.cc,npjtkgpekgb.org,vrcpfytztoq.biz,ychyqyvrqjz.org~~~3~4~0~b0:f9:63:39:42:f5~90:f1:b0:00:ce:80~0~~~~~成功~20~0~0~5001",
+            "<128>April 17 15:44:17 2024 dbapp APT~30~1~2024-04-17 15:44:17~31.0.49.119:0~31.0.179.8:53~DGA域名请求~~~中~2404171544170000070~~请求解析域名：b5e21205-170a-4b94-81bb-e29083057425.local,c075e543-c334-42c4-a38f-eebb4d9d24f4.local,828f150a-8b37-49b8-8e08-fe2aef422995.local,b18d45a0-8a17-4791-8692-257ce3e9a890.local,b4d6a2b1-fde4-44d2-aced-3c1a69735ed3.local,d124c21a-55eb-4349-b1fd-d0ab8b84207e.local,cc0053f2-12de-4852-82f6-2635ad1e24f2.local,8d9d8718-3f1e-458d-a46f-39ff2bdd50cb.local,5a9c90e8-aed2-411c-a791-838a6dedc8a4.local,0cf0a235-9eaf-4602-8160-843fb985232d.local~~~3~4~1~08:e8:4f:68:59:1f~00:50:56:9f:04:ea~0~~~~~成功~20~0~0~220001"
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 28,
+      "original_log": "January 11 16:10:33 2021 dbapp APT~52~1~2021-01-11 16:09:49~10.20.28.1:0~10.20.28.77:0~ARP 欺骗~~00 0c 29 12 14 c3 00 0c 29 2b ef 0e 08 06 00 01 08 00 06 04 00 02 70 57 bf 23 56 01 0a 14 1c 01 00 0c 29 12 14 c3 0a 14 1c 4d 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ~中~2101111609490000200~~~~~0~1~1~00:0c:29:2b:ef:0e~00:0c:29:12:14:c3~0~~~~~尝试~41~0~0~0",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "January 11 16:10:33 2021 dbapp APT~52~1~2021-01-11 16:09:49~10.20.28.1:0~10.20.28.77:0~ARP 欺骗~~00 0c 29 12 14 c3 00 0c 29 2b ef 0e 08 06 00 01 08 00 06 04 00 02 70 57 bf 23 56 01 0a 14 1c 01 00 0c 29 12 14 c3 0a 14 1c 4d 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ~中~2101111609490000200~~~~~0~1~1~00:0c:29:2b:ef:0e~00:0c:29:12:14:c3~0~~~~~尝试~41~0~0~0"
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 29,
       "original_log": "CEF:0|AsiaInfo Security|Threat Discovery Appliance|5.0.1329|100120|Deep Discovery Inspector detected the protocol in your monitored network.|2|dvc=172.22.9.32 dvcmac=00:50:56:AD:03:BD dvchost=localhost deviceExternalId=E9A3FA433916-4738984C-A4BF-84A0-D603 rt=Jun 22 2017 10:06:24 GMT+08:00 app=eDonkey deviceDirection=1 dhost=10.1.100.223 dst=10.1.100.223 dpt=4662 dmac=00:0c:29:a7:72:74 shost=10.1.117.231 src=10.1.117.231 spt=39933 smac=00:30:da:2d:47:32 cn3Label=Threat Type cn3=6 sourceTranslatedAddress=10.1.117.231 destinationTranslatedAddress=10.1.100.223 cnt=1 flexNumber1Label=vLANId flexNumber1=4095 devicePayloadId=6:11:P",
       "fields": [
@@ -5383,13 +5232,27 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "CEF:0|AsiaInfo Security|Threat Discovery Appliance|5.0.1329|100120|Deep Discovery Inspector detected the protocol in your monitored network.|2|dvc=172.22.9.32 dvcmac=00:50:56:AD:03:BD dvchost=localhost deviceExternalId=E9A3FA433916-4738984C-A4BF-84A0-D603 rt=Jun 22 2017 10:06:24 GMT+08:00 app=eDonkey deviceDirection=1 dhost=10.1.100.223 dst=10.1.100.223 dpt=4662 dmac=00:0c:29:a7:72:74 shost=10.1.117.231 src=10.1.117.231 spt=39933 smac=00:30:da:2d:47:32 cn3Label=Threat Type cn3=6 sourceTranslatedAddress=10.1.117.231 destinationTranslatedAddress=10.1.100.223 cnt=1 flexNumber1Label=vLANId flexNumber1=4095 devicePayloadId=6:11:P"
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     }
   ],
   "statistics": {
-    "total_samples": 22,
-    "total_fields": 288,
-    "unique_fields": 288
+    "total_samples": 28,
+    "total_fields": 285,
+    "unique_fields": 262
   }
 }

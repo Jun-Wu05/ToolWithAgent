@@ -525,6 +525,20 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"topsec\" dev_type=\"4\" dev_name=\"TopADS\" dev_ip=\"192.168.90.137\" time=\"2020-09-10 11:27:16\" index=\"901\" recorder=\"ads_atk_log\" symbol=\"attack_log\" action=\"1\" event_id=\"34943\" time_begin=\"2020-09-10 11:25:39\" dst_addr=\"192.168.44.9\" obj_type=\"tuple-1\" obj_extend1=\"192.168.44.9\" obj_extend2=\"any other\" obj_extend3=\"any other\" zone=\"ads\" grpname=\"default\" cur_t=\"2020-09-10 11:27:16\" alarm_level=\"medium\" app_name=\"ip\" domain=\"\" attack_type=\"ip flood\" is_private_atk=\"0\" threshold=\"1\" unit=\"pps\" status=\"active\" proto=\"udp\" port=\"6555\" country=\"UNKNOWN\" city=\"UNKNOWN\" latitude=\"0.000000\" longitude=\"0.000000\" method=\"ip source limit\" def_port=\"6555\" def_unit=\"pps\" drop_pkts=\"110\" drop_bytes=\"63140\" abn_conns=\"0\" src_ip=\"\" content=\"\""
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "dst_port",
@@ -655,6 +669,20 @@
         },
         {
           "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "log_type=ip_attack_sum device_ip=111.23.236.81 device_type=DETECT direction=inbound zone_id=29 zone_name=changsha_jike zone_ip=111.22.12.202 start_time=\"2024-01-23 16:12:06\" end_time=\"2024-01-23 16:17:16\" severity=1 max_severity=1 in_pps=28000 in_kbps=257135 drop_pps=0 drop_kbps=0 max_in_pps=28000 max_in_kbps=257135 curr_conn=0 new_conn=0 attack_type=\"11\" max_drop_kbps=\"0\" max_drop_pps=\"0\"  src_ip=111.23.236.75"
+          ],
+          "sim": true,
+          "value": ""
+        },
+        {
+          "core": false,
           "entity": "事件",
           "field": "event_type",
           "index": "type",
@@ -680,6 +708,66 @@
           ],
           "sim": false,
           "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 4,
+      "original_log": "sub_type=flowlog time_interval=1 dst_addr=10.111.254.97 zonename=南开区政府策略 grpname=南开区政府策略 ip_flow_p=0 cut_ip_flow_p=0 ipfrag_flow_p=0 cut_ipfrag_flow_p=0 tcp_flow_p=0 cut_tcp_flow_p=0 udp_flow_p=0 cut_udp_flow_p=0 icmp_flow_p=0 cut_icmp_flow_p=0 dns_flow_p=0 cut_dns_flow_p=0 http_flow_p=0 cut_http_flow_p=0 https_flow_p=0 cut_https_flow_p=0 sip_flow_p=0 cut_sip_flow_p=0 ip_flow_b=0 cut_ip_flow_b=0 ipfrag_flow_b=0 cut_ipfrag_flow_b=0 tcp_flow_b=0 cut_tcp_flow_b=0 udp_flow_b=0 cut_udp_flow_b=0 icmp_flow_b=0 cut_icmp_flow_b=0 dns_flow_b=0 cut_dns_flow_b=0 http_flow_b=0 cut_http_flow_b=0 https_flow_b=0 cut_https_flow_b=0 sip_flow_b=0 cut_sip_flow_b=0 backup1=0 backup2=0 backup3=0 backup4=0",
+      "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "sub_type=flowlog time_interval=1 dst_addr=10.111.254.97 zonename=南开区政府策略 grpname=南开区政府策略 ip_flow_p=0 cut_ip_flow_p=0 ipfrag_flow_p=0 cut_ipfrag_flow_p=0 tcp_flow_p=0 cut_tcp_flow_p=0 udp_flow_p=0 cut_udp_flow_p=0 icmp_flow_p=0 cut_icmp_flow_p=0 dns_flow_p=0 cut_dns_flow_p=0 http_flow_p=0 cut_http_flow_p=0 https_flow_p=0 cut_https_flow_p=0 sip_flow_p=0 cut_sip_flow_p=0 ip_flow_b=0 cut_ip_flow_b=0 ipfrag_flow_b=0 cut_ipfrag_flow_b=0 tcp_flow_b=0 cut_tcp_flow_b=0 udp_flow_b=0 cut_udp_flow_b=0 icmp_flow_b=0 cut_icmp_flow_b=0 dns_flow_b=0 cut_dns_flow_b=0 http_flow_b=0 cut_http_flow_b=0 https_flow_b=0 cut_https_flow_b=0 sip_flow_b=0 cut_sip_flow_b=0 backup1=0 backup2=0 backup3=0 backup4=0"
+          ],
+          "sim": true,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 5,
+      "original_log": "vendor=\"topsec\" dev_type=\"4\" dev_name=\"TopADS\" dev_ip=\"192.168.90.137\" time=\"2020-09-14 18:53:11\" index=\"904\" recorder=\"ads_atk_geo_log\" symbol=\"attack_geo_log\" event_id=\"38637\" dst_addr=\"10.41.1.117\" obj_type=\"tuple-1\" zone=\"dd\" grpname=\"default\" time_begin=\"2020-09-14 18:45:30\" attack_type=\"udp flood\" cur_t=\"2020-09-14 18:53:11\" country=\"UNKNOWN\" city=\"UNKNOWN\" latitude=\"0.000000\" longitude=\"0.000000\" drop_pkts=\"2\" drop_bytes=\"200\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"topsec\" dev_type=\"4\" dev_name=\"TopADS\" dev_ip=\"192.168.90.137\" time=\"2020-09-14 18:53:11\" index=\"904\" recorder=\"ads_atk_geo_log\" symbol=\"attack_geo_log\" event_id=\"38637\" dst_addr=\"10.41.1.117\" obj_type=\"tuple-1\" zone=\"dd\" grpname=\"default\" time_begin=\"2020-09-14 18:45:30\" attack_type=\"udp flood\" cur_t=\"2020-09-14 18:53:11\" country=\"UNKNOWN\" city=\"UNKNOWN\" latitude=\"0.000000\" longitude=\"0.000000\" drop_pkts=\"2\" drop_bytes=\"200\""
+          ],
+          "sim": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 6,
+      "original_log": "vendor=\"topsec\" dev_type=\"4\" dev_name=\"TopADS\" dev_ip=\"192.168.90.137\" time=\"2020-09-01 10:39:09\" index=\"917\" recorder=\"ads_attack_flow_log\" symbol=\"attack_flow_log\" action=\"1\" event_id=\"32479\" time_begin=\"2020-09-01 10:28:05\" dst_addr=\"192.168.44.9\" obj_type=\"tuple-1\" obj_extend1=\"192.168.44.9\" obj_extend2=\"any other\" obj_extend3=\"any other\" zone=\"ads\" grpname=\"default\" cur_t=\"2020-09-01 10:39:09\" alarm_level=\"medium\" app_name=\"ip\" domain=\"\" attack_type=\"ip flood\" is_private_atk=\"0\" threshold=\"1\" unit=\"pps\" status=\"active\" proto=\"udp\" port=\"6555\" recv_bps=\"73472\" recv_pps=\"16\" tx_bps=\"22960\" tx_pps=\"5\" is_under_atk=\"1\" time_interval=\"10\" protocol=\"udp\" src_ip=\"192.168.55.15\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"topsec\" dev_type=\"4\" dev_name=\"TopADS\" dev_ip=\"192.168.90.137\" time=\"2020-09-01 10:39:09\" index=\"917\" recorder=\"ads_attack_flow_log\" symbol=\"attack_flow_log\" action=\"1\" event_id=\"32479\" time_begin=\"2020-09-01 10:28:05\" dst_addr=\"192.168.44.9\" obj_type=\"tuple-1\" obj_extend1=\"192.168.44.9\" obj_extend2=\"any other\" obj_extend3=\"any other\" zone=\"ads\" grpname=\"default\" cur_t=\"2020-09-01 10:39:09\" alarm_level=\"medium\" app_name=\"ip\" domain=\"\" attack_type=\"ip flood\" is_private_atk=\"0\" threshold=\"1\" unit=\"pps\" status=\"active\" proto=\"udp\" port=\"6555\" recv_bps=\"73472\" recv_pps=\"16\" tx_bps=\"22960\" tx_pps=\"5\" is_under_atk=\"1\" time_interval=\"10\" protocol=\"udp\" src_ip=\"192.168.55.15\""
+          ],
+          "sim": true,
+          "value": null
         }
       ]
     },
@@ -824,6 +912,23 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"domain_name\":\"省电力公司\", \"dst_ip\":\"218.65.110.139\", \"dst_port\":\"8080\", \"src_ip\":\"14.24.57.153\", \"src_port\":\"3734\", \"timestamp\":\"2023-05-31 17:39:33\", \"defend_type\":\"LOG_ACK\", \"code\":\"TCP_ACK_DROP_RST_FIN\", \"country_name_cn\":\"中国\", \"country_name_en\":\"China\"}",
+            "{\"domain_name\":\"省电力公司\", \"dst_ip\":\"218.65.110.153\", \"dst_port\":\"80\", \"src_ip\":\"112.49.233.179\", \"src_port\":\"9810\", \"timestamp\":\"2024-03-15 17:09:32\", \"defend_type\":\"LOG_HTTP\", \"code\":\"HTTP_DROP_UNAUTH_ACK\", \"country_name_cn\":\"中国\", \"country_name_en\":\"China\"}",
+            "{\"domain_name\":\"省电力公司\", \"dst_ip\":\"218.65.110.153\", \"dst_port\":\"80\", \"src_ip\":\"111.75.236.157\", \"src_port\":\"59211\", \"timestamp\":\"2024-03-15 17:09:35\", \"defend_type\":\"LOG_HTTP\", \"code\":\"HTTP_DROP_UNAUTH_ACK\", \"country_name_cn\":\"中国\", \"country_name_en\":\"China\"}",
+            "{\"domain_name\":\"省电力公司\", \"dst_ip\":\"218.65.110.153\", \"dst_port\":\"80\", \"src_ip\":\"117.169.229.82\", \"src_port\":\"24996\", \"timestamp\":\"2024-03-15 17:09:22\", \"defend_type\":\"LOG_DEFAULT\", \"code\":\"SP_ERROR_SPORT\", \"country_name_cn\":\"中国\", \"country_name_en\":\"China\"}"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "src_port",
@@ -929,6 +1034,25 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "log_type=ip_attack device_ip=172.16.110.113 device_type=CLEAN direction=inbound zone_id=11 zone_name=test_zone zone_ip=10.10.5.8 biz_id=1 is_deszone=false is_ipLocation=false ipLocation_id=0 total_pps=1259 total_kbps=10485 tcp_pps=0 tcp_kbps=0 tcpfrag_pps=0 tcpfrag_kbps=0 udp_pps=1259 udp_kbps=10485 udpfrag_pps=0 udpfrag_kbps=0 icmp_pps=0 icmp_kbps=0 other_pps=0 other_kbps=0 syn_pps=0 synack_pps=0 ack_pps=0 finrst_pps=0 http_pps=0 http_kbps=0 http_get_pps=0 https_pps=0 https_kbps=0 dns_request_pps=0 dns_request_kbps=0 dns_reply_pps=0 dns_reply_kbps=0 sip_invite_pps=0 sip_invite_kbps=0 tcp_increase_con=0 udp_increase_con=0 icmp_increase_con=0 other_increase_con=0 tcp_concur_con=0 udp_concur_con=0 icmp_concur_con=0 other_concur_con=0 total_average_pps=723 total_average_kbps=6028",
+            "log_type=ip_attack device_ip=172.16.110.113 device_type=CLEAN direction=inbound zone_id=11 zone_name=test_zone zone_ip=10.10.5.8 start_time_alert=\"2022-11-04 10:33:36\" start_time_attack=\"2022-11-04 10:33:36\" end_time=\"\" duration=258758 attack_type=19 protocol=0 port=0 attack_status=ATTACK drop_packets=178183166 drop_kbits=1483929710 attacker=1.1.40.17,1.4.150.249,1.16.0.217,1.16.4.193,1.15.237.81,1.15.241.57,1.15.252.241,1.4.123.161,1.5.66.217,1.1.47.225,1.4.115.209,1.4.139.65,1.12.165.121,1.10.236.17,1.10.60.73,1.10.56.97,1.10.87.161,1.5.74.169,1.2.241.25,1.15.84.249,1.10.189.49,1.5.98.25,1.10.197.1,1.10.68.25,1.10.232.41,1.10.220.113,1.2.237.49,1.15.73.65,1.15.88.225,1.10.79.209,1.12.153.193,1.3.0.185,1.4.119.185,1.2.245.1,1.15.249.9,1.3.4.161,1.2.225.121,1.4.135.89,1.2.252.209,1.10.64.49,1.2.229.97,1.15.69.89,1.5.105.233,1.15.57.161,1.12.149.217,1.10.228.65,1.12.157.169,1.5.94.49,1.2.233.73,1.10.52.121,1.5.70.193,1.12.181.25,1.15.233.105,1.5.78.145,1.4.131.113,1.2.248.233,1.5.82.121,1.12.169.97,1.12.177.49,1.5.62.241,1.15.77.41,1.12.173.73,1.5.90.73,1.10.83.185,1.1.43.249,1.11.241.201,1.4.127.137,1.10.208.185,1.10.75.233,1.1.55.177,1.10.193.25,1.10.224.89,1.12.161.145,1.10.72.1,1.16.8.169,1.5.86.97,1.5.102.1,1.15.92.201,1.10.212.161,1.1.59.153,1.15.65.113,1.10.239.249,1.1.75.57,1.15.81.17,1.10.243.225,1.1.51.201,1.12.5.81,1.15.61.137,1.10.204.209,1.1.67.105,1.10.216.137,1.4.143.41,1.1.63.129,1.15.245.33,1.10.200.233,1.1.71.81,1.16.12.145,1.12.9.57,1.12.185.1,1.4.147.17 attacker_pps= attacker_kbps= current_attack_flow=12117 limit_attack_value=1024 attack_unit=\"kbps\" max_drop_kbps=10485 max_drop_pps=1259",
+            "log_type=ip_attack device_ip=172.16.110.113 device_type=CLEAN direction=inbound zone_id=11 zone_name=test_zone zone_ip=10.10.5.12 start_time=\"2022-11-04 10:33:36\" end_time=\"\" severity=4 max_severity=4 in_pps=723 in_kbps=6022 drop_pps=723 drop_kbps=6022 max_in_pps=1283 max_in_kbps=10684 curr_conn=0 new_conn=0 attack_type=\"19\" max_drop_kbps=\"10684\" max_drop_pps=\"1283\"",
+            "log_type=ip_attack device_ip=172.16.110.113 device_type=CLEAN direction=inbound zone_id=11 zone_name=test_zone zone_ip=10.10.5.6 start_time=\"2022-11-04 10:33:36\" refresh_time=\"2022-11-07 10:27:05\" severity=4 attack_type=\"UDP Flood\" attacker_ip=\"1.15.151.97,1.2.123.233,1.11.108.249,1.6.248.89,1.11.112.225,1.13.182.233,1.2.139.137,1.13.73.137,1.11.93.89,1.1.165.17,1.13.202.113,1.6.252.65,1.11.97.65,1.5.47.81,1.2.112.49,1.2.143.113,1.7.4.17,1.13.96.249,1.6.240.137,1.11.226.41,1.7.113.113,1.13.198.137,1.1.200.57,1.2.131.185,1.7.90.1,1.1.211.241,1.9.23.81,1.15.155.73,1.7.86.25,1.2.147.89,1.13.190.185,1.7.101.185,1.13.194.161,1.7.0.41,1.13.85.65,1.15.131.217,1.2.225.121,1.2.116.25,1.1.192.105,1.13.214.41,1.2.229.97,1.7.117.89,1.2.120.1,1.7.109.137,1.13.69.161,1.15.147.121,1.12.1.105,1.13.65.185,1.15.143.145,1.7.121.65,1.2.127.209,1.13.77.113,1.13.206.89,1.13.81.89,1.11.11.81,1.1.215.217,1.7.105.161,1.11.116.201,1.15.167.1,1.13.186.209,1.6.244.113,1.11.81.161,1.15.139.169,1.11.253.129,1.13.210.65,1.15.163.25,1.7.93.233,1.11.241.201,1.11.230.17,1.3.59.81,1.13.179.1,1.15.159.49,1.7.35.81,1.2.135.161,1.1.208.9,1.6.228.209,1.12.255.81,1.11.249.153,1.13.93.17,1.11.105.17,1.1.184.153,1.11.245.177,1.12.5.81,1.1.188.129,1.13.89.41,1.15.135.193,1.7.97.209,1.11.89.113,1.11.101.41,1.1.219.193,1.11.85.137,1.13.61.209,1.6.232.185,1.14.243.81,1.1.204.33,1.11.233.249,1.6.236.161,1.6.224.233,1.11.237.225,1.1.196.81\" in_pps=724 in_bps=6029000 drop_pps=724 drop_bps=6029000 forward_pps=0 forward_bps=0 attack_status=ATTACK",
+            "log_type=ip_attack device_ip=172.16.110.113 device_type=CLEAN direction=inbound zone_id=11 zone_name=test_zone zone_ip=10.10.5.8 biz_id=1 is_deszone=false is_ipLocation=false ipLocation_id=0 total_pps=1259 total_kbps=10485 tcp_pps=0 tcp_kbps=0 tcpfrag_pps=0 tcpfrag_kbps=0 udp_pps=1259 udp_kbps=10485 udpfrag_pps=0 udpfrag_kbps=0 icmp_pps=0 icmp_kbps=0 other_pps=0 other_kbps=0 syn_pps=0 synack_pps=0 ack_pps=0 finrst_pps=0 http_pps=0 http_kbps=0 http_get_pps=0 https_pps=0 https_kbps=0 dns_request_pps=0 dns_request_kbps=0 dns_reply_pps=0 dns_reply_kbps=0 sip_invite_pps=0 sip_invite_kbps=0 total_average_pps=723 total_average_kbps=6028",
+            "log_type=ip_attack device_ip=10.120.120.1 device_type=CLEAN zone_id=16 zone_name=web2_DX zone_ip=118.213.242.243 start_time_alert=\"2023-03-30 05:41:19\" start_time_attack=\"2023-03-30 05:41:19\" end_time=\"2023-03-30 05:41:24\" duration=5 attack_type=26 protocol=0 port=0 attack_status=ATTACK drop_packets=13312 drop_kbits=16871 attacker=36.100.150.109,223.221.213.52,110.167.158.91,110.166.223.34,223.220.87.126,36.100.122.155,110.191.19.42,110.167.146.112,223.220.34.40,36.100.13.102,110.166.24.225,36.45.47.180,110.166.27.217,118.213.2.93,223.220.87.90,110.166.253.2,125.72.27.50,110.167.49.68,36.100.160.13,110.166.55.25,116.205.253.180,110.166.170.118,223.220.35.112,110.167.241.56,223.221.31.92,110.167.89.92,125.70.178.204,223.220.24.162,116.228.198.120,36.100.6.241,110.166.248.216,116.228.198.126"
+          ],
+          "sim": true,
+          "value": ""
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "src_address",
@@ -1028,6 +1152,21 @@
         },
         {
           "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"domain_name\":\"省电力公司\", \"dst_ip\":\"218.65.110.136\", \"dst_port\":\"80\", \"src_ip\":\"182.109.138.46\", \"timestamp\":\"2023-05-31 17:48:08\", \"total_traffic_bps\":\"239000 bps\", \"passed_traffic_bps\":\"194680 bps\", \"attack_traffic_bps\":\"44320 bps\",\"total_traffic_pps\":\"141 pps\", \"passed_traffic_pps\":\"118 pps\", \"attack_traffic_pps\":\"23 pps\", \"attack_type\":\"HTTP\", \"country_name_cn\":\"中国\", \"country_name_en\":\"China\"}",
+            "{\"domain_name\":\"省电力公司\", \"src_ip\":\"183.218.219.33\", \"dst_ip\":\"218.65.110.153\", \"attack_type\":\"HTTP\", \"start_time\":\"2024-03-15 17:05:18\", \"end_time\":\"2024-03-15 17:08:00\", \"in_total_mbps\":\"967037 Bytes\", \"in_total_pps\":\"9705 packets\",\"attack_total_mbps\":\"22899 Bytes\", \"attack_total_pps\":\"125 packets\", \"out_total_mbps\":\"944138 bps\", \"out_total_pps\":\"9580 pps\", \"max_attack_mbps\":\"9685 bps\", \"max_attack_pps\":\"33 pps\",\"attack_state\":\"攻击结束\"}"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "会话",
           "field": "session_start_time",
           "index": "start_time",
@@ -1103,40 +1242,18 @@
         {
           "core": false,
           "entity": "日志",
-          "field": "occur_time",
-          "index": "field0",
-          "info": [],
-          "mappings": [
-            {
-              "mappingType": "TIME",
-              "mappingValue": "yyyy-MM-dd HH:mm:ss",
-              "orgValue": ""
-            }
-          ],
-          "required": false,
-          "result": [
-            "2015-02-05 07:11:29",
-            "2015-02-05 07:11:29",
-            "2015-02-05 07:25:29"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "用户",
-          "field": "user_name",
-          "index": "field4",
+          "field": "original_log",
+          "index": "original_log",
           "info": [],
           "mappings": [],
           "required": false,
           "result": [
-            "admin",
-            "admin",
-            "admin"
+            "2015-02-05 07:11:29|Attack Alert|DstIP=10.66.59.2 AttackType=\"SYN-Flood\" DstPort=80 DstPortChanged=0 BeginTime=2015-02-05 07:10:59 EndTime=\"--\" Status=Begin Flow=222/3 Filter=222/3|local|admin",
+            "2015-02-05 07:11:29|Attack Alert|DstIP=10.66.59.2 AttackType=\"SYN-Flood\" DstPort=82 DstPortChanged=1 BeginTime=2015-02-05 07:10:59 EndTime=\"--\" Status=Ongoing Flow=421/3 Filter=421/3|local|admin",
+            "2015-02-05 07:25:29|Attack Alert|DstIP=10.66.250.108 AttackType=\"ACK-Flood\" DstPort=83 DstPortChanged=1 BeginTime=2015-02-05 07:19:59 EndTime=2015-02-05 07:20:29 Status=end Flow=122/2 Filter=122/2|local|admin"
           ],
-          "sim": false,
-          "value": ""
+          "sim": true,
+          "value": null
         }
       ]
     },
@@ -1144,6 +1261,20 @@
       "sample_id": 11,
       "original_log": "vendor=\"topsec\" dev_type=\"4\" dev_name=\"TopADS\" dev_ip=\"192.168.90.137\" time=\"2020-09-01 15:43:30\" index=\"920\" recorder=\"ads_attack_srcip_log\" \"NGTOS\" \"v3.2294.2253b4.1_ads\" \"2020-09-01 07:43:31\" \"root_vsys\" \"information\" \"ads_attack_srcip\" \"ads_attack_srcip_log\" \"2179\" \"0\" symbol=\"attack_srcip_log\" event_id=\"32482\" time_interval=\"10\" src_ip=\"192.168.200.37\" total_pkts=\"1\" total_bytes=\"306\" cur_t=\"2020-09-01 15:43:30\" dst_addr=\"192.168.44.9\" obj_type=\"tuple-1\" zone=\"ads\" grpname=\"default\" attack_type=\"udp flood\" time_begin=\"2020-09-01 15:43:25\" recv_pps=\"0\" recv_bps=\"244\"",
       "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"topsec\" dev_type=\"4\" dev_name=\"TopADS\" dev_ip=\"192.168.90.137\" time=\"2020-09-01 15:43:30\" index=\"920\" recorder=\"ads_attack_srcip_log\" \"NGTOS\" \"v3.2294.2253b4.1_ads\" \"2020-09-01 07:43:31\" \"root_vsys\" \"information\" \"ads_attack_srcip\" \"ads_attack_srcip_log\" \"2179\" \"0\" symbol=\"attack_srcip_log\" event_id=\"32482\" time_interval=\"10\" src_ip=\"192.168.200.37\" total_pkts=\"1\" total_bytes=\"306\" cur_t=\"2020-09-01 15:43:30\" dst_addr=\"192.168.44.9\" obj_type=\"tuple-1\" zone=\"ads\" grpname=\"default\" attack_type=\"udp flood\" time_begin=\"2020-09-01 15:43:25\" recv_pps=\"0\" recv_bps=\"244\""
+          ],
+          "sim": true,
+          "value": null
+        },
         {
           "core": false,
           "entity": "流量",
@@ -1221,6 +1352,20 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SYN-Flood src=1.1.5.78 dst=221.225.1.167 sport=9145 dport=7000 flag=SYN-64"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "src_address",
@@ -1238,8 +1383,8 @@
     }
   ],
   "statistics": {
-    "total_samples": 9,
-    "total_fields": 72,
-    "unique_fields": 72
+    "total_samples": 12,
+    "total_fields": 81,
+    "unique_fields": 70
   }
 }

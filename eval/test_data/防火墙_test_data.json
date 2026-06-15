@@ -562,6 +562,21 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "\"User\": \"N/A\", \"client IP\": \"223.245.213.130\", \"client port\": \"60100\", \"server IP\": \"172.192.13.9\", \"server port\": \"443\", \"site name\": \"gxrc-https\", \"policy name\": \"policy_normal\", \"protection type\": \"102\", \"protection subtype\": \"10200\", \"action\": \"pass\", \"followed action\": \"NONE\", \"block time\": \"N/A\", \"rule ID\": \"1020010131\", \"attack name\": \"SQL Injection Attack Attempts are Detected\", \"vulnerability ID\": \"N/A\", \"CVE ID\": \"N/A\", \"CNNVD ID\": \"N/A\", \"severity\": \"1\", \"domain name\": \"mfcg.gxrc.com\", \"HTTP method\": \"POST\", \"HTTP URL\": \"/list/index.asp\", \"server status code\": \"404\", \"source country/region\": \"CN\", \"source province/area\": \"AH\", \"IP Reputation\": \"N/A\", \"message\": \"SQL injection attack attempts are detected. Hit data: chr( is found in the matched variable (Execute                              (\"                              Execute                              (\"\"          :Function bd(byVal s):For i=1 To Len(s) Step 2:c=Mid(s,i,2):If IsNumeric(Mid(s,i,1)) Then:Execute(\"\"\"\"bd=bd&chr(&H\"\"\"\"&c&\"\"\"\")\"\"\"\"):Else:Execute(\"\"\"\"bd=bd&chr(&H\"\"\"\"&c&Mid(s,i 2,2)&\"\"\"\")\"\"\"\"):i=i 2:End If\"\"&chr(10)&\"\"Next:End Function:Response.Write(\"\"\"\"->|\"\"\"\"):                    Execute                              (\"\"\"\"On Error Resume Next:\"\"\"\"&bd(\"\"\"\"526573706F6E73652E5772697465282268616F72656E67652E636F6D51513331373237353733382229\"\"\"\")):Response.Write(\"\"\"\"|<-\"\"\"\"):Response.End\"\")\"))\", \"attack count\": \"1\"",
+            "\"User\": \"N/A\", \"client IP\": \"182.38.124.213\", \"client port\": \"55656\", \"server IP\": \"172.192.13.9\", \"server port\": \"80\", \"site name\": \"gxrc-http\", \"policy name\": \"policy_normal\", \"protection type\": \"107\", \"protection subtype\": \"10701\", \"action\": \"deny\", \"followed action\": \"NONE\", \"block time\": \"N/A\", \"rule ID\": \"1070110064\", \"attack name\": \"ThinkPHP2.1 Framework Remote Code Execution Vulnerability\", \"vulnerability ID\": \"N/A\", \"CVE ID\": \"N/A\", \"CNNVD ID\": \"N/A\", \"severity\": \"2\", \"domain name\": \"s.gxrc.com\", \"HTTP method\": \"POST\", \"HTTP URL\": \"/index.php/module/action/param1/$%7B@eval($_POST%5Bheimi%5D)%7D\", \"server status code\": \"N/A\", \"source country/region\": \"CN\", \"source province/area\": \"SD\", \"IP Reputation\": \"N/A\", \"message\": \"Vulnerability exploitation attack is detected (ThinkPHP2.1 Framework Remote Code Execution Vulnerability). Hit data: /${@ is found in the URI (/index.php/module/action/param1/${@eval($_POST[heimi])})\", \"attack count\": \"1\""
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "威胁",
           "field": "threat_type",
@@ -683,6 +698,21 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"type\":3,\"time\":1754550790,\"sip\":\"220.171.42.82\",\"sport\":\"8082\",\"dip\":\"192.168.1.171\",\"dport\":\"57932\",\"proto\":\"TCP\",\"sid\":5613287,\"isipv6\":0,\"policyid\":3,\"ipsid\":1,\"priority\":3,\"action\":\"告警\",\"count\":1,\"hit_profile\":\"所有规则\",\"hit_rule\":\" BROWSER-OTHER HTTP characters prior to header evasion 尝试 \",\"alert_time\":0,\"message\":\" BROWSER-OTHER HTTP characters prior to header evasion 尝试 \",\"lasttime\":\"1754550790\",\"level\":\"warning\"}",
+            "{\"type\":3,\"time\":1715160605,\"sip\":\"172.31.1.24\",\"sport\":\"44932\",\"dip\":\"11.11.11.38\",\"dport\":\"25\",\"proto\":\"TCP\",\"sid\":7347196,\"isipv6\":0,\"policyid\":1,\"ipsid\":1000,\"priority\":1,\"action\":\"丢弃\",\"count\":1,\"hit_profile\":\"test1\",\"hit_rule\":\"TCP\",\"alert_time\":0,\"message\":\"TCP\",\"lasttime\":\"1715160605\",\"level\":\"fatal\"}"
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": true,
@@ -853,6 +883,21 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"type\":8,\"time\":1754550985,\"sip\":\"222.81.124.171\",\"sport\":\"80\",\"dip\":\"192.168.2.24\",\"dport\":\"38112\",\"proto\":\"TCP\",\"sid\":0,\"isipv6\":0,\"policyid\":3,\"ipsid\":0,\"priority\":1,\"action\":\"告警\",\"webfilter_cfg\":\"默认\",\"hit_count\":1,\"alert_time\":0,\"extstr\":\"\",\"message\":\"BROWSER-IE Microsoft Internet Explorer长URL缓冲区溢出尝试\",\"level\":\"fatal\"}",
+            "{\"type\":8,\"time\":1715225682,\"sip\":\"172.22.0.13\",\"sport\":\"21556\",\"dip\":\"172.30.0.13\",\"dport\":\"10000\",\"proto\":\"TCP\",\"sid\":0,\"isipv6\":0,\"policyid\":1,\"ipsid\":0,\"priority\":1,\"action\":\"告警\",\"webfilter_cfg\":\"\",\"hit_count\":1,\"alert_time\":0,\"extstr\":\"\",\"message\":\"SERVER-WEBAPP\",\"level\":\"fatal\"}"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "威胁",
           "field": "threat_info",
@@ -949,6 +994,20 @@
           ],
           "sim": true,
           "value": "1"
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"type\":11,\"time\":1715244972,\"attack_type\":\"icmp-flood\",\"ddos_name\":\"0\",\"sip\":\"102.0.0.191\",\"dip\":\"100.0.0.163\",\"sport\":\"0\",\"dport\":\"0\",\"proto\":\"1\",\"ddos_alg\":\"drop\",\"level\":\"error\"}"
+          ],
+          "sim": true,
+          "value": null
         }
       ]
     },
@@ -956,6 +1015,20 @@
       "sample_id": 6,
       "original_log": "{\"type\":15,\"time\":1715226190,\"sip\":\"17.7.7.23\",\"sport\":\"44980\",\"dip\":\"16.6.6.67\",\"dport\":\"21\",\"proto\":\"\",\"sid\":0,\"isipv6\":0,\"policyid\":1,\"ipsid\":0,\"priority\":3,\"action\":\"告警\",\"count\":1,\"weakpwcheck\":\"test\",\"service\":\"FTP\",\"url\":\"\",\"weak_type\":\"密码长度小于等于8且为字典序\",\"user\":\"sadama\",\"blacktime\":0,\"alert_time\":0,\"message\":\"(weakpwcheck)\",\"level\":\"warning\"}",
       "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"type\":15,\"time\":1715226190,\"sip\":\"17.7.7.23\",\"sport\":\"44980\",\"dip\":\"16.6.6.67\",\"dport\":\"21\",\"proto\":\"\",\"sid\":0,\"isipv6\":0,\"policyid\":1,\"ipsid\":0,\"priority\":3,\"action\":\"告警\",\"count\":1,\"weakpwcheck\":\"test\",\"service\":\"FTP\",\"url\":\"\",\"weak_type\":\"密码长度小于等于8且为字典序\",\"user\":\"sadama\",\"blacktime\":0,\"alert_time\":0,\"message\":\"(weakpwcheck)\",\"level\":\"warning\"}"
+          ],
+          "sim": true,
+          "value": null
+        },
         {
           "core": true,
           "entity": "流量",
@@ -1045,6 +1118,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "{\"type\":14,\"time\":1715234744,\"sip\":\"17.7.7.23\",\"sport\":\"44986\",\"dip\":\"16.6.6.67\",\"dport\":\"21\",\"proto\":\"\",\"sid\":0,\"isipv6\":0,\"policyid\":1,\"ipsid\":0,\"priority\":3,\"action\":\"告警\",\"count\":1,\"explsion_proof_cfg\":\"test\",\"service\":\"ftp\",\"blacktime\":0,\"alert_time\":0,\"message\":\"(explosion_proof)\",\"level\":\"warning\"}"
+          ],
+          "sim": true,
+          "value": null
         }
       ]
     },
@@ -1241,6 +1328,24 @@
             "Free Download Manager多个远程安全漏洞\"",
             "netbios: Microsoft Windows Plug and Play Buffer Overflow Vulnerability",
             "icmp_flood|2|1|1"
+          ],
+          "sim": true,
+          "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "date=2024-12-11 time=10:42:21 devname=GCGS_KFW3800_B device_id=APW2KMA001000072 log_id=16384 type=ips subtype=\"特征\" pri=\"告警\" severity=\"严重\" carrier_ep=\"N/A\" profilegroup=\"N/A\" profiletype=\"N/A\" profile=\"N/A\" src=10.147.64.40 dst=139.219.98.17 src_int=\"m1/8\" dst_int=\"m1/7\" policyid=1 identidx=0 serial=1651679156 status=\"检测到\" proto=6 service=HTTP vd=\"root\" count=1 src_mac=\"24:44:27:eb:61:2b\" dst_mac=\"00:60:e0:6a:73:97\" attack_name=\"Free Download Manager多个远程安全漏洞\" src_port=50185 dst_port=4500 log_pkt=0 attack_id=12351 sensor=\"all_default\" ref=\"http://www.easynetworks.com.cn/ids/VID12351\" user=\"N/A\" group=\"N/A\" incident_serialno=1634303875 msg=\"Free Download Manager多个远程安全漏洞\"\"",
+            "date=2024-12-11 time=10:37:51 devname=GCGS_KFW3800_B device_id=APW2KMA001000072 log_id=16384 type=ips subtype=\"特征\" pri=\"告警\" severity=\"严重\" carrier_ep=\"N/A\" profilegroup=\"N/A\" profiletype=\"N/A\" profile=\"N/A\" src=10.147.64.40 dst=139.219.98.17 src_int=\"m1/8\" dst_int=\"m1/7\" policyid=1 identidx=0 serial=1651470037 status=\"检测到\" proto=6 service=HTTP vd=\"root\" count=1 src_mac=\"24:44:27:eb:61:2b\" dst_mac=\"00:60:e0:6a:73:97\" attack_name=\"Free Download Manager多个远程安全漏洞\" src_port=49542 dst_port=4500 log_pkt=0 attack_id=12351 sensor=\"all_default\" ref=\"http://www.easynetworks.com.cn/ids/VID12351\" user=\"N/A\" group=\"N/A\" incident_serialno=820016603 msg=\"Free Download Manager多个远程安全漏洞\"\"",
+            "date=2024-12-11 time=10:32:51 devname=GCGS_KFW3800_B device_id=APW2KMA001000072 log_id=16384 type=ips subtype=\"特征\" pri=\"告警\" severity=\"严重\" carrier_ep=\"N/A\" profilegroup=\"N/A\" profiletype=\"N/A\" profile=\"N/A\" src=10.147.64.40 dst=139.219.98.17 src_int=\"m1/8\" dst_int=\"m1/7\" policyid=1 identidx=0 serial=1651237799 status=\"检测到\" proto=6 service=HTTP vd=\"root\" count=1 src_mac=\"24:44:27:eb:61:2b\" dst_mac=\"00:60:e0:6a:73:97\" attack_name=\"Free Download Manager多个远程安全漏洞\" src_port=65163 dst_port=4500 log_pkt=0 attack_id=12351 sensor=\"all_default\" ref=\"http://www.easynetworks.com.cn/ids/VID12351\" user=\"N/A\" group=\"N/A\" incident_serialno=261924174 msg=\"Free Download Manager多个远程安全漏洞\"\"",
+            "date=2024-05-13 time=15:16:56 devname=APW1KMB011002497 device_id=APW1KMB011002497 log_id=16384 type=ips subtype=signature pri=alert severity=critical carrier_ep=\"N/A\" profilegroup=\"1\" profiletype=\"1\" profile=\"1\" src=192.168.10.184 dst=192.168.10.237 src_int=\"port5\" dst_int=\"N/A\" policyid=N/A identidx=N/A serial=0 status=dropped proto=6 service=NBSS vd=\"root\" count=1 src_mac=\"ec:d6:8a:0b:7e:b1\" dst_mac=\"00:60:e0:85:7a:55\" attack_name=\"Microsoft Windows Plug and Play Buffer Overflow Vulnerability\" src_port=1635 dst_port=445 log_pkt=0 attack_id=10814 sensor=\"1\" ref=\"http://www.easynetworks.com.cn/ids/VID10814\" user=\"N/A\" group=\"N/A\" incident_serialno=1353566975 msg=\"netbios: Microsoft Windows Plug and Play Buffer Overflow Vulnerability\"",
+            "date=2024-05-13 time=15:38:08 devname=APW1KMB011002497 device_id=APW1KMB011002497 log_id=18433 type=ips subtype=anomaly pri=alert severity=critical carrier_ep=\"N/A\" profilegroup=\"N/A\" profiletype=\"N/A\" profile=\"N/A\" src=10.10.10.10 dst=10.10.10.1 src_int=\"port5\" dst_int=\"N/A\" policyid=N/A identidx=N/A serial=0 status=clear_session proto= service=ICMP vd=\"root\" count=1 src_mac=\"90:2e:16:c2:97:12\" dst_mac=\"00:60:e0:85:7a:59\" attack_name=\"icmp_flood\" icmp_id=0xe81e icmp_type=0x08 icmp_code=0x00 log_pkt=0 attack_id=16777316 sensor=\"1\" ref=\"http://www.easynetworks.com.cn/ids/VID16777316\" user=\"N/A\" group=\"N/A\" msg=\"icmp_flood|2|1|1\""
           ],
           "sim": true,
           "value": ""
@@ -1741,6 +1846,23 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "date=2022-03-14 time=14:15:49 devname=\"JINSHAN_1500D\" devid=\"FG1K5DT918800387\" eventtime=1647238550104104065 tz=\"+0800\" logid=\"0317013312\" type=\"utm\" subtype=\"ips\" eventtype=\"ftgd_allow\" level=\"notice\" vd=\"root\" policyid=394 sessionid=3303619953 srcip=172.25.244.228 srcport=55868 srcintf=\"Portchannel\" srcintfrole=\"undefined\" dstip=60.191.57.206 dstport=80 dstintf=\"port19\" dstintfrole=\"undefined\" proto=6 service=\"HTTP\" hostname=\"telapi.getui.com\" profile=\"proxy-all\" action=\"detected\" reqtype=\"direct\" url=\"http://telapi.getui.com/apiex.htm\" sentbyte=3900 rcvdbyte=1184 direction=\"outgoing\" msg=\"URL belongs to an allowed category in policy\" method=\"domain\" cat=52 catdesc=\"信息技术\" agent=\"Mozilla/5.0\" banword=\"games\" contenttype=\"application/json; charset=UTF-8\" forwardedfor=\"127.0.0.11\" from=\"test@163.com\" to=\"victim@abc.com\" rawdata=\"POST /pms_skap/meet_order_define/list_dto.json HTTP/1.1Origin: https://retail-test.belle.net.cnContent-Length: 92Accept-Language: zh-CN,zh;q=0.8,\" referralurl=\"\" trueclntip=\"172.16.1.1\" attack=\"\" attackcontext=\"TVQKKHT=\" attackcontextid=\"\" attackid=\"T1006.001\" authserver=\"\" eventtype=\"botnet\" ref=\"http://example/case\" user=\"victim\"",
+            "date=2022-03-14 time=14:15:49 devname=\"JINSHAN_1500D\" devid=\"FG1K5DT918800387\" eventtime=1647238550104104065 tz=\"+0800\" logid=\"0317013312\" type=\"utm\" subtype=\"ips\" eventtype=\"ftgd_allow\" level=\"notice\" vd=\"root\" policyid=394 sessionid=3303619953 srcip=172.25.244.228 srcport=55868 srcintf=\"Portchannel\" srcintfrole=\"undefined\" dstip=60.191.57.206 dstport=80 dstintf=\"port19\" dstintfrole=\"undefined\" proto=6 service=\"HTTP\" hostname=\"telapi.getui.com\" profile=\"proxy-all\" action=\"detected\" reqtype=\"direct\" url=\"http://telapi.getui.com/apiex.htm\" sentbyte=3900 rcvdbyte=1184 direction=\"outgoing\" msg=\"URL belongs to an allowed category in policy\" method=\"domain\" cat=52 catdesc=\"信息技术\" agent=\"Mozilla/5.0\" banword=\"games\" contenttype=\"application/json; charset=UTF-8\" forwardedfor=\"127.0.0.1\" from=\"test@163.com\" to=\"victim@abc.com\" rawdata=\"POST /pms_skap/meet_order_define/list_dto.json HTTP/1.1Origin: https://retail-test.belle.net.cnContent-Length: 92Accept-Language: zh-CN,zh;q=0.8,\" referralurl=\"\" trueclntip=\"172.16.1.1\" attack=\"\" attackcontext=\"TVQKKHT=\" attackcontextid=\"\" attackid=\"T1006.001\" authserver=\"\" eventtype=\"botnet\" ref=\"http://example/case\" user=\"victim\"",
+            "date=2024-12-15 time=23:59:01 devname=\"XSA-CMCCMDC-4-5F-NFW-H14-31U\" devid=\"FG4H0ETB21902307\" eventtime=1734278342220891512 tz=\"+0800\" logid=\"0419016384\" type=\"utm\" subtype=\"ips\" eventtype=\"signature\" level=\"alert\" vd=\"root\" severity=\"critical\" srcip=10.249.1.185 srccountry=\"Reserved\" dstip=10.3.33.59 srcintf=\"agg17\" srcintfrole=\"undefined\" dstintf=\"agg25\" dstintfrole=\"lan\" sessionid=3416240914 action=\"dropped\" proto=6 service=\"HTTP\" policyid=377 attack=\"Bash.Function.Definitions.Remote.Code.Execution\" srcport=27562 dstport=27900 hostname=\"60.204.208.243\" url=\"/cgi-bin/index-cgi\" direction=\"outgoing\" attackid=39294 profile=\"dahua_ips\" ref=\"http://www.fortinet.com/ids/VID39294\" incidentserialno=156111720 msg=\"applications3: Bash.Function.Definitions.Remote.Code.Execution,\" crscore=50 craction=4096 crlevel=\"critical\"",
+            "date=2024-12-15 time=21:45:47 devname=\"XSA-CMCCMDC-4-5F-NFW-H14-31U\" devid=\"FG4H0ETB21902307\" eventtime=1734270348412395098 tz=\"+0800\" logid=\"0419016384\" type=\"utm\" subtype=\"ips\" eventtype=\"signature\" level=\"alert\" vd=\"root\" severity=\"critical\" srcip=10.249.2.17 srccountry=\"Reserved\" dstip=10.1.88.105 srcintf=\"agg17\" srcintfrole=\"undefined\" dstintf=\"agg25\" dstintfrole=\"lan\" sessionid=3413744124 action=\"dropped\" proto=6 service=\"HTTP\" policyid=384 attack=\"MS.Exchange.Server.Autodiscover.Remote.Code.Execution\" srcport=46683 dstport=80 hostname=\"121.37.128.164\" url=\"/autodiscover/autodiscover.json?@zdi/Powershell\" direction=\"outgoing\" attackid=50584 profile=\"dahua_ips\" ref=\"http://www.fortinet.com/ids/VID50584\" incidentserialno=156111717 msg=\"web_app3: MS.Exchange.Server.Autodiscover.Remote.Code.Execution,\" forwardedfor=\"172.169.191.209\" crscore=50 craction=4096 crlevel=\"critical\""
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "http协议",
           "field": "http_req",
@@ -1978,6 +2100,21 @@
           ],
           "sim": true,
           "value": null
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "2020-08-24 18:08:21\tLocal7.Warning\t10.180.191.201\tAug 24 18:07:50 2307022130002729(root) 469c9401 Threat@FLOW: From 10.180.60.11/33096(ethernet1/2) to 10.88.5.12/25(ethernet1/2), threat name: Suspected Spam, threat type: Spam, threat subtype: Spam, App/Protocol: SMTP, action: log-only, defender: ANTISPAM, sender: , recipient: cqwu@hillstonenet.com, subject: ** PROBLEM Service Alert: cuckoo4/services_monitor is UNKNOWN **, profile: predef_default, threat serverity: Medium, policy id: 646",
+            "<188>Nov  1 11:34:52 3714334202001939(root) 460c9413 Threat@FLOW: From 218.60.148.169:41304(aggregate1) to 218.60.148.169:38970(-), threat name: land-attack, threat type: DoS, threat subtype: Protocol Exception, App/Protocol: IPv4/TCP, action: ALARM, defender: AD, severity: Medium, zone l2-untrust: IP land attack, occurred 4 times in the last 30 seconds"
+          ],
+          "sim": false,
+          "value": ""
         }
       ]
     },
@@ -1997,6 +2134,23 @@
             "{|0A| \"body\" : \"blB5ABa+N+sjctE+C1OispaeDO84DnMfxkfI3NBZD70fydrntV7B+oeA8od8RIMOBbDz75WX8G8d3rrwRnfJw20Bp5D9s/4E+vuy9fQc2IjrumN6qLmrQEVDNBvQLwmYnEpA4u1d2bZwGVVRBHwkd9VvlmaocVAT1cSUuaJIUTCfvFHeDrwKd/Ud3gu5JkYlg0gElbQ7JHArvAy/3KGdvVmNMNqrkZjcAEEtyxc/fywu7wckuE4NxeDjREXxVEJYbwF+R8hN30/iom8jRMrZzfo8FzWKU2+nMt78mTu/fn4=\",|0A| \"header\" : {|0A| \"checksum\" : 3259020362,|0A| \"size\" : 300|0A| }|0A|}|0A|, "
           ],
           "sim": true,
+          "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "<186>Feb 26 11:26:58 2508339174021550(root) 48089217 Threat@IPS: CRITICAL! From 10.18.7.81:445(ethernet0/2) to 172.24.14.47:2380(ethernet0/1), threat name: Microsoft Windows SMB Server Smbv1 Memory Corruption Vulnerability -3 (CVE-2017-0143), threat type: Attack, threat subtype: Buffer Overflow, App/Protocol: NETBIOS, action: reset, defender: IPS, signature ID: 1905701, profile: predef_default, threat severity: High, policy id: 1",
+            "2020-08-24 18:08:09\tLocal7.Critical\t10.180.191.201\tAug 24 18:07:38 2307022130002729(root) 48089217 Threat@IPS: CRITICAL! From 10.180.140.2:58627(ethernet1/2) to 45.55.53.98:443(ethernet1/2), threat name: Suspicious Mining Activities, threat type: Malware, threat subtype: Trojan, App/Protocol: Other-Tcp, action: reset, defender: IPS, signature ID: 712733, profile: predef_critical, threat severity: High, policy id: 646",
+            "<190>Aug 11 09:58:22 2406940205010033(root) 48089616 Threat@IPS: INFO: From 192.241.221.54:15043(xethernet2/0) to 192.168.7.149:8080(xethernet2/1), threat name: Tool Scanner Zgrab Detection, threat type: Malware, threat subtype: Trojan, App/Protocol: HTTP, action: log-only, defender: IPS, signature ID: 336206, profile: predef_loose, threat severity: Low, policy id: 1",
+            "<186>Feb 26 11:26:58 2508339174021550(root) 48089217 Threat@IPS: CRITICAL! From 10.18.7.81:445(ethernet0/2) to 172.24.14.47:2380(ethernet0/1), threat name: XSS Injection Attack, threat type: Attack, threat subtype: Web Attack, App/Protocol: HTTP, action: reset, defender: IPS, site: http://url-query.api.pc120.com/warty/query, URI: /warty/query, injection port: post data, Error ID: 360010, attack data: {|0A| \"body\" : \"blB5ABa+N+sjctE+C1OispaeDO84DnMfxkfI3NBZD70fydrntV7B+oeA8od8RIMOBbDz75WX8G8d3rrwRnfJw20Bp5D9s/4E+vuy9fQc2IjrumN6qLmrQEVDNBvQLwmYnEpA4u1d2bZwGVVRBHwkd9VvlmaocVAT1cSUuaJIUTCfvFHeDrwKd/Ud3gu5JkYlg0gElbQ7JHArvAy/3KGdvVmNMNqrkZjcAEEtyxc/fywu7wckuE4NxeDjREXxVEJYbwF+R8hN30/iom8jRMrZzfo8FzWKU2+nMt78mTu/fn4=\",|0A| \"header\" : {|0A| \"checksum\" : 3259020362,|0A| \"size\" : 300|0A| }|0A|}|0A|, profile: l2-direct-a-default-ips, threat severity: High, policy id: 2, aggregation attack count: 2"
+          ],
+          "sim": false,
           "value": ""
         }
       ]
@@ -2356,6 +2510,38 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 09:25:50\" SrcIP=172.16.100.4 DstIP=101.226.95.85 Protocol=UDP SrcPort=55986 DstPort=8006 PolicyID=1 Action=PASS evt_id=1603156 evt_category_id=1 evt_name=\"UDP x86 Shellcode [命令执行]\" Content=\"IPS check , evt_id:1603156,evt_name:UDP x86 Shellcode [命令执行]\" EvtCount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:46:38\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=59825 dstport=50070 policyid=1 action=pass evt_id=1205034 evt_category_id=3 evt_name=\"http dbappsecurity漏洞扫描\" content=\"ips check 2024-06-06@14.46.38_858464_2, evt_id:1205034,evt_name:http dbappsecurity漏洞扫描, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:45:34\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=56626 dstport=50070 policyid=1 action=pass evt_id=1205896 evt_category_id=8 evt_name=\"http gateone 任意文件读取漏洞(cve-2020-35736)(cnnvd-202012-1605)\" content=\"ips check 2024-06-06@14.45.34_945190_2, evt_id:1205896,evt_name:http gateone 任意文件读取漏洞(cve-2020-35736)(cnnvd-202012-1605), \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:44:57\" srcip=10.6.26.205 dstip=10.6.40.5 protocol=tcp srcport=43152 dstport=7000 policyid=1 action=pass evt_id=1205443 evt_category_id=1 evt_name=\"http 疑似包含tomcat 服务器版本信息\" content=\"ips check 2024-06-06@14.44.57_292120_1, evt_id:1205443,evt_name:http 疑似包含tomcat 服务器版本信息, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:44:59\" srcip=10.6.26.205 dstip=10.6.40.4 protocol=udp srcport=33633 dstport=38628 policyid=1 action=pass evt_id=1403521 evt_category_id=2 evt_name=\"ip x86 shellcode代码[inc ebx noop]\" content=\"ips check 2024-06-06@14.44.59_662246_2, evt_id:1403521,evt_name:ip x86 shellcode代码[inc ebx noop], \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:48:02\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=56798 dstport=50070 policyid=1 action=pass evt_id=1201258 evt_category_id=7 evt_name=\"http 目录遍历 ..\\\" content=\"ips check 2024-06-06@14.48.02_318802_3, evt_id:1201258,evt_name:http 目录遍历 ..\\, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:45:34\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=56626 dstport=50070 policyid=1 action=pass evt_id=1201679 evt_category_id=7 evt_name=\"http /etc/passwd 访问\" content=\"ips check 2024-06-06@14.45.34_945213_2, evt_id:1201679,evt_name:http /etc/passwd 访问, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:46:55\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=43050 dstport=50070 policyid=1 action=pass evt_id=1202923 evt_category_id=8 evt_name=\"http win.ini本地文件包含漏洞\" content=\"ips check 2024-06-06@14.46.55_654032_1, evt_id:1202923,evt_name:http win.ini本地文件包含漏洞, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:48:30\" srcip=10.6.26.205 dstip=10.6.40.5 protocol=tcp srcport=51661 dstport=7000 policyid=1 action=pass evt_id=1206147 evt_category_id=7 evt_name=\"http node.js 目录穿越漏洞(cve-2017-14849)(cnnvd-201709-1260)\" content=\"ips check 2024-06-06@14.48.30_776444_3, evt_id:1206147,evt_name:http node.js 目录穿越漏洞(cve-2017-14849)(cnnvd-201709-1260), \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:48:18\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=58771 dstport=50070 policyid=1 action=pass evt_id=1206036 evt_category_id=7 evt_name=\"http zeit next.js 至 2.4.0 / next 路径遍历漏洞(cve-2017-16877)(cnnvd-201711-711)\" content=\"ips check 2024-06-06@14.48.18_419310_3, evt_id:1206036,evt_name:http zeit next.js 至 2.4.0 / next 路径遍历漏洞(cve-2017-16877)(cnnvd-201711-711), \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:48:41\" srcip=10.6.26.205 dstip=10.6.40.3 protocol=tcp srcport=48828 dstport=9999 policyid=1 action=pass evt_id=1206248 evt_category_id=8 evt_name=\"http 博华网龙防火墙 users.xml 未授权访问漏洞\" content=\"ips check 2024-06-06@14.48.41_120811_3, evt_id:1206248,evt_name:http 博华网龙防火墙 users.xml 未授权访问漏洞, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:45:36\" srcip=10.6.26.205 dstip=10.6.40.2 protocol=tcp srcport=45142 dstport=7000 policyid=1 action=pass evt_id=1203137 evt_category_id=6 evt_name=\"http 疑似xss攻击尝试\" content=\"ips check 2024-06-06@14.45.36_862846_2, evt_id:1203137,evt_name:http 疑似xss攻击尝试, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:50:24\" srcip=10.6.26.205 dstip=10.6.40.3 protocol=tcp srcport=60603 dstport=9999 policyid=1 action=pass evt_id=1204663 evt_category_id=8 evt_name=\"http shell php eval base64 decode木马文件上传\" content=\"ips check 2024-06-06@14.50.24_779882_3, evt_id:1204663,evt_name:http shell php eval base64 decode木马文件上传, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:47:23\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=58871 dstport=50070 policyid=1 action=pass evt_id=1200725 evt_category_id=2 evt_name=\"http bitmover bitkeeper守护进程模式远程命令执行漏洞(bid-6588)\" content=\"ips check 2024-06-06@14.47.23_330502_2, evt_id:1200725,evt_name:http bitmover bitkeeper守护进程模式远程命令执行漏洞(bid-6588), \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:47:17\" srcip=10.6.26.205 dstip=10.6.40.5 protocol=tcp srcport=46296 dstport=7000 policyid=1 action=pass evt_id=1206296 evt_category_id=1 evt_name=\"http wavlink-wn535 g3 live check.shtml 信息泄露漏洞(cve-2022-31845)(cnnvd-202206-1298)\" content=\"ips check 2024-06-06@14.47.17_915355_2, evt_id:1206296,evt_name:http wavlink-wn535 g3 live check.shtml 信息泄露漏洞(cve-2022-31845)(cnnvd-202206-1298), \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:47:27\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=56600 dstport=50070 policyid=1 action=pass evt_id=1205652 evt_category_id=2 evt_name=\"http apache log4j2 远程代码执行漏洞(cve-2021-44228)(cnnvd-202112-799)\" content=\"ips check 2024-06-06@14.47.27_105255_3, evt_id:1205652,evt_name:http apache log4j2 远程代码执行漏洞(cve-2021-44228)(cnnvd-202112-799), \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:47:19\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=tcp srcport=50653 dstport=50070 policyid=1 action=pass evt_id=1204683 evt_category_id=5 evt_name=\"http 疑似sql注入\" content=\"ips check 2024-06-06@14.47.19_090429_2, evt_id:1204683,evt_name:http 疑似sql注入, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:46:32\" srcip=10.6.26.205 dstip=10.6.40.2 protocol=tcp srcport=46662 dstport=7000 policyid=1 action=pass evt_id=1206392 evt_category_id=8 evt_name=\"http flir ax8 任意文件下载漏洞\" content=\"ips check 2024-06-06@14.46.32_762343_3, evt_id:1206392,evt_name:http flir ax8 任意文件下载漏洞, \" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:48:01\" srcip=10.6.26.205 dstip=10.6.40.5 protocol=tcp srcport=45886 dstport=7000 policyid=1 action=pass evt_id=1201192 evt_category_id=9 evt_name=\"http unify ewave servletexec远程拒绝服务攻击漏洞b(cve-2000-1025)(cnnvd-200012-060)\" content=\"ips check 2024-06-06@14.48.01_832158_2, evt_id:1201192,evt_name:http unify ewave servletexec远程拒绝服务攻击漏洞b(cve-2000-1025)(cnnvd-200012-060), \" evtcount=1"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "威胁",
           "field": "threat_rule_id",
           "index": "policyid",
@@ -2628,6 +2814,20 @@
           "result": [],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP=0.0.0.0 SMAC= Protocol= InInterface= DstIP=0.0.0.0 DMAC= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -2636,31 +2836,17 @@
       "original_log": "日志类型:主动诱捕日志, 攻击类型:可疑访问, 源IP:122.114.254.26, 伪装服务地址(含端口):125.89.65.233:22, 协议:TCP, 攻击事件描述:可疑网络访问行为, 严重级别:低",
       "fields": [
         {
-          "core": true,
-          "entity": "流量",
-          "field": "dst_address",
-          "index": "field0",
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
           "info": null,
-          "mappings": [],
+          "mappings": null,
           "required": false,
           "result": [
-            "125.89.65.233"
+            "日志类型:主动诱捕日志, 攻击类型:可疑访问, 源IP:122.114.254.26, 伪装服务地址(含端口):125.89.65.233:22, 协议:TCP, 攻击事件描述:可疑网络访问行为, 严重级别:低"
           ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": true,
-          "entity": "流量",
-          "field": "dst_port",
-          "index": "field1",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "22"
-          ],
-          "sim": true,
+          "sim": false,
           "value": ""
         },
         {
@@ -2764,6 +2950,87 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "ARP spoof attack:alarm! MAC address 000e.5e44.d4ce and 000e.5e54.b7ce has same IP address 192.168.0.250 on interface ethernet0/9",
+            "ARP spoof attack:alarm! MAC address 000e.5e44.d4ce and 000e.5e44.d4ce has same IP address 1.1.1.1 on interface interface-name.",
+            "ARP spoof attack:drop! MAC address 000e.5e44.d4ce and 000e.5e44.d4ce has same IP address 1.1.1.1 on interface interface-name.",
+            "ND spoof attack:alarm! MAC address 000e.5e44.d4ce and 000e.5e54.b7ce has same IP address 192.168.0.250 on interface ethernet0/9",
+            "ARP spoof attack:alarm! 1.1.1.1/000e.5e44.d4ce has spoofing MAC MAC-address, drop the {IP | ARP} packet from interface interface-name.",
+            "ND spoof attack:alarm! 1.1.1.1/ 000e.5e44.d4ce should not be from zone zone-name, drop the packet from interface interface-name."
+          ],
+          "sim": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 17,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= PolicyID= Action= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= PolicyID= Action= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 18,
+      "original_log": "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 09:25:50\" SrcIP=172.16.100.4 SMAC=11:22:33:44 Protocol=ARP InInterface=ge2/1 DstIP=101.226.95.85 DMAC=44:33:22:11 PolicyID=1 Action=PASS evt_id=1603156 evt_category_id=101 evt_name=\"ARP攻击\" Content=\"Packet in conflict with MAC 30:29:52:38:3C:17 in ARP table\" EvtCount=1#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP=0.0.0 SMAC= Protocol= InInterface= DstIP=0.0.0.0 DMAC= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 09:25:50\" SrcIP=172.16.100.4 SMAC=11:22:33:44 Protocol=ARP InInterface=ge2/1 DstIP=101.226.95.85 DMAC=44:33:22:11 PolicyID=1 Action=PASS evt_id=1603156 evt_category_id=101 evt_name=\"ARP攻击\" Content=\"Packet in conflict with MAC 30:29:52:38:3C:17 in ARP table\" EvtCount=1",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP=0.0.0 SMAC= Protocol= InInterface= DstIP=0.0.0.0 DMAC= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 19,
+      "original_log": "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 09:25:50\" SrcIP=172.16.100.4 DstIP=101.226.95.85 Protocol=UDP SrcPort=55986 DstPort=8006 PolicyID=1 Action=DROP evt_id=1603156 evt_category_id=1 evt_name=\"webshell连接\" Content=\"WAF check , evt_id:1603156,evt_name:UDP x86 Shellcode [命令执行]\" EvtCount=1#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= SrcPort= DstPort= PolicyID= Action= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 09:25:50\" SrcIP=172.16.100.4 DstIP=101.226.95.85 Protocol=UDP SrcPort=55986 DstPort=8006 PolicyID=1 Action=DROP evt_id=1603156 evt_category_id=1 evt_name=\"webshell连接\" Content=\"WAF check , evt_id:1603156,evt_name:UDP x86 Shellcode [命令执行]\" EvtCount=1",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= SrcPort= DstPort= PolicyID= Action= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -2785,6 +3052,21 @@
           ],
           "sim": false,
           "value": null
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": null,
+          "required": false,
+          "result": [
+            "日志类型:WAF应用防护日志, 源IP:192.168.200.1, 源端口:1084, 目的IP:192.168.200.100, 目的端口:80, 攻击类型:信息泄漏攻击, 严重级别:高, 系统动作:拒绝, URL:192.200.41.126/",
+            "日志类型:WAF应用防护日志, 源IP:1.119.130.202, 源端口:29000, 目的IP:192.168.200.100, 目的端口:80, 攻击类型:WEB登录弱口令防护, 严重级别:中, 系统动作:被记录, URL:hseq.ccccltd.cn/ConserveEnergyTest/waf/loginPost.bo"
+          ],
+          "sim": false,
+          "value": ""
         },
         {
           "core": true,
@@ -2901,6 +3183,26 @@
       ]
     },
     {
+      "sample_id": 21,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= PolicyID= Action= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= PolicyID= Action= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 22,
       "original_log": "CRITICAL! From 10.18.7.81:445(ethernet0/2) to 172.24.14.47:2380(ethernet0/1), threat name: Microsoft Windows SMB Server Smbv1 Memory Corruption Vulnerability -3 (CVE-2017-0143), threat type: Attack, threat subtype: Buffer Overflow, App/Protocol: NETBIOS, action: reset, defender: IPS, signature ID: 1905701, profile: predef_default, threat severity: High, policy id: 1#next#CRITICAL! From 10.180.140.2:58627(ethernet1/2) to 45.55.53.98:443(ethernet1/2), threat name: Suspicious Mining Activities, threat type: Malware, threat subtype: Trojan, App/Protocol: Other-Tcp, action: reset, defender: IPS, signature ID: 712733, profile: predef_critical, threat severity: High, policy id: 646#next#INFO: From 192.241.221.54:15043(xethernet2/0) to 192.168.7.149:8080(xethernet2/1), threat name: Tool Scanner Zgrab Detection, threat type: Malware, threat subtype: Trojan, App/Protocol: HTTP, action: log-only, defender: IPS, signature ID: 336206, profile: predef_loose, threat severity: Low, policy id: 1#next#CRITICAL! From 10.18.7.81:445(ethernet0/2) to 172.24.14.47:2380(ethernet0/1), threat name: XSS Injection Attack, threat type: Attack, threat subtype: Web Attack, App/Protocol: HTTP, action: reset, defender: IPS, site: http://url-query.api.pc120.com/warty/query, URI: /warty/query, injection port: post data, Error ID: 360010, attack data: {|0A| \"body\" : \"blB5ABa+N+sjctE+C1OispaeDO84DnMfxkfI3NBZD70fydrntV7B+oeA8od8RIMOBbDz75WX8G8d3rrwRnfJw20Bp5D9s/4E+vuy9fQc2IjrumN6qLmrQEVDNBvQLwmYnEpA4u1d2bZwGVVRBHwkd9VvlmaocVAT1cSUuaJIUTCfvFHeDrwKd/Ud3gu5JkYlg0gElbQ7JHArvAy/3KGdvVmNMNqrkZjcAEEtyxc/fywu7wckuE4NxeDjREXxVEJYbwF+R8hN30/iom8jRMrZzfo8FzWKU2+nMt78mTu/fn4=\",|0A| \"header\" : {|0A| \"checksum\" : 3259020362,|0A| \"size\" : 300|0A| }|0A|}|0A|, profile: l2-direct-a-default-ips, threat severity: High, policy id: 2, aggregation attack count: 2",
       "fields": [
@@ -2934,6 +3236,23 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "CRITICAL! From 10.18.7.81:445(ethernet0/2) to 172.24.14.47:2380(ethernet0/1), threat name: Microsoft Windows SMB Server Smbv1 Memory Corruption Vulnerability -3 (CVE-2017-0143), threat type: Attack, threat subtype: Buffer Overflow, App/Protocol: NETBIOS, action: reset, defender: IPS, signature ID: 1905701, profile: predef_default, threat severity: High, policy id: 1",
+            "CRITICAL! From 10.180.140.2:58627(ethernet1/2) to 45.55.53.98:443(ethernet1/2), threat name: Suspicious Mining Activities, threat type: Malware, threat subtype: Trojan, App/Protocol: Other-Tcp, action: reset, defender: IPS, signature ID: 712733, profile: predef_critical, threat severity: High, policy id: 646",
+            "INFO: From 192.241.221.54:15043(xethernet2/0) to 192.168.7.149:8080(xethernet2/1), threat name: Tool Scanner Zgrab Detection, threat type: Malware, threat subtype: Trojan, App/Protocol: HTTP, action: log-only, defender: IPS, signature ID: 336206, profile: predef_loose, threat severity: Low, policy id: 1",
+            "CRITICAL! From 10.18.7.81:445(ethernet0/2) to 172.24.14.47:2380(ethernet0/1), threat name: XSS Injection Attack, threat type: Attack, threat subtype: Web Attack, App/Protocol: HTTP, action: reset, defender: IPS, site: http://url-query.api.pc120.com/warty/query, URI: /warty/query, injection port: post data, Error ID: 360010, attack data: {|0A| \"body\" : \"blB5ABa+N+sjctE+C1OispaeDO84DnMfxkfI3NBZD70fydrntV7B+oeA8od8RIMOBbDz75WX8G8d3rrwRnfJw20Bp5D9s/4E+vuy9fQc2IjrumN6qLmrQEVDNBvQLwmYnEpA4u1d2bZwGVVRBHwkd9VvlmaocVAT1cSUuaJIUTCfvFHeDrwKd/Ud3gu5JkYlg0gElbQ7JHArvAy/3KGdvVmNMNqrkZjcAEEtyxc/fywu7wckuE4NxeDjREXxVEJYbwF+R8hN30/iom8jRMrZzfo8FzWKU2+nMt78mTu/fn4=\",|0A| \"header\" : {|0A| \"checksum\" : 3259020362,|0A| \"size\" : 300|0A| }|0A|}|0A|, profile: l2-direct-a-default-ips, threat severity: High, policy id: 2, aggregation attack count: 2"
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": false,
@@ -2974,6 +3293,20 @@
       "sample_id": 23,
       "original_log": "日志类型:DOS攻击日志, 策略名称:dos2, 源IP:202.0.181.219, 目的IP:192.168.254.64, 攻击方向:外网, 攻击类型:IP宽松源路由选项报文, 严重等级:低, 系统动作:拒绝",
       "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "日志类型:DOS攻击日志, 策略名称:dos2, 源IP:202.0.181.219, 目的IP:192.168.254.64, 攻击方向:外网, 攻击类型:IP宽松源路由选项报文, 严重等级:低, 系统动作:拒绝"
+          ],
+          "sim": false,
+          "value": ""
+        },
         {
           "core": true,
           "entity": "事件",
@@ -3051,6 +3384,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "From 202.106.0.20:53 to 192.168.15.201:3584, detected bad protocol packet, Error ID:160001, Error Name: Bad DNS message length, action:log-only"
+          ],
+          "sim": true,
+          "value": null
         }
       ]
     },
@@ -3058,6 +3405,22 @@
       "sample_id": 25,
       "original_log": "日志类型:IPS防护日志, 源IP:122.114.15.149, 源端口:55133, 目的IP:10.1.7.239, 目的端口:3306, 协议:tcp, 攻击类型:database, 漏洞名称:MYSQL Client Outhentication Bypass Vulnerability, 严重等级:中, 动作:被记录#next#日志类型:IPS防护日志, 策略名称:nginx流量防护, 漏洞ID:0, 漏洞名称:, 源IP:10.250.2.23, 源端口:0, 目的IP:10.250.16.74, 目的端口:0, 协议:tcp, 攻击类型:scan漏洞攻击, 严重等级:高, 动作:允许#next#日志类型:IPS防护日志, 策略名称:ips2, 漏洞ID:1265, 漏洞名称:WebCalendar本地文件包含和PHP代码注入漏洞, 源IP:192.168.200.1, 源端口:80, 目的IP:192.168.200.100, 目的端口:80, 协议:tcp, 攻击类型:web漏洞攻击, 严重等级:高, 动作:拒绝",
       "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": null,
+          "required": false,
+          "result": [
+            "日志类型:IPS防护日志, 源IP:122.114.15.149, 源端口:55133, 目的IP:10.1.7.239, 目的端口:3306, 协议:tcp, 攻击类型:database, 漏洞名称:MYSQL Client Outhentication Bypass Vulnerability, 严重等级:中, 动作:被记录",
+            "日志类型:IPS防护日志, 策略名称:nginx流量防护, 漏洞ID:0, 漏洞名称:, 源IP:10.250.2.23, 源端口:0, 目的IP:10.250.16.74, 目的端口:0, 协议:tcp, 攻击类型:scan漏洞攻击, 严重等级:高, 动作:允许",
+            "日志类型:IPS防护日志, 策略名称:ips2, 漏洞ID:1265, 漏洞名称:WebCalendar本地文件包含和PHP代码注入漏洞, 源IP:192.168.200.1, 源端口:80, 目的IP:192.168.200.100, 目的端口:80, 协议:tcp, 攻击类型:web漏洞攻击, 严重等级:高, 动作:拒绝"
+          ],
+          "sim": false,
+          "value": ""
+        },
         {
           "core": true,
           "entity": "威胁",
@@ -3327,452 +3690,6 @@
           ],
           "sim": true,
           "value": ""
-        },
-        {
-          "core": false,
-          "entity": "日志",
-          "field": "log_type",
-          "index": "field3",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "THREAT"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "对象",
-          "field": "object_type",
-          "index": "field4",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "vulnerability"
-          ],
-          "sim": false,
-          "value": null
-        },
-        {
-          "core": true,
-          "entity": "流量",
-          "field": "src_address",
-          "index": "field7",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "87.98.226.111"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": true,
-          "entity": "流量",
-          "field": "dst_address",
-          "index": "field8",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "220.248.230.230"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "src_nat_ip",
-          "index": "field9",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "87.98.226.111"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "dst_nat_ip",
-          "index": "field10",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "10.251.65.34"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "threat_rule_name",
-          "index": "field11",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "Untrust-CU_to_Trust"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "用户",
-          "field": "src_username",
-          "index": "field12",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [],
-          "sim": false,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "用户",
-          "field": "dst_username",
-          "index": "field13",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [],
-          "sim": false,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "域",
-          "field": "src_ad",
-          "index": "field16",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "Untrust-CU"
-          ],
-          "sim": false,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "域",
-          "field": "dst_domain",
-          "index": "field17",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "Trust"
-          ],
-          "sim": false,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "input",
-          "index": "field18",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "ethernet1/2"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "output",
-          "index": "field19",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "vlan.103"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "威胁",
-          "field": "threat_count",
-          "index": "field23",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "4"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": true,
-          "entity": "流量",
-          "field": "src_port",
-          "index": "field24",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "60218"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": true,
-          "entity": "流量",
-          "field": "dst_port",
-          "index": "field25",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "25"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "src_nat_port",
-          "index": "field26",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "60218"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "dst_nat_port",
-          "index": "field27",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "25"
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "tran_protocol",
-          "index": "field29",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "6",
-              "orgValue": "tcp"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "17",
-              "orgValue": "udp"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "1",
-              "orgValue": "icmp"
-            }
-          ],
-          "required": false,
-          "result": [
-            "tcp"
-          ],
-          "sim": true,
-          "value": "-1"
-        },
-        {
-          "core": false,
-          "entity": "事件",
-          "field": "event_action",
-          "index": "field30",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "alert"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "block-url"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "allow"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "deny"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "drop"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "drop-all-packets"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "reset-client"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "reset-server"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拦截",
-              "orgValue": "reset-both"
-            }
-          ],
-          "required": false,
-          "result": [
-            "reset-both"
-          ],
-          "sim": true,
-          "value": "拦截"
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "flow_req",
-          "index": "field31",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            ""
-          ],
-          "sim": true,
-          "value": null
-        },
-        {
-          "core": true,
-          "entity": "事件",
-          "field": "event_level",
-          "index": "field34",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "1",
-              "orgValue": "informational"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "1",
-              "orgValue": "low"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "1",
-              "orgValue": "medium"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "2",
-              "orgValue": "high"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "3",
-              "orgValue": "critical"
-            }
-          ],
-          "required": false,
-          "result": [
-            "high"
-          ],
-          "sim": true,
-          "value": "1"
-        },
-        {
-          "core": false,
-          "entity": "流量",
-          "field": "flow_direction",
-          "index": "field35",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "client-to-server"
-          ],
-          "sim": true,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "位置",
-          "field": "src_location_country",
-          "index": "field38",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "Spain"
-          ],
-          "sim": false,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "位置",
-          "field": "dst_location_country",
-          "index": "field39",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [
-            "China"
-          ],
-          "sim": false,
-          "value": ""
-        },
-        {
-          "core": false,
-          "entity": "http协议",
-          "field": "http_ua",
-          "index": "field46",
-          "info": null,
-          "mappings": [],
-          "required": false,
-          "result": [],
-          "sim": false,
-          "value": null
         }
       ]
     },
@@ -3869,6 +3786,21 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "devid=0 date=\"2012/07/19 00:14:09\" dname=Themis logtype=24 pri=4 ver=0.3.0 user=\"\" mod=uids eventtype=UIDS_IDS eventname=\"UserDefine sina_alert\"severity=1 dsp_msg=\"检测到攻击: sina_alert; 类型: UserDefine \" protocol=TCP srcaddr=10.1.5.200 srcport =56085 destaddr=119.84.71.211 destport=80 srcregion=”HOST” destregion=”CN-中国” app=HTTP repeated=1 eventdetails=\"/1245758104/50/1300244013/0\" action=\"drop\" if=\"\" fwlog=0",
+            "devid=0 date=\"2012/07/19 00:14:09\" dname=Themis logtype=16 pri=4 ver=0.3.0 user=\"\" mod=ips eventtype=IPS eventname=\"UserDefine sina_alert\"severity=1 dsp_msg=\"检测到攻击: sina_alert; 类型: UserDefine \" protocol=TCP srcaddr=10.1.5.200 srcport =56085 destaddr=119.84.71.211 destport=80 srcregion=”HOST” destregion=”CN-中国” app=HTTP repeated=1 eventdetails=\"/1245758104/50/1300244013/0\" action=\"drop\" if=\"市场部\" fwlog=0"
+          ],
+          "sim": false,
+          "value": null
         },
         {
           "core": true,
@@ -3974,6 +3906,26 @@
       ]
     },
     {
+      "sample_id": 29,
+      "original_log": "<186>Aug 29 11:32:35 26LSHW2011180604(root) 4144c20a Web-security@SYS: CRITICAL! \"User\": \"N/A\", \"client IP\": \"223.245.213.130\", \"client port\": \"60100\", \"server IP\": \"172.192.13.9\", \"server port\": \"443\", \"site name\": \"gxrc-https\", \"policy name\": \"policy_normal\", \"protection type\": \"102\", \"protection subtype\": \"10200\", \"action\": \"pass\", \"followed action\": \"NONE\", \"block time\": \"N/A\", \"rule ID\": \"1020010131\", \"attack name\": \"SQL Injection Attack Attempts are Detected\", \"vulnerability ID\": \"N/A\", \"CVE ID\": \"N/A\", \"CNNVD ID\": \"N/A\", \"severity\": \"1\", \"domain name\": \"mfcg.gxrc.com\", \"HTTP method\": \"POST\", \"HTTP URL\": \"/list/index.asp\", \"server status code\": \"404\", \"source country/region\": \"CN\", \"source province/area\": \"AH\", \"IP Reputation\": \"N/A\", \"message\": \"SQL injection attack attempts are detected. Hit data: chr( is found in the matched variable (Execute                              (\"                              Execute                              (\"\"          :Function bd(byVal s):For i=1 To Len(s) Step 2:c=Mid(s,i,2):If IsNumeric(Mid(s,i,1)) Then:Execute(\"\"\"\"bd=bd&chr(&H\"\"\"\"&c&\"\"\"\")\"\"\"\"):Else:Execute(\"\"\"\"bd=bd&chr(&H\"\"\"\"&c&Mid(s,i 2,2)&\"\"\"\")\"\"\"\"):i=i 2:End If\"\"&chr(10)&\"\"Next:End Function:Response.Write(\"\"\"\"->|\"\"\"\"):                    Execute                              (\"\"\"\"On Error Resume Next:\"\"\"\"&bd(\"\"\"\"526573706F6E73652E5772697465282268616F72656E67652E636F6D51513331373237353733382229\"\"\"\")):Response.Write(\"\"\"\"|<-\"\"\"\"):Response.End\"\")\"))\", \"attack count\": \"1\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "<186>Aug 29 11:32:35 26LSHW2011180604(root) 4144c20a Web-security@SYS: CRITICAL! \"User\": \"N/A\", \"client IP\": \"223.245.213.130\", \"client port\": \"60100\", \"server IP\": \"172.192.13.9\", \"server port\": \"443\", \"site name\": \"gxrc-https\", \"policy name\": \"policy_normal\", \"protection type\": \"102\", \"protection subtype\": \"10200\", \"action\": \"pass\", \"followed action\": \"NONE\", \"block time\": \"N/A\", \"rule ID\": \"1020010131\", \"attack name\": \"SQL Injection Attack Attempts are Detected\", \"vulnerability ID\": \"N/A\", \"CVE ID\": \"N/A\", \"CNNVD ID\": \"N/A\", \"severity\": \"1\", \"domain name\": \"mfcg.gxrc.com\", \"HTTP method\": \"POST\", \"HTTP URL\": \"/list/index.asp\", \"server status code\": \"404\", \"source country/region\": \"CN\", \"source province/area\": \"AH\", \"IP Reputation\": \"N/A\", \"message\": \"SQL injection attack attempts are detected. Hit data: chr( is found in the matched variable (Execute                              (\"                              Execute                              (\"\"          :Function bd(byVal s):For i=1 To Len(s) Step 2:c=Mid(s,i,2):If IsNumeric(Mid(s,i,1)) Then:Execute(\"\"\"\"bd=bd&chr(&H\"\"\"\"&c&\"\"\"\")\"\"\"\"):Else:Execute(\"\"\"\"bd=bd&chr(&H\"\"\"\"&c&Mid(s,i 2,2)&\"\"\"\")\"\"\"\"):i=i 2:End If\"\"&chr(10)&\"\"Next:End Function:Response.Write(\"\"\"\"->|\"\"\"\"):                    Execute                              (\"\"\"\"On Error Resume Next:\"\"\"\"&bd(\"\"\"\"526573706F6E73652E5772697465282268616F72656E67652E636F6D51513331373237353733382229\"\"\"\")):Response.Write(\"\"\"\"|<-\"\"\"\"):Response.End\"\")\"))\", \"attack count\": \"1\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 30,
       "original_log": "devid=0 date=\"2014/03/26 17:59:58\" dname=themis logtype=29 pri=4 ver=0.3.0 user=\"\" mod=\"Web应用防护\" eventtype=WAF eventname=\"跨站脚本攻击\" severity=中 dsp_msg=\"检测到攻击:跨站脚本攻击\" protocol=TCP srcaddr=10.1.5.200 srcport=3746 destaddr=211.152.122.22 destport=80 srcregion=”HOST” destregion=”CN-中国” app=HTTP repeated=1 eventdetails=\"/?yyy=zz%0aand%0dxxx=1\" action=\"丢弃\" if=\"\" fwlog=0",
       "fields": [
@@ -4010,6 +3962,20 @@
           ],
           "sim": true,
           "value": "其他"
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "devid=0 date=\"2014/03/26 17:59:58\" dname=themis logtype=29 pri=4 ver=0.3.0 user=\"\" mod=\"Web应用防护\" eventtype=WAF eventname=\"跨站脚本攻击\" severity=中 dsp_msg=\"检测到攻击:跨站脚本攻击\" protocol=TCP srcaddr=10.1.5.200 srcport=3746 destaddr=211.152.122.22 destport=80 srcregion=”HOST” destregion=”CN-中国” app=HTTP repeated=1 eventdetails=\"/?yyy=zz%0aand%0dxxx=1\" action=\"丢弃\" if=\"\" fwlog=0"
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4017,6 +3983,22 @@
       "sample_id": 31,
       "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Protocol= SrcPort= DstPort= PolicyID= Content=\"\"#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= InInterface= Content=\"\"#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Content=\"\"",
       "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Protocol= SrcPort= DstPort= PolicyID= Content=\"\"",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= InInterface= Content=\"\"",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
+        },
         {
           "core": true,
           "entity": "威胁",
@@ -4039,6 +4021,20 @@
       "sample_id": 32,
       "original_log": "日志类型:WEB威胁, 策略名称:web_threat, 用户:b, 源IP:200.200.1.1, 目的IP:200.200.5.1, 应用名称:p2p, 系统动作:拒绝, URL:http://200.200.1.1/repro/ss",
       "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "日志类型:WEB威胁, 策略名称:web_threat, 用户:b, 源IP:200.200.1.1, 目的IP:200.200.5.1, 应用名称:p2p, 系统动作:拒绝, URL:http://200.200.1.1/repro/ss"
+          ],
+          "sim": false,
+          "value": ""
+        },
         {
           "core": false,
           "entity": "应用",
@@ -4066,6 +4062,46 @@
           ],
           "sim": false,
           "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 33,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= SrcPort= DstPort= PolicyID= Action= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= SrcPort= DstPort= PolicyID= Action= Content=\"\""
+          ],
+          "sim": false,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 34,
+      "original_log": "SerialNum=100211000000002007224819 GenTime=\"2022-05-25 10:44:56\" SrcIP=172.16.100.117 DstIP=10.10.10.57 InInterface=ge0/2 Action=DROP evt_id=5 evt_category_id=103 evt_name=\"Dos攻击\" Content=\"syn-flag attack\" EvtCount=1",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=100211000000002007224819 GenTime=\"2022-05-25 10:44:56\" SrcIP=172.16.100.117 DstIP=10.10.10.57 InInterface=ge0/2 Action=DROP evt_id=5 evt_category_id=103 evt_name=\"Dos攻击\" Content=\"syn-flag attack\" EvtCount=1"
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4263,6 +4299,47 @@
       ]
     },
     {
+      "sample_id": 36,
+      "original_log": "日志类型:僵尸网络日志, 策略名称:-, 特征ID:34014989, 源IP:202.0.64.99, 源端口:4720, 目的IP:192.168.254.71, 目的端口:80, 攻击类型:僵尸网络, 严重级别:低, 系统动作:拒绝, URL:www.audi_log.org/test.html#next#日志类型:僵尸网络日志, 规则ID:23636, 源IP:192.168.5.21, 源端口:80, 目的IP:192.168.5.1, 目的端口:80, 风险类型:1, 严重级别:高, 协议:tcp, URL:www.audi_log.org/pvs",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": null,
+          "required": false,
+          "result": [
+            "日志类型:僵尸网络日志, 策略名称:-, 特征ID:34014989, 源IP:202.0.64.99, 源端口:4720, 目的IP:192.168.254.71, 目的端口:80, 攻击类型:僵尸网络, 严重级别:低, 系统动作:拒绝, URL:www.audi_log.org/test.html",
+            "日志类型:僵尸网络日志, 规则ID:23636, 源IP:192.168.5.21, 源端口:80, 目的IP:192.168.5.1, 目的端口:80, 风险类型:1, 严重级别:高, 协议:tcp, URL:www.audi_log.org/pvs"
+          ],
+          "sim": false,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 37,
+      "original_log": "<190>Jul 12 15:25:30 2017 B-SJZX-F5000 %%10DPATTACK/6/ATK_ATTACK_REPORT(l): atckType(1016)=(9)ICMP Unreachable;rcvIfName(1023)=Vlan-interface3004;srcIPAddr(1017)=124.119.57.120;srcMacAddr(1021)= ;destIPAddr(1019)=202.201.161.84;destMacAddr(1022)= ;atckSpeed(1047)=0;atckTime_cn(1048)=20170712152530",
+      "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "<190>Jul 12 15:25:30 2017 B-SJZX-F5000 %%10DPATTACK/6/ATK_ATTACK_REPORT(l): atckType(1016)=(9)ICMP Unreachable;rcvIfName(1023)=Vlan-interface3004;srcIPAddr(1017)=124.119.57.120;srcMacAddr(1021)= ;destIPAddr(1019)=202.201.161.84;destMacAddr(1022)= ;atckSpeed(1047)=0;atckTime_cn(1048)=20170712152530"
+          ],
+          "sim": true,
+          "value": ""
+        }
+      ]
+    },
+    {
       "sample_id": 38,
       "original_log": "-DevIP=10.180.255.81; SrcZoneName(1025)=Untrust; DstIPAddr(1007)=117.114.137.10; RcvVPNInstance(1042)=--; UpperLimit(1049)=10000; Action(1053)=logging,client-verify; BeginTime_c(1011)=20231022084945.",
       "fields": [
@@ -4321,6 +4398,20 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "-DevIP=10.180.255.81; SrcZoneName(1025)=Untrust; DstIPAddr(1007)=117.114.137.10; RcvVPNInstance(1042)=--; UpperLimit(1049)=10000; Action(1053)=logging,client-verify; BeginTime_c(1011)=20231022084945."
+          ],
+          "sim": true,
+          "value": ""
         }
       ]
     },
@@ -4355,6 +4446,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "devid=0 date=\"2009/04/02 14:20:56\" dname=themis logtype=22 pri=6 ver=0.3.0 mod=scan taskname=111 hostip=219.133.49.206 level=漏洞 pluginid=3240 port=general/SMBClient risk=高 family=后门 summary=这是一个后门 user=”” dsp_msg=”发现漏洞\n漏洞扫描任务111发现主机219.133.49.206存在编号为3240的漏洞” fwlog=0"
+          ],
+          "sim": false,
+          "value": null
         },
         {
           "core": false,
@@ -4438,6 +4543,23 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 17:13:14\" SrcIP=172.16.100.50 DstIP=172.16.106.52 Protocol=HTTP SrcPort=49070 DstPort=53948 InInterface=ge0/2 Action=DENY PolicyName=default evt_id=3 evt_category_id=110 evt_name=\"XSS attack\" Content=\"XSS attack:,/#/index.php?appservlang=<svg/onload=confirm('xss')>\" EvtCount=1",
+            "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 17:19:51\" SrcIP=172.16.100.50 DstIP=172.16.106.52 Protocol=HTTP SrcPort=48426 DstPort=55547 InInterface=ge0/2 Action=DENY PolicyName=default evt_id=4 evt_category_id=109 evt_name=\"SQL attack\" Content=\"SQL attack:,/rdyw/show-2884.html?keywords=NTOhjouP';select pg_sleep(6); -- \" EvtCount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:45:32\" srcip=10.6.26.205 dstip=10.6.40.1 protocol=http srcport=56300 dstport=50070 ininterface=tvi10 action=deny policyname=default evt_id=3 evt_category_id=110 evt_name=\"xss attack\" content=\"xss attack:,/forms/rpauth_1?id=</form><img src=1 onerror=\"alert(1)\"><form>\" evtcount=1",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:50:12\" srcip=10.6.26.205 dstip=10.6.40.3 protocol=http srcport=59642 dstport=9999 ininterface=tvi10 action=deny policyname=default evt_id=4 evt_category_id=109 evt_name=\"sql attack\" content=\"sql attack:,/tjobs/jobdetails.php?jobid=-5 union select 12345678987654321,2,3,4,5,6,concat(admin,0x23,email,0x5d,loginname,0x7e,pass),8,9,0,1,2,3,4,5,6,7,8,9,0 from users--\" evtcount=1"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "威胁",
           "field": "threat_rule_name",
           "index": "policyname",
@@ -4454,9 +4576,44 @@
       ]
     },
     {
+      "sample_id": 41,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= InInterface= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= InInterface= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 42,
       "original_log": "id=tos time=\"2008-02-20 06:06:21\" fw=TopsecOS  pri=6 type=secure recorder=IDS src=192.168.89.211 dst=192.169.110.254  sport=2219 dport=20000 msg=\"udpflood attack detect!!\"#next#id=tos time=\"2008-02-20 06:06:21\" fw=TopsecOS  pri=6 type=secure recorder=IDS src=192.168.89.211 dst=192.169.110.254 msg=\"bad ip option detected!\"",
       "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "id=tos time=\"2008-02-20 06:06:21\" fw=TopsecOS  pri=6 type=secure recorder=IDS src=192.168.89.211 dst=192.169.110.254  sport=2219 dport=20000 msg=\"udpflood attack detect!!\"",
+            "id=tos time=\"2008-02-20 06:06:21\" fw=TopsecOS  pri=6 type=secure recorder=IDS src=192.168.89.211 dst=192.169.110.254 msg=\"bad ip option detected!\""
+          ],
+          "sim": true,
+          "value": null
+        },
         {
           "core": false,
           "entity": "模块",
@@ -4579,6 +4736,42 @@
           "required": false,
           "result": [
             "ceshi"
+          ],
+          "sim": false,
+          "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=100211000000002007224819 GenTime=\"2022-05-24 09:25:50\" SrcIP=172.16.100.4 DstIP=101.226.95.85 Protocol=HTTP SrcPort=55986 DstPort=8006 PolicyID=1 Action=PASS UserName=ceshi evt_id=1603156 evt_category_id=24 evt_name=\"弱口令\" Content=\" check , \" EvtCount=1",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= UserName= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 44,
+      "original_log": "日志类型:WEB应用防护, 策略名称:外_区检察院_南山区检察院（WEB应用）_443, 规则ID:13070453, 源IP:203.175.141.247, 源端口:16629, 目的IP:10.200.202.1, 目的端口:443, 攻击类型:信息泄漏攻击, 严重级别:高, 系统动作:拒绝, URL:www.nsjc.gov.cn:443/invoker/JMXInvokerServlet#next#日志类型:WEB应用防护, 策略名称:waf1, 规则ID:0, 源IP:202.0.156.216, 源端口:7224, 目的IP:192.168.254.31, 目的端口:80, 攻击类型:跨站请求伪造, 严重级别:低, 系统动作:允许, URL:http://www.sangfor.com/waf.jsp",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": null,
+          "required": false,
+          "result": [
+            "日志类型:WEB应用防护, 策略名称:外_区检察院_南山区检察院（WEB应用）_443, 规则ID:13070453, 源IP:203.175.141.247, 源端口:16629, 目的IP:10.200.202.1, 目的端口:443, 攻击类型:信息泄漏攻击, 严重级别:高, 系统动作:拒绝, URL:www.nsjc.gov.cn:443/invoker/JMXInvokerServlet",
+            "日志类型:WEB应用防护, 策略名称:waf1, 规则ID:0, 源IP:202.0.156.216, 源端口:7224, 目的IP:192.168.254.31, 目的端口:80, 攻击类型:跨站请求伪造, 严重级别:低, 系统动作:允许, URL:http://www.sangfor.com/waf.jsp"
           ],
           "sim": false,
           "value": ""
@@ -4869,6 +5062,85 @@
           ],
           "sim": true,
           "value": "未知"
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "-DevIP=10.164.8.74; Protocol(1001)=UDP; Application(1002)=dns; SrcIPAddr(1003)=172.25.4.20; SrcPort(1004)=50338; DstIPAddr(1007)=202.106.0.20; DstPort(1008)=53; RcvVPNInstance(1042)=--; SrcZoneName(1025)=Trust; DstZoneName(1035)=Untrust; PolicyName(1079)=default; AttackName(1088)=Trojan.Win32.Ramnit_DNS_Request; AttackID(1089)=35329; Category(1090)=MalwareTraffic; Protection(1091)=OperationSystem; SubProtection(1092)=Any; Severity(1087)=MEDIUM; Action(1053)=Permit & Logging; CVE(1075)=--; BID(1076)=--; MSB(1077)=--; HitDirection(1115)=original; RealSrcIP(1100)=; SubCategory(1124)=TrojanTraffic;"
+          ],
+          "sim": true,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 47,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP=172.16.100.48 Protocol=6 SrcPort=60008 DstPort=22 PolicyID=1 Action=DROP evt_id=1 evt_category_id=102 evt_name=\"扫描攻击\" Content=\"Packet is blocked\"#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Protocol= SrcPort= DstPort= PolicyID= Content=\"\"#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= InInterface= Content=\"\"#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Content=\"\"#next#serialnum=100601002023111514171224 gentime=\"2024-06-06 14:43:24\" srcip=10.6.26.205 dstip=10.6.40.3 protocol=17 srcport=51557 dstport=161 policyid=1 action=drop evt_id=1 evt_category_id=102 evt_name=\"扫描攻击\" content=\"packet is blocked\" evtcount=1",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP=172.16.100.48 Protocol=6 SrcPort=60008 DstPort=22 PolicyID=1 Action=DROP evt_id=1 evt_category_id=102 evt_name=\"扫描攻击\" Content=\"Packet is blocked\"",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Protocol= SrcPort= DstPort= PolicyID= Content=\"\"",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= InInterface= Content=\"\"",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= Content=\"\"",
+            "serialnum=100601002023111514171224 gentime=\"2024-06-06 14:43:24\" srcip=10.6.26.205 dstip=10.6.40.3 protocol=17 srcport=51557 dstport=161 policyid=1 action=drop evt_id=1 evt_category_id=102 evt_name=\"扫描攻击\" content=\"packet is blocked\" evtcount=1"
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 48,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= Action= PolicyName= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= Action= PolicyName= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 49,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP=172.16.100.4 DstIP=218.30.116.252 Protocol=17 SrcPort=54992 DstPort=443 InInterface=ge0/2 PolicyID=1 Action=Drop evt_id=2 evt_category_id=102 evt_name=\"Flood攻击\" Content=\"dest-ip reached antiflood limit:1000\"#next#SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= PolicyID= Action= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP=172.16.100.4 DstIP=218.30.116.252 Protocol=17 SrcPort=54992 DstPort=443 InInterface=ge0/2 PolicyID=1 Action=Drop evt_id=2 evt_category_id=102 evt_name=\"Flood攻击\" Content=\"dest-ip reached antiflood limit:1000\"",
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= PolicyID= Action= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4905,6 +5177,41 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "date=2022-03-14 time=14:15:49 devname=\"JINSHAN_1500D\" devid=\"FG1K5DT918800387\" eventtime=1647238550104104065 tz=\"+0800\" logid=\"0317013312\" type=\"utm\" subtype=\"waf\" eventtype=\"ftgd_allow\" level=\"notice\" vd=\"root\" policyid=394 sessionid=3303619953 srcip=172.25.244.228 srcport=55868 srcintf=\"Portchannel\" srcintfrole=\"undefined\" dstip=60.191.57.206 dstport=80 dstintf=\"port19\" dstintfrole=\"undefined\" proto=6 service=\"HTTP\" hostname=\"telapi.getui.com\" profile=\"proxy-all\" action=\"Deny\" reqtype=\"direct\" url=\"http://telapi.getui.com/apiex.htm\" sentbyte=3900 rcvdbyte=1184 direction=\"outgoing\" msg=\"URL belongs to an allowed category in policy\" method=\"domain\" cat=52 catdesc=\"信息技术\" agent=\"Mozilla/5.0\" banword=\"games\" contenttype=\"application/json; charset=UTF-8\" forwardedfor=\"127.0.0.11\" from=\"test@163.com\" to=\"victim@abc.com\" rawdata=\"POST /pms_skap/meet_order_define/list_dto.json HTTP/1.1Origin: https://retail-test.belle.net.cnContent-Length: 92Accept-Language: zh-CN,zh;q=0.8,\" referralurl=\"\" trueclntip=\"172.16.1.1\" method=\"GET\" constraint=\"\" name=\"sql injection was detected\" user=\"victim\"",
+            "date=2022-03-14 time=14:15:49 devname=\"JINSHAN_1500D\" devid=\"FG1K5DT918800387\" eventtime=1647238550104104065 tz=\"+0800\" logid=\"0317013312\" type=\"utm\" subtype=\"waf\" eventtype=\"ftgd_allow\" level=\"notice\" vd=\"root\" policyid=394 sessionid=3303619953 srcip=172.25.244.228 srcport=55868 srcintf=\"Portchannel\" srcintfrole=\"undefined\" dstip=60.191.57.206 dstport=80 dstintf=\"port19\" dstintfrole=\"undefined\" proto=6 service=\"HTTP\" hostname=\"telapi.getui.com\" profile=\"proxy-all\" action=\"Deny\" reqtype=\"direct\" url=\"http://telapi.getui.com/apiex.htm\" sentbyte=3900 rcvdbyte=1184 direction=\"outgoing\" msg=\"URL belongs to an allowed category in policy\" method=\"domain\" cat=52 catdesc=\"信息技术\" agent=\"Mozilla/5.0\" banword=\"games\" contenttype=\"application/json; charset=UTF-8\" forwardedfor=\"127.0.0.1\" from=\"test@163.com\" to=\"victim@abc.com\" rawdata=\"POST /pms_skap/meet_order_define/list_dto.json HTTP/1.1Origin: https://retail-test.belle.net.cnContent-Length: 92Accept-Language: zh-CN,zh;q=0.8,\" referralurl=\"\" trueclntip=\"172.16.1.1\" method=\"GET\" constraint=\"\" name=\"sql injection was detected\" user=\"victim\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "sample_id": 51,
+      "original_log": "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= UserName= Content=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "SerialNum=001000000000001309109941 GenTime=\"2012-09-29 23:45:53\" SrcIP= DstIP= Protocol= SrcPort= DstPort= InInterface= UserName= Content=\"\""
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4925,6 +5232,20 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "date=2022-03-14 time=14:16:49 devname=\"JINSHAN_1500D\" devid=\"FG1K5DT918800387\" eventtime=1647238609522947619 tz=\"+0800\" logid=\"1059028705\" type=\"utm\" subtype=\"anomaly\" eventtype=\"signature\" level=\"warning\" vd=\"root\" appid=35972 srcip=172.31.180.140 dstip=220.181.111.91 srcport=63026 dstport=80 srcintf=\"Portchannel\" srcintfrole=\"undefined\" dstintf=\"port19\" dstintfrole=\"undefined\" proto=6 service=\"HTTP\" direction=\"outgoing\" policyid=513 sessionid=3303752894 applist=\"monitor-all\" action=\"block\" attackid=\"\" attack=\"\" hostname=\"pan.baidu.com\" incidentserialno=3139260519 url=\"/api/filediff?block_list=1&clienttype=8&channel=00000000000000000000000000000000&version=7.12.1.1&devuid=BDIMXV2%2DO%5FA954479A5329486E872E5330E9E26448%2DC%5F0%2DD%5F0100%5F0000%5F0000%5F0000%5F8CE3%5F8E04%5F0107%5FDE13%2E%2DM%5F18473D4B6A49%2DV%5F0AB6AA26\" msg=\"Storage.Backup: Baidu.Cloud,\" apprisk=\"medium\" ref=\"\" srccountry=\"\" user=\"test\""
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -5031,6 +5352,20 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "devid=3 dname=DC1-qianxinfirewall01 serial=60851c0674e903eef8dbc4483580e27d665fe10b module=ips severity=err vsys=root-vsys type=threat session_id=4548783 time=1615515998 duration=0 addr_src=10.111.111.10 addr_dst=172.16.254.154 nataddr_src=:: nataddr_dst=:: port_src=23754 port_dst=65029 natport_src=0 natport_dst=0 action=block appname=SIP rule=permit_111.35 proto=UDP session_time=4162 sess_nth=0 sess_dev_id=0 zone_src=l2untrust zone_dst=l2trust locale_src=内网 locale_dst=内网 user_src= user_dst= app_category=APP_NETWORK app_risk=4 asset_os_src= asset_os_dst= asset_name_src= asset_name_dst= asset_type_src= asset_type_dst= focus_type=NO profile= non_standard_port=NO direction=C2S attacker_ip=10.111.111.10 victim_ip=172.16.254.154 attack_name= victim_name= sample_name= threat_name=SIPVicious Scanner Detection threat_id=60187 threat_severity=high hit_num=1 filename= url= dns_domain= detail= detail_zh= sample_type= sample_md5= threat_class=scan detect_method= malicious_type= ioc_id= disposal_id= confidence= threat_type=vulner last_hit_num=0 filepath="
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "dst_port",
@@ -5100,6 +5435,26 @@
       ]
     },
     {
+      "sample_id": 54,
+      "original_log": "devid=0 date=\"2012/08/09 17:34:40\" dname=themis logtype=20 pri=4 ver=0.3.0 user=\"\" mod=antiscan eventtype=ANTISCAN eventname=\"antiscan portscan\" severity=低 dsp_msg=\"检测到事件:portscan;type:antiscan\" protocol=UDP srcaddr=192.168.101.19 srcport=0 destaddr=255.255.255.255 destport=0 srcregion=”美国” destregion=”英国” app=HTTP repeated=1 eventdetails=\"portscan\" action=\"通过\" if=\"\"  fwlog=0",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "devid=0 date=\"2012/08/09 17:34:40\" dname=themis logtype=20 pri=4 ver=0.3.0 user=\"\" mod=antiscan eventtype=ANTISCAN eventname=\"antiscan portscan\" severity=低 dsp_msg=\"检测到事件:portscan;type:antiscan\" protocol=UDP srcaddr=192.168.101.19 srcport=0 destaddr=255.255.255.255 destport=0 srcregion=”美国” destregion=”英国” app=HTTP repeated=1 eventdetails=\"portscan\" action=\"通过\" if=\"\"  fwlog=0"
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 55,
       "original_log": "time:2017-03-10 16:27:16;danger_degree:2;breaking_sighn:0;event:[50363]Windows SMB协议用户认证失败;src_addr:10.24.193.79;src_port:58503;dst_addr:10.23.134.9;dst_port:139;proto:TCP.NETBIOSSSN",
       "fields": [
@@ -5146,6 +5501,20 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "time:2017-03-10 16:27:16;danger_degree:2;breaking_sighn:0;event:[50363]Windows SMB协议用户认证失败;src_addr:10.24.193.79;src_port:58503;dst_addr:10.23.134.9;dst_port:139;proto:TCP.NETBIOSSSN"
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -5166,6 +5535,24 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "From 61.139.2.69:53(xethernet1/5) to 10.0.116.16:50407(aggregate2), threat name: Botnet dga domain, threat type: Malware, threat subtype: Trojan, App/Protocol: DNS, action: log-only, defender: BOTNET DETECT, domain name: hcdnw.cbg.contentcenter.v6.cdnhwclrd102.cn, profile: CC, threat severity: High, policy id: 5",
+            "threat name: Blacklist-IP, threat type: Attack, threat subtype: Risk IP, action: TCP-RST/DROP, defender: PTF, severity: High, detected ip: 172.18.1.254, hit-count: 21(in the last 60 seconds)",
+            "From 10.180.60.11/33096(ethernet1/2) to 10.88.5.12/25(ethernet1/2), threat name: Suspected Spam, threat type: Spam, threat subtype: Spam, App/Protocol: SMTP, action: log-only, defender: ANTISPAM, sender: , recipient: cqwu@hillstonenet.com, subject: ** PROBLEM Service Alert: cuckoo4/services_monitor is UNKNOWN **, profile: predef_default, threat serverity: Medium, policy id: 646",
+            "From 218.60.148.169:41304(aggregate1) to 218.60.148.169:38970(-), threat name: land-attack, threat type: DoS, threat subtype: Protocol Exception, App/Protocol: IPv4/TCP, action: ALARM, defender: AD, severity: Medium, zone l2-untrust: IP land attack, occurred 4 times in the last 30 seconds",
+            "threat name: Blacklist-IP, threat type: Attack, threat subtype: Risk IP, action: TCP-RST/DROP, defender: PTF, severity: High, detected ip: 69.192.13.162, hit-count: 52(in the last 60 seconds)"
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": false,
@@ -5210,8 +5597,8 @@
     }
   ],
   "statistics": {
-    "total_samples": 40,
-    "total_fields": 270,
-    "unique_fields": 270
+    "total_samples": 56,
+    "total_fields": 292,
+    "unique_fields": 242
   }
 }

@@ -8,261 +8,6 @@
       "original_log": "046 其他",
       "fields": [
         {
-          "core": true,
-          "entity": "威胁",
-          "field": "threat_type",
-          "index": "field0",
-          "info": null,
-          "mappings": [
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "代码执行",
-              "orgValue": "000"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "缓冲区溢出",
-              "orgValue": "001"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "缓冲区溢出",
-              "orgValue": "002"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "003"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "004"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "005"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "006"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "007"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "反序列化",
-              "orgValue": "008"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "信息泄露",
-              "orgValue": "009"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "目录遍历",
-              "orgValue": "010"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "文件上传",
-              "orgValue": "011"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "文件包含",
-              "orgValue": "012"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "013"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "014"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "SQL注入",
-              "orgValue": "015"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "XSS攻击",
-              "orgValue": "016"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他注入",
-              "orgValue": "017"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "Webshell",
-              "orgValue": "018"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "跨站请求伪造",
-              "orgValue": "019"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "020"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拒绝服务",
-              "orgValue": "021"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "网页木马",
-              "orgValue": "022"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "僵尸网络",
-              "orgValue": "023"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "024"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "025"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "勒索病毒",
-              "orgValue": "026"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "027"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "028"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "未授权访问",
-              "orgValue": "029"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "认证绕过",
-              "orgValue": "030"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "031"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "暴力破解",
-              "orgValue": "032"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "033"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "弱口令",
-              "orgValue": "034"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "弱口令",
-              "orgValue": "035"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "拒绝服务",
-              "orgValue": "036"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "037"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "038"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "会话劫持",
-              "orgValue": "039"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "040"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "网络钓鱼",
-              "orgValue": "041"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "主机扫描",
-              "orgValue": "042"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "应用扫描",
-              "orgValue": "043"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "044"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "045"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "其他",
-              "orgValue": "046"
-            },
-            {
-              "mappingType": "EQUAL",
-              "mappingValue": "挖矿木马",
-              "orgValue": "047"
-            }
-          ],
-          "required": false,
-          "result": [
-            "046"
-          ],
-          "sim": true,
-          "value": "未映射"
-        },
-        {
           "core": false,
           "entity": "",
           "field": "key_keeper",
@@ -509,6 +254,20 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"wb_dns_log\";time=1602560051;card=\"T1/2\";sip=\"192.168.1.4\";smac=\"D8:24:BD:89:78:CA\";sport=53;dip=\"10.14.62.120\";dmac=\"F4:8E:38:A7:1B:E4\";dport=57585;vid=0;ruleid=41756;event=\"网络中发现可疑 DNS 行为(DNS 黑名单)\";module=11;threat_level=2;threat_type=\"\";action=3;acted=3;count=1;protocol=\"UDP\";user_name=\"\";smt_user=\"\";policy_id=0;direction=\"server\";szonename=\"Direct\u0002A\";dzonename=\"\";cdnip=\"\";ip=\"58.215.111.12\";domain=\"www.51job.om\";engine=\"\";ar=2;src_asset=0;dst_asset=0;scountry=\"保留\";scity=\"\";dcountry=\"保留\";dcity=\"\""
+          ],
+          "sim": false,
+          "value": ""
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "protocol",
@@ -674,6 +433,26 @@
           "required": false,
           "result": [
             ""
+          ],
+          "sim": false,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 3,
+      "original_log": "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"wb_malicious_ip_log\";time=1602559673;card=\"T1/2\";sip=\"121.51.139.161\";smac=\"D8:24:BD:89:78:CA\";sport=8080;dip=\"10.14.62.120\";dmac=\"F4:8E:38:A7:1B:E4\";dport=57501;vid=0;ruleid=41584;event=\"5oG25oSPSVAt6Ieq5a6a5LmJ\";module=10;threat_level=2;threat_type=\"其他\";action=3;acted=3;count=1;protocol=\"TCP\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"server\";szonename=\"Direct-A\";dzonename=\"\";cdnip=\"\";ip=\"10.14.62.120\";wb_type=\"黑名单\";engine=\"\";ar=2;src_asset=0;dst_asset=0;scountry=\"中国\";scity=\"广东\";dcountry=\"保留\";dcity=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"wb_malicious_ip_log\";time=1602559673;card=\"T1/2\";sip=\"121.51.139.161\";smac=\"D8:24:BD:89:78:CA\";sport=8080;dip=\"10.14.62.120\";dmac=\"F4:8E:38:A7:1B:E4\";dport=57501;vid=0;ruleid=41584;event=\"5oG25oSPSVAt6Ieq5a6a5LmJ\";module=10;threat_level=2;threat_type=\"其他\";action=3;acted=3;count=1;protocol=\"TCP\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"server\";szonename=\"Direct-A\";dzonename=\"\";cdnip=\"\";ip=\"10.14.62.120\";wb_type=\"黑名单\";engine=\"\";ar=2;src_asset=0;dst_asset=0;scountry=\"中国\";scity=\"广东\";dcountry=\"保留\";dcity=\"\""
           ],
           "sim": false,
           "value": ""
@@ -1707,6 +1486,24 @@
           "value": "未知"
         },
         {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "Protocol(1001)=TCP; Application(1002)=http_other; SrcIPAddr(1003)=10.138.8.39; SrcPort(1004)=63052; DstIPAddr(1007)=10.72.77.73; DstPort(1008)=5180; RcvVPNInstance(1042)=; SrcZoneName(1025)=Untrust; DstZoneName(1035)=Trust; UserName(1113)=10.138.8.39; PolicyName(1079)=�澯������; AttackName(1088)=Generic_Web_Server_Select_From_SQL_Injection_Attacks(POST); AttackID(1089)=23908; Category(1090)=Vulnerability; Protection(1091)=WebServer; SubProtection(1092)=Any; Severity(1087)=MEDIUM; Action(1053)=Permit & Logging; CVE(1075)=--; BID(1076)=--; MSB(1077)=--; HitDirection(1115)=original; RealSrcIP(1100)=; SubCategory(1124)=SQLInjection; LoginUserName(1177)=; LoginPwd(1178)=; CapturePktName(1116)=; HttpHost(1117)=; HttpFirstLine(1118)=; FileName(1097)=; SrcMacAddr(1021)=48bd-3dec-6401; DstMacAddr(1022)=a27a-9601-000e; RealSrcMacAddr(1204)=; RealDstMacAddr(1205)=; PayLoad(1135)=CgzoW2_K42Wr1\\00\\00\\00\\00\"\\02a2*\\192022-04-29T10:06:18+08:002\\0bapplication:\\cb\\08{\"computer_name\":\"A2-SZ-Buff.global.cnooc.corp\",\"event_data\":{\"param1\":\"LENGTH: '391' ACTION :[147] 'select /*+ opt_param('parallel_execution_enabled',                                    'false') EXEC_FROM_DBMS_XPLAN */ * from gv$sql_plan where 1=0' DATABASE USER:[1] '/' PRIVILEGE :[4] 'NONE' CLIENT USER:[0] '' CLIENT TERMINAL:[10] 'A2-SZ-BUFF' STATUS:[1] '0' DBID:[10] '1543364724' SESSIONID:[1] '0' USERHOST:[10] 'A2-SZ-BUFF' CLIENT ADDRESS:[0] '' ACTION NUMBER:[1] '3' \"},\"event_id\":34,\"keywords\":[\"\\e7\\bb\\8f\\e5\\85\\b8\"],\"level\":\"\\e4\\bf\\a1\\e6\\81\\af\",\"log_name\":\"Application\",\"message\":\"Audit trail: LENGTH: '391' ACTION :[147] 'select /*+ opt_param('parallel_execution_enabled',                                    'false') EXEC_FROM_DBMS_XPLAN */ * from gv$sql_plan where 1=0' DATABASE USER:[1] '/' PRIVILEGE :[4] 'NONE' CLIENT USER:[0] '' CLIENT TERMINAL:[10] 'A2-SZ-BUFF' STATUS:[1] '0' DBID:[10] '1543364724' SESSIONID:[1] '0' USERHOS;",
+            "-Context=1;Protocol(1001)=TCP;Application(1002)=http;SrcIPAddr(1003)=100.10.10.40;SrcPort(1004)=2999;DstIPAddr(1007)=200.10.10.40;DstPort(1008)=80;RcvVPNInstance(1042)=;SrcZoneName(1025)=spf;DstZoneName(1035)=spf;UserName(1113)=abc;PolicyName(1079)=ips;AttackName(1088)=WEB_CLIENT_Windows_Media_ASF_File_Download_SET;AttackID(1089)=5707;Category(1090)=Other;Protection(1091)=Other;SubProtection(1092)=Other;Severity(1087)=CRITICAL;Action(1053)=Reset & Logging;CVE(1075)=CVE-2014-6277 | CVE-2014-6278;BID(1076)=BID-22559;MSB(1077)=MS10-017;HitDirection(1115)=original;RealSrcIP(1100)=10.10.10.10,20.20.20.20;SubCategory(1124)=Other;LoginUserName(1177)=admin;LoginPwd(1178)=YW5nc2MxMDA2Vw==;CapturePktName(1116)=ips_100.10.10.40_20171205_101112_5707.pcap;HttpHost(1117)=www.shr.com;HttpFirstLine(1118)=/file/show.cgi%7cecho%20HSC/http_pic_300k.jpg;PayLoad(1135)=/file/show.cgi;",
+            "-Slot=0.3; Protocol(1001)=TCP; Application(1002)=general_tcp; SrcIPAddr(1003)=66.240.205.34; SrcPort(1004)=58136; DstIPAddr(1007)=183.215.59.20; DstPort(1008)=80; RcvVPNInstance(1042)=management; SrcZoneName(1025)=Trust; DstZoneName(1035)=Trust; UserName(1113)=66.240.205.34; PolicyName(1079)=p1; AttackName(1088)=Trojan.Win.Gh0st_Traffic_Request; AttackID(1089)=35408; Category(1090)=MalwareTraffic; Protection(1091)=OperationSystem; SubProtection(1092)=Any; Severity(1087)=HIGH; Action(1053)=Permit & Logging; CVE(1075)=--; BID(1076)=--; MSB(1077)=--; HitDirection(1115)=original; RealSrcIP(1100)=; SubCategory(1124)=TrojanTraffic; LoginUserName(1177)=; LoginPwd(1178)=; CapturePktName(1116)=; HttpHost(1117)=; HttpFirstLine(1118)=; PayLoad(1135)=Gh0st\\ad\\00\\00\\00\\e0\\00\\00\\00x\\9cKS``\\98\\c3\\c0\\c0\\c0\\06\\c4\\8c@\\bcQ\\96\\81\\81\\09H\\07\\a7\\16\\95e&\\a7*\\04$&g+\\182\\94\\f6\\b000\\ac\\a8rc\\00\\01\\11\\a0\\82\\1f\\\\`&\\83\\c7K7\\86\\19\\e5n\\0c9\\95n\\0c;\\84\\0f3\\ac\\e8sch\\a8^\\cf4'J\\97\\a9\\82\\e30\\c3\\91h]&\\90\\f8\\ce\\97S\\cbA4L?2=\\e1\\c4\\92\\86\\0b@\\f5`\\0cT\\1f\\ae\\af]\\0ar\\0b\\03#\\a3\\dc\\02~\\06\\86\\03+\\18m\\c2=\\fdtC,C\\fdL<<==\\\\\\9d\\19\\88\\00\\e5 \\02\\00T\\f5+\\\\;",
+            "-Context=1;Protocol(1001)=TCP;Application(1002)=http;SrcIPv6Addr(1036)=100::40;SrcPort(1004)=2999;DstIPv6Addr(1037)=200::40;DstPort(1008)=80;RcvVPNInstance(1042)=;SrcZoneName(1025)=spf;DstZoneName(1035)=spf;UserName(1113)=aaa;PolicyName(1079)=ips;AttackName(1088)=WEB_CLIENT_Windows_Media_ASF_File_Download_SET;AttackID(1089)=5707;Category(1090)=Other;Protection(1091)=Other;SubProtection(1092)=Other;Severity(1087)=CRITICAL;Action(1053)=Reset & Logging;CVE(1075)=CVE-2014-6277 | CVE-2014-6278;BID(1076)=BID-22559;MSB(1077)=MS10-017;HitDirection(1115)=reply;RealSrcIP(1100)=10::1;SubCategory(1124)=Other;LoginUserName(1177)=admin;LoginPwd(1178)=YW5nc2MxMDA2Vw==;CapturePktName(1116)=ips_100::40_20171205_101112_5707.pcap;HttpHost(1117)=www.shr.com;HttpFirstLine(1118)=/file/show.cgi%7cecho%20HSC/http_pic_300k.jpg; PayLoad(1135)=/file/show.cgi;",
+            "-Slot=1.3; Protocol(1001)=TCP; Application(1002)=http; SrcIPv6Addr(1036)=2607:8500:faca:de::120; SrcPort(1004)=48332; DstIPv6Addr(1037)=2409:8c50:a00:201f:3::7f1; DstPort(1008)=80; RcvVPNInstance(1042)=management; SrcZoneName(1025)=Untrust; DstZoneName(1035)=Untrust; UserName(1113)=2607:8500:faca:de::120; PolicyName(1079)=default; AttackName(1088)=Nmap_Scripting_Engine_HTTP_Scan; AttackID(1089)=23545; Category(1090)=InformationDisclosure; Protection(1091)=WebServer; SubProtection(1092)=Any; Severity(1087)=MEDIUM; Action(1053)=Reset & Logging; CVE(1075)=--; BID(1076)=--; MSB(1077)=--; HitDirection(1115)=original; RealSrcIP(1100)=; SubCategory(1124)=RemoteScan; LoginUserName(1177)=; LoginPwd(1178)=; CapturePktName(1116)=; HttpHost(1117)= 2409:8c50:a00:201f:3::7f1; HttpFirstLine(1118)=/evox/about; PayLoad(1135)= Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)\\0d\\0a;"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "威胁",
           "field": "threat_type",
@@ -2207,6 +2004,21 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"Topsec\" dev_type=\"1\" dev_name=\"HT-EB-IPS\" dev_ip=\"10.0.64.137\" time=\"2023-12-29 10:31:26\" index=\"301\" recorder=\"tvdevent\" type=\"19\" sub_type=\"1911\" level=\"3\" sid=\"658e2f7e0145b1b\" proto=\"3\" sip=\"10.16.144.124\" sport=\"54476\" dip=\"199.7.83.42\" dport=\"53\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"feth3\" ddev=\"feth2\" smac=\"50:DA:00:5B:66:01\" dmac=\"00:00:36:23:00:00\" op=\"1\" rule=\"85215\" msg=\"DNS隧道通信\" repeat=\"1\" cve=\"\" app_pro=\"4\" app=\"DNS\" method=\"\" appendix=\"e.gtld-servers.NET\" response_code=\"\" file=\"Event85215.20231229_103126457364916422335259.23323.pcap\" client=\"\" server=\"\" sgeo=\"Private IP\" dgeo=\"圣文森特和格林纳丁斯\" result=\"0\" x_forwarded_for=\"1.1.1.1\" x_real_ip=\"1.1.1.1\" direction=\"s2c\" fingerprint=\"\" req_header=\"\" req_body=\"\" resp_header=\"\" resp_body=\"\"",
+            "vendor=\"Topsec\" dev_type=\"1\" dev_name=\"KG_EB_IPS\" dev_ip=\"10.0.0.136\" time=\"2023-12-29 02:23:09\" index=\"301\" recorder=\"tvdevent\" type=\"19\" sub_type=\"1905\" level=\"2\" sid=\"658dbd0d0154b1c\" proto=\"2\" sip=\"10.2.58.26\" sport=\"49273\" dip=\"12.1.1.136\" dport=\"8080\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"feth2\" ddev=\"feth3\" smac=\"38:97:D6:B4:07:C4\" dmac=\"00:00:5E:00:01:10\" op=\"1\" rule=\"104845\" msg=\"恶意文件上传行为(image/png)\" repeat=\"1\" cve=\"\" app_pro=\"1\" app=\"HTTP\" method=\"POST\" appendix=\"http://corp.kcbebank.com:38080/eweb/actions/photo_uploader.php\" response_code=\"404\" file=\"Event104845.20231229_022309457357052068842268.19228.pcap\" client=\",Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36\" server=\",nginx\" sgeo=\"Private IP\" dgeo=\"圣文森特和格林纳丁斯\" result=\"0\" x_forwarded_for=\"172.19.149.118\" x_real_ip=\"1.1.1.1\" direction=\"c2s\" fingerprint=\"http_method,504F5354#http_uri,75706C6F6164#payload,436F6E74656E742D547970653A20696D6167652F706E67#payload,3C3F706870#\" req_header=\"UE9TVCAvZXdlYi9hY3Rpb25zL3Bob3RvX3VwbG9hZGVyLnBocCBIVFRQLzEuMVxyXG5Ib3N0OiBjb3JwLmtjYmViYW5rLmNvbTozODA4MFxyXG5Vc2VyLUFnZW50OiBNb3ppbGxhLzUuMCAoV2luZG93cyBOVCAxMC4wOyBXT1c2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzcxLjAuMzU3OC45OCBTYWZhcmkvNTM3LjM2XHJcbkNvbnRlbnQtTGVuZ3RoOiAzODdcclxuQWNjZXB0OiB0ZXh0L2h0bWwsYXBwbGljYXRpb24veGh0bWwreG1sLGFwcGxpY2F0aW9uL3htbDtxPTAuOSxpbWFnZS9hdmlmLGltYWdlL3dlYnAsaW1hZ2UvYXBuZywqLyo7cT0wLjgsYXBwbGljYXRpb24vc2lnbmVkLWV4Y2hhbmdlO3Y9YjM7cT0wLjlcclxuQWNjZXB0LUxhbmd1YWdlOiBlblxyXG5Db250ZW50LVR5cGU6IG11bHRpcGFydC9mb3JtLWRhdGE7IGJvdW5kYXJ5PS0tLS1XZWJLaXRGb3JtQm91bmRhcnl5d2RiY2FsY1xyXG5Db29raWU6IFNFU1NJT049WmpKbU9USmtNemt0WVRobVl5MDBNR05oTFdKaU1tWXROR0ZoTURReU5HWm1aR0ZtXHJcblJlZmVyZXI6IGh0dHBzOi8vY29ycC5rY2JlYmFuay5jb206MzgwODAvZXdlYi9jb25maWcvXHJcblNlYy1GZXRjaC1EZXN0OiBkb2N1bWVudFxyXG5TZWMtRmV0Y2gtTW9kZTogbmF2aWdhdGVcclxuU2VjLUZldGNoLVNpdGU6IG5vbmVcclxuU2VjLUZldGNoLVVzZXI6ID8xXHJcblR5cGU6IFgtcmF5LXNjYW5cclxuVXBncmFkZS1JbnNlY3VyZS1SZXF1ZXN0czogMVxyXG5YLUZvcndh\" req_body=\"LS0tLS0tV2ViS2l0Rm9ybUJvdW5kYXJ5eXdkYmNhbGMNCkNvbnRlbnQtRGlzcG9zaXRpb246IGZvcm0tZGF0YTsgbmFtZT0iZmlsZSI7IGZpbGVuYW1lPSJqLmpwZyINCkNvbnRlbnQtVHlwZTogaW1hZ2UvcG5nDQo8P3BocCBlY2hvICJ3cmVoanpobSI7IHVubGluayhfX0ZJTEVfXyk7ID8+DQotLS0tLS1XZWJLaXRGb3JtQm91bmRhcnl5d2RiY2FsYw0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJwbHVwbG9hZCINCjENCi0tLS0tLVdlYktpdEZvcm1Cb3VuZGFyeXl3ZGJjYWxjDQpDb250ZW50LURpc3Bvc2l0aW9uOiBmb3JtLWRhdGE7IG5hbWU9Im5hbWUiDQpsdnd4d3BwYS5waHANCi0tLS0tLVdlYktpdEZvcm1Cb3VuZGFyeXl3ZGJjYWxjLS0g\" resp_header=\"SFRUUC8xLjEgNDA0IFxyXG5TZXJ2ZXI6IG5naW54XHJcbkRhdGU6IFRodSwgMjggRGVjIDIwMjMgMTg6MjM6MDggR01UXHJcbkNvbnRlbnQtVHlwZTogdGV4dC9odG1sO2NoYXJzZXQ9SVNPLTg4NTktMVxyXG5Db250ZW50LUxlbmd0aDogMzA2XHJcbkNvbm5lY3Rpb246IGtlZXAtYWxpdmVcclxuU2V0LUNvb2tpZTogU0VTU0lPTj1NRGxrWXprMVpUSXRaRGN4TkMwME9EWm1MV0U1TkRVdE1UVmtPRFF4Wm1JeE1USTU7IFBhdGg9L2V3ZWIvOyBIdHRwT25seVxyXG5Db250ZW50LUxhbmd1YWdlOiB6aC1DTlxyXG4=\" resp_body=\"PGh0bWw+PGJvZHk+PGgxPldoaXRlbGFiZWwgRXJyb3IgUGFnZTwvaDE+PHA+VGhpcyBhcHBsaWNhdGlvbiBoYXMgbm8gZXhwbGljaXQgbWFwcGluZyBmb3IgL2Vycm9yLCBzbyB5b3UgYXJlIHNlZWluZyB0aGlzIGFzIGEgZmFsbGJhY2suPC9wPjxkaXYgaWQ9J2NyZWF0ZWQnPkZyaSBEZWMgMjkgMDI6MjM6MDggQ1NUIDIwMjM8L2Rpdj48ZGl2PlRoZXJlIHdhcyBhbiB1bmV4cGVjdGVkIGVycm9yICh0eXBlPU5vdCBGb3VuZCwgc3RhdHVzPTQwNCkuPC9kaXY+PGRpdj5ObyBtZXNzYWdlIGF2YWlsYWJsZTwvZGl2PjwvYm9keT48L2h0bWw+\""
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "流量",
           "field": "tran_protocol",
           "index": "proto",
@@ -2547,6 +2359,26 @@
       ]
     },
     {
+      "sample_id": 7,
+      "original_log": "vendor=\"topsec\" dev_type=\"1\" dev_name=\"TopsecOS\" dev_ip=\"192.168.113.101\" time=\"2020-06-11 02:27:07\" index=\"301\" recorder=\"attack\" type=\"17\" sub_type=\"\" level=\"1\" sid=\"427299216830932575\" proto=\"2\" sip=\"10.10.10.1\" sport=\"53490\" dip=\"10.10.10.2\" dport=\"80\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"feth1\" ddev=\"\" smac=\"00:00:00:00:00:01\" dmac=\"00:00:00:00:00:02\" op=\"1\" rule=\"95000\" msg=\"22222\" repeat=\"1\" cve=\"\" app_pro=\"1\" app=\"HTTP\" method=\"POST\" appendix=\"(URL=http://www.example.com/admbook/write.php)\" response_code=\"200 OK\" file=\"\" client=\"unknown,sun-tzu\" server=\"unknown\"sgeo=\"Private IP\" dgeo=\"Private IP\" result=\"0\" x_forwarded_for=\"1.1.1.1\" x_real_ip=\"1.1.1.1\" direction=\"c2s\" fingerprint=\"2,474554#\" req_header=\"UE9TVCAvYWRtYm9vay93cml0ZS5waHAgSFRUUC8xLjENClJlZmVyZXI6IGh0dHA6Ly93d3cuc3RvbmVkY29kZXIub3JnL2FkbWJvb2svaW5kZXgucGhwDQpYLUZvcndhcmRlZC1Gb3I6IEdVRVNTX1dIQVQ6JztpZiAoaXNzZXQoJF9HRVRbQ01EXSkpe0VDSE8nSGkgLk1hc3RlciEnO0lOSV9TRVQoJ21heF9leGVjdXRpb25fdGltZScsMCk7UEFTU1RIUlUoJF9HRVRbQ01EXSk7RElFO31lY2hvJw0KQ29udGVudC1UeXBlOiBhcHBsaWNhdGlv\" req_body=\"cGFnZT0xJm5hbWU9d2hvYW1pJnVybD0mZW1haWw9d2hvYW1pQFNVTlRaVS5DT00maWNxPSZtZXNzYWdlPUklMjBsb3ZlJTIwaXRhbGlhbiUyMGd1eXMlMjE=\" resp_header=\"SFRUUC8xLjEgMjAwIE9LDQpTZXJ2ZXI6IEFwYWNoZQ0KTGFzdC1Nb2RpZmllZDogTW9uLCAwMiBGZWIgMjAwNCAxMTozMjo0MSBHTVQNCkVUYWc6ICJhODQo=\" resp_body=\"UHduVCE=\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"topsec\" dev_type=\"1\" dev_name=\"TopsecOS\" dev_ip=\"192.168.113.101\" time=\"2020-06-11 02:27:07\" index=\"301\" recorder=\"attack\" type=\"17\" sub_type=\"\" level=\"1\" sid=\"427299216830932575\" proto=\"2\" sip=\"10.10.10.1\" sport=\"53490\" dip=\"10.10.10.2\" dport=\"80\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"feth1\" ddev=\"\" smac=\"00:00:00:00:00:01\" dmac=\"00:00:00:00:00:02\" op=\"1\" rule=\"95000\" msg=\"22222\" repeat=\"1\" cve=\"\" app_pro=\"1\" app=\"HTTP\" method=\"POST\" appendix=\"(URL=http://www.example.com/admbook/write.php)\" response_code=\"200 OK\" file=\"\" client=\"unknown,sun-tzu\" server=\"unknown\"sgeo=\"Private IP\" dgeo=\"Private IP\" result=\"0\" x_forwarded_for=\"1.1.1.1\" x_real_ip=\"1.1.1.1\" direction=\"c2s\" fingerprint=\"2,474554#\" req_header=\"UE9TVCAvYWRtYm9vay93cml0ZS5waHAgSFRUUC8xLjENClJlZmVyZXI6IGh0dHA6Ly93d3cuc3RvbmVkY29kZXIub3JnL2FkbWJvb2svaW5kZXgucGhwDQpYLUZvcndhcmRlZC1Gb3I6IEdVRVNTX1dIQVQ6JztpZiAoaXNzZXQoJF9HRVRbQ01EXSkpe0VDSE8nSGkgLk1hc3RlciEnO0lOSV9TRVQoJ21heF9leGVjdXRpb25fdGltZScsMCk7UEFTU1RIUlUoJF9HRVRbQ01EXSk7RElFO31lY2hvJw0KQ29udGVudC1UeXBlOiBhcHBsaWNhdGlv\" req_body=\"cGFnZT0xJm5hbWU9d2hvYW1pJnVybD0mZW1haWw9d2hvYW1pQFNVTlRaVS5DT00maWNxPSZtZXNzYWdlPUklMjBsb3ZlJTIwaXRhbGlhbiUyMGd1eXMlMjE=\" resp_header=\"SFRUUC8xLjEgMjAwIE9LDQpTZXJ2ZXI6IEFwYWNoZQ0KTGFzdC1Nb2RpZmllZDogTW9uLCAwMiBGZWIgMjAwNCAxMTozMjo0MSBHTVQNCkVUYWc6ICJhODQo=\" resp_body=\"UHduVCE=\""
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 8,
       "original_log": "proto=\"tcp\" src=\"58.116.210.3\" sport=\"59325\" dst=\"198.199.105.129\" dport=\"81\" rule=\"1312\" application=\"\" method=\"\" msg=\"木马和服务器建立连接(Backdoor.Zegost.a.Topsec)\" atk=\"WIN平台木马\" appendix=\"\" op=\"permit\" sdev=\"feth30\" ddev=\"\" smac=\"FC:E3:3C:9A:BA:6E\" dmac=\"7C:0E:CE:02:A9:00\" filename=\"\" client_version=\"\" server_version=\"\" time_rule=\"\"",
       "fields": [
@@ -2608,6 +2440,20 @@
           "required": false,
           "result": [
             ""
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "proto=\"tcp\" src=\"58.116.210.3\" sport=\"59325\" dst=\"198.199.105.129\" dport=\"81\" rule=\"1312\" application=\"\" method=\"\" msg=\"木马和服务器建立连接(Backdoor.Zegost.a.Topsec)\" atk=\"WIN平台木马\" appendix=\"\" op=\"permit\" sdev=\"feth30\" ddev=\"\" smac=\"FC:E3:3C:9A:BA:6E\" dmac=\"7C:0E:CE:02:A9:00\" filename=\"\" client_version=\"\" server_version=\"\" time_rule=\"\""
           ],
           "sim": false,
           "value": null
@@ -2721,6 +2567,20 @@
           ],
           "sim": true,
           "value": "放行"
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "From 10.17.244.58:0(aggregate1) to 10.13.24.233:0(-), threat name: ip-sweep, threat type: Scan, threat subtype: IP Scan, App/Protocol: IPv4/ICMP, action: DROP, defender: AD, severity: Medium, zone tap: Address sweep attack"
+          ],
+          "sim": false,
+          "value": ""
         },
         {
           "core": true,
@@ -2910,6 +2770,20 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"advance_threat_file_log\";time=1602572178;card=\"T1/2\";sip=\"10.67.5.50\";smac=\"B8-CA-3A-BA-F2-45\";sport=52728;dip=\"10.67.4.201\";dmac=\"18-03-73-AF-88-D6\";dport=25;vid=0;ruleid=41769;event=\"Trojan.Agent.BDXT\";module=12;threat_level=5;threat_type=\"av\";action=1;acted=1;count=1;protocol=\"TCP\";policy_id=0;cdnip=\"\";user_name=\"\";smt_user=\"\";file_md5=\"0006beaffe4b21d713583036b77d88ac\";file_sha256=\"7896d280794b2e82b7b3f0fce626c1e62c50c0cefbf175a77d75a913f9b35647\";orig_name=\"A1F1D44D88434A3299BF96DEBF67A601\";new_name=\"0006beaffe4b21d713583036b77d88ac\";tacinfo=\"\";url=\"\";submit_time=1602572156;taskid=409ac70405f8530a16025681400ed479;file_type=\"\";file_size=482273;tags=\"[\"trojan\"]\";app_info=\"\"\"\";threat_info=\"[{\"description\": \"\\u6728\\u9a6c\", \"threat_name\": \"Trojan.Agent.BDXT\", \"behavior\": \"Trojan\", \"proposal\": \"\\u4f7f\\u7528\\u6740\\u8f6f\\u8fdb\\u884c\\u5168\\u76d8\\u67e5\\u6740\", \"threat_level\": \"high\", \"engine_type\": \"av\"}]\";dropped=\"[]\";file_structure=\"{\"PE Type\": \"PE32\", \"Internal Name\": \"large\", \"Machine Type\": \"Intel 386 or later, and compatibles\", \"File OS\": \"Win32\", \"Code Size\": \"245760\", \"OS Version\": \"5.1\", \"Entry Point\": \"0x61000\", \"File Flags Mask\": \"0x003f\", \"Linker Version\": \"11.0\", \"File Subtype\": \"0\", \"Uninitialized Data Size\": \"0\", \"File Version\": \"or is a\", \"Initialized Data Size\": \"137728\", \"File Description\": \"Obtaining operating database with\", \"Product Version Number\": \"1.8.0.0\", \"Product Name\": \"large\", \"Company Name\": \"large\", \"MIME Type\": \"application/octet-stream\", \"Character Set\": \"Windows, Latin1\", \"Time Stamp\": \"2014:01:24 03:47:25+08:00\", \"Language Code\": \"English (U.S.)\", \"File Version Number\": \"1.8.0.0\", \"File Type\": \"Win32 DLL\", \"Original Filename\": \"Obtaining operating database with\", \"Legal Copyright\": \"Copyright (C) 2014\", \"Subsystem\": \"Windows GUI\", \"Object File Type\": \"Dynamic link library\", \"Image Version\": \"0.0\", \"File Flags\": \"(none)\", \"Subsystem Version\": \"5.1\", \"Product Version\": \"large\"}\";file_basic=\"{\"crc32\": 4083226098, \"sha256\": \"7896d280794b2e82b7b3f0fce626c1e62c50c0cefbf175a77d75a913f9b35647\", \"md5\": \"0006beaffe4b21d713583036b77d88ac\", \"sha1\": \"d6bdb4d72de4ae41cce80fd3e5cb6f00b90ab61a\"}\";ar=2;cve_id=\"\";network=\"\";src_asset=0;dst_asset=0;scountry=\"保留\";scity=\"\";dcountry=\"保留\";dcity=\"\""
+          ],
+          "sim": false,
+          "value": ""
+        },
+        {
+          "core": false,
           "entity": "防病毒",
           "field": "malware_submit_time",
           "index": "submit_time",
@@ -3053,6 +2927,20 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "src_ip=192.168.2.20;dst_ip=192.168.201.5;src_port=61234;dst_port=53;src_mac=d4:81:d7:ca:58:f9;dst_mac=60:0b:03:ad:26:30;protocol=UDP;behavior_name_cn=DNS 隧道;behavior_name_en=DNS tunnel;behavior_detail=dnscat.3cba012b6284d273a814100a25f6fb7b14;behavior_desc=The DNS traffic is too large and there are abnormal dns packet.;level=warning;action=拒绝;"
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": true,
@@ -3209,6 +3097,21 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"ips_log\";time=1601455220;card=\"T1/2\n\";sip=\"10.14.14.226\";smac=\"00:23:AE:6D:F1:DC\";sport=64327;dip=\"10.34.17.207\";dmac=\"D8:24:\nBD:89:78:C9\";dport=110;vid=0;ruleid=50043;event=\"POP3 服务用户登录认证成功\n\";module=0;threat_level=1;threat_type=\"045 EventMonitor\";attack_type=\"4\";action=1;acted=1;count=1;protocol=\"TCP\";user_name=\"\";smt_user\n=\"\";policy_id=1;digest=\"POP3nSf0CusSERVERnSf0CusUSER=gj@mail.test.com\";direction=\"serve\nr\";szonename=\"Direct\u0002A\";dzonename=\"\";rawinfo=\"ACOubfHc2CS9iXjJCABFAABGGv1AAH8Gq9QKIhHPCg4O4gBu+\n0el5B9nwtKlLVAY+syT1gAAK09LIE1haWxib3ggbG9ja2VkIGFuZCByZWFkeQ0K\";rawlen=112;c\ndnip=\"\";extension=\"\";popular=\"2\";affect_os=\"Windows,Linux/Unix\";service=\"POP\";ar=2;cve_id=\"\"\n;cwe_id=\"\";cnnvd_id=\"\";src_asset=0;dst_asset=0;scountry=\"保留\";scity=\"\";dcountry=\"保留\n\";dcity=\"\"",
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"ips_log\";time=1679384729;card=\"G1/2\";sip=\"172.27.246.214\";smac=\"30:C6:D7:E3:8C:01\";sport=3339;dip=\"8.8.8.8\";dmac=\"CC:D3:9D:92:D3:E5\";dport=53;vid=0;ruleid=50622;event=\"Anydesk远程控制软件运行\";module=0;threat_level=2;threat_type=\"045 事件监控\";attack_type=\"4\";action=1;acted=1;count=1;protocol=\"UDP\";user_name=\"\";smt_user=\"\";policy_id=1;digest=\"RE5T\";direction=\"server\";szonename=\"Direct-A\";dzonename=\"Direct-A\";rawinfo=\"zNOdktPlMMbX44wBCABFAABNdTYAADwRVmisG/bWCAgICA0LADUAOUw0gnYBAAABAAAAAAABBGJvb3QDbmV0B2FueWRlc2sDY29tAAABAAEAACkQAAAAgAAAAA==\";rawlen=124;cdnip=\"\";extension=\"\";popular=1;affect_os=\"Windows,Linux/Unix,M\";service=\"DNS\";ar=2;cve_id=\"\";cwe_id=\"\";cnnvd_id=\"\";src_asset=0;dst_asset=0;scountry=\"保留\";scity=\"\";dcountry=\"美国\";dcity=\"\""
+          ],
+          "sim": false,
+          "value": ""
+        },
+        {
+          "core": false,
           "entity": "威胁",
           "field": "threat_rule_id",
           "index": "policy_id",
@@ -3319,6 +3222,21 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "user_name= ;src_ip=192.168.5.95;src_port=1863;dst_ip=121.10.215.99;dst_port=1863;name=udpflood;type=flood-attack;protocol=UDP;mac=28:d2:44:7c:2e:51; count=1;level=4;in_if_name=ge5;create_time=1511858873;end_time= 1511858873;extend=;",
+            "user_name=;src_ip=192.168.10.1;src_port=0;dst_ip=192.168.10.118;dst_port=0;name=arp-flood;type=arp-attack;protocol=ARP;mac=68:91:d0:d5:64:e6;count=41;level=4;in_if_name=ge13;create_time=1649690359;end_time=1649690368;extend=;"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "威胁",
           "field": "threat_info",
@@ -3339,6 +3257,20 @@
       "sample_id": 15,
       "original_log": "vendor=\"Topsec\" dev_type=\"1\" dev_name=\"CY-EB-IPS\" dev_ip=\"10.0.32.136\" time=\"2023-12-29 07:18:59\" index=\"301\" recorder=\"thrint\" type=\"24\" sub_type=\"2499\" level=\"1\" sid=\"658e026301c0456\" proto=\"2\" sip=\"120.231.249.152\" sport=\"10803\" dip=\"12.1.192.156\" dport=\"443\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"feth10\" ddev=\"\" smac=\"02:00:4C:69:62:E3\" dmac=\"00:00:5E:00:01:69\" op=\"2\" rule=\"31806764\" msg=\"恶意软件[120.231.249.152(中国 广东省 深圳市)]\" repeat=\"1\" cve=\"\" app_pro=\"0\" app=\"Others\" method=\"\" appendix=\"\" response_code=\"\" file=\"Event31806764.20231229_071859457361816798626902.1110.pcap\" client=\"\" server=\"\" sgeo=\"中国 广东省 深圳市\" dgeo=\"圣文森特和格林纳丁斯\" result=\"1\" x_forwarded_for=\"1.1.1.1\" x_real_ip=\"1.1.1.1\" direction=\"c2s\" fingerprint=\"\" req_header=\"\" req_body=\"\" resp_header=\"\" resp_body=\"\"",
       "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"Topsec\" dev_type=\"1\" dev_name=\"CY-EB-IPS\" dev_ip=\"10.0.32.136\" time=\"2023-12-29 07:18:59\" index=\"301\" recorder=\"thrint\" type=\"24\" sub_type=\"2499\" level=\"1\" sid=\"658e026301c0456\" proto=\"2\" sip=\"120.231.249.152\" sport=\"10803\" dip=\"12.1.192.156\" dport=\"443\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"feth10\" ddev=\"\" smac=\"02:00:4C:69:62:E3\" dmac=\"00:00:5E:00:01:69\" op=\"2\" rule=\"31806764\" msg=\"恶意软件[120.231.249.152(中国 广东省 深圳市)]\" repeat=\"1\" cve=\"\" app_pro=\"0\" app=\"Others\" method=\"\" appendix=\"\" response_code=\"\" file=\"Event31806764.20231229_071859457361816798626902.1110.pcap\" client=\"\" server=\"\" sgeo=\"中国 广东省 深圳市\" dgeo=\"圣文森特和格林纳丁斯\" result=\"1\" x_forwarded_for=\"1.1.1.1\" x_real_ip=\"1.1.1.1\" direction=\"c2s\" fingerprint=\"\" req_header=\"\" req_body=\"\" resp_header=\"\" resp_body=\"\""
+          ],
+          "sim": false,
+          "value": null
+        },
         {
           "core": true,
           "entity": "http协议",
@@ -3483,6 +3415,41 @@
           "result": [
             "60.12.185.139",
             "unknown"
+          ],
+          "sim": false,
+          "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "In the past 168 seconds, unprotected domain name has caused access requests from the client to server 10.0.6.228:8999 in 3 times allow. The last request's client IP:117.50.170.119, host:60.12.185.139, URI:/robots.txt",
+            "In the past 65 seconds, 1 HTTP requests to site gxrc-http with Request-Line abnormal were dropped. The last request's client IP:91.240.118.187, method:unknown, host:unknown, URI:unknown, Cause of anomaly:Request line \"\\x03\\x00\\x00/*\\xE0\\x00\\x00\\x00\\x00\\x00Cookie: mstshash=Administr\" is illegal"
+          ],
+          "sim": false,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 17,
+      "original_log": "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"web_secure_log\";time=1601455163;card=\"T1/2\";sip=\"3.3.3.3\";smac=\"40:16:9F:F3:C6:62\";sport=58348;dip=\"3.3.3.189\";dmac=\"00:1B:21:0B:ED:CA\";dport=80;vid=0;ruleid=29003;event=\"Web 服务远程 SQL 注入攻击可疑行为\";module=8;threat_level=3;threat_type=\"015 SQL 注入\";action=3;acted=3;count=1;protocol=\"TCP\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"client\";szonename=\"Direct\u0002A\";dzonename=\"\";rawinfo=\"ABshC+3KQBaf88ZiCABFAACnMUxAAIAGvD8DAwMDAwMDvePsAFBy0jH9Ms5ZJlAYAQCpZwAAR0VUIC9zcWxzZXJ2ZXIvc2VhcmNoL3NlYXJjaC5hc3A/c2VsZWN0JTIwc2xlZXAoNSkgSFRUUC8xLjENCkhvc3Q6IDMuMy4zLjE4OQ0KQWNjZXB0OiAqLyoNCkNvb2tpZTogbmFtZT1tYW8nJTIwYW5kJTIwJ2EnPSdhDQoNCg==\";rawlen=244;cdnip=\"\";url=\"http://3.3.3.189/sqlserver/search/search.asp?\";digest=\"HTTPnSf0CusCLIENTnSf0CusURL=/sqlserver/search/search.asp?nSf0CusHOST=3.3.3.189nSf0CusGET_PARAM=select sleep(5)\";websecure_type=\"SQL 注入\";ar=2;src_asset=0;dst_asset=0;scountry=\"美国\";scity=\"华盛顿\";dcountry=\"美国\";dcity=\"华盛顿\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"web_secure_log\";time=1601455163;card=\"T1/2\";sip=\"3.3.3.3\";smac=\"40:16:9F:F3:C6:62\";sport=58348;dip=\"3.3.3.189\";dmac=\"00:1B:21:0B:ED:CA\";dport=80;vid=0;ruleid=29003;event=\"Web 服务远程 SQL 注入攻击可疑行为\";module=8;threat_level=3;threat_type=\"015 SQL 注入\";action=3;acted=3;count=1;protocol=\"TCP\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"client\";szonename=\"Direct\u0002A\";dzonename=\"\";rawinfo=\"ABshC+3KQBaf88ZiCABFAACnMUxAAIAGvD8DAwMDAwMDvePsAFBy0jH9Ms5ZJlAYAQCpZwAAR0VUIC9zcWxzZXJ2ZXIvc2VhcmNoL3NlYXJjaC5hc3A/c2VsZWN0JTIwc2xlZXAoNSkgSFRUUC8xLjENCkhvc3Q6IDMuMy4zLjE4OQ0KQWNjZXB0OiAqLyoNCkNvb2tpZTogbmFtZT1tYW8nJTIwYW5kJTIwJ2EnPSdhDQoNCg==\";rawlen=244;cdnip=\"\";url=\"http://3.3.3.189/sqlserver/search/search.asp?\";digest=\"HTTPnSf0CusCLIENTnSf0CusURL=/sqlserver/search/search.asp?nSf0CusHOST=3.3.3.189nSf0CusGET_PARAM=select sleep(5)\";websecure_type=\"SQL 注入\";ar=2;src_asset=0;dst_asset=0;scountry=\"美国\";scity=\"华盛顿\";dcountry=\"美国\";dcity=\"华盛顿\""
           ],
           "sim": false,
           "value": ""
@@ -3662,6 +3629,20 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "log-type:av-file;``source-ip:1.1.215.126;``destination-ip:1.2.106.194;``source-port:42583;``destination-port:25;``virus-name:Exploit/CVE-2010-0188;``file-name:vjWPO.pDF;``md5:A38A70821C62BE2996AC1C28575F2FD2;``basic-protocol:TCP;``app-protocol:SMTP.TCP;``av-type:20;``event:block;``mail-sender:CcH2QxNBZJPZnjUdKkUtk8t@bJlwTOxcBhiMsEinXnHH.net;``mail-receiver:tJcWNBjNK0UPTeTNNNUofpukaUG@XedriPjxrSZjpeWLbgFdZRpdWNsXVuVZruT.us;``mail-cc:;``mail-subject: fOkDpsW5;``"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "src_address",
@@ -3786,6 +3767,20 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"cc_log\";time=1601455286;card=\"T1/2\";sip=\"192.168.1.4\";smac=\"D8:24:BD:89:78:CA\";sport=53;dip=\"10.14.62.120\";dmac=\"F4:8E:38:A7:1B:E4\";dport=52433;vid=0;ruleid=41044;event=\"僵尸网络\";module=9;threat_type=\"C&C 主机\";action=3;acted=3;count=1;protocol=\"UDP\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"server\";szonename=\"Direct\u0002A\";dzonename=\"\";cdnip=\"\";botnet=\"\";botnet_family=\"\";ar=2;src_asset=0;dst_asset=0;botnet_id=0;scountry=\"保留\";scity=\"\";dcountry=\"保留\";dcity=\"\""
+          ],
+          "sim": false,
+          "value": ""
         }
       ]
     },
@@ -3869,6 +3864,22 @@
           "value": ""
         },
         {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "occur_time=2018-07-02 17:19:52;src=192.168.1.82;dst=192.168.1.65;service=pop3;action=blist",
+            "occur_time=2022-04-11 14:58:50;src=192.168.1.11;dst=192.168.1.12;service=ftp;crack_success=0;crack_account=;action=ignore",
+            "occur_time=2022-04-11 14:58:50;src=192.168.1.11;dst=192.168.1.12;service=ftp;crack_success=0;crack_account=;action=ignore"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "用户",
           "field": "user_name",
@@ -3900,6 +3911,21 @@
           ],
           "sim": false,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "src=1.1.187.45;dst=1.2.93.151;service=pop3;login=VDvwcK;pwd_type=le8-let",
+            "src=172.16.0.100;dst=172.16.0.102;service=ftp;login=camftp;pwd_type=null-pwd"
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": true,
@@ -3941,6 +3967,27 @@
           ],
           "sim": true,
           "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 23,
+      "original_log": "user_name= ;src_ip=192.168.1.66;src_port=36050;dst_ip=192.168.212.66;dst_port=16000;name=port-scan;type=scan-attack;protocol=TCP;mac=90:2e:16:ab:26:76;count=1980;level=4;in_if_name=mgt0;create_time=1649700821;end_time=1649700825;extend=;#next#user_name= ;src_ip=192.168.2.34;src_port=0;dst_ip=198.46.82.65;dst_port= 0;name=ipsweep;type=scan-attack;protocol=ICMP;mac=00:21:45:c0:fa:00;count= 1;level=4;in_if_name=ge2;create_time=1511858856;end_time=1511858856; extend=;",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "user_name= ;src_ip=192.168.1.66;src_port=36050;dst_ip=192.168.212.66;dst_port=16000;name=port-scan;type=scan-attack;protocol=TCP;mac=90:2e:16:ab:26:76;count=1980;level=4;in_if_name=mgt0;create_time=1649700821;end_time=1649700825;extend=;",
+            "user_name= ;src_ip=192.168.2.34;src_port=0;dst_ip=198.46.82.65;dst_port= 0;name=ipsweep;type=scan-attack;protocol=ICMP;mac=00:21:45:c0:fa:00;count= 1;level=4;in_if_name=ge2;create_time=1511858856;end_time=1511858856; extend=;"
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4041,6 +4088,21 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "user_id=2;user_name=192.168.1.171;policy_id=1;src_mac=08:9e:01:6b:9e:43;dst_mac=00:21:45:c7:00:c1;src_ip=192.168.1.171;dst_ip=192.168.88.1;src_port=37990;dst_port=80;X-Forwarded-For=1.1.1.1;app_name=..(HTTP);protocol=TCP;app_protocol=HTTP;event_id=957736;event_name=log4j2..;event_type=..;agg_mode=0;agg_count=0;attack_success=0;level=notice;ctime=2021-02-22 15:48:38;action=drop;severity=low",
+            "user_id=2;user_name=10.0.0.160;policy_id=1;src_mac=02:1a:c5:01:00:00;dst_mac=02:1a:c5:02:00:00;src_ip=10.0.0.160;dst_ip=10.0.0.200;src_port=25141;dst_port=4318;X-Forwarded-For=127.0.0.1;app_name=全部应用;protocol=TCP;app_protocol=TCP;event_id=24639;event_name=PROTOCOL-RPC端口映射CA BrightStor ARCserve tcp过程122无效的函数调用尝试 ;event_type=拒绝服务;level=notice;ctime=2020-08-18 09:09:37;action=drop"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "http协议",
           "field": "proxy_address",
           "index": "proxy_address",
@@ -4138,6 +4200,22 @@
           ],
           "sim": true,
           "value": "web攻击"
+        },
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "policy_name=test;url=\"http://istock.jrj.com.cn/article,000725,1891461.html\";waf_method=GET;src_mac=00:5b:51:31:c6:b1;dst_mac=ff:ff:ff:ff:ff:ff;src_ip=192.16.8.1;dst_ip=59.151.53.100;src_port=1510;dst_port=80;defend_type=\"防盗链\";level=notice;action=允许;msg=\"来源页面: http://stock.jrj.com.cn/share,000725.shtml\"",
+            "policy_name=test;url=\"http://122.141.227.136/youku/6561A478953381CD9043845DD/030002060351AD67B9E18309275726E945B50C-D38D-DF84-02E5-A7B689E9289A.flv\";waf_method=GET;src_mac=-;dst_mac=-;src_ip=222.199.231.162;dst_ip=122.141.227.136;src_port=18931;dst_port=80;defend_type=\"应用隐藏\";level=warning;action=允许;msg=\"server字段被隐藏\"",
+            "policy_name=1;url=\"http://1111:2222:3333:4444:5555:6666:7777:2000/atmosphere-chat-2.2.10/chat?X-Atmosphere-Transport=jsonp&X-Atmosphere-tracking-id=48&X-Atmosphere-Framework=1&X-atmo-protocol=true&jsonpTransport=%3Chtml%3E%3Cbody%20onclick=%22alert(document.domain)%22%3E%3C/body%3E%3C/html%3E\";waf_method=GET;src_mac=00:50:56:b8:c8:e7;dst_mac=00:50:56:b8:4a:76;src_ip=1111:2222:3333:4444:5555:6666:7777:1001;dst_ip=1111:2222:3333:4444:5555:6666:7777:2000;src_port=55553;dst_port=80;rule_id=904015;defend_type=\"XSS攻击\";level=warning;action=允许;msg=\"请求参数中包含疑似利用document对象进行攻击, 攻击字符串\"\"document.\"\", 原始字符串\"\"x-atmosphere-transport=jsonp&x-atmosphere-tracking-id=48&x-atmosphere-framework=1&x-atmo-protocol=true&jsonptransport=<html><body onclick=\"\"alert(document.domain)\"\"></body></html>\"\"\""
+          ],
+          "sim": true,
+          "value": null
         },
         {
           "core": false,
@@ -4391,6 +4469,23 @@
         },
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "log-type:attack-protect;``event:alert;``attack-name:(268448014)Oracle Java SE和Java for Business New Java Plug-in组件远程安全漏洞(CVE-2010-3552);``attack-type:信息收集类:扫描探测;``protocol-name:(1375731729)HTTP;``basic-protocol-name:(17)HTTP;``ip-proto-id:6;``source-ip:0.0.0.0;``source-port:52555;``destination-ip:0.0.0.0;``destination-port:80;``ifname-inside:tengige0_1;``vlan-tag:1107;``vsys-id:0;``packet:EPMRAIhTACRQWLAAgQAEUwgARQIFEnRqAAD+BmOrCm/x7gpr2QUAUM1LcCoxlQ4GI6dQGMd05e0AADA0ZTINCjxodG1sPjxib2R5PjxvYmplY3QgY2xhc3NpZD0iY2xzaWQ6OEFEOUM4NDAtMDQ0RS0xMUQxLUIzRTktMDA4MDVGNDk5RDkzIgljb2RlYmFzZT0iaHR0cDovLzEwLjExMS4yNDEuMjM4OjgwL1BNUy9qcmUtNnUyNC13aW5kb3dzLWk1ODYuZXhlI1ZlcnNpb249MSw2LDAsMCIJd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBpZD0icmVwb3J0X2RpcmVjdFByaW50QXBwbGV0Ij4JPHBhcmFtIG5hbWU9InR5cGUiIHZhbHVlPSJhcHBsaWNhdGlvbi94LWphdmEtYXBwbGV0O3ZlcnNpb249MS42Ij4JPHBhcmFtIG5hbWU9Im5hbWUiIHZhbHVlPSJyZXBvcnRfZGlyZWN0UA==;``summary-count:1;``summary-offset:0;``",
+            "log-type:attack-protect;``event:alert;``attack-name:(268444165)FTP LIST 缓冲区溢出尝试(Linux/Windows);``attack-type:主机漏洞利用:缓冲区溢出漏洞;``protocol-name:(1375731731)FTP Control.TCP;``basic-protocol-name:(19)FTP Control.TCP;``ip-proto-id:6;``source-ip:10.21.68.138;``source-port:64795;``destination-ip:10.1.200.94;``destination-port:21;``ifname-inside:tengige1_1;``vlan-tag:0;``vsys-id:0;``packet:;``summary-count:1;``summary-offset:;``host:;``uri:;``attack-period:投放;``policy-id:1;``policy-name:IPS;``src-mac:68:93:20:c7:bb:79;``dst-mac:88:df:9e:2b:70:01;``http-status:0;``attack-level:0;``cve-name:CVE-1999-0349|CVE-1999-1510|CVE-2000-0129|CVE-2007-0019;``",
+            "log-type:attack-protect;``event:alert;``attack-name:(268450951)疑似ISNULL函数SQL注入攻击;``attack-type:注入攻击:SQL注入;``protocol-name:(1375731729)HTTP;``basic-protocol-name:(17)HTTP;``ip-proto-id:6;``source-ip:10.20.15.2;``source-port:80;``destination-ip:10.20.28.116;``destination-port:39546;``ifname-inside:gige0_16;``vlan-tag:200;``vsys-id:0;``packet:ACSsSGb2ACSsNdwPgQAAyAgARQAFoAeKAAD9BnEwChQPAgoUHHQAUJp6+nUHhyBbRgtQEEAALk0AAEhUVFAvMS4xIDIwMCBPSw0KRGF0ZTogVHVlLCAyNiBTZXAgMjAyMyAwMDo0ODoyOCBHTVQNClRyYW5zZmVyLUVuY29kaW5nOiBjaHVua2VkDQpDb250ZW50LVR5cGU6IHRleHQvaHRtbDsgY2hhcnNldD1VVEYtOA0KQ29udGVudC1MYW5ndWFnZTogemgtQ04NCkNvbm5lY3Rpb246IGtlZXAtYWxpdmUNCg0KMWJmZQ0KCgoKPCFET0NUWVBFIGh0bWw+CjxodG1sIGNsYXNzPSJqY0dPQSIgaWQ9ImNvbnRlbnQiPgo8aGVhZD4KCgoKCgoKCgoKCgoKCgoKCQoKPHNjcmlwdD4KCXZhciBhcGlTZXJ2ZXJQYXRoID0gIi9nb2EiOwoJaWYgKHR5cGVvZihzdWJzeXN0ZW1JZCkgPT0gInVuZGVmaW5lZCIpIHsKCQl2YXIgc3Vic3lzdGVtSWQgPSAiIjsKCX0KCWZ1bmN0aW9uIGdldFN1YnN5c3RlbUlkKCkgewoJCXJldHVybiBzdWJzeXN0ZW1JZDsKCX0KICAgIGZ1bmN0aW9uIGlzTnVsbChpdGVtKSB7CiAgICAgICAgaWYoIWl0ZW0gfHwgIm51bGwiID09IGl0ZW0pewogICAgICAgICAgICByZXR1cm4gIiI7CiAgICAgICAgfWVsc2V7CiAgICAgICAgICAgIHJldHVybiBpdGVtOwogICAgICAgIH0KICAgIH0KICAgIC8v5bm05pyI5pel5pe25YiGLeWIhumalAogICAgZnVuY3Rpb24gZm9ybWF0RGF0ZUhvdXJNaW51dGVzKHRpbWVTdGFtcCkgewogICAgICAgIHZhciBkYXRlID0gbmV3IERhdGUoKTsKICAgICAgICBpZih0aW1lU3RhbXApewogICAgICAgICAgICBkYXRlLnNldFRpbWUodGltZVN0YW1wKTsKICAgICAgICB9CiAgICAgICAgdmFyIHkgPSBkYXRlLmdldEZ1bGxZZWFyKCk7CiAgICAgICAgdmFyIG0gPSBkYXRlLmdldE1vbnRoKCkgKyAxOwogICAgICAgIG0gPSBtIDwgMTAgPyAoJzAnICsgbSkgOiBtOwogICAgICAgIHZhciBkID0gZGF0ZS5nZXREYXRlKCk7CiAgICAgICAgZCA9IGQgPCAxMCA/ICgnMCcgKyBkKSA6IGQ7CiAgICAgICAgdmFyIGggPSBkYXRlLmdldEhvdXJzKCk7CiAgICAgICAgaCA9IGggPCAxMCA/ICgnMCcgKyBoKSA6IGg7CiAgICAgICAgdmFyIG1pbiA9IGRhdGUuZ2V0TWludXRlcygpOwogICAgICAgIG1pbiA9IG1pbiA8IDEwID8gKCcwJyArIG1pbikgOiBtaW47CiAgICAgICAgcmV0dXJuIHkgKyAnLScgKyBtICsgJy0nICsgZCArIiAiKyBoICsiOiIrIG1pbjsKICAgIH07CiAgICAvL+W5tOaciOaXpQogICAgZnVuY3Rpb24gZm9ybWF0RGF0ZVllYXJNb250aERheUNobih0aW1lU3RhbXApIHsKICAgICAgICB2YXIgZGF0ZSA9IG5ldyBEYXRlKCk7CiAgICAgICAgZGF0ZS5zZXRUaW1lKHRpbWVTdGFtcCk7CiAgICAgICAgdmFyIHkgPSBkYXRlLmdldEZ1bGxZZWFyKCk7CiAgICAgICAgdmFyIG0gPSBkYXRlLmdldE1vbnRoKCkgKyAxOwogICAgICAgIG0gPSBtIDwgMTAgPyAoJzAnICsgbSkgOiBtOwogICAgICAgIHZhciBkID0gZGF0ZS5nZXREYXRl;``summary-count:1;``summary-offset:0;``host:;``uri:;``attack-period:利用;``policy-id:1;``policy-name:IPS全告警;``",
+            "log-type:attack-protect;``event:block;``attack-name:(268448268)MyPhPim calendar.php3 cal id......SQL............;``attack-type:............:SQL......;``protocol-name:(1375731729)HTTP;``basic-protocol-name:(17)HTTP;``ip-proto-id:6;``source-ip:1.1.52.235;``source-port:49286;``destination-ip:1.2.56.121;``destination-port:80;``block-reason:ABNORMITY-DETECTION;``ifname-inside:gige0_6;``vlan-tag:0;``vsys-id:0;``packet:////////AAAAhB+2CABFAAGMdaAAAP8G1WQBATTrAQI4ecCGAFBEzhwDwN8z6FAQP/8SNwAAR0VUIC9teXBocGltL2NhbGVuZGFyLnBocDM/bWVudT1kZXRhaWwmY2FsX2lkPTIlMjBVbklPbiUyMHNlbEVjdCUyMDcsOSw4OSwxMSw5LDUwLDcsOCw5LDUzLDQwLDUxLDIsODAsNTQsMDQsMi8lMmEgSFRUUC8xLjENCkhvc3Q6IFNUaWdjcVRWbmlUVkVCYk1ZbUtRaQ0KVXNlci1BZ2VudDogTW96aWxsYS81LjAgKExpbnV4OyBVOyBBbmRyb2lkIDEuNjsgYXItdXM7IFNvbnlFcmljc3NvblgxMGkgQnVpbGQvUjJCQTAyNikgQXBwbGVXZWJLaXQvNTI4LjUrIChLSFRNTCwgbGlrZSBHZWNrbykgVmVyc2lvbi8zLjEuMiBNb2JpbGUgU2FmYXJpLzUyNS4yMC4xDQpBY2NlcHQ6ICovKg0KQ29ubmVjdGlvbjoga2VlcC1hbGl2ZQ0KDQqUzpn2;``summary-count:1;``summary-offset:0;``host:STigcqTVniTVEBbMYmKQi;``uri:GET /myphpim/calendar.php3?menu=detail&cal_id=2%20UnIOn%20selEct%20;``attack-period:......;``policy-id:1;``policy-name:aaa;``src-mac:00:00:00:d6:6d:9f;``dst-mac:ff:ff:ff:ff:ff:ff;``http-status:0;``"
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "威胁",
           "field": "attack_payload",
           "index": "packet",
@@ -4473,6 +4568,21 @@
       "original_log": "time=2019-07-12 14:59:18;policy_name=out;server_addr=192.168.24.80;out_addr=192.168.24.255;proto=UDP;port=137;action=1#next#time=2022-03-28 16:02:41;policy_name=0;server_addr=192.168.7.153;out_addr=10.0.223.9;proto=TCP;port=443;action=1",
       "fields": [
         {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "time=2019-07-12 14:59:18;policy_name=out;server_addr=192.168.24.80;out_addr=192.168.24.255;proto=UDP;port=137;action=1",
+            "time=2022-03-28 16:02:41;policy_name=0;server_addr=192.168.7.153;out_addr=10.0.223.9;proto=TCP;port=443;action=1"
+          ],
+          "sim": true,
+          "value": null
+        },
+        {
           "core": true,
           "entity": "流量",
           "field": "dst_address",
@@ -4537,6 +4647,47 @@
           ],
           "sim": true,
           "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 29,
+      "original_log": "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"ddos_log\";time=1601455634;card=\"T1/2\";sip=\"131.197.37.179\";smac=\"00:10:94:00:00:02\";sport=0;dip=\"192.0.0.1\";dmac=\"00:00:01:00:00:01\";dport=0;vid=0;ruleid=10058;event=\"ICMP-Flood 淹没拒绝服务攻击\";module=0;acted=1;protocol=\"ICMP\";user_name=\"\";smt_user=\"\";direction=\"server\";szonename=\"Direct-A\";dzonename=\"\";cdnip=\"\";service=\"WWW\";ar=2;src_asset=0;dst_asset=0;scountry=\"美国\";scity=\"\";dcountry=\"保留\";dcity=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"ddos_log\";time=1601455634;card=\"T1/2\";sip=\"131.197.37.179\";smac=\"00:10:94:00:00:02\";sport=0;dip=\"192.0.0.1\";dmac=\"00:00:01:00:00:01\";dport=0;vid=0;ruleid=10058;event=\"ICMP-Flood 淹没拒绝服务攻击\";module=0;acted=1;protocol=\"ICMP\";user_name=\"\";smt_user=\"\";direction=\"server\";szonename=\"Direct-A\";dzonename=\"\";cdnip=\"\";service=\"WWW\";ar=2;src_asset=0;dst_asset=0;scountry=\"美国\";scity=\"\";dcountry=\"保留\";dcity=\"\""
+          ],
+          "sim": false,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 30,
+      "original_log": "user_name=test;src_ip=20.1.1.5;src_port=0;dst_ip=30.1.1.2;dst_port= 0;name=jolt2;type=abnormal-packet;protocol=ICMP;mac=00:40:01:55:24:34; count=8268;level=4;in_if_name=ge6;create_time=1406279692;end_time= 1406279702;extend=;#next#user_name= ;src_ip=10.23.88.75;src_port=0;dst_ip=123.123.123.0;dst_port=0;name=ip-option;type=abnormal-packet;protocol=ICMP;mac=c8:3a:35:d3:d9:bc;count=3;level=4;in_if_name=ge2;create_time=1648479243;end_time=1648479243;extend=;",
+      "fields": [
+        {
+          "core": false,
+          "entity": "日志",
+          "field": "original_log",
+          "index": "original_log",
+          "info": [],
+          "mappings": [],
+          "required": false,
+          "result": [
+            "user_name=test;src_ip=20.1.1.5;src_port=0;dst_ip=30.1.1.2;dst_port= 0;name=jolt2;type=abnormal-packet;protocol=ICMP;mac=00:40:01:55:24:34; count=8268;level=4;in_if_name=ge6;create_time=1406279692;end_time= 1406279702;extend=;",
+            "user_name= ;src_ip=10.23.88.75;src_port=0;dst_ip=123.123.123.0;dst_port=0;name=ip-option;type=abnormal-packet;protocol=ICMP;mac=c8:3a:35:d3:d9:bc;count=3;level=4;in_if_name=ge2;create_time=1648479243;end_time=1648479243;extend=;"
+          ],
+          "sim": true,
+          "value": null
         }
       ]
     },
@@ -4638,6 +4789,40 @@
           ],
           "sim": true,
           "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"sensitive_file_log\";time=1601455551;card=\"T1/2\";sip=\"10.14.62.120\";smac=\"F4:8E:38:A7:1B:E4\";sport=63722;dip=\"10.14.14.228\";dmac=\"00:0C:29:10:5E:4C\";dport=18557;vid=0;ruleid=33947668;event=\"Microsoft Office 2007 Word Document\";module=5;threat_level=1;action=5;acted=5;count=1;protocol=\"TCP\";user_name=\"\";policy_\nid=1;digest=\"FTPDATAnSf0CusCLIENT\";direction=\"client\";szonename=\"Direct\u0002A\";dzonename=\"\";cdnip=\"\";service=\"WWW\";file_name=\"\";src_asset=0;dst_asset=0;scountry=\"保留\";scity=\"\";dcountry=\"保留\";dcity=\"\""
+          ],
+          "sim": false,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 33,
+      "original_log": "vendor=\"Topsec\" dev_type=\"1\" dev_name=\"HT-EB-IPS\" dev_ip=\"10.0.64.137\" time=\"2023-12-29 02:08:38\" index=\"301\" recorder=\"ads_atk_log\" type=\"3\" sub_type=\"307\" level=\"2\" sid=\"4494\" proto=\"2\" sip=\"112.24.240.105, 101.91.44.253, 180.167.147.194, 113.102.136.243\" sport=\"59515\" dip=\"12.1.128.181\" dport=\"443\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"\" ddev=\"\" smac=\"\" dmac=\"\" op=\"2\" rule=\"0\" msg=\"zone:云平台-生产 attack_type:tcp flood status:inactive\" repeat=\"0\" cve=\"\" app_pro=\"0\" app=\"0\" method=\"\" appendix=\"\" response_code=\"\" file=\"\" client=\"\" server=\"\" sgeo=\"\" dgeo=\"\" result=\"\" x_forwarded_for=\"1.1.1.1\" x_real_ip=\"1.1.1.1\" direction=\"\" fingerprint=\"\" req_header=\"\" req_body=\"\" resp_header=\"\" resp_body=\"\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "vendor=\"Topsec\" dev_type=\"1\" dev_name=\"HT-EB-IPS\" dev_ip=\"10.0.64.137\" time=\"2023-12-29 02:08:38\" index=\"301\" recorder=\"ads_atk_log\" type=\"3\" sub_type=\"307\" level=\"2\" sid=\"4494\" proto=\"2\" sip=\"112.24.240.105, 101.91.44.253, 180.167.147.194, 113.102.136.243\" sport=\"59515\" dip=\"12.1.128.181\" dport=\"443\" sipv6=\"\" dipv6=\"\" vid=\"\" sdev=\"\" ddev=\"\" smac=\"\" dmac=\"\" op=\"2\" rule=\"0\" msg=\"zone:云平台-生产 attack_type:tcp flood status:inactive\" repeat=\"0\" cve=\"\" app_pro=\"0\" app=\"0\" method=\"\" appendix=\"\" response_code=\"\" file=\"\" client=\"\" server=\"\" sgeo=\"\" dgeo=\"\" result=\"\" x_forwarded_for=\"1.1.1.1\" x_real_ip=\"1.1.1.1\" direction=\"\" fingerprint=\"\" req_header=\"\" req_body=\"\" resp_header=\"\" resp_body=\"\""
+          ],
+          "sim": false,
+          "value": null
         }
       ]
     },
@@ -4685,6 +4870,20 @@
             "domain"
           ],
           "sim": true,
+          "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"malicious_file_callback_log\";time=1602582141;card=\"T1/2\";sip=\"10.14.62.120\";smac=\"70:B5:E8:29:35:01\";sport=64723;dip=\"220.181.107.181\";dmac=\"D8:24:BD:89:78:CA\";dport=80;vid=0;ruleid=41765;event=\"恶意样本关联\";module=13;threat_level=-1;action=17;acted=17;count=1;protocol=\"TCP\";cdnip=\"\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"client\";szonename=\"Monitor\";dzonename=\"\";callback_type=\"domain\";callback_address=\"www.hao123.com\";callback_label=\"\";ar=0;src_asset=0;dst_asset=0;scountry=\"保留\";scity=\"\";dcountry=\"中国\";dcity=\"北京\""
+          ],
+          "sim": false,
           "value": ""
         }
       ]
@@ -4814,6 +5013,20 @@
             "ips"
           ],
           "sim": true,
+          "value": ""
+        },
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "log_type=ips;rule_id=50450;time=2019-05-20 16:35:12;device_type=ips;manufacturers=nsfocus;product=7ED1-A0CB-229D-1D27;danger_degree=1;pkt_len=160;pkt_data=2CS9iXjgABDzY44mCABFAABqXLYAAH8Rvc4KRAH8CjIKjdTWAKEAVvRCMEwCAQAEBnB1YmxpY6A/AgIPKAIBAAIBADAzMA8GCysGAQIBGQMCAQUBBQAwDwYLKwYBAgEZAwUBAQEFADAPBgsrBgECARkDBQECAQUA;breaking_sighn=0;event=[50450]SNMP操作使用弱口令;last_count=1;src_mac=00:10:F3:63:8E:26;src_addr=10.68.1.252;src_port=54486;dst_mac=D8:24:BD:89:78:E0;dst_addr=10.50.10.141;dst_port=161;user=null;smt_user=null;proto=IP.UDP;attack=80;os=67108864;service=26214400;pop=12;"
+          ],
+          "sim": false,
           "value": ""
         },
         {
@@ -5199,9 +5412,63 @@
       ]
     },
     {
+      "sample_id": 39,
+      "original_log": "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"malicious_file_log\";time=1602487443;card=\"T1/2\";sip=\"218.206.199.10\";smac=\"00:00:00:01:00:10\";sport=4058;dip=\"139.199.100.152\";dmac=\"00:03:03:0E:1F:19\";dport=2590;vid=0;ruleid=41311;event=\"访问危险文件(高级威胁防护)\";module=3;threat_level=2;threat_type=\"046 其他\";action=5;acted=5;count=1;protocol=\"TCP\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"server\";szonename=\"Direct\u0002A\";dzonename=\"\";cdnip=\"\";file_type=\"\";file_size=319336;file_md5=\"0480be3c36cd59c82e20d3a4003b99fd\";file_sha256=\"\";orig_name=\"1D34B2920CC9406CBEF7EB445D8B3876\";new_name=\"C36A3D92E0884107AEF3FF361D25D00C\";url=\"http://139.199.100.152:2590/dw?taskId=135\nB53B1709C4122B7EBEA6D2419AD4D&type=virus&bankId=46B2C1E2E5E647DA9CC609DCA705D035&sampleId=1D34B2920CC9406CBEF7EB445D8B3876\";ar=0;cve_id=\"\";service=\"MISC\";src_asset=0;dst_asset=0;scountry=\"中国\";scity=\"河南\";dcountry=\"中国\";dcity=\"天津\"",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": null,
+          "required": false,
+          "result": [
+            "device_type=\"ips\";manufacturers=\"nsfocus\";security_name=\"malicious_file_log\";time=1602487443;card=\"T1/2\";sip=\"218.206.199.10\";smac=\"00:00:00:01:00:10\";sport=4058;dip=\"139.199.100.152\";dmac=\"00:03:03:0E:1F:19\";dport=2590;vid=0;ruleid=41311;event=\"访问危险文件(高级威胁防护)\";module=3;threat_level=2;threat_type=\"046 其他\";action=5;acted=5;count=1;protocol=\"TCP\";user_name=\"\";smt_user=\"\";policy_id=1;direction=\"server\";szonename=\"Direct\u0002A\";dzonename=\"\";cdnip=\"\";file_type=\"\";file_size=319336;file_md5=\"0480be3c36cd59c82e20d3a4003b99fd\";file_sha256=\"\";orig_name=\"1D34B2920CC9406CBEF7EB445D8B3876\";new_name=\"C36A3D92E0884107AEF3FF361D25D00C\";url=\"http://139.199.100.152:2590/dw?taskId=135\nB53B1709C4122B7EBEA6D2419AD4D&type=virus&bankId=46B2C1E2E5E647DA9CC609DCA705D035&sampleId=1D34B2920CC9406CBEF7EB445D8B3876\";ar=0;cve_id=\"\";service=\"MISC\";src_asset=0;dst_asset=0;scountry=\"中国\";scity=\"河南\";dcountry=\"中国\";dcity=\"天津\""
+          ],
+          "sim": false,
+          "value": ""
+        }
+      ]
+    },
+    {
+      "sample_id": 40,
+      "original_log": "user_name= ;src_ip=192.168.1.12;src_port=53623;dst_ip=239.255.255.250;dst_port=1900;name=ip-mac-bind;type=arp-attack;protocol=UDP;mac=3c:2c:30:f9:7b:f8;count=2;level=4;in_if_name=ge0;create_time=1649695945;end_time=1649695946;extend=;",
+      "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "user_name= ;src_ip=192.168.1.12;src_port=53623;dst_ip=239.255.255.250;dst_port=1900;name=ip-mac-bind;type=arp-attack;protocol=UDP;mac=3c:2c:30:f9:7b:f8;count=2;level=4;in_if_name=ge0;create_time=1649695945;end_time=1649695946;extend=;"
+          ],
+          "sim": false,
+          "value": null
+        }
+      ]
+    },
+    {
       "sample_id": 41,
       "original_log": "log-type:sensitive-keyword;``event:block;``protocol-name:(17)HTTP;``ip-proto-id:6;``source-ip:10.121.10.52;``source-port:44170;``destination-ip:10.121.10.115;``destination-port:8080;``ifname-inside:gige0_6;``vsys-id:0;``sensitive-content:........;``",
       "fields": [
+        {
+          "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "log-type:sensitive-keyword;``event:block;``protocol-name:(17)HTTP;``ip-proto-id:6;``source-ip:10.121.10.52;``source-port:44170;``destination-ip:10.121.10.115;``destination-port:8080;``ifname-inside:gige0_6;``vsys-id:0;``sensitive-content:........;``"
+          ],
+          "sim": false,
+          "value": null
+        },
         {
           "core": false,
           "entity": "事件",
@@ -5224,6 +5491,20 @@
       "fields": [
         {
           "core": false,
+          "entity": "",
+          "field": "key_keeper",
+          "index": "original_log",
+          "info": null,
+          "mappings": [],
+          "required": false,
+          "result": [
+            "id=tos time=\"2018-08-22 11:09:08\" fw=OS pri=4 type=ips recorder=IPSEVENT proto=tcp src=11.99.237.66 sport=33106 dst=11.99.218.3 dport=5555 rule=22028 repeat=1 msg=\"HP OpenView Storage Data Protector Op代码远程缓冲区溢出漏洞攻击(CVE-2011-1865)\" appendix= application= op=\"permit\" interface= sdev=eth10 ddev="
+          ],
+          "sim": false,
+          "value": null
+        },
+        {
+          "core": false,
           "entity": "事件",
           "field": "event_type",
           "index": "recorder",
@@ -5240,8 +5521,8 @@
     }
   ],
   "statistics": {
-    "total_samples": 30,
-    "total_fields": 251,
-    "unique_fields": 251
+    "total_samples": 39,
+    "total_fields": 283,
+    "unique_fields": 250
   }
 }

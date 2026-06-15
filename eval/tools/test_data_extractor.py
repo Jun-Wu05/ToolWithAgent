@@ -73,9 +73,11 @@ class TestExtractor:
         """
         过滤和去重字段
         
-        规则：
-        1. 过滤掉field为null或空的记录
-        2. 对index进行去重，保留第一个出现的记录（全局去重）
+        规则（按优先级排序）：
+        1. 删除index包含"field"的字段（如field0, field1等）
+        2. 过滤掉field为null或空的记录
+        3. 保护field="key_keeper"或field="original_log"的字段
+        4. 对index进行去重，保留第一个出现的记录（全局去重）
         
         Args:
             normalize_list: normalize数组
@@ -96,11 +98,20 @@ class TestExtractor:
             field_value = item.get('field')
             index_value = item.get('index', '')
             
-            # 规则1：过滤掉field为null或空的记录
+            # 规则1：删除index包含"field"的字段
+            if "field" in str(index_value):
+                continue
+            
+            # 规则2：过滤掉field为null或空的记录
             if field_value is None or str(field_value).strip() == '':
                 continue
             
-            # 规则2：index去重，保留第一个（全局去重）
+            # 规则3：保护特殊字段
+            if field_value == "key_keeper" or field_value == "original_log":
+                filtered_fields.append(item)
+                continue
+            
+            # 规则4：index去重，保留第一个（全局去重）
             if index_value in seen_indexes:
                 continue
             
