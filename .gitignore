@@ -55,4 +55,5 @@ context_summary/
 eval/
 docs/
 .clinerules
+.github/
 
