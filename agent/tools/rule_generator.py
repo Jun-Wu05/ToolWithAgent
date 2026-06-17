@@ -10,6 +10,7 @@ import json
 import base64
 import uuid
 import time
+import re
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -383,6 +384,34 @@ def _build_json_normalize_entries(
     return entries
 
 
+def _extract_kv_keys(text: str, delimit: str = " ") -> list[str]:
+    """从 KV 格式文本中提取所有字段名（key）。
+
+    CHANGED: 使用正则 ``(?:起始|分隔符)key=`` 模式匹配，避免引号/方括号
+    内的分隔符导致错误拆分（如 ``event_name="内置规则_Linux 网络..."``
+    中值内空格不会被误认为字段分隔符）。
+
+    Args:
+        text: KV 格式文本（单行或多行）。
+        delimit: 字段分隔符（``"space"`` 或实际字符如 ``";"`` ``","``）。
+
+    Returns:
+        去重后的 key 列表（保持首次出现顺序）。
+    """
+    # CHANGED: delimit 语义化名称转正则
+    delimiter_re = r"\s" if delimit == "space" else re.escape(delimit)
+    pattern = re.compile(rf"(?:^|{delimiter_re})(\w+)=")
+
+    keys: list[str] = []
+    seen: set[str] = set()
+    for m in pattern.finditer(text):
+        key = m.group(1)
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return keys
+
+
 def _build_kv_normalize_entries_from_all_logs(
     all_logs_str: str,
     logtype: str = "",
@@ -407,32 +436,12 @@ def _build_kv_normalize_entries_from_all_logs(
     Returns:
         normalize条目列表
     """
-    # delimit语义化名称转义
-    delimiter = " " if delimit == "space" else delimit
+    # CHANGED: 使用正则提取 key，避免引号/方括号内的分隔符导致错误拆分
+    keys = _extract_kv_keys(all_logs_str, delimit)
 
     entries: list[dict[str, Any]] = []
-    keys: set[str] = set()  # 去重
-
-    # 遍历所有日志行
-    for line in all_logs_str.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        
-        # 按delimit分割
-        for pair in line.split(delimiter):
-            pair = pair.strip()
-            if not pair:
-                continue
-
-            # 找到第一个tab的位置，提取key
-            tab_pos = pair.find(tab)
-            if tab_pos > 0:
-                key = pair[:tab_pos].strip()
-                if key and key not in keys:
-                    keys.add(key)
-                    # 构建空result的条目
-                    entries.append(_make_kv_normalize_entry(key, None))
+    for key in keys:
+        entries.append(_make_kv_normalize_entry(key, None))
 
     # 按字母序排列
     entries.sort(key=lambda e: e["index"])
@@ -467,26 +476,12 @@ def _build_kv_normalize_entries(
     Returns:
         normalize条目列表
     """
-    # delimit语义化名称转义
-    delimiter = " " if delimit == "space" else delimit
+    # CHANGED: 使用正则提取 key，避免引号/方括号内的分隔符导致错误拆分
+    keys = _extract_kv_keys(real_samples_str, delimit)
 
     entries: list[dict[str, Any]] = []
-    keys: set[str] = set()  # 去重
-
-    # 按delimit分割
-    for pair in real_samples_str.split(delimiter):
-        pair = pair.strip()
-        if not pair:
-            continue
-
-        # 找到第一个tab的位置，提取key
-        tab_pos = pair.find(tab)
-        if tab_pos > 0:
-            key = pair[:tab_pos].strip()
-            if key and key not in keys:
-                keys.add(key)
-                # 构建空result的条目
-                entries.append(_make_kv_normalize_entry(key, None))
+    for key in keys:
+        entries.append(_make_kv_normalize_entry(key, None))
 
     # 按字母序排列
     entries.sort(key=lambda e: e["index"])
