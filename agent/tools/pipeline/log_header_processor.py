@@ -228,11 +228,14 @@ def classify_header_features(
     format_type: str = "json",
     format_detail: str = "",
     header_end_marker: str = "",
+    format_info: dict | None = None,
 ) -> str:
     """Path A: 日志头分类特征提取主函数。
 
     CHANGED: 新增 header_end_marker 参数，用于 real_samples 去头。
     CHANGED (2026-06-02): 根据 format_type 动态设置 feature_identifier 和 analysis。
+    CHANGED (2026-06-18): 新增 format_info 参数，优先使用 Step1 确定的 delimit/tab，
+                           避免 LLM 二次判断覆盖正确值（修复 delimit 从 ';' 误变为 'space' 的问题）。
     """
     # 辅助函数：根据 format_type 获取 feature_identifier
     def _get_feature_identifier(fmt_type: str) -> str:
@@ -336,15 +339,19 @@ def classify_header_features(
         parsed.setdefault("classification_details", [])
         parsed.setdefault("categorical_features", "在日志头中")
         parsed.setdefault("Diversion_method", "日志头特征分类")
-        # CHANGED: analysis 字段由 LLM 输出（delimit、tab），布尔值根据格式设置
+        # CHANGED: analysis 字段优先使用 format_info 中的确定性 delimit/tab（来自 Step1），
+        #          仅当 format_info 缺失时才 fallback 到 LLM 输出（修复 delimit 误判为 space 的问题）
         llm_analysis = parsed.get("analysis", {})
+        # CHANGED: format_info 优先（Step1 确定性判断），LLM 输出兜底
+        fi_delimit = (format_info or {}).get("delimit") if format_info else None
+        fi_tab = (format_info or {}).get("tab") if format_info else None
         parsed["analysis"] = {
             "has_json_structure": not is_kv,
             "has_cef_prefix": False,
             "has_key_value_pairs": is_kv,
             "has_delimited_structure": False,
-            "delimit": llm_analysis.get("delimit", "判断失败"),
-            "tab": llm_analysis.get("tab", "判断失败"),
+            "delimit": fi_delimit or llm_analysis.get("delimit", "判断失败"),
+            "tab": fi_tab or llm_analysis.get("tab", "判断失败"),
         }
         # CHANGED: 使用传入的 header_end_marker 而非硬编码 ""
         parsed["header_end_marker"] = header_end_marker

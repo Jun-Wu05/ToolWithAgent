@@ -579,6 +579,7 @@ def _do_classify_log_features(
 
         if located == "header":
             # Path A: 特征在日志头中
+            # CHANGED: 传递 format_info（delimit/tab），确保 analysis 使用 Step1 确定性值
             logger.info("[_do_classify_log_features] → Path A (header)")
             from agent.tools.pipeline.log_header_processor import classify_header_features
 
@@ -587,6 +588,7 @@ def _do_classify_log_features(
                 format_type=format_type,
                 format_detail=format_detail,
                 header_end_marker=header_end_marker,
+                format_info={"delimit": delimit, "tab": tab},  # CHANGED: 传递 Step1 确定的分隔符
             )
 
         if located == "body":
