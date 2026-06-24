@@ -518,14 +518,14 @@ def _do_classify_log_features(
     if is_kv and has_header:
         from agent.tools.pipeline.log_feature_locator import locate_feature
 
-        # 从 format_info 解析 delimit/tab
-        delimit = "="
-        tab = " "
+        # CHANGED: 修复 delimit/tab 默认值写反的问题（delimit=字段分隔符, tab=键值分隔符）
+        delimit = ";"   # 字段分隔符默认值
+        tab = "="       # 键值分隔符默认值
         try:
             if format_info:
                 info_dict = json.loads(format_info)
-                delimit = info_dict.get("delimit", "=") or "="
-                tab = info_dict.get("tab", " ") or " "
+                delimit = info_dict.get("delimit", ";") or ";"
+                tab = info_dict.get("tab", "=") or "="
         except Exception:
             logger.warning(f"[_do_classify_log_features] 解析 format_info 失败，使用默认值")
 

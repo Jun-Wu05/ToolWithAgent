@@ -384,23 +384,45 @@ def _build_json_normalize_entries(
     return entries
 
 
-def _extract_kv_keys(text: str, delimit: str = " ") -> list[str]:
+def _extract_kv_keys(text: str, delimit: str = " ", tab: str = "=") -> list[str]:
     """从 KV 格式文本中提取所有字段名（key）。
 
-    CHANGED: 使用正则 ``(?:起始|分隔符)key=`` 模式匹配，避免引号/方括号
+    CHANGED: 使用正则 ``(?:起始|分隔符)key<tab>`` 模式匹配，避免引号/方括号
     内的分隔符导致错误拆分（如 ``event_name="内置规则_Linux 网络..."``
     中值内空格不会被误认为字段分隔符）。
 
+    CHANGED: 新增 ``tab`` 参数，支持非 ``=`` 的键值分隔符（如 ``:``）。
+    CHANGED: 新增 delimit 语义化名称映射（``"comma"`` → ``,``, ``"semicolon"`` → ``;``）。
+
     Args:
         text: KV 格式文本（单行或多行）。
-        delimit: 字段分隔符（``"space"`` 或实际字符如 ``";"`` ``","``）。
+        delimit: 字段分隔符（``"space"`` / ``"comma"`` / ``"semicolon"`` 或实际字符）。
+        tab: 键值分隔符（如 ``"="`` ``":"``）。
 
     Returns:
         去重后的 key 列表（保持首次出现顺序）。
     """
-    # CHANGED: delimit 语义化名称转正则
-    delimiter_re = r"\s" if delimit == "space" else re.escape(delimit)
-    pattern = re.compile(rf"(?:^|{delimiter_re})(\w+)=")
+    # CHANGED: delimit 语义化名称 → 实际字符
+    _DELIMIT_MAP: dict[str, str] = {
+        "space": " ",
+        "comma": ",",
+        "semicolon": ";",
+        "tab": "\t",
+    }
+    actual_delimit = _DELIMIT_MAP.get(delimit.lower(), delimit)
+    delimiter_re = r"\s" if actual_delimit == " " else re.escape(actual_delimit)
+
+    # CHANGED: 用排除字符集替代 \w+，支持包含括号的字段名如 Protocol(1001)
+    # key = 除空白、分隔符、tab 外的所有字符
+    exclude_chars = r"\s"
+    if actual_delimit != " " and len(actual_delimit) == 1:
+        exclude_chars += actual_delimit
+    if len(tab) == 1:
+        exclude_chars += tab
+
+    # CHANGED: tab 参数替代硬编码 "="
+    tab_re = re.escape(tab)
+    pattern = re.compile(rf"(?:^|{delimiter_re})\s*([^{exclude_chars}]+){tab_re}")
 
     keys: list[str] = []
     seen: set[str] = set()
@@ -436,8 +458,8 @@ def _build_kv_normalize_entries_from_all_logs(
     Returns:
         normalize条目列表
     """
-    # CHANGED: 使用正则提取 key，避免引号/方括号内的分隔符导致错误拆分
-    keys = _extract_kv_keys(all_logs_str, delimit)
+    # CHANGED: 使用正则提取 key，避免引号/方括号内的分隔符导致错误拆分；传递 tab 支持非 = 分隔符
+    keys = _extract_kv_keys(all_logs_str, delimit, tab=tab)
 
     entries: list[dict[str, Any]] = []
     for key in keys:
@@ -476,8 +498,8 @@ def _build_kv_normalize_entries(
     Returns:
         normalize条目列表
     """
-    # CHANGED: 使用正则提取 key，避免引号/方括号内的分隔符导致错误拆分
-    keys = _extract_kv_keys(real_samples_str, delimit)
+    # CHANGED: 使用正则提取 key，避免引号/方括号内的分隔符导致错误拆分；传递 tab 支持非 = 分隔符
+    keys = _extract_kv_keys(real_samples_str, delimit, tab=tab)
 
     entries: list[dict[str, Any]] = []
     for key in keys:
@@ -499,13 +521,14 @@ def _build_kv_normalize_entries(
 def _escape_delimit(delimit: str) -> str:
     """转义 delimit 字段中的特殊字符。
 
+    CHANGED: 补充语义化名称映射（之前标注为 TODO，现已实现）。
+
     当前转义规则：
     - "space" → \\s（空格）
+    - "comma" → `,`（逗号）
+    - "semicolon" → `;`（分号）
     - "\\t" → \\t（制表符）
     - 其他（";", ",", "||" 等）→ 保持原样
-
-    🔮 边界情况待处理：
-    - 如果 Step 1 返回语义化名称（如 "comma", "semicolon"），需要扩展映射表
 
     Args:
         delimit: 字段分隔符（键值对之间的分隔符）
@@ -513,8 +536,15 @@ def _escape_delimit(delimit: str) -> str:
     Returns:
         转义后的分隔符字符串
     """
-    if delimit == "space":
-        return "\\s"
+    _SEMANTIC_MAP: dict[str, str] = {
+        "space": "\\s",
+        "comma": ",",
+        "semicolon": ";",
+        "tab": "\\t",
+    }
+    mapped = _SEMANTIC_MAP.get(delimit.lower())
+    if mapped is not None:
+        return mapped
     if delimit == "\\t":
         return "\\t"
     return delimit
