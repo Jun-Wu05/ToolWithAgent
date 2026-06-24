@@ -254,21 +254,29 @@ def render_log_parser_result(
     lines: List[str] = []
     lines.append("## 🔍 日志解析结果")
     lines.append("")
+
+    # CHANGED: 日志格式 + 格式详情合并显示，精简展示项
+    log_format_detail = classification.get("log_format_detail", "")
+    if log_format_detail and log_format_detail != log_format:
+        format_display = f"{log_format}（{log_format_detail}）"
+    else:
+        format_display = log_format
+
+    # CHANGED: 从 analysis 提取分隔符（KV 格式专用）
+    analysis = classification.get("analysis", {})
+    delimit = analysis.get("delimit", "")
+    tab = analysis.get("tab", "")
+    is_kv = str(log_format).upper() == "KV"
+
     lines.append(f"| 项目 | 值 |")
     lines.append(f"|---|---|")
-    lines.append(f"| 日志格式 | {log_format} |")
+    lines.append(f"| 日志格式 | {format_display} |")
     lines.append(f"| 业务分类字段 | `{feature_field}` |")
-    lines.append(f"| 特征标识符 | `{feature_identifier}` |")
-    if categorical_features:
-        lines.append(f"| 分类特征名称 | {categorical_features} |")
-    if diversion_method:
-        lines.append(f"| 分流方法 | {diversion_method} |")
     lines.append(f"| 分类数量 | {feature_count} |")
-
-    # 展示 log_format_detail（LLM 原始描述），避免与上方 log_format 枚举值重复
-    log_format_detail = classification.get("log_format_detail", "")
-    if log_format_detail:
-        lines.append(f"| 格式详情 | {log_format_detail} |")
+    # CHANGED: KV 格式展示分隔符（含"判断失败"），JSON 格式隐藏
+    if is_kv:
+        lines.append(f"| 字段分隔符 | {delimit or '判断失败'} |")
+        lines.append(f"| 键值分隔符 | {tab or '判断失败'} |")
 
     if overall_summary:
         lines.append("")
