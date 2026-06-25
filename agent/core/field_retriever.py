@@ -40,10 +40,11 @@ CACHE_SCHEMA_VERSION = "2"
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
 EMBEDDING_DIM = 4096
 EMBEDDING_API_URL = "https://api.siliconflow.cn/v1/embeddings"
-EMBEDDING_BATCH_SIZE = 30  # 每次 API 调用最多嵌入 30 个文本（防 413 Request Entity Too Large）
-EMBEDDING_BATCH_SLEEP = 0.3  # 每批请求间隔（秒），防止 API 429 限流
-EMBEDDING_TIMEOUT = 10.0  # 单次 API 调用超时（秒）
-EMBEDDING_MAX_RETRIES = 2  # 最多重试次数
+# CHANGED: 调整为更稳健的配置（适配 Qwen3-Embedding-8B 大模型批量推理）
+EMBEDDING_BATCH_SIZE = 15  # 每次 API 调用最多嵌入 15 个文本（减半，降低服务端单次负载，防 413）
+EMBEDDING_BATCH_SLEEP = 0.3  # 每批请求间隔（秒），防止 API 429 限流（保持不变）
+EMBEDDING_TIMEOUT = 30.0  # 单次 API 调用超时（秒）— 8B 模型批量推理需更长时间，原 10s 易误超时
+EMBEDDING_MAX_RETRIES = 3  # 最多重试次数（+1 次容错）
 
 # 相似度阈值：低于此值的候选不返回
 SIMILARITY_THRESHOLD = 0.15
