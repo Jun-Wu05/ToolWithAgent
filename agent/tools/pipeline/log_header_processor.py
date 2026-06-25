@@ -361,8 +361,14 @@ def classify_header_features(
                 ensure_ascii=False,
             )
 
+    # CHANGED: 确定 KV 格式的键值连接符，用于 header 提取
+    kv_delimit = "="
+    if is_kv and format_info:
+        kv_delimit = format_info.get("tab", "=")
+
     try:
-        agg_result = aggregate_headers(logs_str)
+        # CHANGED: 传入 format_type 和 delimit，确保 KV 格式正确提取 header
+        agg_result = aggregate_headers(logs_str, format_type=format_type, delimit=kv_delimit)
         clusters = agg_result["clusters"]
         total_lines = agg_result["total_lines"]
 
@@ -380,7 +386,21 @@ def classify_header_features(
 
         # CHANGED: 转义花括号，防止 str.format() 误解析
         aggregated_text = _escape_format_braces(json.dumps(clusters, ensure_ascii=False))
-        sampled = _escape_format_braces(sample_logs(logs_str, 5))
+        # CHANGED: 使用每个 cluster 的原始未脱敏日志行进行分层采样，
+        # 替代原来的随机5行采样，确保所有日志类型（含少样本类型）都有代表样例
+        representative_lines = [
+            c["raw_sample"] for c in clusters
+            if c.get("raw_sample")
+        ]
+        if representative_lines:
+            sampled = _escape_format_braces('\n'.join(representative_lines[:20]))
+            logger.info(
+                f"[classify_header_features] 分层采样: "
+                f"{len(representative_lines[:20])} 条代表样例（来自 {len(clusters)} 个 cluster）"
+            )
+        else:
+            # fallback: 如果 raw_sample 为空，使用原始随机采样
+            sampled = _escape_format_braces(sample_logs(logs_str, 5))
 
         prompt = load_log_header_classify_prompt().format(
             aggregated_headers=aggregated_text,

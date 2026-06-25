@@ -377,10 +377,28 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
             user_session["enum_excel_path"] = excel_path
         
         # 检测"原始日志"列并预提取，供 LogParserAgent 精简输入使用
+        # CHANGED: 替换单元格内的换行符为空格，防止单条日志被拆散成多行碎片
         raw_log_lines = None
         for col in df.columns:
             if "原始日志" in str(col):
-                raw_log_lines = df[col].dropna().astype(str).tolist()
+                raw_series = df[col].dropna().astype(str)
+                # 统计并替换单元格内的 \n
+                # CHANGED: 同时替换 \r 和 \n（Windows 换行 \r\n 合并为一个空格）
+                newline_count = int(raw_series.str.contains(r'[\r\n]', regex=True).sum())
+                if newline_count > 0:
+                    raw_log_lines = raw_series.str.replace(r'[\r\n]+', ' ', regex=True).tolist()
+                    logger.info(
+                        f"[FILE_UPLOAD] 单元格内换行预处理: {newline_count} 个单元格含换行符，已替换为空格"
+                    )
+                    for i, line in enumerate(raw_log_lines[:3]):
+                        preview = line[:300] + ("..." if len(line) > 300 else "")
+                        logger.info(
+                            f"[FILE_UPLOAD] 预处理后样例[{i+1}/{min(3, len(raw_log_lines))}]: {preview}"
+                        )
+                else:
+                    raw_log_lines = raw_series.tolist()
+                    logger.debug("[FILE_UPLOAD] 单元格内无换行符，无需预处理")
+
                 if hasattr(user_session, "raw_log_lines"):
                     user_session.raw_log_lines = raw_log_lines
                 else:

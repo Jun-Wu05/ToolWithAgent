@@ -287,12 +287,10 @@ def render_log_parser_result(
         lines.append("")
         lines.append(f"### 📊 分类详情（{len(details)} 类）")
         lines.append("")
-        lines.append("| 字段值 | 特征值 | 真实样例 |")
-        lines.append("|---|---|---|")
+        lines.append("| 特征值 | 真实样例 |")
+        lines.append("|---|---|")
         for _d in details:
-            # 取消硬截断，完整展示字段内容
-            value = str(_d.get("logtype", ""))
-            # meaning/matched_regex 已废弃，改用 logtype + sample 展示
+            # CHANGED: 字段值与特征值列重复，已移除冗余列
             feature_val = str(_d.get("logtype", ""))
             real_samples = _d.get("real_samples", [])
             if isinstance(real_samples, str):
@@ -301,7 +299,7 @@ def render_log_parser_result(
                 sample = real_samples[0] if isinstance(real_samples, list) else str(real_samples)
             else:
                 sample = str(_d.get("sample", ""))
-            lines.append(f"| {value} | {feature_val} | {sample} |")
+            lines.append(f"| {feature_val} | {sample} |")
 
     lines.append("")
     lines.append("*以上结果由 LogParser Pipeline 直接生成*")

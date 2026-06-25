@@ -21,7 +21,7 @@ _HEADER_DESENSITIZE_RE = _re.compile(
     r"[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}|"
     r"[a-zA-Z0-9]{15,}|"
     r"\b\d+[kKmMgGtTbB%]+\b|"  # 数字+单位后缀（250k, 50GB, 98%）
-    r"\b\d+\b|"
+    r"(?<!/)\b\d+\b(?!/)|"
     r"host|server|pid|ppid|uid|gid|sessionid|messageid",
     _re.IGNORECASE,
 )
@@ -46,9 +46,10 @@ def extract_header(line: str, format_type: str = "json", delimit: str = "=") -> 
         return line[:json_start].strip()
 
     # 2. KV 分割：用 delimit 字符定位第一个 KV 对
+    # CHANGED: 支持 -前缀、(数字)后缀的字段名（如 -Slot=、SrcZoneName(1025)=）
     if format_type == "kv" and delimit:
-        # 匹配：空格/行首 + word + delimit
-        pattern = rf'(?:^|\s)(\w+)\s*{_re.escape(delimit)}'
+        # 匹配：空格/行首 + 字段名(含.-前缀和(数字)后缀) + delimit
+        pattern = rf'(?:^|\s)[\w.-]+(?:\(\d+\))?\s*{_re.escape(delimit)}'
         match = _re.search(pattern, line)
         if match:
             # 如果 match 在行首，说明无 header
@@ -101,6 +102,8 @@ def aggregate_headers(
 
     cluster_map: dict[str, int] = defaultdict(int)
     header_samples: dict[str, str] = {}
+    # CHANGED: 新增 raw_samples，存储每个 cluster 的原始未脱敏日志行
+    raw_samples: dict[str, str] = {}
 
     for line in lines:
         if len(cluster_map) >= max_clusters:
@@ -120,10 +123,14 @@ def aggregate_headers(
             if len(desensitized) > max_header_len:
                 sample += "...日志过长已截断"
             header_samples[desensitized] = sample
+        # CHANGED: 存储原始未脱敏日志行，供下游分层采样使用
+        if desensitized not in raw_samples:
+            raw_samples[desensitized] = line[:max_header_len]
 
     sorted_clusters = sorted(cluster_map.items(), key=lambda x: x[1], reverse=True)
     clusters = [
-        {"log_header": header_samples[header], "count": count}
+        {"log_header": header_samples[header], "count": count,
+         "raw_sample": raw_samples.get(header, "")}
         for header, count in sorted_clusters
     ]
 
