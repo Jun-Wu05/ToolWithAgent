@@ -29,6 +29,7 @@ def aggregate_by_field(
     kv_delimit: str | None = None,
     field_delimit: str | None = None,
     header_end_marker: str = "",
+    is_json: bool = True,
 ) -> dict:
     """使用可插拔的提取器按特征字段值对日志行分组。
 
@@ -44,6 +45,9 @@ def aggregate_by_field(
         kv_delimit:       KV 格式的键值分隔符（可选）。
         field_delimit:    KV 格式的字段分隔符（可选）。
         header_end_marker: 日志头与 body 的分隔符（用于剥离日志头）。
+        is_json:          是否按 JSON 格式剥离头部。JSON 优先用 ``{...}``
+                          提取 body，避免 syslog 头多空格误切断；
+                          KV/其他格式保持原 ``split(marker, 1)`` 行为。
 
     Returns:
         {
@@ -56,16 +60,16 @@ def aggregate_by_field(
         }
     """
     # CHANGED: 使用 header_end_marker 剥离日志头（2026-06-08 修复 syslog 头部干扰问题）
+    # CHANGED: JSON 格式优先用 {...} 提取 body，避免 syslog 头多空格误切断（2026-06-29）
+    from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
     lines = []
     for line in logs_str.strip().split("\n"):
         if not line.strip():
             continue
-        if header_end_marker:
-            # 使用 header_end_marker 分割，取第二部分（body）
-            parts = line.split(header_end_marker, 1)
-            stripped_line = parts[1].strip() if len(parts) == 2 else line.strip()
-        else:
-            stripped_line = line.strip()
+        stripped_line = strip_header_to_body(
+            line, header_end_marker, is_json=is_json
+        ).strip()
         lines.append(stripped_line)
     
     lines = lines[:max_lines]

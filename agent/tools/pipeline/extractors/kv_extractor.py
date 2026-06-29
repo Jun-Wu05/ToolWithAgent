@@ -267,4 +267,5 @@ class KvExtractor(ValueExtractor):
             kv_delimit=self.kv_delimit,
             field_delimit=self.field_delimit,
             header_end_marker=header_end_marker,
+            is_json=False,
         )

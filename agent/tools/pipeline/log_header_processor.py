@@ -231,11 +231,14 @@ def _replace_samples_with_raw(
     CHANGED (2026-06-05): 支持 KV 格式，使用 feature_identifier 正则提取 body。
     """
     log_lines = [l.strip() for l in logs_str.strip().split("\n") if l.strip()]
-    
+
     # CHANGED: 获取 feature_identifier 和 feature_body_group，用于 KV 格式 body 提取
     feature_identifier = classification_data.get("feature_identifier", "")
     feature_body_group = classification_data.get("feature_body_group", 0)
     has_feature_identifier = bool(feature_identifier and feature_body_group > 0)
+
+    # JSON 格式优先用 {...} 提取 body，避免 syslog 头多空格误切断
+    is_json = str(classification_data.get("log_format", "")).upper() == "JSON"
     
     # CHANGED: 如果有 feature_identifier 正则，预编译
     feature_pattern = None
@@ -284,16 +287,19 @@ def _replace_samples_with_raw(
                     f"使用正则提取 body ({len(detail['real_samples'])} 字符)"
                 )
             else:
-                # 正则匹配失败，降级使用 header_end_marker
-                if header_end_marker:
-                    parts = found.split(header_end_marker, 1)
-                    detail["real_samples"] = parts[1] if len(parts) == 2 else found
-                else:
-                    detail["real_samples"] = found
+                # 正则匹配失败，降级剥离头部（JSON 用 {...}，KV 用 marker）
+                from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
+                detail["real_samples"] = strip_header_to_body(
+                    found, header_end_marker, is_json=is_json
+                ) or found
         elif header_end_marker and found:
-            # 无 feature_identifier，使用 header_end_marker 分割（JSON 格式）
-            parts = found.split(header_end_marker, 1)
-            detail["real_samples"] = parts[1] if len(parts) == 2 else found
+            # 无 feature_identifier，剥离头部（JSON 用 {...}，KV 用 marker）
+            from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
+            detail["real_samples"] = strip_header_to_body(
+                found, header_end_marker, is_json=is_json
+            ) or found
         elif found and "{" in found:
             # fallback: header_end_marker 为空时，自动提取 JSON body
             json_start = found.find("{")

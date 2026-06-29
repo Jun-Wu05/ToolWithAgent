@@ -189,10 +189,11 @@ def match_real_samples(
                 else:
                     body = line
         elif header_end_marker:
-            # 无 feature_identifier，使用 header_end_marker 分割（JSON 格式）
-            parts = line.split(header_end_marker, 1)
-            if len(parts) == 2:
-                body = parts[1]
+            # 无 feature_identifier，JSON 格式：优先用 {...} 提取 body，
+            # 避免 syslog 头多空格时 split(marker, 1) 从首个空格误切断
+            from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
+            body = strip_header_to_body(line, header_end_marker, is_json=True)
 
         feature_val = extractor_func(body, ff)
         if feature_val is None and body != line:
@@ -225,9 +226,13 @@ def match_real_samples(
                 else:
                     detail["real_samples"] = matched_line
         elif header_end_marker and matched_line:
-            # 无 feature_identifier，使用 header_end_marker 分割（JSON 格式）
-            parts = matched_line.split(header_end_marker, 1)
-            detail["real_samples"] = parts[1] if len(parts) == 2 else matched_line
+            # 无 feature_identifier，JSON 格式：优先用 {...} 提取 body，
+            # 避免 syslog 头多空格时 split(marker, 1) 从首个空格误切断
+            from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
+            detail["real_samples"] = strip_header_to_body(
+                matched_line, header_end_marker, is_json=True
+            )
         elif matched_line and "{" in matched_line:
             # fallback: header_end_marker 为空时，自动提取 JSON body
             json_start = matched_line.find("{")

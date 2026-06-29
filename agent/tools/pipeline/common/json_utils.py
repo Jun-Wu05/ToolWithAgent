@@ -61,6 +61,48 @@ def extract_json_body(line: str) -> str | None:
     return m.group(0) if m else None
 
 
+def strip_header_to_body(
+    line: str, header_end_marker: str = "", *, is_json: bool = True
+) -> str:
+    """剥离日志头，返回 body 部分。
+
+    - ``is_json=True``（JSON / 日志头+JSON）：优先用 :func:`extract_json_body`
+      从第一个 ``{`` 取到最后一个 ``}``，完全不依赖 ``header_end_marker``，
+      避免 syslog 头部含多个空格时 ``split(marker, 1)`` 从首个空格误切断的问题；
+      当行内没有 ``{...}`` 时，降级使用 ``header_end_marker`` 分割。
+    - ``is_json=False``（KV / 其他格式）：保持原有
+      ``line.split(header_end_marker, 1)`` 行为不变。
+
+    Args:
+        line:              完整日志行。
+        header_end_marker: 头部与 body 的分隔符（JSON 格式下仅作降级使用）。
+        is_json:           是否按 JSON 格式剥离头部。
+
+    Returns:
+        剥离头部后的 body；标记为空或未找到时返回原始行。
+    """
+    if not line:
+        return line
+
+    if is_json:
+        body = extract_json_body(line)
+        if body:
+            return body
+        # 行内无 {...}：降级使用 header_end_marker
+        if header_end_marker:
+            parts = line.split(header_end_marker, 1)
+            if len(parts) == 2:
+                return parts[1]
+        return line
+
+    # 非 JSON：保持原 split(header_end_marker, 1) 行为
+    if header_end_marker:
+        parts = line.split(header_end_marker, 1)
+        if len(parts) == 2:
+            return parts[1]
+    return line
+
+
 def try_extract_json_feature(line: str, feature_field: str) -> Any:
     """从 JSON 日志行中提取字段值。
 

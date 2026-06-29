@@ -55,4 +55,5 @@ class JsonExtractor(ValueExtractor):
             extractor=self.extract_value,
             max_lines=max_lines,
             header_end_marker=header_end_marker,
+            is_json=True,
         )

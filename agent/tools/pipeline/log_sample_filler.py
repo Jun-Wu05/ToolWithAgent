@@ -125,13 +125,16 @@ def _strip_header(line: str, header_end_marker: str) -> str:
 
     返回:
         剥离头部后的 body；标记为空或未找到时返回原始行
+
+    Note:
+        本函数仅在 JSON 格式（Step 3 样本回填）下使用，因此优先用
+        :func:`extract_json_body` 从第一个 ``{`` 提取到最后一个 ``}``，
+        避免 syslog 头部含多个空格时 ``split(marker, 1)`` 从首个空格误切断。
     """
-    if not header_end_marker:
-        return line
-    parts = line.split(header_end_marker, 1)
-    if len(parts) == 2 and parts[1].strip():
-        return parts[1].strip()
-    return line
+    from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
+    body = strip_header_to_body(line, header_end_marker, is_json=True)
+    return body.strip() if body and body != line else body
 
 
 def _extract_json_body(line: str) -> str | None:
