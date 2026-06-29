@@ -13,6 +13,7 @@ Chainlit Action 回调 - 从 chainlit_app.py 提取
 import chainlit as cl
 import json
 import io
+import re
 import pandas as pd
 from datetime import datetime
 from agent.shared.logger import get_logger
@@ -27,6 +28,64 @@ from agent.tools.rule_generator import (
 from agent.tools.standard_mapper import _load_object_mapping
 
 logger = get_logger("action_callbacks")
+
+
+def _build_retrieval_candidates_map(mapping_results: list) -> dict[str, str]:
+    """为导出 xlsx 重新检索每个原始字段的标准字段候选 top3。
+
+    batch_retrieve_candidates 是确定性的（同缓存 + 同字段名 → 同候选），
+    因此导出时重新检索一次即可还原 LLM 输入中注入的候选，
+    无需侵入映射流程保存中间结果。
+
+    Args:
+        mapping_results: 子规则映射结果列表（含 rule_name + mappings[原始字段名]）
+
+    Returns:
+        {原始字段名: "候选A(0.71) / 候选B(0.69) / 候选C(0.64)"} 字典。
+        检索失败或无候选时对应值为空字符串。
+    """
+    # 收集所有原始字段名（去重，保持顺序）
+    all_fields: list[str] = []
+    seen: set[str] = set()
+    for mr in mapping_results:
+        for m in mr.get("mappings", []):
+            f = m.get("原始字段名", "")
+            if f and f not in seen:
+                all_fields.append(f)
+                seen.add(f)
+
+    if not all_fields:
+        return {}
+
+    candidates_map: dict[str, str] = {f: "" for f in all_fields}
+
+    try:
+        from agent.core.field_retriever import batch_retrieve_candidates
+        raw = batch_retrieve_candidates(all_fields, top_k=3)
+    except Exception as e:
+        logger.warning(f"[EXPORT] 检索候选失败，候选列留空: {e}")
+        return candidates_map
+
+    if not raw or not raw.strip():
+        return candidates_map
+
+    # 解析紧凑格式：每行 "field → cand1(...) | cand2(...) | cand3(...)"
+    # 候选格式形如 "威胁等级(0.71, threat_level)"，去掉括号内冗余只保留"候选名(分数)"
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or "→" not in line:
+            continue
+        field_part, cand_part = line.split("→", 1)
+        field = field_part.strip()
+        cands = [c.strip() for c in cand_part.split("|") if c.strip()]
+        # 把 "威胁等级(0.71, threat_level)" 规整为 "威胁等级(0.71)"
+        cleaned: list[str] = []
+        for c in cands:
+            m = re.match(r"^(.+?)\(([\d.]+)", c)
+            cleaned.append(f"{m.group(1)}({m.group(2)})" if m else c)
+        candidates_map[field] = " / ".join(cleaned)
+
+    return candidates_map
 
 
 @cl.action_callback("fill_threat_with_field")
@@ -466,23 +525,28 @@ async def on_export_field_mapping_excel(action: cl.Action):
         return
     
     try:
+        # 重新检索每个原始字段的标准字段候选 top3（确定性，还原 LLM 输入候选）
+        candidates_map = _build_retrieval_candidates_map(mapping_results)
+
         excel_data = []
         for mr in mapping_results:
             rule_name = mr.get("rule_name", "未知")
             for m in mr.get("mappings", []):
+                orig = m.get("原始字段名", "")
                 excel_data.append({
                     "子规则": rule_name,
-                    "原始字段": m.get("原始字段名", ""),
+                    "原始字段": orig,
                     "标准字段": m.get("系统属性名称", ""),
                     "匹配状态": m.get("匹配状态", ""),
+                    "检索候选top3": candidates_map.get(orig, ""),
                 })
-        
+
         df = pd.DataFrame(excel_data)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='字段映射')
         output.seek(0)
-        
+
         date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name = f"字段映射_{date_str}.xlsx"
         
@@ -517,23 +581,28 @@ async def on_export_batch_field_mapping_excel(action: cl.Action):
         return
     
     try:
+        # 重新检索每个原始字段的标准字段候选 top3（确定性，还原 LLM 输入候选）
+        candidates_map = _build_retrieval_candidates_map(mapping_results)
+
         excel_data = []
         for mr in mapping_results:
             rule_name = mr.get("rule_name", "批量映射")
             for m in mr.get("mappings", []):
+                orig = m.get("原始字段名", "")
                 excel_data.append({
                     "子规则": rule_name,
-                    "原始字段": m.get("原始字段名", ""),
+                    "原始字段": orig,
                     "标准字段": m.get("系统属性名称", ""),
                     "匹配状态": m.get("匹配状态", ""),
+                    "检索候选top3": candidates_map.get(orig, ""),
                 })
-        
+
         df = pd.DataFrame(excel_data)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='字段映射')
         output.seek(0)
-        
+
         date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name = f"字段映射_批量_{date_str}.xlsx"
         
