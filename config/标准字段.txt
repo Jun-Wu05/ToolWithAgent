@@ -1,4 +1,4 @@
-﻿系统属性名称	属性分类	字段名称	属性类型	描述	枚举值	对象
+系统属性名称	属性分类	字段名称	属性类型	描述	枚举值	对象
 AptGUID	基础属性	apt_GUID	字符	apt组织唯一标识特征		APT
 APT组织名	基础属性	apt_group	字符	APT组织的名字		APT
 攻击子技术ID	基础属性	attck_subtechnique_id_list	字符	攻击子技术ID		BAS
@@ -8,8 +8,7 @@ CNNVD编号	基础属性	cnnvd_number	字符	CNNVD编号		BAS
 APT组织名列表	基础属性	apt_group_list	字符	APT组织名列表		BAS
 攻击技术ID	基础属性	attck_techniques_id_list	字符	攻击技术ID		BAS
 样本家族	基础属性	sample_family	字符	样本家族		BAS
-攻击战术	基础属性	attck_tactics_list	字符	"攻击战术
-"		BAS
+攻击战术	基础属性	attck_tactics_list	字符	攻击战术		BAS
 CVE编号	基础属性	cve_number	字符	CVE编号		BAS
 攻击技战术	基础属性	tactics_techniques_list	字符	攻击技战术		BAS
 CNVD编号	基础属性	cnvd_number	字符	CNVD编号		BAS
@@ -17,9 +16,6 @@ CNVD编号	基础属性	cnvd_number	字符	CNVD编号		BAS
 WMI类名	基础属性	wmi_class	字符	WMI类名		WMI对象
 WMI消费者名称	基础属性	wmi_consumer_name	字符	WMI消费者名称		WMI对象
 WMI查询语句	基础属性	wmi_query	字符	WMI查询语句		WMI对象
-WMI显示名称	基础属性	wmi_displayname	字符	WMI显示名称		WMI对象
-WMI命名空间	基础属性	wmi_eventnamespace	字符	WMI命名空间		WMI对象
-WMI过滤器名称	基础属性	wmi_filter_name	字符	WMI过滤器名称		WMI对象
 ARP网卡类型	基础属性	arp_HT	字符	网卡硬件类型，用于标识链路层协议		arp协议
 ARP操作码	基础属性	arp_OP	字符	操作代码，标识ARP数据包类型，1表示请求，2表示回应		arp协议
 ARP网络地址类型	基础属性	arp_PT	字符	协议类型，用于标识网络层协议		arp协议
@@ -27,7 +23,6 @@ DHCP客户端ip地址	基础属性	dhcp_ciaddr	字符	DHCP客户端的IP地址�
 DHCP客户端mac地址	基础属性	dhcp_chaddr	字符	DHCP客户端的MAC地址		dhcp协议
 DHCP分配ip地址	基础属性	dhcp_yiaddr	IP	DHCP服务器分配给客户端的IP地址，这是服务器在客户请求下提供的；		dhcp协议
 DHCP服务器名称	基础属性	dhcp_sname	字符	DHCP服务器名称		dhcp协议
-DHCP交互类型	基础属性	dhcp_type	枚举	DHCP客户与服务器之间的交互类型，该字段记录在“DHCP可选信息”标记值为53的位置；	DHCPACK(5)IP地址分配确认&租约确认,DHCPDECLINE(4)租约表client硬件地址置空,DHCPDISCOVER(1)客户机初始化&寻找DHCP服务器,DHCPFORCERENEW(9),DHCPINFORM(8)DHCP客户端通知,DHCPLEASEACTIVE(13)DHCP租约活动,DHCPLEASEQUERY(10)DHCP租约查询,DHCPLEASEUNASSIGNED(11)DHCP未分配租约,DHCPLEASEUNKNOWN(12)DHCP未知租约,DHCPNAK(6)DHCP请求拒绝,DHCPOFFER(2)分配IP地址&提供IP地址租用,DHCPRELEASE(7)清空租期回收IP,DHCPREQUEST(3)接受IP地址&接受IP租约,其他	dhcp协议
 DHCP事务标示符	基础属性	dhcp_xid	字符	DHCP客户端请求标识；事务ID，是个随机数，用于客户和服务器之间匹配请求和相应消息；		dhcp协议
 DHCP操作码	基础属性	dhcp_op	字符	DHCP协议中OP字段，指明流量方向，若是客户端发送给server的包，设为1，反向为2		dhcp协议
 DNS响应记录	基础属性	dns_rr_ans_items	字符	DNS响应资源记录		dns协议
@@ -48,7 +43,6 @@ DNSQR类型	基础属性	dns_QR	字符	查询请求/响应的标志信息		dns�
 dns_transaction_id	基础属性	dns_transaction_id	字符	DNS事务ID		dns协议
 DNS查询类	基础属性	dns_query_class	字符	DNS查询类字段		dns协议
 FTP返回码	基础属性	ftp_code	字符	FTP返回码		ftp协议
-FTP命令类型	基础属性	ftp_cmd_type	枚举		传输模式(MODE),保存(STOR),其他,分配(ALLO),列表(LIST),创建目录(MKD),删除文件(DELE),删除目录(RMD),名字列表(NLST),唯一保存(STOU),回到上一层目录(CDUP),帮助(HELP),打印工作目录(PWD),改变工作目录(CWD),放弃操作(ABOR),数据连接端口(PORT),文件结构(STRU),未映射,状态(STAT),用户口令(PASS),用户名(USER),站点参数(SITE),等待(NOOP),系统(SYST),结构加载(SMNT),获得文件(RETR),表示类型(TYPE),被动侦听(PASV),账号信息(ACCT),退出登录(QUIT),重命名(RNFR),重命名为(RNTO),重新初始化(REIN),重新开始(REST),附加(APPE)	ftp协议
 FTP命令	基础属性	ftp_cmd	字符	命令的详细内容(包括参数)		ftp协议
 URL	基础属性	http_url_path	字符	http请求的URL		http协议
 HTTP请求内容	基础属性	http_req	字符	http请求的数据包		http协议
@@ -106,7 +100,6 @@ RPC服务端进程路径	基础属性	rpc_server_path	字符	提供RPC服务的�
 RPC客户端进程Pid	基础属性	rpc_client_pid	字符	发起RPC调用的客户端进程PID		rpc协议
 RPC客户端进程路径	基础属性	rpc_client_path	字符	发起RPC调用的客户端进程路径		rpc协议
 RPC服务端进程Pid	基础属性	rpc_serverpid	字符	提供RPC服务的服务端进程PID		rpc协议
-SMB命令类型	基础属性	smb_cmd_type	枚举	SMB命令，可参考RFC1001、RFC1002、https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-cifs/5cd5747f-fe0b-40a6-89d0-d67f751f8232?redirectedfrom=MSDN	SMB_COM_CHECK_DIRECTORY(0x10),SMB_COM_CLOSE(0x04),SMB_COM_CLOSE_PRINT_FILE(0xC2),SMB_COM_COPY(0x29),SMB_COM_CREATE(0x03),SMB_COM_CREATE_DIRECTORY (0x00),SMB_COM_CREATE_NEW(0x0F),SMB_COM_CREATE_TEMPORARY(0x0E),SMB_COM_DELETE(0x06),SMB_COM_DELETE_DIRECTORY(0x01),SMB_COM_ECHO(0x2B),SMB_COM_FIND(0x82),SMB_COM_FIND_CLOSE(0x84),SMB_COM_FIND_CLOSE2(0x34),SMB_COM_FIND_NOTIFY_CLOSE(0x35),SMB_COM_FIND_UNIQUE(0x83),SMB_COM_FLUSH(0x05),SMB_COM_GET_PRINT_QUEUE(0xC3),SMB_COM_INVALID(0xFE),SMB_COM_IOCTL(0x27),SMB_COM_IOCTL_SECONDARY(0x28),SMB_COM_LOCKING_ANDX(0x24),SMB_COM_LOCK_AND_READ(0x13),SMB_COM_LOCK_BYTE_RANGE(0x0C),SMB_COM_LOGOFF_ANDX(0x74),SMB_COM_MOVE(0x2A),SMB_COM_NEGOTIATE(0x72),SMB_COM_NEW_FILE_SIZE(0x30),SMB_COM_NO_ANDX_COMMAND(0xFF),SMB_COM_NT_CANCEL(0xA4),SMB_COM_NT_CREATE_ANDX(0xA2),SMB_COM_NT_RENAME(0xA5),SMB_COM_NT_TRANSACT(0xA0),SMB_COM_OPEN(0x02),SMB_COM_OPEN_ANDX(0x2D),SMB_COM_OPEN_PRINT_FILE(0xC0),SMB_COM_PROCESS_EXIT(0x11),SMB_COM_QUERY_INFORMATION(0x08),SMB_COM_QUERY_INFORMATION2(0x23),SMB_COM_QUERY_SERVER(0x21),SMB_COM_READ(0x0A),SMB_COM_READ_ANDX(0x2E),SMB_COM_READ_BULK(0xD8),SMB_COM_READ_MPX(0x1B),SMB_COM_READ_MPX_SECONDARY(0x1C),SMB_COM_READ_RAW(0x1A),SMB_COM_RENAME(0x07),SMB_COM_SEARCH(0x81),SMB_COM_SEEK(0x12),SMB_COM_SESSION_SETUP_ANDX(0x73),SMB_COM_SET_INFORMATION(0x09),SMB_COM_SET_INFORMATION2(0x22),SMB_COM_TRANSACTION(0x25),SMB_COM_TRANSACTION2(0x32),SMB_COM_TREE_CONNECT(0x70),SMB_COM_TREE_CONNECT_ANDX(0x75),SMB_COM_TREE_DISCONNECT(0x71),SMB_COM_UNLOCK_BYTE_RANGE(0x0D),SMB_COM_WRITE(0x0B),SMB_COM_WRITE_ANDX(0x2F),SMB_COM_WRITE_AND_CLOSE(0x2C),SMB_COM_WRITE_AND_UNLOCK(0x14),SMB_COM_WRITE_BULK(0xD9),SMB_COM_WRITE_BULK_DATA(0xDA),SMB_COM_WRITE_COMPLETE(0x20),SMB_COM_WRITE_MPX(0x1E),SMB_COM_WRITE_PRINT_FILE(0xC1),SMB_COM_WRITE_RAW(0x1D),其他	smb协议
 SMB命令	基础属性	smb_cmds	字符			smb协议
 SMB消息id	基础属性	smb_message_id	字符	SMB消息ID		smb协议
 SMB树ID	基础属性	smb_tree_id	字符	SMB树ID		smb协议
@@ -146,7 +139,6 @@ TLS证书链	基础属性	tls_chain	字符	TLS证书链		tls协议
 操作系统位数	基础属性	os_bit	字符			主机
 源主机名称	基础属性	src_host_name	字符			主机
 计算机组	基础属性	com_group	字符			主机
-原子网掩码	基础属性	old_host_mask	字符			主机
 主机MAC地址	基础属性	host_mac	字符			主机
 主机GUID	基础属性	host_guid	字符			主机
 操作系统内核版本	基础属性	os_kernel_version	字符			主机
@@ -193,20 +185,12 @@ TLS证书链	基础属性	tls_chain	字符	TLS证书链		tls协议
 目的国家编码	基础属性	dst_location_country_code	字符	目的国家编码		位置
 目的省份	基础属性	dst_location_province	字符	目的省份		位置
 源区域	基础属性	src_location	字符	源区域		位置
-告警次数	基础属性	alarm_count	整型	基础属性		告警
-热门场景	基础属性	rule_scene	字符	高级场景属性		告警
 域SID	基础属性	domain_sid	字符	domain_sid		域
 源安全域	基础属性	src_ad	字符	src_ad		域
 域信息	基础属性	domain_info	字符	domain_info		域
 域句柄	基础属性	domain_handle	字符	domain_handle		域
-FQDN	基础属性	fqdn	字符			域
 目的域	基础属性	dst_domain	字符	dst_domain		域
 堆栈信息	基础属性	stack_info	字符	堆栈信息		堆栈
-栈顶地址	基础属性	stack_Base	字符	栈顶地址		堆栈
-栈底地址	基础属性	stack_limit	字符	栈底地址		堆栈
-可疑堆栈地址	基础属性	suspect_stack_address	字符	可疑堆栈地址		堆栈
-栈顶指针esp	基础属性	stack_esp	字符	栈顶指针		堆栈
-栈底指针ebp	基础属性	stack_ebp	字符	栈底指针		堆栈
 ATTCK技术ID	基础属性	attck_techniques_id	字符			威胁
 威胁特征	基础属性	threat_feature	字符	多记录攻击payload		威胁
 威胁检测引擎ID	基础属性	threat_engine_id	字符	检测设备的引擎ID		威胁
@@ -216,12 +200,11 @@ ATTCK技术ID	基础属性	attck_techniques_id	字符			威胁
 威胁规则ID列表	基础属性	threat_rule_id_list	字符			威胁
 威胁名称	基础属性	threat_name	字符	如果威胁信息和威胁类型不够用，这时可以按需使用威胁子类型和威胁名称。		威胁
 ATTCK技战术名称	基础属性	attack_attck	字符			威胁
-攻击结果	基础属性	attack_result	枚举	攻击的结果		威胁
+攻击结果	基础属性	attack_result	枚举	攻击的结果	攻击成功,攻击失败,未知	威胁
 攻击者组	基础属性	attacker_array	字符			威胁
 威胁规则ID	基础属性	threat_rule_id	字符	用于告警日志里记录检测威胁的ID		威胁
 攻击工具	基础属性	attack_tool	字符	攻击工具		威胁
-威胁信息	基础属性	threat_info	字符	"威胁类日志必须解析。一般将原始日志中的告警名称（或其他能够描述告警的简短词句）需要解析为本脑的""威胁信息""。
-告警转换类的SAE规则会引用变量威胁信息。"		威胁
+威胁信息	基础属性	threat_info	字符	威胁类日志必须解析。一般将原始日志中的告警名称（或其他能够描述告警的简短词句）需要解析为本脑的威胁信息。告警转换类的SAE规则会引用变量威胁信息。		威胁
 威胁数量	基础属性	threat_count	整型	整型，检测威胁事件的合并数量		威胁
 威胁子类型	基础属性	threat_subtype	字符	如果威胁信息和威胁类型不够用，这时可以按需使用威胁子类型和威胁名称。		威胁
 ATTCK技术名称	基础属性	attck_techniques	字符			威胁
@@ -311,12 +294,10 @@ HOME目录路径	基础属性	home_directory	字符	系统/home下的目录		文
 文件SHA256	基础属性	file_sha256	字符	文件SHA256值		文件
 新HOME目录路径	基础属性	new_home_directory	字符	新的home目录		文件
 快捷方式命令行	基础属性	lnk_cmd	字符			文件
-设备文件名	基础属性	file_device	字符	文件设备的名称		文件
 新文件名称	基础属性	new_filename	字符			文件
 旧文件名称	基础属性	old_filename	字符			文件
 源文件路径	基础属性	src_file_path	字符	来源的文件路径		文件
 文件类型	基础属性	file_type	字符	文件类型与文件后缀名不同；		文件
-文件名RTLO标志	基础属性	filename_unicode_rtlo	字符	一个不可显示的控制类字符，其本质是unicode 字符		文件
 文件HASH值	基础属性	file_hash	字符	文件的hash值		文件
 文件pdb	基础属性	file_pdb	字符	文件的PDB信息，记录的是文件的调试文件路径		文件
 文件版本	基础属性	file_ver	字符	文件的版本		文件
@@ -352,16 +333,12 @@ HOME目录路径	基础属性	home_directory	字符	系统/home下的目录		文
 服务端协议版本	基础属性	server_proto_version	字符	服务端的协议版本		服务端
 服务器名称	基础属性	server_name	字符	服务器的名称		服务端
 服务端ID	基础属性	server_id	字符	服务端唯一标识符		服务端
-模块起始地址	基础属性	module_start_address	字符	模块起始地址		模块
 模块大小	基础属性	module_size	字符	模块大小		模块
 模块路径	基础属性	module_path	字符	模块路径		模块
 模块名称	基础属性	module_name	字符	模块名称		模块
-函数调用模块MD5	基础属性	call_stack_module_md5	字符	函数调用模块MD5		模块
 文件ID	基础属性	file_search	字符	用于映射沙箱中文件ID值，可用作本脑下载文件		沙箱
 沙箱版本	基础属性	sandbox_version	字符	沙箱的版本		沙箱
 沙箱名称	基础属性	sandbox_name	字符	沙箱的名称		沙箱
-旧注册表键值	基础属性	old_reg_value	字符	旧注册表键值		注册表
-注册表地址	基础属性	reg_path	字符	注册表地址		注册表
 源nat转换地址	基础属性	src_nat_ip	IP			流量
 响应流量包数	基础属性	flow_res_package	整型			流量
 入接口	基础属性	input	字符	基础属性		流量
@@ -382,7 +359,6 @@ HOME目录路径	基础属性	home_directory	字符	系统/home下的目录		文
 目的地址列表	基础属性	dst_ip_list	IP			流量
 目的nat转换端口	基础属性	dst_nat_port	整型	基础属性		流量
 响应流量字节数	基础属性	flow_res_size	长整型			流量
-源端口总数	基础属性	src_ports_num	整型	net_flow_aggr		流量
 连接数量	基础属性	connect_count	整型			流量
 目的MAC	基础属性	dst_mac	字符	基础属性		流量
 源端口列表	基础属性	src_port_list	整型			流量
@@ -397,8 +373,6 @@ HOME目录路径	基础属性	home_directory	字符	系统/home下的目录		文
 漏洞名称	基础属性	vul_names	字符	漏洞名称		漏洞
 漏洞级别	基础属性	vul_level	字符			漏洞
 漏洞数量	基础属性	vul_count	整型	漏洞数量		漏洞
-环境变量名称	基础属性	env_name	字符	环境变量名称		环境变量
-环境变量值	基础属性	env_value	字符	环境变量值		环境变量
 有效用户ID	基础属性	effective_user_id	字符	有效用户ID		用户
 用户类型	基础属性	user_type	字符	用户类型		用户
 文件系统用户ID	基础属性	file_system_user_id	字符	文件系统用户ID，linux用于文件系统的访问控制，在没有明确设置的情况下与EUID相同		用户
@@ -478,7 +452,6 @@ shell路径	基础属性	shell_path	字符	shell路径		用户
 脚本执行函数参数	基础属性	script_action_funcargv	字符	脚本执行的函数参数内容		脚本
 脚本执行函数名称	基础属性	script_action_funcname	字符	脚本执行的函数名		脚本
 脚本名称	基础属性	script_filename	字符	脚本的文件名称		脚本
-蜜标名称	基础属性	honeytoken_name	字符	蜜罐诱饵的名称		蜜罐
 蜜罐名称	基础属性	honeypot_name	字符	蜜罐的名称		蜜罐
 蜜罐探针ID	基础属性	honeypot_agent_id	字符	蜜罐探针的ID		蜜罐
 蜜标状态	基础属性	honeytoken_status	字符	蜜罐诱饵的状态		蜜罐
@@ -582,7 +555,6 @@ ppath原始路径	基础属性	original_ppath	字符	ppath原始路径		进程
 祖父进程导入表HASH	基础属性	g_proc_importhash	字符	祖父进程导入表HASH		进程
 进程完整性等级	基础属性	proc_integrity	字符	进程完整性等级		进程
 进程当前目录	基础属性	proc_current_directory	字符	进程当前目录		进程
-反射dll名称	基础属性	reflective_dll_name	字符	反射dll名称		进程
 API名称	基础属性	proc_api_name	字符	API名称		进程
 目的进程签名	基础属性	dst_proc_signer	字符	目的进程签名		进程
 根进程命令行	基础属性	r_proc_command	字符	根进程命令行		进程
@@ -643,12 +615,7 @@ HASH检测结果	基础属性	ti	字符	邮件HASH检测结果		邮件
 邮件正文URL列表	基础属性	mail_texturls	字符	邮件正文URL列表		邮件
 配置类型	基础属性	profile_type	字符	描述哪个实体的配置		配置
 配置名称	基础属性	profile_name	字符	配置名称		配置
-配置内容	基础属性	profile_content	字符	配置内容		配置
 防火墙规则ID	基础属性	firewall_rule_id	字符	防火墙的规则ID		防火墙
 防火墙规则	基础属性	firewall_rule	字符	防火墙所拥有的的规则		防火墙
-样本提交来源	基础属性	malware_src	字符	样本提交来源		防病毒
-样本扫描方式	基础属性	malware_scan_ft	字符	样本扫描方式		防病毒
 病毒名称	基础属性	malware_name	字符	病毒名称		防病毒
-样本回扫任务id	基础属性	malware_rescan_id	字符	样本回扫任务id		防病毒
 病毒家族	基础属性	malware_family	字符	病毒家族名称		防病毒
-病毒库状态	基础属性	update_virus	枚举	描述防病毒产品病毒库的更新状态	最新,未知,过期	防病毒

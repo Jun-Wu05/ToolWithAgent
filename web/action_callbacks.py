@@ -380,6 +380,14 @@ async def on_apply_field_mapping(action: cl.Action):
                 if "匹配成功" in m.get("匹配状态", ""):
                     total_matched += 1
         
+        # 构建各子规则字段明细
+        per_rule_lines = []
+        for mr in all_sub_rule_results:
+            rule_name = mr.get("rule_name", "未知")
+            field_count = len(mr.get("mappings", []))
+            per_rule_lines.append(f"  - `{rule_name}`：{field_count} 个字段")
+        per_rule_detail = "\n".join(per_rule_lines)
+
         summary = (
             f"✅ **标准字段映射完成！**\n\n"
             f"📊 **映射统计：**\n"
@@ -387,6 +395,8 @@ async def on_apply_field_mapping(action: cl.Action):
             f"- 总字段数：{total_fields}\n"
             f"- 匹配成功：{total_matched} 个\n"
             f"- 未匹配：{total_fields - total_matched} 个\n\n"
+            f"📋 **各子规则字段明细：**\n"
+            f"{per_rule_detail}\n\n"
             f"✨ **表格功能：**\n"
             f"- 📌 点击列标题排序\n"
             f"- 🔍 使用搜索框筛选\n\n"

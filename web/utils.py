@@ -254,21 +254,29 @@ def render_log_parser_result(
     lines: List[str] = []
     lines.append("## 🔍 日志解析结果")
     lines.append("")
+
+    # CHANGED: 日志格式 + 格式详情合并显示，精简展示项
+    log_format_detail = classification.get("log_format_detail", "")
+    if log_format_detail and log_format_detail != log_format:
+        format_display = f"{log_format}（{log_format_detail}）"
+    else:
+        format_display = log_format
+
+    # CHANGED: 从 analysis 提取分隔符（KV 格式专用）
+    analysis = classification.get("analysis", {})
+    delimit = analysis.get("delimit", "")
+    tab = analysis.get("tab", "")
+    is_kv = str(log_format).upper() == "KV"
+
     lines.append(f"| 项目 | 值 |")
     lines.append(f"|---|---|")
-    lines.append(f"| 日志格式 | {log_format} |")
+    lines.append(f"| 日志格式 | {format_display} |")
     lines.append(f"| 业务分类字段 | `{feature_field}` |")
-    lines.append(f"| 特征标识符 | `{feature_identifier}` |")
-    if categorical_features:
-        lines.append(f"| 分类特征名称 | {categorical_features} |")
-    if diversion_method:
-        lines.append(f"| 分流方法 | {diversion_method} |")
     lines.append(f"| 分类数量 | {feature_count} |")
-
-    # 展示 log_format_detail（LLM 原始描述），避免与上方 log_format 枚举值重复
-    log_format_detail = classification.get("log_format_detail", "")
-    if log_format_detail:
-        lines.append(f"| 格式详情 | {log_format_detail} |")
+    # CHANGED: KV 格式展示分隔符（含"判断失败"），JSON 格式隐藏
+    if is_kv:
+        lines.append(f"| 字段分隔符 | {delimit or '判断失败'} |")
+        lines.append(f"| 键值分隔符 | {tab or '判断失败'} |")
 
     if overall_summary:
         lines.append("")
@@ -279,12 +287,10 @@ def render_log_parser_result(
         lines.append("")
         lines.append(f"### 📊 分类详情（{len(details)} 类）")
         lines.append("")
-        lines.append("| 字段值 | 特征值 | 真实样例 |")
-        lines.append("|---|---|---|")
+        lines.append("| 特征值 | 真实样例 |")
+        lines.append("|---|---|")
         for _d in details:
-            # 取消硬截断，完整展示字段内容
-            value = str(_d.get("logtype", ""))
-            # meaning/matched_regex 已废弃，改用 logtype + sample 展示
+            # CHANGED: 字段值与特征值列重复，已移除冗余列
             feature_val = str(_d.get("logtype", ""))
             real_samples = _d.get("real_samples", [])
             if isinstance(real_samples, str):
@@ -293,7 +299,7 @@ def render_log_parser_result(
                 sample = real_samples[0] if isinstance(real_samples, list) else str(real_samples)
             else:
                 sample = str(_d.get("sample", ""))
-            lines.append(f"| {value} | {feature_val} | {sample} |")
+            lines.append(f"| {feature_val} | {sample} |")
 
     lines.append("")
     lines.append("*以上结果由 LogParser Pipeline 直接生成*")
