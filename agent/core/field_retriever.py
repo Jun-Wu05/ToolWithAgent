@@ -35,7 +35,7 @@ from agent.shared.logger import get_logger
 logger = get_logger("field_retriever")
 
 # 缓存 schema 版本：标准字段表格式变更时递增，触发自动刷新
-CACHE_SCHEMA_VERSION = "2"
+CACHE_SCHEMA_VERSION = "3"  # v3: tag_rules.json 外置 + 中文同义词接入，需重建缓存
 
 # Embedding 模型配置
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
@@ -162,11 +162,38 @@ def _compute_bm25_scores(query_fields: list[str], bm25_index) -> np.ndarray:
     return scores
 
 
+_TAG_RULES_PATH = Path(__file__).parent.parent.parent / "config" / "tag_rules.json"
+_TAG_RULES: Optional[dict[str, list[str]]] = None
+
+
+def _load_tag_rules() -> dict[str, list[str]]:
+    """懒加载标签规则表 tag_rules.json。
+
+    结构：{ "标签名": ["关键词1", "关键词2", ...] }
+    匹配在 token 级进行（字段名拆分后的每个 token 与关键词严格相等），
+    避免子串误匹配（如 'severity' 含 'ver' 误触发 version）。
+    """
+    global _TAG_RULES
+    if _TAG_RULES is None:
+        try:
+            data = json.loads(_TAG_RULES_PATH.read_text(encoding="utf-8"))
+            _TAG_RULES = data.get("rules", data) if isinstance(data, dict) else data
+        except FileNotFoundError:
+            logger.warning(f"标签规则表不存在: {_TAG_RULES_PATH}，标签生成将禁用")
+            _TAG_RULES = {}
+        except Exception as e:
+            logger.warning(f"加载标签规则表失败: {e}，标签生成将禁用")
+            _TAG_RULES = {}
+    return _TAG_RULES
+
+
 def _generate_field_tags(field_name: str) -> list[str]:
     """
     从字段名自动推断元数据标签（纯规则，零 LLM 调用）。
 
-    标签用于嵌入复合文本增强，使拥有相同标签的字段在向量空间中互相靠近。
+    规则来自外置 tag_rules.json。字段名拆分为 token 后逐个匹配：
+    任一 token 命中某标签的关键词集合，即打上该标签。
+    token 级匹配可避免子串误匹配（如 'severity' 不再误触发 version）。
 
     Args:
         field_name: 字段名称（英文，如 destAddress, src_ip_list）
@@ -174,49 +201,20 @@ def _generate_field_tags(field_name: str) -> list[str]:
     Returns:
         排序后的语义标签列表
     """
+    rules = _load_tag_rules()
+    if not rules:
+        return []
+
+    # 拆分为小写 token（与 _normalize_field_name 一致的 camelCase 处理）
+    name = field_name.replace("-", "_")
+    name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
+    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    tokens = set(t.lower() for t in name.split("_"))
+
     tags: set[str] = set()
-    name_lower = _normalize_field_name(field_name)
-
-    # --- 方向标签 ---
-    if any(x in name_lower for x in ("src", "source")):
-        tags.update(("source", "network"))
-    if any(x in name_lower for x in ("dst", "dest", "destination")):
-        tags.update(("destination", "network"))
-
-    # --- 语义类型标签 ---
-    if any(x in name_lower for x in ("address", "addr", "ip", "sip", "dip")):
-        tags.add("address")
-    if "port" in name_lower:
-        tags.add("port")
-    if "mac" in name_lower:
-        tags.add("mac_address")
-    if any(x in name_lower for x in ("time", "timestamp", "date", "duration", "ttl")):
-        tags.add("time")
-    if any(x in name_lower for x in ("name", "label", "title")):
-        tags.add("name")
-    if any(x in name_lower for x in ("id", "identifier", "guid", "uuid", "xid")):
-        tags.add("identifier")
-    if any(x in name_lower for x in ("type", "category", "class", "code", "opcode", "op")):
-        tags.add("type")
-    if any(x in name_lower for x in ("count", "number", "size", "len", "length", "num",
-                                       "total", "cnt")):
-        tags.add("numeric")
-    if any(x in name_lower for x in ("status", "state", "flag")):
-        tags.add("status")
-    if any(x in name_lower for x in ("version", "ver")):
-        tags.add("version")
-    if any(x in name_lower for x in ("hash", "md5", "sha", "checksum")):
-        tags.add("hash")
-    if any(x in name_lower for x in ("path", "directory", "dir", "folder")):
-        tags.add("path")
-    if any(x in name_lower for x in ("protocol", "proto")):
-        tags.add("protocol")
-    if any(x in name_lower for x in ("dns", "dhcp", "http", "ftp", "smtp", "tcp", "udp",
-                                       "icmp", "arp", "ssh", "tls", "ssl")):
-        tags.add("protocol")
-    if any(x in name_lower for x in ("list", "items", "entries")):
-        tags.add("collection")
-
+    for tag, keywords in rules.items():
+        if tokens & set(keywords):
+            tags.add(tag)
     return sorted(tags)
 
 
@@ -413,9 +411,11 @@ def _save_cache_meta(file_md5: str, record_count: int) -> None:
     """
     保存缓存元数据。
     """
+    tag_md5 = _compute_file_md5(_TAG_RULES_PATH) if _TAG_RULES_PATH.exists() else ""
     meta = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "standard_fields_md5": file_md5,
+        "tag_rules_md5": tag_md5,
         "record_count": record_count,
         "embedding_model": EMBEDDING_MODEL,
         "embedding_dim": EMBEDDING_DIM,
@@ -494,22 +494,29 @@ def init_field_cache(force_refresh: bool = False) -> bool:
         bool: 缓存是否就绪（可用）
     """
     if not force_refresh and _CACHE_EMBEDDINGS_PATH.exists() and _CACHE_RECORDS_PATH.exists():
-        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 是否匹配
+        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 + tag规则 MD5 是否匹配
         meta = _get_cache_meta()
         if meta:
             meta_version = meta.get("schema_version", "")
             meta_md5 = meta.get("standard_fields_md5", "")
+            meta_tag_md5 = meta.get("tag_rules_md5", "")
             current_md5 = _compute_file_md5(_STANDARD_FIELDS_PATH)
+            # tag 规则影响索引端 _composite_text，变更需重建缓存
+            current_tag_md5 = _compute_file_md5(_TAG_RULES_PATH) if _TAG_RULES_PATH.exists() else ""
 
-            if meta_version == CACHE_SCHEMA_VERSION and meta_md5 == current_md5:
-                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5），跳过初始化")
+            if (meta_version == CACHE_SCHEMA_VERSION
+                    and meta_md5 == current_md5
+                    and meta_tag_md5 == current_tag_md5):
+                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5+tag规则），跳过初始化")
                 return True
             else:
                 differ: list[str] = []
                 if meta_version != CACHE_SCHEMA_VERSION:
                     differ.append(f"版本: {meta_version} → {CACHE_SCHEMA_VERSION}")
                 if meta_md5 != current_md5:
-                    differ.append(f"MD5: {meta_md5[:8]}... → {current_md5[:8]}...")
+                    differ.append(f"字段表MD5: {meta_md5[:8]}... → {current_md5[:8]}...")
+                if meta_tag_md5 != current_tag_md5:
+                    differ.append(f"tag规则MD5: {meta_tag_md5[:8]}... → {current_tag_md5[:8]}...")
                 logger.info(f"[CACHE] 标准字段表已变更 ({', '.join(differ)})，自动触发缓存刷新")
         else:
             logger.info("[CACHE] 缓存元数据缺失，触发缓存刷新")
