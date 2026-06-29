@@ -37,6 +37,19 @@ ToolWithAgent/
 config/标准字段_cache_meta.json
 config/标准字段_embeddings.npy
 config/标准字段_records.json
+config/*.npy
+config/*_cache_meta.json
+config/*_records.json
+
+# 备份文件
+*.bk
+*.bak
+
+# Office 临时文件（Excel/Word 打开时生成）
+~$*
+
+# Chainlit 空目录/误生成文件
+chainlit
 
 # 向量知识库（运行时生成，不提交）
 *.db
