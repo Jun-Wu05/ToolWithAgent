@@ -14,6 +14,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -50,6 +51,11 @@ EMBEDDING_MAX_RETRIES = 3  # 最多重试次数（+1 次容错）
 SIMILARITY_THRESHOLD = 0.15
 # 单条复合文本的最大字段描述长度（字符），防止超长文本溢出模型上下文
 MAX_DESCRIPTION_LENGTH = 200
+
+# 检索诊断日志开关：设为 True 后，batch_retrieve_candidates 会在 DEBUG 级别
+# 逐字段打印候选在「纯向量 → BM25融合 → 候选收集 → token重排序」各阶段的排名轨迹，
+# 便于定位候选被压到 top_k 之外的原因。排查完毕可改回 False 关闭。
+RETRIEVE_DEBUG_TRACE = True
 
 # 网络协议字段常见缩写 → 全称展开（覆盖所有标准字段，零手动维护）
 ABBR_EXPANSIONS: dict[str, str] = {
@@ -676,6 +682,47 @@ def _strip_field_prefix(name: str) -> list[str]:
     return variants
 
 
+def _format_top_n(sims_row: Optional[np.ndarray], records: list[dict], n: int = 5) -> str:
+    """将一行相似度向量格式化为 "名(分数) | 名(分数) ..." 的 top-N 文本（诊断用）。"""
+    if sims_row is None:
+        return "(未启用诊断)"
+    k = min(n, len(sims_row))
+    top = np.argsort(sims_row)[::-1][:k]
+    return " | ".join(
+        f"{records[idx].get('系统属性名称', '')}({float(sims_row[idx]):.2f})" for idx in top
+    )
+
+
+def _log_retrieve_trace(
+    field_name: str,
+    i: int,
+    pure_vector_matrix: Optional[np.ndarray],
+    similarity_matrix: np.ndarray,
+    candidates_tmp: list[tuple[str, str, float]],
+    candidates: list[str],
+    records: list[dict],
+) -> None:
+    """打印单个字段检索各阶段候选排名的诊断日志（DEBUG 级别）。
+
+    阶段说明：
+    - 阶段1 纯向量：embedding 余弦相似度 top5（BM25 融合前）
+    - 阶段2 融合后：BM25 融合后 top5（即喂给 Layer2 的 sims）
+    - 阶段3 收集候选：Layer1/1.5/2/2.5 汇总的候选（含精确匹配与去前缀变体）
+    - 阶段4 重排序后：token 重排序后的最终输出（即注入 LLM 的候选）
+    """
+    stage1 = _format_top_n(pure_vector_matrix[i] if pure_vector_matrix is not None else None, records)
+    stage2 = _format_top_n(similarity_matrix[i], records)
+    stage3 = " | ".join(fmt for fmt, _, _ in candidates_tmp) or "(空)"
+    stage4 = " | ".join(candidates) or "(空-被阈值过滤/重排序丢弃)"
+    logger.debug(
+        f"[TRACE] '{field_name}'\n"
+        f"  阶段1 纯向量top5 : {stage1}\n"
+        f"  阶段2 BM25融合后 : {stage2}\n"
+        f"  阶段3 收集候选({len(candidates_tmp)}): {stage3}\n"
+        f"  阶段4 重排序输出 : {stage4}"
+    )
+
+
 def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str:
     """
     对一批原始字段名执行语义检索，返回紧凑格式的候选列表。
@@ -733,6 +780,9 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
     # query_vecs: (N_fields, D), embeddings: (N_records, D)
     # 结果: (N_fields, N_records)
     similarity_matrix = np.dot(query_vecs, embeddings.T)
+
+    # 保存纯向量相似度副本，供诊断日志对比 BM25 融合前后的排名变化
+    pure_vector_matrix = similarity_matrix.copy() if RETRIEVE_DEBUG_TRACE else None
 
     # BM25 混合检索：在纯向量相似度基础上融合关键词匹配分数
     # 权重分配：向量 70%，BM25 30%（当 BM25 索引就绪时）
@@ -884,6 +934,13 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
             reranked_rows.append((tier, -overlap, -sim, fmt_str))
         reranked_rows.sort()
         candidates = [row[3] for row in reranked_rows]
+
+        # 检索诊断：追踪候选在「纯向量 → BM25融合 → 候选收集 → token重排序」各阶段的排名
+        if RETRIEVE_DEBUG_TRACE and logger.isEnabledFor(logging.DEBUG):
+            _log_retrieve_trace(
+                field_name, i, pure_vector_matrix, similarity_matrix,
+                candidates_tmp, candidates, records,
+            )
 
         if candidates:
             lines.append(f"{field_name} → {' | '.join(candidates)}")
