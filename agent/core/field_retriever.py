@@ -57,78 +57,32 @@ MAX_DESCRIPTION_LENGTH = 200
 # 便于定位候选被压到 top_k 之外的原因。排查完毕可改回 False 关闭。
 RETRIEVE_DEBUG_TRACE = True
 
-# 网络协议字段常见缩写 → 全称展开（覆盖所有标准字段，零手动维护）
-ABBR_EXPANSIONS: dict[str, str] = {
-    "dest": "destination",
-    "dst": "destination",
-    "src": "source",
-    "addr": "address",
-    "mac": "mac_address",
-    "ip": "ip_address",
-    "sip": "source_ip",
-    "dip": "destination_ip",
-    "dev": "device",
-    "host": "host",
-    "num": "number",
-    "id": "identifier",
-    "info": "information",
-    "desc": "description",
-    "cnt": "count",
-    "len": "length",
-    "seq": "sequence",
-    "ack": "acknowledgement",
-    "syn": "synchronize",
-    "pkt": "packet",
-    "msg": "message",
-    "cfg": "configuration",
-    "max": "maximum",
-    "min": "minimum",
-    "avg": "average",
-    "total": "total",
-    "list": "list",
-    "type": "type",
-    "name": "name",
-    "code": "code",
-    "flag": "flag",
-    "port": "port",
-    "proto": "protocol",
-    "ver": "version",
-    "uri": "uri",
-    "url": "url",
-    "svc": "service",
-    "loc": "location",
-    "prov": "province",
-    "cty": "city",
-    "cntry": "country",
-    "grp": "group",
-    "usr": "user",
-    "pwd": "password",
-    "tgt": "target",
-    "ref": "reference",
-    "orig": "origin",
-    "sub": "sub",
-    "pub": "public",
-    "priv": "private",
-    "ext": "external",
-    "int": "internal",
-    "nat": "network_address_translation",
-    "dns": "domain_name_system",
-    "dhcp": "dynamic_host_configuration_protocol",
-    "http": "hypertext_transfer_protocol",
-    "https": "hypertext_transfer_protocol_secure",
-    "ftp": "file_transfer_protocol",
-    "smtp": "simple_mail_transfer_protocol",
-    "tcp": "transmission_control_protocol",
-    "udp": "user_datagram_protocol",
-    "icmp": "internet_control_message_protocol",
-    "arp": "address_resolution_protocol",
-    "vlan": "virtual_local_area_network",
-    "vpn": "virtual_private_network",
-    "os": "operating_system",
-    "hw": "hardware",
-    "sw": "software",
-    "fw": "firewall",
-}
+# 字段同义词表路径（外置配置：缩写→英文全称 + 中文同义词）
+_SYNONYMS_PATH = Path(__file__).parent.parent.parent / "config" / "field_synonyms.json"
+
+# 同义词表缓存（懒加载）。结构：{ token: {"en": str, "zh": [str, ...]} }
+_SYNONYMS: Optional[dict[str, dict]] = None
+
+
+def _load_synonyms() -> dict[str, dict]:
+    """懒加载字段同义词表。
+
+    field_synonyms.json 结构：{ "token": {"en": "英文全称", "zh": ["中文同义词", ...]} }
+    - en：缩写/字段名 → 英文全称，用于 embedding 前文本展开（替代原 ABBR_EXPANSIONS）
+    - zh：token → 中文同义词列表，用于 query 文本跨语言桥接（提升中文标准字段召回）
+    """
+    global _SYNONYMS
+    if _SYNONYMS is None:
+        try:
+            _SYNONYMS = json.loads(_SYNONYMS_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            logger.warning(f"同义词表不存在: {_SYNONYMS_PATH}，缩写展开与中文桥接将禁用")
+            _SYNONYMS = {}
+        except Exception as e:
+            logger.warning(f"加载同义词表失败: {e}，缩写展开与中文桥接将禁用")
+            _SYNONYMS = {}
+    return _SYNONYMS
+
 
 # 缓存文件路径
 _STANDARD_FIELDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
@@ -267,13 +221,20 @@ def _generate_field_tags(field_name: str) -> list[str]:
 
 
 def _expand_field_name(field_name: str) -> str:
-    """将缩写字段名展开为全英文描述，例如 destAddress → destination address"""
+    """将缩写字段名展开为全英文描述，例如 destAddress → destination address。
+
+    展开规则来自外置同义词表 field_synonyms.json 的 en 字段（替代原硬编码 ABBR_EXPANSIONS）。
+    """
+    synonyms = _load_synonyms()
     # camelCase/pascalCase → snake_case 拆分（与 _normalize_field_name 一致）
     name = field_name.replace("-", "_")
     name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
     name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
     tokens = name.split("_")
-    expanded = [ABBR_EXPANSIONS.get(t.lower(), t) for t in tokens]
+    expanded = []
+    for t in tokens:
+        entry = synonyms.get(t.lower())
+        expanded.append(entry["en"] if entry and entry.get("en") else t)
     return " ".join(expanded)
 
 
@@ -640,24 +601,54 @@ def _load_cache() -> tuple[Optional[np.ndarray], Optional[list[dict]]]:
         return None, None
 
 
+def _collect_zh_synonyms(field_name: str) -> list[str]:
+    """收集字段名各 token 对应的中文同义词（去重，保持顺序）。
+
+    用于在 query 文本中桥接中文标准字段——embedding 模型对中英跨语言对齐能力有限，
+    在 query 里补上中文同义词可显著提升对中文系统属性名（如"协议""文件名称"）的召回。
+    """
+    synonyms = _load_synonyms()
+    name = field_name.replace("-", "_")
+    name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
+    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    tokens = name.split("_")
+    zh_set: list[str] = []
+    seen: set[str] = set()
+    for t in tokens:
+        entry = synonyms.get(t.lower())
+        if not entry:
+            continue
+        for zh in entry.get("zh", []):
+            if zh and zh not in seen:
+                zh_set.append(zh)
+                seen.add(zh)
+    return zh_set
+
+
 def _build_query_text_for_embedding(field_name: str) -> str:
     """
-    为 Embedding API 查询构建带标签的增强输入文本。
+    为 Embedding API 查询构建带标签与中文同义词的增强输入文本。
 
-    使查询端与索引端使用相同的标签格式，
-    BGE-m3 可将拥有相同标签的查询与候选字段在向量空间中拉近。
+    - 标签（[TAGS:...]）：使查询端与索引端使用相同的标签格式，BGE-m3 可将拥有
+      相同标签的查询与候选字段在向量空间中拉近。
+    - 中文同义词：补在标签后，桥接中文标准字段，提升跨语言召回（如 appProtocol →
+      补"协议"，使其更易命中系统属性名"协议 protocol"）。
 
     Args:
         field_name: 原始字段名（如 destAddress, src_ip_list）
 
     Returns:
-        带标签的文本，供 Embedding API 编码
+        带标签与中文同义词的文本，供 Embedding API 编码
     """
     tags = _generate_field_tags(field_name)
     expanded = _expand_field_name(field_name)
+    zh_synonyms = _collect_zh_synonyms(field_name)
+    parts = [expanded]
     if tags:
-        return f"{expanded} [TAGS:{' '.join(tags)}]"
-    return expanded
+        parts.append(f"[TAGS:{' '.join(tags)}]")
+    if zh_synonyms:
+        parts.append(" ".join(zh_synonyms))
+    return " ".join(parts)
 
 
 def _strip_field_prefix(name: str) -> list[str]:
