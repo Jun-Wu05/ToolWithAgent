@@ -482,6 +482,7 @@ CPU架构	基础属性	cpu_architecture	字符	cpu的架构		计算机资源
 认证类型	基础属性	auth_type	字符	认证类型		认证
 设备MAC地址	基础属性	dev_mac	字符			设备
 设备描述	基础属性	dev_describe	字符	设备的描述信息		设备
+设备名称	基础属性	dev_name	字符	设备的名称		设备
 证书显示名称	基础属性	cert_display_name	字符	证书显示名称		证书
 证书名称_RDN	基础属性	cert_name_rdn	字符	证书名称_RDN		证书
 证书类型	基础属性	cert_type	字符	证书类型		证书
