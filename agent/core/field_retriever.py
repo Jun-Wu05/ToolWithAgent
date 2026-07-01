@@ -489,6 +489,16 @@ def _normalize_field_name(name: str) -> str:
     return name.lower()
 
 
+def _compact_field_name(name: str) -> str:
+    """去除所有分隔符的紧凑形式（file_name → filename）。
+
+    用于精确匹配的二级 key，消除 camelCase 拆分（file_name）与无分隔符命名
+    （filename）之间的差异。标准字段表里 filename / file_name / fileName
+    会被归一化到同一个紧凑形式，从而在 Layer1 精确匹配时命中。
+    """
+    return re.sub(r"[_\-\s]", "", name).lower()
+
+
 def _build_field_name_index(records: list[dict]) -> dict[str, int]:
     """
     构建「规范化字段名 → 记录索引」的精确匹配字典。
@@ -504,8 +514,10 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
     index: dict[str, int] = {}
     for i, rec in enumerate(records):
         field_name = rec.get("字段名称", "")
-        if field_name:
-            key = _normalize_field_name(field_name)
+        if not field_name:
+            continue
+        # 注册两级 key：snake_case 形式 + 紧凑形式（消除 file_name/filename 鸿沟）
+        for key in (_normalize_field_name(field_name), _compact_field_name(field_name)):
             # 若存在多个记录映射到同一 key，保留第一个（最权威）
             if key not in index:
                 index[key] = i
@@ -756,6 +768,9 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         # Layer 1: 精确名称匹配兜底（置顶）— 先试原始字段名
         normalized_key = _normalize_field_name(field_name)
         exact_idx = exact_index.get(normalized_key)
+        # 紧凑形式兜底：消除 file_name（camelCase 拆分）与 filename（无分隔符）的鸿沟
+        if exact_idx is None:
+            exact_idx = exact_index.get(_compact_field_name(field_name))
         if exact_idx is not None:
             rec = records[exact_idx]
             rfn = rec.get('字段名称', '')
