@@ -23,13 +23,6 @@ from typing import Optional
 
 import numpy as np
 
-try:
-    from rank_bm25 import BM25Okapi
-    _BM25_AVAILABLE = True
-except ImportError:
-    _BM25_AVAILABLE = False
-    BM25Okapi = None  # type: ignore
-
 from agent.shared.logger import get_logger
 
 logger = get_logger("field_retriever")
@@ -53,7 +46,7 @@ SIMILARITY_THRESHOLD = 0.15
 MAX_DESCRIPTION_LENGTH = 200
 
 # 检索诊断日志开关：设为 True 后，batch_retrieve_candidates 会在 DEBUG 级别
-# 逐字段打印候选在「纯向量 → BM25融合 → 候选收集 → token重排序」各阶段的排名轨迹，
+# 逐字段打印候选在「纯向量 → 候选收集 → token重排序」各阶段的排名轨迹，
 # 便于定位候选被压到 top_k 之外的原因。排查完毕可改回 False 关闭。
 RETRIEVE_DEBUG_TRACE = True
 
@@ -89,77 +82,6 @@ _STANDARD_FIELDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准
 _CACHE_EMBEDDINGS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_embeddings.npy"
 _CACHE_RECORDS_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_records.json"
 _CACHE_META_PATH = Path(__file__).parent.parent.parent / "config" / "标准字段_cache_meta.json"
-
-# BM25 混合检索状态（懒加载）
-_BM25_INDEX = None  # type: ignore[valid-type]
-_BM25_RECORDS: Optional[list[dict]] = None
-_BM25_INIT_ATTEMPTED: bool = False
-
-
-def _init_bm25_index() -> bool:
-    """
-    懒加载 BM25 关键词检索索引。
-
-    基于标准字段记录的「字段名称 + 系统属性名称」（展开缩写后）构建。
-    只在 rank_bm25 可用且缓存已加载时初始化。
-
-    Returns:
-        bool: BM25 索引是否就绪
-    """
-    global _BM25_INDEX, _BM25_RECORDS, _BM25_INIT_ATTEMPTED
-    if _BM25_INDEX is not None:
-        return True
-    if _BM25_INIT_ATTEMPTED:
-        return False
-    _BM25_INIT_ATTEMPTED = True
-
-    if not _BM25_AVAILABLE:
-        logger.info("[BM25] rank_bm25 未安装，降级为纯向量检索")
-        return False
-
-    # 加载缓存确保 records 可用
-    _emb, records = _load_cache()
-    if records is None:
-        logger.info("[BM25] 缓存未就绪，无法构建 BM25 索引")
-        return False
-
-    # 构建语料：每条记录的展开 token 序列
-    corpus: list[list[str]] = []
-    for rec in records:
-        field_name = rec.get('字段名称', '')
-        sys_name = rec.get('系统属性名称', '')
-        entry_text = f"{_expand_field_name(field_name)} {_expand_field_name(sys_name)}"
-        corpus.append(entry_text.split())
-
-    try:
-        _BM25_INDEX = BM25Okapi(corpus)
-        _BM25_RECORDS = records
-        logger.info(f"[BM25] 索引构建成功：{len(records)} 条文档")
-        return True
-    except Exception as e:
-        logger.warning(f"[BM25] 索引构建失败: {e}")
-        return False
-
-
-def _compute_bm25_scores(query_fields: list[str], bm25_index) -> np.ndarray:
-    """
-    对一批查询字段计算 BM25 分数矩阵。
-
-    Args:
-        query_fields: 查询字段名列表
-        bm25_index: BM25Okapi 索引实例
-
-    Returns:
-        (N_fields, N_docs) 的 float64 矩阵，每行为该查询对全部文档的 BM25 分数
-    """
-    n_fields = len(query_fields)
-    n_docs = bm25_index.corpus_size
-    scores = np.zeros((n_fields, n_docs), dtype=np.float64)
-    for i, field in enumerate(query_fields):
-        query_tokens = _expand_field_name(field).split()
-        doc_scores = bm25_index.get_scores(query_tokens)
-        scores[i, :] = np.array(doc_scores, dtype=np.float64)
-    return scores
 
 
 _TAG_RULES_PATH = Path(__file__).parent.parent.parent / "config" / "tag_rules.json"
@@ -694,7 +616,6 @@ def _format_top_n(sims_row: Optional[np.ndarray], records: list[dict], n: int = 
 def _log_retrieve_trace(
     field_name: str,
     i: int,
-    pure_vector_matrix: Optional[np.ndarray],
     similarity_matrix: np.ndarray,
     candidates_tmp: list[tuple[str, str, float]],
     candidates: list[str],
@@ -703,21 +624,18 @@ def _log_retrieve_trace(
     """打印单个字段检索各阶段候选排名的诊断日志（DEBUG 级别）。
 
     阶段说明：
-    - 阶段1 纯向量：embedding 余弦相似度 top5（BM25 融合前）
-    - 阶段2 融合后：BM25 融合后 top5（即喂给 Layer2 的 sims）
-    - 阶段3 收集候选：Layer1/1.5/2/2.5 汇总的候选（含精确匹配与去前缀变体）
-    - 阶段4 重排序后：token 重排序后的最终输出（即注入 LLM 的候选）
+    - 阶段1 纯向量：embedding 余弦相似度 top5（即喂给 Layer2 的 sims）
+    - 阶段2 收集候选：Layer1/1.5/2/2.5 汇总的候选（含精确匹配与去前缀变体）
+    - 阶段3 重排序后：token 重排序后的最终输出（即注入 LLM 的候选）
     """
-    stage1 = _format_top_n(pure_vector_matrix[i] if pure_vector_matrix is not None else None, records)
-    stage2 = _format_top_n(similarity_matrix[i], records)
-    stage3 = " | ".join(fmt for fmt, _, _ in candidates_tmp) or "(空)"
-    stage4 = " | ".join(candidates) or "(空-被阈值过滤/重排序丢弃)"
+    stage1 = _format_top_n(similarity_matrix[i], records)
+    stage2 = " | ".join(fmt for fmt, _, _ in candidates_tmp) or "(空)"
+    stage3 = " | ".join(candidates) or "(空-被阈值过滤/重排序丢弃)"
     logger.debug(
         f"[TRACE] '{field_name}'\n"
         f"  阶段1 纯向量top5 : {stage1}\n"
-        f"  阶段2 BM25融合后 : {stage2}\n"
-        f"  阶段3 收集候选({len(candidates_tmp)}): {stage3}\n"
-        f"  阶段4 重排序输出 : {stage4}"
+        f"  阶段2 收集候选({len(candidates_tmp)}): {stage2}\n"
+        f"  阶段3 重排序输出 : {stage3}"
     )
 
 
@@ -778,28 +696,6 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
     # query_vecs: (N_fields, D), embeddings: (N_records, D)
     # 结果: (N_fields, N_records)
     similarity_matrix = np.dot(query_vecs, embeddings.T)
-
-    # 保存纯向量相似度副本，供诊断日志对比 BM25 融合前后的排名变化
-    pure_vector_matrix = similarity_matrix.copy() if RETRIEVE_DEBUG_TRACE else None
-
-    # BM25 混合检索：在纯向量相似度基础上融合关键词匹配分数
-    # 权重分配：向量 70%，BM25 30%（当 BM25 索引就绪时）
-    bm25_weight: float = 0.3
-    if _init_bm25_index() and _BM25_INDEX is not None:
-        try:
-            bm25_scores = _compute_bm25_scores(raw_field_names, _BM25_INDEX)
-            # 对 BM25 分数做 min-max 归一化至 [0, 1]
-            bm25_min = bm25_scores.min(axis=1, keepdims=True)
-            bm25_max = bm25_scores.max(axis=1, keepdims=True)
-            bm25_range = np.maximum(bm25_max - bm25_min, 1e-10)
-            bm25_norm = (bm25_scores - bm25_min) / bm25_range
-            # 融合：向量相似度 * (1-w) + BM25 归一化分数 * w
-            similarity_matrix = similarity_matrix * (1.0 - bm25_weight) + bm25_norm * bm25_weight
-            logger.info(f"[BM25] 混合检索已融合：bm25_weight={bm25_weight}，{len(raw_field_names)} 个查询字段")
-        except Exception as e:
-            logger.warning(f"[BM25] 混合融合失败，降级为纯向量检索: {e}")
-    else:
-        logger.info("[BM25] 跳过混合检索（索引未就绪）")
 
     # 构建精确名称匹配索引（用于语义检索兜底前置）
     exact_index = _build_field_name_index(records)
@@ -933,10 +829,10 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         reranked_rows.sort()
         candidates = [row[3] for row in reranked_rows]
 
-        # 检索诊断：追踪候选在「纯向量 → BM25融合 → 候选收集 → token重排序」各阶段的排名
+        # 检索诊断：追踪候选在「纯向量 → 候选收集 → token重排序」各阶段的排名
         if RETRIEVE_DEBUG_TRACE and logger.isEnabledFor(logging.DEBUG):
             _log_retrieve_trace(
-                field_name, i, pure_vector_matrix, similarity_matrix,
+                field_name, i, similarity_matrix,
                 candidates_tmp, candidates, records,
             )
 

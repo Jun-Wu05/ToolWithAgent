@@ -16,8 +16,5 @@ agno==2.5.17
 openai==2.32.0
 SQLAlchemy==2.0.49
 
-# 混合检索
-rank_bm25>=2.0
-
 # HTTP 客户端（DeepSeek API 调用）
 httpx>=0.24.0

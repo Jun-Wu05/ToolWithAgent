@@ -5,7 +5,7 @@
 存储已解析日志的指纹 + embedding，实现跨文件自动匹配。
 - 指纹脱敏: IP→{ip}, 时间→{time}, 数字→{n}
 - 存储: SQLite 存元数据 + .npy 存 embedding
-- 检索: 余弦相似度 + BM25 混合
+- 检索: 余弦相似度
 - 自动匹配阈值: ≥ 0.85
 
 复用 agent/core/field_retriever.py 的 embedding API 和 cosine 工具函数。
