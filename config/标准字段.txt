@@ -141,6 +141,8 @@ TLS证书链	基础属性	tls_chain	字符	TLS证书链		tls协议
 计算机组	基础属性	com_group	字符			主机
 主机MAC地址	基础属性	host_mac	字符			主机
 主机GUID	基础属性	host_guid	字符			主机
+主机名称	高级业务属性	host_name	字符			主机
+主机ID	业务属性	client_host_sign	字符			主机
 操作系统内核版本	基础属性	os_kernel_version	字符			主机
 操作系统平台	基础属性	os	枚举	Windows|Linux|MacOS|others	Linux,MacOS,others,Windows	主机
 操作系统补丁	基础属性	os_patch	字符			主机
@@ -162,6 +164,8 @@ TLS证书链	基础属性	tls_chain	字符	TLS证书链		tls协议
 事件摘要	基础属性	event_title	字符	事件的摘要；事件内容、摘要、描述这三个字段均可描述事件，三者无本质区别，提供三个字段是为了从不同维度进行描述；优先级:事件摘要>事件内容>事件描述		事件
 事件引用链接	基础属性	event_reference_url	字符	关于该事件说明的引用参考链接；		事件
 事件索引	基础属性	event_index	字符	通过事件索引关联其他事件		事件
+事件名称	业务属性	event_name	字符			事件
+事件级别	业务属性	event_level	整型			事件
 事件内容	基础属性	event_content	字符	描述事件的内容；事件内容、摘要、描述这三个字段均可描述事件，三者无本质区别，提供三个字段是为了从不同维度进行描述；优先级:事件摘要>事件内容>事件描述		事件
 事件原因	基础属性	event_reason	字符	事件发生的原因，尤其是错误事件和失败事件发生的原因；		事件
 事件源	基础属性	event_provider	字符	用于终端监测设备、安全告警设备产生告警日志是来源于什么模块、日志等		事件
