@@ -23,7 +23,6 @@ from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
 from agent.tools import (
     field_mapping_tool,
-    threat_type_tool,
     enum_field_tool,
     extract_enum_from_logs,
     extract_enum_with_regex,
@@ -162,17 +161,13 @@ def create_field_mapping_agent() -> Agent:
 
 
 def create_threat_agent() -> Agent:
-    """创建威胁类型Agent（挂载工具：threat_type_tool）"""
+    """创建威胁类型Agent（纯 prompt 驱动，无需工具）"""
     return Agent(
         name="ThreatAgent",
         role="威胁类型专家",
         model=ModelConfig.get_main_model(),
         instructions=_get_threat_instructions(),
-        tools=[
-            threat_type_tool,     # 威胁类型规则匹配 + 置信度评分
-        ],
         output_schema=ThreatMappingList,  # v3: API 层强制输出 JSON 且符合 schema，杜绝非规范格式
-        tool_call_limit=1,                # v2: 仅 1 个工具，1 次足够
         markdown=False,                   # 配合 output_schema JSON 输出，禁止 Markdown 包装
         debug_mode=False,
     )
