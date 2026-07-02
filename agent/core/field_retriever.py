@@ -587,6 +587,66 @@ def _collect_zh_synonyms(field_name: str) -> list[str]:
     return zh_set
 
 
+def _reverse_bridge(field_name: str) -> tuple[list[str], list[str]]:
+    """中文 query 反向桥接：从 synonyms 表的 zh 同义词反查英文。
+
+    _expand_field_name/_collect_zh_synonyms/_generate_field_tags 三件增强武器
+    均为「英文→中文」单向设计，对中文 query（如「攻击类型」「动作」）全部失效，
+    导致 query 退化为裸中文词做 embedding，召回不稳定。synonyms 表里其实已有
+    现成映射（threat_type.zh 含「攻击类型」、action.zh 含「动作」、
+    event_action.zh 含「事件动作」），本函数补上反向查找路径。
+
+    匹配规则（针对每个 entry 的 zh 列表逐项判断）：
+    - 精确相等：query 与 zh 完全相同
+    - 双向子串：query 含 zh 或 zh 含 query
+
+    Args:
+        field_name: 原始字段名（含中文时启用桥接）
+
+    Returns:
+        (en_terms, bridged_keys)：
+        - en_terms：命中条目的 en 英文全称列表（去重、精确匹配优先、最多 5 个）
+        - bridged_keys：命中条目的英文 key 列表（用于补打 tag）
+    """
+    # 仅对含中文的 query 启用，纯英文字段名走原有链路不受影响
+    if not re.search(r"[\u4e00-\u9fff]", field_name):
+        return [], []
+
+    synonyms = _load_synonyms()
+    if not synonyms:
+        return [], []
+
+    name = field_name.strip()
+    exact_hits: list[str] = []   # 精确相等命中的 en
+    exact_keys: list[str] = []   # 精确相等命中的 key
+    substr_hits: list[str] = []  # 子串命中的 en
+    substr_keys: list[str] = []  # 子串命中的 key
+    seen_en: set[str] = set()
+
+    for key, entry in synonyms.items():
+        en = entry.get("en", "")
+        if not en or en in seen_en:
+            continue
+        for zh in entry.get("zh", []):
+            if not zh:
+                continue
+            if name == zh:
+                exact_hits.append(en)
+                exact_keys.append(key)
+                seen_en.add(en)
+                break
+            if name in zh or zh in name:
+                substr_hits.append(en)
+                substr_keys.append(key)
+                seen_en.add(en)
+                break
+
+    # 精确匹配优先于子串匹配，最多取 5 个 en，避免 query 文本过长
+    en_terms = (exact_hits + substr_hits)[:5]
+    bridged_keys = (exact_keys + substr_keys)[:5]
+    return en_terms, bridged_keys
+
+
 def _build_query_text_for_embedding(field_name: str) -> str:
     """
     为 Embedding API 查询构建带标签与中文同义词的增强输入文本。
@@ -605,7 +665,16 @@ def _build_query_text_for_embedding(field_name: str) -> str:
     tags = _generate_field_tags(field_name)
     expanded = _expand_field_name(field_name)
     zh_synonyms = _collect_zh_synonyms(field_name)
+    # 中文 query 反向桥接：补回丢失的英文锚点与 tag 对齐。
+    # 纯英文字段名时 _reverse_bridge 返回空，不影响原有链路。
+    en_terms, bridged_keys = _reverse_bridge(field_name)
+    if bridged_keys:
+        for bk in bridged_keys:
+            tags.extend(_generate_field_tags(bk))
+        tags = sorted(set(tags))
     parts = [expanded]
+    if en_terms:
+        parts.append(" ".join(en_terms))
     if tags:
         parts.append(f"[TAGS:{' '.join(tags)}]")
     if zh_synonyms:
