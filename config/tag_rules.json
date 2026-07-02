@@ -17,6 +17,7 @@
     "hash":        ["hash", "md5", "sha", "checksum"],
     "path":        ["path", "directory", "folder"],
     "protocol":    ["protocol", "proto", "dns", "dhcp", "http", "ftp", "smtp", "tcp", "udp", "icmp", "arp", "ssh", "tls", "ssl"],
+    "http":        ["http", "https", "url", "uri"],
     "collection":  ["list", "items", "entries"],
     "threat":      ["threat", "attack", "attck", "risk", "severity", "malware"],
     "victim":      ["victim"],

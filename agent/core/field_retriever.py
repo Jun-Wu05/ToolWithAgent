@@ -28,7 +28,7 @@ from agent.shared.logger import get_logger
 logger = get_logger("field_retriever")
 
 # 缓存 schema 版本：标准字段表格式变更时递增，触发自动刷新
-CACHE_SCHEMA_VERSION = "3"  # v3: tag_rules.json 外置 + 中文同义词接入，需重建缓存
+CACHE_SCHEMA_VERSION = "4"  # v4: tag_rules 新增 http tag + synonyms_md5 追踪 + 复合 key 回退，需重建缓存
 
 # Embedding 模型配置
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
@@ -155,6 +155,11 @@ def _expand_field_name(field_name: str) -> str:
     for t in tokens:
         entry = synonyms.get(t.lower())
         expanded.append(entry["en"] if entry and entry.get("en") else t)
+    # 回退查询：整字段名作为复合 key 查 synonyms（如 attack_type/http_url）
+    # 修复 133 个带下划线死条目：单 token 查不到时，复合 key 的 en 定义才生效
+    full_entry = synonyms.get(name.lower())
+    if full_entry and full_entry.get("en"):
+        expanded.append(full_entry["en"])
     return " ".join(expanded)
 
 
@@ -334,10 +339,12 @@ def _save_cache_meta(file_md5: str, record_count: int) -> None:
     保存缓存元数据。
     """
     tag_md5 = _compute_file_md5(_TAG_RULES_PATH) if _TAG_RULES_PATH.exists() else ""
+    synonyms_md5 = _compute_file_md5(_SYNONYMS_PATH) if _SYNONYMS_PATH.exists() else ""
     meta = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "standard_fields_md5": file_md5,
         "tag_rules_md5": tag_md5,
+        "synonyms_md5": synonyms_md5,
         "record_count": record_count,
         "embedding_model": EMBEDDING_MODEL,
         "embedding_dim": EMBEDDING_DIM,
@@ -416,20 +423,24 @@ def init_field_cache(force_refresh: bool = False) -> bool:
         bool: 缓存是否就绪（可用）
     """
     if not force_refresh and _CACHE_EMBEDDINGS_PATH.exists() and _CACHE_RECORDS_PATH.exists():
-        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 + tag规则 MD5 是否匹配
+        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 + tag规则 MD5 + 同义词表 MD5 是否匹配
         meta = _get_cache_meta()
         if meta:
             meta_version = meta.get("schema_version", "")
             meta_md5 = meta.get("standard_fields_md5", "")
             meta_tag_md5 = meta.get("tag_rules_md5", "")
+            meta_synonyms_md5 = meta.get("synonyms_md5", "")
             current_md5 = _compute_file_md5(_STANDARD_FIELDS_PATH)
             # tag 规则影响索引端 _composite_text，变更需重建缓存
             current_tag_md5 = _compute_file_md5(_TAG_RULES_PATH) if _TAG_RULES_PATH.exists() else ""
+            # synonyms 影响索引端 _composite_text（_expand_field_name 展开），变更需重建缓存
+            current_synonyms_md5 = _compute_file_md5(_SYNONYMS_PATH) if _SYNONYMS_PATH.exists() else ""
 
             if (meta_version == CACHE_SCHEMA_VERSION
                     and meta_md5 == current_md5
-                    and meta_tag_md5 == current_tag_md5):
-                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5+tag规则），跳过初始化")
+                    and meta_tag_md5 == current_tag_md5
+                    and meta_synonyms_md5 == current_synonyms_md5):
+                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5+tag规则+同义词），跳过初始化")
                 return True
             else:
                 differ: list[str] = []
@@ -439,6 +450,8 @@ def init_field_cache(force_refresh: bool = False) -> bool:
                     differ.append(f"字段表MD5: {meta_md5[:8]}... → {current_md5[:8]}...")
                 if meta_tag_md5 != current_tag_md5:
                     differ.append(f"tag规则MD5: {meta_tag_md5[:8]}... → {current_tag_md5[:8]}...")
+                if meta_synonyms_md5 != current_synonyms_md5:
+                    differ.append(f"同义词MD5: {meta_synonyms_md5[:8]}... → {current_synonyms_md5[:8]}...")
                 logger.info(f"[CACHE] 标准字段表已变更 ({', '.join(differ)})，自动触发缓存刷新")
         else:
             logger.info("[CACHE] 缓存元数据缺失，触发缓存刷新")
@@ -560,6 +573,14 @@ def _collect_zh_synonyms(field_name: str) -> list[str]:
         if not entry:
             continue
         for zh in entry.get("zh", []):
+            if zh and zh not in seen:
+                zh_set.append(zh)
+                seen.add(zh)
+    # 回退查询：整字段名作为复合 key 查 synonyms（如 attack_type → 威胁类型/攻击类型）
+    # 修复复合 key 死条目：单 token 命中不到中文同义词时，复合 key 的 zh 定义才生效
+    full_entry = synonyms.get(name.lower())
+    if full_entry:
+        for zh in full_entry.get("zh", []):
             if zh and zh not in seen:
                 zh_set.append(zh)
                 seen.add(zh)
