@@ -132,32 +132,6 @@ chainlit run web/chainlit_app.py
 | [项目概要](docs/20260514_项目概要.md) | 项目背景、目标、功能全景 |
 | [文档维护规范](docs/文档维护规范.md) | 文档编写、命名、更新标准 |
 
-## 重构历史
-
-### 2026-06-12 - chainlit_app.py 重构
-
-**目标**：提升代码可读性和可维护性
-
-**变更**：
-- 将 1400 行的 `chainlit_app.py` 拆分为 9 个平级模块
-- 主文件精简至 60 行（减少 96%）
-- 保持向后兼容，无需修改已有业务代码
-
-**新增模块**：
-- `start_handler.py` - 聊天开始初始化
-- `settings_handler.py` - 模型设置更新
-- `message_router.py` - 消息路由分发
-- `upload_handlers.py` - 文件上传处理
-- `user_message_handlers.py` - 用户文本消息处理
-- `log_parser_handler.py` - 日志解析 Pipeline
-- `action_callbacks.py` - Action 回调（按钮交互）
-- `utils.py` - 纯辅助函数
-- `global_state.py` - 全局状态管理
-
-**详细文档**：
-- [重构方案](chainlit_app重构方案.md)
-- [完成报告](chainlit_app重构方案_完成版.md)
-
 ## 技术栈
 
 - **Agent 框架**：Agno (Team Route Mode, 4+ MemberAgents)
