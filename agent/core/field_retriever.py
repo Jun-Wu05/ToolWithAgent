@@ -517,6 +517,12 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
     构建「规范化字段名 → 记录索引」的精确匹配字典。
 
     遍历所有标准字段记录，对其「字段名称」列做规范化处理作为 key。
+    另注册两级中文 key 以修复中文 query 的精确匹配漏网：
+    - 中文系统属性名（如「协议」「事件动作」）直接作为 key
+    - synonyms.zh 反向索引：synonyms key 恰为某记录字段名称时，
+      其 zh 同义词全部注册指向同一记录（如 threat_type.zh 含「攻击类型」）
+    中文 query「协议」「攻击类型」原被迫走向量检索被字面相似词压过，
+    现可经 Layer1 精确命中 sim=1.0 置顶。
 
     Args:
         records: 标准字段记录列表
@@ -525,6 +531,8 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
         dict: 规范化字段名 → 在 records 中的索引位置
     """
     index: dict[str, int] = {}
+    # 字段名称（英文）→ 记录索引的反向映射，供 synonyms.zh 反向索引查用
+    field_name_to_idx: dict[str, int] = {}
     for i, rec in enumerate(records):
         field_name = rec.get("字段名称", "")
         if not field_name:
@@ -534,6 +542,25 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
             # 若存在多个记录映射到同一 key，保留第一个（最权威）
             if key not in index:
                 index[key] = i
+        # 记录原始字段名称（小写）→ 索引，供 synonyms.zh 反向桥接
+        fn_lower = field_name.lower()
+        if fn_lower not in field_name_to_idx:
+            field_name_to_idx[fn_lower] = i
+        # 中文系统属性名作为 key（中文不做 normalize，保持原值）
+        sys_name = rec.get("系统属性名称", "")
+        if sys_name and sys_name not in index:
+            index[sys_name] = i
+
+    # synonyms.zh 反向索引：synonyms key 命中某记录字段名称时，
+    # 其 zh 同义词全部注册指向同一记录（如「攻击类型」→ threat_type 记录）
+    synonyms = _load_synonyms()
+    for syn_key, entry in synonyms.items():
+        target_idx = field_name_to_idx.get(syn_key.lower())
+        if target_idx is None:
+            continue
+        for zh in entry.get("zh", []):
+            if zh and zh not in index:
+                index[zh] = target_idx
     return index
 
 
