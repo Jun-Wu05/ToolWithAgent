@@ -1,6 +1,11 @@
 """
 数据映射解析工具 - Agno Agent 核心模块
 """
-from agent.agent import create_agent
+import sys
+import os
 
-__all__ = ["create_agent"]
+# 确保项目根目录在sys.path中（解决Chainlit等工具的模块导入问题）
+_current_file = os.path.abspath(__file__)
+_project_root = os.path.dirname(os.path.dirname(_current_file))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)

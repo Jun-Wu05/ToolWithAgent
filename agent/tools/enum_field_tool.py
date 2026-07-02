@@ -1,119 +1,371 @@
 """
-普通字段枚举处理工具
+枚举字段处理工具
 
-功能：
-- 解码 Base64 编码的配置文件
-- 提取 JSON 中的 simEntities 数组和可枚举字段
-- 生成 Excel 格式的字段映射模板
-- 根据映射表修改 normalize 数组中的字段值
-- 输出修改后的 JSON 配置
+提供两套接口：
+1. Agno Tool 版本 - 供 LLM Agent 调用（@tool 装饰的函数）
+2. 纯函数版本 - 供外部直接调用（不依赖 Agno 框架）
 """
 import json
 import base64
 import os
-from typing import Any, Optional
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from typing import Any, Optional, List, Dict
+from openpyxl import load_workbook
+from collections import defaultdict
+
+from agno.tools import tool
 
 
-def decode_enum_config(b64_text: str) -> dict:
+# ============= Agno Tool 版本（供 LLM Agent 使用）=============
+
+@tool(name="enum_field_extract", description="提取可枚举的字段")
+def enum_field_tool(decoded_json: str) -> str:
     """
-    解码 Base64 枚举配置并提取关键信息
+    提取可枚举的字段
+    
+    当需要识别可枚举字段时使用：
+    1. 从 JSON 中提取 normalize 数组
+    2. 识别可枚举的字段
+    3. 返回候选字段列表
     
     Args:
-        b64_text: Base64 编码的配置文件
-        
+        decoded_json: 解码后的 JSON 对象（字符串格式）
+    
     Returns:
-        dict: 解码结果
-            - status: "success" | "error"
-            - decoded_json: 解码后的 JSON 对象
-            - sim_entities: simEntities 数组
-            - normalize_fields: normalize 数组中的字段列表
-            - enum_candidates: 可枚举的字段候选列表
+        可枚举字段列表
     """
     try:
-        # 清理并解码
-        cleaned = "".join(b64_text.split())
-        if not cleaned:
-            return {"status": "error", "error_message": "输入为空"}
-        
-        # 补齐 padding
-        missing_padding = len(cleaned) % 4
-        if missing_padding:
-            cleaned += "=" * (4 - missing_padding)
-        
-        # 解码
-        decoded_bytes = base64.b64decode(cleaned)
-        decoded_text = decoded_bytes.decode("utf-8", errors="replace")
-        
-        # 解析 JSON
-        decoded_json = json.loads(decoded_text)
-        
-        # 提取 simEntities
-        sim_entities = extract_sim_entities(decoded_json)
+        # 解析输入
+        json_obj = json.loads(decoded_json) if isinstance(decoded_json, str) else decoded_json
         
         # 提取 normalize 字段
-        normalize_fields = extract_normalize_fields(decoded_json)
+        normalize_fields = _extract_normalize_fields(json_obj)
         
-        # 识别可枚举的字段
-        enum_candidates = identify_enum_candidates(decoded_json, normalize_fields)
+        # 识别可枚举字段
+        enum_candidates = _identify_enum_candidates(normalize_fields)
         
-        return {
-            "status": "success",
-            "decoded_json": decoded_json,
-            "decoded_text": decoded_text,
-            "sim_entities": sim_entities,
-            "normalize_fields": normalize_fields,
-            "enum_candidates": enum_candidates,
-            "field_count": len(normalize_fields)
-        }
+        # 生成结果
+        lines = ["可枚举字段候选：", ""]
+        for i, candidate in enumerate(enum_candidates[:10], 1):  # 最多显示10个
+            field = candidate.get("field", "未知")
+            values = candidate.get("values", [])
+            count = candidate.get("count", 0)
+            
+            lines.append(f"{i}. **{field}**")
+            lines.append(f"   - 唯一值数量: {count}")
+            if values:
+                lines.append(f"   - 示例: {', '.join(values[:3])}" + ("..." if len(values) > 3 else ""))
+        
+        return "\n".join(lines)
         
     except Exception as e:
-        return {"status": "error", "error_message": f"解码失败: {str(e)}"}
+        return f"提取枚举字段失败: {str(e)}"
 
 
-def extract_sim_entities(json_obj: dict) -> list:
+@tool(name="apply_enum_mapping", description="应用枚举映射")
+def apply_enum_mapping_tool(
+    json_data: str,
+    mapping_table: str,
+    target_field: Optional[str] = None
+) -> str:
     """
-    递归提取 JSON 中的 simEntities 数组
+    应用枚举映射到 JSON
     
     Args:
-        json_obj: JSON 对象
-        
-    Returns:
-        list: simEntities 数组列表
-    """
-    sim_entities_list = []
+        json_data: JSON 对象（字符串格式）
+        mapping_table: 映射表（JSON 字符串格式）
+        target_field: 可选，指定目标字段
     
-    def traverse(obj, path=""):
-        if isinstance(obj, dict):
-            if "simEntities" in obj and isinstance(obj["simEntities"], list):
-                sim_entities_list.append({
-                    "path": path or "root",
-                    "simEntities": obj["simEntities"]
+    Returns:
+        应用映射后的 JSON
+    """
+    try:
+        # 解析输入
+        json_obj = json.loads(json_data) if isinstance(json_data, str) else json_data
+        mappings = json.loads(mapping_table) if isinstance(mapping_table, str) else mapping_table
+        
+        # 按字段分组映射
+        field_mappings = {}
+        for item in mappings:
+            field = item.get("field", "")
+            if target_field and field != target_field:
+                continue
+            
+            if field not in field_mappings:
+                field_mappings[field] = {}
+            
+            org_value = item.get("orgValue", "")
+            mapping_value = item.get("mappingValue", "")
+            mapping_type = item.get("mappingType", "REGULAR")
+            
+            if mapping_type == "REGULAR" and org_value:
+                field_mappings[field][org_value] = mapping_value
+        
+        # 应用映射
+        result = _apply_enum_mapping(json_obj, field_mappings, target_field)
+        
+        return json.dumps(result, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "error_message": f"应用枚举映射失败: {str(e)}"
+        }, ensure_ascii=False)
+
+
+# ============= 纯函数版本（供外部直接调用）=============
+
+def read_enum_mappings_from_excel(excel_path: str) -> Dict[str, List[Dict]]:
+    """
+    从 Excel 文件读取枚举映射表
+    
+    Excel 格式：
+    - Sheet 名 = 目标字段名
+    - 第一列: mappingType (EQUAL 或 REGULAR)
+    - 第二列: orgValue (原始值)
+    - 第三列: mappingValue (映射值)
+    
+    Args:
+        excel_path: Excel 文件路径
+    
+    Returns:
+        Dict[str, List[Dict]], key 是 Sheet 名，value 是映射列表
+        格式: {"threat_type": [{"mappingType": "REGULAR", "orgValue": "sql注入", "mappingValue": "SQL注入"}], ...}
+    """
+    if not os.path.exists(excel_path):
+        raise FileNotFoundError(f"Excel 文件不存在: {excel_path}")
+    
+    all_mappings = defaultdict(list)
+    valid_types = {"EQUAL", "REGULAR"}
+    
+    wb = load_workbook(excel_path, read_only=True, data_only=True)
+    try:
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            sheet_mappings = []
+            
+            for row in ws.iter_rows(min_row=2, max_col=3, values_only=True):
+                # 跳过空行
+                if row[1] is None:
+                    continue
+                
+                # 读取映射类型，默认 EQUAL
+                mapping_type = str(row[0]).upper() if row[0] is not None else "EQUAL"
+                if mapping_type not in valid_types:
+                    mapping_type = "EQUAL"
+                
+                org_value = str(row[1]).strip() if row[1] is not None else ""
+                mapping_value = str(row[2]).strip() if row[2] is not None else ""
+                
+                if not org_value:
+                    continue
+                
+                # 对于 REGULAR 类型，智能添加通配符
+                if mapping_type == "REGULAR":
+                    # 如果已经以 .* 开头（包括 .* 和 (?i).*），则不添加
+                    if org_value.startswith(".*") or org_value.startswith("(?i).*"):
+                        # 已经是完整正则，不做任何修改
+                        pass
+                    else:
+                        # 简单文本，添加通配符
+                        if not org_value.startswith(".*"):
+                            org_value = ".*" + org_value
+                        if not org_value.endswith(".*"):
+                            org_value = org_value + ".*"
+                
+                sheet_mappings.append({
+                    "mappingType": mapping_type,
+                    "orgValue": org_value,
+                    "mappingValue": mapping_value or org_value
                 })
             
-            for key, value in obj.items():
-                new_path = f"{path}.{key}" if path else key
-                traverse(value, new_path)
-                
-        elif isinstance(obj, list):
-            for i, item in enumerate(obj):
-                traverse(item, f"{path}[{i}]")
+            if sheet_mappings:
+                all_mappings[sheet_name] = sheet_mappings
+    finally:
+        wb.close()
     
-    traverse(json_obj)
-    return sim_entities_list
+    return dict(all_mappings)
 
 
-def extract_normalize_fields(json_obj: dict) -> list:
+def get_enum_preview(excel_path: str) -> List[Dict]:
     """
-    提取 normalize 数组中的所有字段信息
+    获取枚举映射预览数据，用于 DataFrame 展示
+    
+    将多 Sheet 的映射表展平为列表，每个元素包含字段名和映射信息
     
     Args:
-        json_obj: JSON 对象
-        
+        excel_path: Excel 文件路径
+    
     Returns:
-        list: 字段信息列表 [{index, field, entity, result}, ...]
+        List[Dict], 展平后的映射列表
+        格式: [{"目标字段": "threat_type", "mappingType": "REGULAR", "orgValue": "sql注入", "mappingValue": "SQL注入"}, ...]
     """
+    mappings = read_enum_mappings_from_excel(excel_path)
+    
+    preview = []
+    for field_name, field_mappings in mappings.items():
+        for mapping in field_mappings:
+            # 去掉通配符显示
+            display_org = mapping["orgValue"]
+            if display_org.startswith(".*") and display_org.endswith(".*"):
+                display_org = display_org[2:-2]
+            
+            preview.append({
+                "目标字段": field_name,
+                "mappingType": mapping["mappingType"],
+                "原始值": display_org,
+                "映射值": mapping["mappingValue"]
+            })
+    
+    return preview
+
+
+def apply_enum_fill(
+    decoded_data: Any,
+    excel_path: str,
+    target_fields: Optional[List[str]] = None
+) -> Any:
+    """
+    应用枚举填充
+    
+    遍历 normalize 数组，根据 Excel 映射表对目标字段添加 mappings
+    
+    Args:
+        decoded_data: 解码后的 JSON 对象（或 Base64 字符串，会自动解码）
+        excel_path: Excel 映射表文件路径
+        target_fields: 可选，指定目标字段列表；None 表示全部 Sheet 字段
+    
+    Returns:
+        更新后的 JSON 对象
+    
+    Raises:
+        FileNotFoundError: Excel 文件不存在
+        ValueError: decoded_data 解析失败
+    """
+    # 如果是 Base64 字符串，先解码
+    if isinstance(decoded_data, str):
+        try:
+            decoded_data = base64.b64decode(decoded_data.encode('ascii'))
+            decoded_data = json.loads(decoded_data.decode('utf-8'))
+        except Exception as e:
+            raise ValueError(f"Base64 解码失败: {str(e)}")
+    
+    # 读取映射表
+    all_mappings = read_enum_mappings_from_excel(excel_path)
+    
+    # 如果指定了目标字段，只使用这些字段的映射
+    if target_fields:
+        filtered_mappings = {}
+        for field in target_fields:
+            if field in all_mappings:
+                filtered_mappings[field] = all_mappings[field]
+        all_mappings = filtered_mappings
+    
+    # 深拷贝避免修改原数据
+    result = json.loads(json.dumps(decoded_data))
+    
+    # 处理可能是列表的情况
+    if isinstance(result, list):
+        data_list = result
+    else:
+        data_list = [result]
+    
+    # 遍历每个数据项
+    for data_item in data_list:
+        if not isinstance(data_item, dict):
+            continue
+        
+        normalize = data_item.get("normalize", [])
+        if not normalize:
+            continue
+        
+        # 遍历映射表
+        for field_name, field_mappings in all_mappings.items():
+            # 查找匹配的 normalize 项
+            for norm_item in normalize:
+                if not isinstance(norm_item, dict):
+                    continue
+                
+                # 匹配字段：index 或 field
+                index_value = str(norm_item.get("index", "")).strip()
+                field_value = str(norm_item.get("field", "")).strip()
+                
+                # CHANGED: 去掉 in 子字符串匹配，避免 "3" in "13" 误匹配
+                matched = (
+                    index_value == field_name
+                    or field_value == field_name
+                )
+                
+                if not matched:
+                    continue
+                
+                # 获取或初始化 mappings
+                mappings = norm_item.get("mappings")
+                if mappings is None:
+                    mappings = []
+                    norm_item["mappings"] = mappings
+                
+                # 已存在的 orgValue 集合
+                existing_org = {m.get("orgValue", "") for m in mappings if isinstance(m, dict)}
+                
+                # 添加新映射
+                for mapping in field_mappings:
+                    org_value = mapping.get("orgValue", "")
+                    if org_value not in existing_org:
+                        mappings.append({
+                            "mappingType": mapping.get("mappingType", "REGULAR"),
+                            "orgValue": org_value,
+                            "mappingValue": mapping.get("mappingValue", org_value)
+                        })
+    
+    return result
+
+
+def export_enum_to_base64(data: Any) -> str:
+    """
+    将 JSON 对象导出为 Base64 编码字符串
+    
+    Args:
+        data: JSON 对象（字典或列表）
+    
+    Returns:
+        str, Base64 编码字符串
+    """
+    json_str = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+    base64_bytes = base64.b64encode(json_str.encode('utf-8'))
+    return base64_bytes.decode('utf-8')
+
+
+def apply_enum_with_base64(
+    base64_data: str,
+    excel_path: str,
+    target_fields: Optional[List[str]] = None
+) -> str:
+    """
+    一站式枚举填充函数：解码 -> 填充 -> 编码
+    
+    Args:
+        base64_data: Base64 编码的 JSON 字符串
+        excel_path: Excel 映射表文件路径
+        target_fields: 可选，指定目标字段列表
+    
+    Returns:
+        str, 填充后的 Base64 编码字符串
+    """
+    # 1. 解码
+    decoded = base64.b64decode(base64_data.encode('ascii'))
+    data = json.loads(decoded.decode('utf-8'))
+    
+    # 2. 应用填充
+    result = apply_enum_fill(data, excel_path, target_fields)
+    
+    # 3. 编码
+    return export_enum_to_base64(result)
+
+
+# ============= 内部辅助函数 =============
+
+def _extract_normalize_fields(json_obj: dict) -> list:
+    """提取 normalize 数组中的所有字段信息"""
     fields = []
     
     def traverse(obj):
@@ -126,8 +378,6 @@ def extract_normalize_fields(json_obj: dict) -> list:
                             "field": item.get("field", ""),
                             "entity": item.get("entity", ""),
                             "result": item.get("result", []),
-                            "core": item.get("core", False),
-                            "sim": item.get("sim", False)
                         }
                         fields.append(field_info)
             
@@ -142,21 +392,10 @@ def extract_normalize_fields(json_obj: dict) -> list:
     return fields
 
 
-def identify_enum_candidates(json_obj: dict, normalize_fields: list) -> list:
-    """
-    识别可枚举的字段候选
-    
-    Args:
-        json_obj: JSON 对象
-        normalize_fields: normalize 字段列表
-        
-    Returns:
-        list: 可枚举的字段列表 [{field, values, count}, ...]
-    """
-    candidates = []
-    
-    # 统计每个 field 的唯一值
+def _identify_enum_candidates(normalize_fields: list) -> list:
+    """识别可枚举的字段候选"""
     field_values = {}
+    
     for item in normalize_fields:
         field = item.get("field", "")
         result = item.get("result", [])
@@ -174,283 +413,42 @@ def identify_enum_candidates(json_obj: dict, normalize_fields: list) -> list:
         elif result:
             field_values[field].add(str(result).strip())
     
-    # 生成候选列表
+    candidates = []
     for field, values in field_values.items():
-        if len(values) > 1:  # 至少有2个不同值才有枚举必要
+        if len(values) > 1:
             candidates.append({
                 "field": field,
                 "values": sorted(list(values)),
                 "count": len(values)
             })
     
+    # 按唯一值数量排序
+    candidates.sort(key=lambda x: x["count"], reverse=True)
     return candidates
 
 
-def generate_enum_mapping_template(
-    decoded_json: dict,
-    excel_path: Optional[str] = None,
-    target_field: Optional[str] = None
-) -> dict:
-    """
-    生成枚举字段映射模板
-    
-    Args:
-        decoded_json: 解码后的 JSON 对象
-        excel_path: 可选，Excel 模板保存路径
-        target_field: 可选，指定目标字段
-        
-    Returns:
-        dict: 生成结果
-            - status: "success" | "error"
-            - mapping_table: 映射表数据
-            - excel_path: Excel 文件路径（如果生成了）
-    """
-    try:
-        # 提取 normalize 字段
-        normalize_fields = extract_normalize_fields(decoded_json)
-        
-        # 构建映射表
-        mapping_table = []
-        
-        for item in normalize_fields:
-            field = item.get("field", "")
-            index = item.get("index", "")
-            result = item.get("result", [])
-            mappings = item.get("mappings", [])
-            
-            # 如果指定了目标字段，只处理该字段
-            if target_field and field != target_field:
-                continue
-            
-            # 获取当前映射
-            existing_mappings = {}
-            if isinstance(mappings, list):
-                for m in mappings:
-                    if isinstance(m, dict):
-                        org = m.get("orgValue", "")
-                        mv = m.get("mappingValue", "")
-                        if org:
-                            existing_mappings[org] = mv
-            
-            # 处理 result 值
-            if isinstance(result, list):
-                for v in result:
-                    if v and str(v).strip():
-                        v_str = str(v).strip()
-                        mapping_table.append({
-                            "field": field,
-                            "index": index,
-                            "orgValue": v_str,
-                            "mappingValue": existing_mappings.get(v_str, ""),
-                            "mappingType": "REGULAR"
-                        })
-            elif result:
-                v_str = str(result).strip()
-                mapping_table.append({
-                    "field": field,
-                    "index": index,
-                    "orgValue": v_str,
-                    "mappingValue": existing_mappings.get(v_str, ""),
-                    "mappingType": "REGULAR"
-                })
-        
-        # 生成 Excel 文件
-        if excel_path:
-            save_mapping_to_excel(mapping_table, excel_path)
-        
-        return {
-            "status": "success",
-            "mapping_table": mapping_table,
-            "excel_path": excel_path,
-            "record_count": len(mapping_table)
-        }
-        
-    except Exception as e:
-        return {"status": "error", "error_message": f"生成映射模板失败: {str(e)}"}
-
-
-def save_mapping_to_excel(mapping_table: list, excel_path: str) -> bool:
-    """
-    将映射表保存为 Excel 文件
-    
-    Args:
-        mapping_table: 映射表数据
-        excel_path: Excel 文件保存路径
-        
-    Returns:
-        bool: 是否保存成功
-    """
-    try:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "枚举映射"
-        
-        # 设置表头样式
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF")
-        header_alignment = Alignment(horizontal="center", vertical="center")
-        
-        # 写入表头
-        headers = ["mappingType", "orgValue", "mappingValue", "field"]
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=header)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = header_alignment
-        
-        # 设置边框
-        thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-        
-        # 写入数据
-        for row_idx, item in enumerate(mapping_table, 2):
-            ws.cell(row=row_idx, column=1, value=item.get("mappingType", "REGULAR"))
-            ws.cell(row=row_idx, column=2, value=item.get("orgValue", ""))
-            ws.cell(row=row_idx, column=3, value=item.get("mappingValue", ""))
-            ws.cell(row=row_idx, column=4, value=item.get("field", ""))
-            
-            # 应用边框
-            for col in range(1, 5):
-                ws.cell(row=row_idx, column=col).border = thin_border
-        
-        # 自动调整列宽
-        for col in ws.columns:
-            max_length = 0
-            column = col[0].column_letter
-            for cell in col:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws.column_dimensions[column].width = adjusted_width
-        
-        # 保存文件
-        wb.save(excel_path)
-        return True
-        
-    except Exception as e:
-        print(f"保存 Excel 失败: {e}")
-        return False
-
-
-def load_mapping_from_excel(excel_path: str) -> list:
-    """
-    从 Excel 文件加载映射表（新格式）
-    
-    格式说明：
-    - 每个 Sheet 的标签名 = 目标字段名（可以是 normalize 的 index 值或 field 值）
-    - Sheet 内部三列：mappingType | orgValue | mappingValue
-    
-    Args:
-        excel_path: Excel 文件路径
-        
-    Returns:
-        list: 映射表数据 [{"mappingType": "REGULAR", "orgValue": "xxx", "mappingValue": "yyy", "field": "目标字段名"}, ...]
-    """
-    from openpyxl import load_workbook
-    
-    mapping_table = []
-    
-    try:
-        wb = load_workbook(excel_path, data_only=True)
-        
-        # 遍历所有 Sheet
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            field_name = sheet_name.strip()  # Sheet 名就是目标字段名
-            
-            # 跳过表头，从第二行开始读取
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[0] and row[1]:  # mappingType 和 orgValue 必须有值
-                    mapping_table.append({
-                        "mappingType": str(row[0]).strip() if row[0] else "REGULAR",
-                        "orgValue": str(row[1]).strip() if row[1] else "",
-                        "mappingValue": str(row[2]).strip() if row[2] else "",
-                        "field": field_name
-                    })
-        
-        wb.close()
-        print(f"加载映射表：{len(mapping_table)} 条记录，{len(wb.sheetnames)} 个字段")
-        
-    except Exception as e:
-        print(f"读取 Excel 失败: {e}")
-    
-    return mapping_table
-
-
-def apply_enum_mapping(
-    json_obj: dict,
-    mapping_table: list,
-    target_field: Optional[str] = None
-) -> dict:
-    """
-    应用枚举映射到 JSON 对象
-    
-    Args:
-        json_obj: 原始 JSON 对象
-        mapping_table: 映射表，格式为:
-            [
-                {"mappingType": "REGULAR", "orgValue": "xxx", "mappingValue": "yyy", "field": "zzz"},
-                ...
-            ]
-        target_field: 可选，指定目标字段
-        
-    Returns:
-        dict: 修改后的 JSON 对象
-    """
+def _apply_enum_mapping(json_obj: dict, field_mappings: dict, target_field: Optional[str] = None) -> dict:
+    """应用枚举映射"""
     result = json_obj.copy()
     
-    # 按字段分组映射
-    field_mappings = {}
-    for item in mapping_table:
-        field = item.get("field", "")
-        if target_field and field != target_field:
-            continue
-        
-        if field not in field_mappings:
-            field_mappings[field] = {}
-        
-        org_value = item.get("orgValue", "")
-        mapping_value = item.get("mappingValue", "")
-        mapping_type = item.get("mappingType", "REGULAR")
-        
-        if mapping_type == "REGULAR" and org_value:
-            field_mappings[field][org_value] = mapping_value
-    
-    if not field_mappings:
-        print("[WARNING] 映射表为空或字段不匹配")
-        return result
-    
-    # 应用映射
     def traverse(obj, path=""):
         if isinstance(obj, dict):
-            # 处理 normalize 数组
             if "normalize" in obj and isinstance(obj["normalize"], list):
                 for norm_item in obj["normalize"]:
                     if isinstance(norm_item, dict):
                         field = norm_item.get("field", "")
                         
-                        # 如果指定了目标字段，只处理该字段
                         if target_field and field != target_field:
                             continue
                         
                         if field in field_mappings:
-                            # 获取或创建 mappings 数组
                             mappings = norm_item.get("mappings", [])
                             if mappings is None:
                                 mappings = []
                                 norm_item["mappings"] = mappings
                             
-                            # 获取已存在的映射
                             existing_org_values = {m.get("orgValue", "") for m in mappings if isinstance(m, dict)}
                             
-                            # 添加/更新映射
                             for org_value, mapping_value in field_mappings[field].items():
                                 if org_value not in existing_org_values:
                                     mappings.append({
@@ -458,9 +456,7 @@ def apply_enum_mapping(
                                         "orgValue": org_value,
                                         "mappingValue": mapping_value
                                     })
-                                    print(f"添加映射 [{field}]: {org_value} -> {mapping_value}")
             
-            # 继续遍历
             for key, value in obj.items():
                 traverse(value, f"{path}.{key}" if path else key)
                 
@@ -470,82 +466,3 @@ def apply_enum_mapping(
     
     traverse(result)
     return result
-
-
-def process_enum_workflow(
-    base64_data: str,
-    mapping_table: list,
-    target_field: Optional[str] = None
-) -> dict:
-    """
-    完整的枚举字段处理流程
-    
-    Args:
-        base64_data: Base64 编码的数据
-        mapping_table: 映射表
-        target_field: 可选，指定目标字段
-        
-    Returns:
-        dict: 处理结果
-            - status: "success" | "error"
-            - decoded_json: 解码后的 JSON
-            - processed_json: 处理后的 JSON
-            - json_output: JSON 格式输出
-    """
-    try:
-        # 1. 解码 Base64
-        decoded_bytes = base64.b64decode(base64_data)
-        decoded_json = json.loads(decoded_bytes.decode('utf-8'))
-        
-        # 2. 应用枚举映射
-        processed_json = apply_enum_mapping(decoded_json, mapping_table, target_field)
-        
-        # 3. 生成 JSON 输出
-        json_output = json.dumps(processed_json, ensure_ascii=False, indent=2)
-        
-        return {
-            "status": "success",
-            "decoded_json": decoded_json,
-            "processed_json": processed_json,
-            "json_output": json_output
-        }
-        
-    except Exception as e:
-        return {"status": "error", "error_message": f"枚举字段处理失败: {str(e)}"}
-
-
-def get_enum_fields_list(enum_candidates: list) -> str:
-    """
-    生成枚举候选字段的可读列表
-    
-    Args:
-        enum_candidates: 可枚举字段候选列表
-        
-    Returns:
-        str: 格式化后的字段列表
-    """
-    if not enum_candidates:
-        return "未发现可枚举的字段"
-    
-    lines = ["可枚举字段列表：", ""]
-    for i, candidate in enumerate(enum_candidates, 1):
-        field = candidate.get("field", "未知")
-        values = candidate.get("values", [])
-        count = candidate.get("count", 0)
-        
-        lines.append(f"{i}. **{field}**")
-        lines.append(f"   - 唯一值数量: {count}")
-        lines.append(f"   - 示例值: {', '.join(values[:3])}" + ("..." if len(values) > 3 else ""))
-        lines.append("")
-    
-    return "\n".join(lines)
-
-
-if __name__ == "__main__":
-    # 测试代码
-    print("枚举字段工具测试")
-    
-    # 测试解码
-    test_b64 = "test"
-    result = decode_enum_config(test_b64)
-    print(f"解码结果: {result['status']}")

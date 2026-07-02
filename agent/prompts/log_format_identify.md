@@ -1,0 +1,86 @@
+<task>
+分析以下采样日志，识别日志格式类型和基本结构。
+本任务只负责格式识别，不需要判断分类字段（分类字段由后续步骤自动发现）。
+</task>
+
+<role>安全日志格式分析专家</role>
+
+<format_types>
+<type name="json">每行一个 JSON 对象，或"日志头+JSON"（行首有固定前缀，后面跟 JSON body）</type>
+<type name="kv">key=value 键值对，分隔符为空格、分号或逗号</type>
+<type name="space">纯空格分隔多列，固定列位无显式 key</type>
+<type name="semicolon">分号分隔</type>
+<type name="comma">逗号分隔（CSV）</type>
+<type name="unknown">无法识别</type>
+</format_types>
+
+<important_rules>
+- 对于"日志头 + JSON body"的格式，必须识别为 format="json"，NOT "syslog" NOT "mixed"
+- 所有可解析的 JSON body 日志（包括有 syslog 前缀的）都属于 json 类型
+- 如果识别到 feature_field，请务必填写具体字段名，不要留空
+  - JSON 格式：填写 JSON 字段名（如 "event.action"、"type"、"tag_name"）
+  - KV 格式：填写 key 名（如 "type"、"log_type"、"category"、"event"）
+- 实在找不到分类字段时 feature_field 才留空
+</important_rules>
+
+<kv_separator_rules>
+**KV 格式特殊要求（必须遵守）**：
+
+如果 format="kv" 或 format_detail 包含 "KV"，必须填写以下字段：
+
+1. **kv_connector**：键值分隔符（键和值之间的连接符）
+   - 常见值："="、":"、
+   - 示例：`key=value` → kv_connector="="
+   - 示例：`日志类型:Authentication Server` → kv_connector=":"
+
+2. **kv_separator**：字段分隔符（键值对之间的分隔符）
+   - 常见值："space"、"||"、";"、","
+   - 示例：`key=value key2=value2` → kv_separator="space"
+   - 示例：`key=value||key2=value2` → kv_separator="||"
+
+**禁止**：
+- ❌ KV 格式时 kv_connector 或 kv_separator 留空
+- ❌ KV 格式时不填写这两个字段
+</kv_separator_rules>
+
+  <header_detection>
+  判断日志是否有"日志头"——即日志行前半部分为固定格式的时间戳、主机名、进程名等系统前缀。
+  在 format_detail 中描述完整格式，例如"日志头+KV"、"日志头+JSON"、"纯KV"、"纯JSON"等。
+
+  如果存在日志头，还需识别日志头与 body 之间的分界标记（header_end_marker）：
+  - 定义：紧接在系统前缀之后、body 开始之前的一个固定字符串
+  - 识别方法：查看日志行中系统前缀结束的位置，通常是一个或多个特殊字符（如冒号、空格、破折号等）
+  - 示例：
+    - RFC5424 格式：`<14>1 2026-04-14T05:57:55Z host app 1 type - body_content` → header_end_marker=" - "
+    - BSD syslog 格式：`<132>May 18 10:48:52 sfos-x86_64 fwlog[7992]: 日志类型:IPS防护日志` → header_end_marker=": "
+    - 自定义格式：`[2026-06-08] [INFO] log content` → header_end_marker="] "
+    - Syslog 前缀直接跟 KV：`<190>timestamp=123 type=event` → header_end_marker=""（注意：日志头是 <190>，后面直接是 KV body，没有分隔符）
+
+  特殊规则：
+  - 如果日志行以 <数字> 开头（如 <190>、<31>），且后面直接跟 KV 键值对（不是标准 syslog 格式），则 header_end_marker 必须为空字符串 ""
+  - 如果日志头只是 syslog 优先级（如 <190>），后面没有标准 syslog 格式的时间戳、主机名等，则 header_end_marker 必须为空字符串 ""
+
+  如果无日志头（纯 JSON / 纯 KV），header_end_marker 为空字符串。
+  </header_detection>
+  +++++++ REPLACE
+
+
+<output>
+严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
+{{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:","kv_separator":"分隔符代码格式（空格填space，分号填semicolon，英文逗号填comma，中文逗号填chinese_comma，管道填pipe，tab填tab）","has_header":true|false,"header_end_marker":"日志头与body的分界标记字符串（如RFC5424的' - '、BSD syslog的': '等，纯格式为空字符串）","has_header_feature":true|false,"feature_field":"日志分类特征字段名（JSON格式填字段名如event_type，KV格式填key名如type、log_type；找不到时为空字符串）","feature_location":"body|header|unknown（特征值在header中则填header，在body内则填body，无法判断填unknown）","reason":"判断理由"}}
+  +++++++ REPLACE
+
+注意：
+- format_detail 必须准确描述结构，如"日志头+KV"表示 syslog 头部后跟 KV body
+- has_header_feature 判断规则：当 has_header=true 时，检查日志头中是否包含可作为日志类型分类的特征关键词（如攻击类型名、功能模块名、日志类别等），不包含 IP/时间/UUID/数字/日志级别等非分类信息。如果 has_header=false，则 has_header_feature 必须为 false
+- feature_field: 
+  - JSON 格式：识别 JSON body 中哪个字段是日志分类的主要特征字段（如 tag_、event_type、msg_type、type、action 等）
+  - KV 格式：识别 KV body 中哪个 key 是日志分类的主要特征字段（如 type、log_type、category、event 等）
+  - 如果 has_header_feature=true 且特征在头部，则 feature_field 可留空
+- feature_location: 分类特征所在位置。"body"=分类字段在body内部值中，"header"=分类特征在日志头部分（{{之前的文本}}），"unknown"=无法判断
+  +++++++ REPLACE
+</output>
+
+<input>
+{sampled_logs}
+</input>
