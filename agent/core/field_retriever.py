@@ -668,6 +668,21 @@ def _reverse_bridge(field_name: str) -> tuple[list[str], list[str]]:
                 seen_en.add(en)
                 break
 
+    # 复合延伸过滤：当存在精确匹配的 base 同义词时，子串匹配仅保留 key 含该 base
+    # 的复合条目（如「动作」精确命中 action 后，仅延伸到 event_action——其 key 含
+    # action，排除 mail_cmd/method 等仅共享「动作」字面但语义无关的噪声条目）。
+    # 这避免短中文 query 因字面重叠引入噪声反过来压制正确候选。
+    if exact_hits and substr_hits:
+        exact_key_set = set(exact_keys)
+        filtered_hits: list[str] = []
+        filtered_keys: list[str] = []
+        for en, k in zip(substr_hits, substr_keys):
+            if any(ek in k for ek in exact_key_set):
+                filtered_hits.append(en)
+                filtered_keys.append(k)
+        substr_hits = filtered_hits
+        substr_keys = filtered_keys
+
     # 精确匹配优先于子串匹配，最多取 5 个 en，避免 query 文本过长
     en_terms = (exact_hits + substr_hits)[:5]
     bridged_keys = (exact_keys + substr_keys)[:5]
