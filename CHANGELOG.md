@@ -5,12 +5,22 @@
 ## [Unreleased]
 
 ### Added
+- 字段映射导出新增「检索候选top3」列（`web/action_callbacks.py`），区分检索问题 vs LLM 误判
+- 检索链路 DEBUG 级诊断日志（`field_retriever.py` RETRIEVE_DEBUG_TRACE），逐字段打印候选排名轨迹
+- 中文同义词桥接：`field_synonyms.json` 升级为 264 条 `{en, zh}` 结构，query 文本拼接中文同义词提升跨语言召回
+- tag 规则外置：`config/tag_rules.json`（token 级匹配，修正 code/severity 误归类，新增 threat tag）
+- 精确匹配 compact key：`_compact_field_name()` 消除 file_name/filename 命名鸿沟
+- 标准字段表扩充至 625 条（新增设备名称/主机名称/主机ID/事件名称/事件级别）
 - Prompt 迁移：将 `log_parser_pipeline.py` 中的 LLM prompt 从字符串常量迁移到独立 `.md` 文件（`agent/prompts/log_format_identify.md`、`agent/prompts/log_classify_feature.md`）
 - 枚举提取 Prompt 输出格式严格约束：禁止前导说明文字、markdown 代码块、多行输出
 - 枚举提取 LLM 输出格式遵从度检测日志（`[ENUM_EXTRACT] LLM 未遵守纯 JSON 输出格式`）
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- 移除 BM25 混合检索，回归纯向量检索（中文同义词接入后纯向量召回充分，BM25 净负面）
+- 删除 ABBR_EXPANSIONS 硬编码（69条），合并进外置 `field_synonyms.json`
+- 死代码清理（-1006行）：删除 `threat_type_tool.py`、`session_manager.py`、`team_web.py` + agent.py 死函数
+- `requirements.txt` 移除 `rank_bm25` 依赖
 - Prompt 改写为 XML 格式，移除硬编码测试数据
 - 移除分类表中废弃的 `severity`/`attack_type` 列
 - Pipeline 分类输出 schema 清理：移除废弃字段 `expert_summary`→`overall_summary`、`total_lines`/`matched_lines`→`total_valid_lines`/`covered_lines`、`matched_regex`/`meaning`/`fail_reason`/`field_uses_full_line`

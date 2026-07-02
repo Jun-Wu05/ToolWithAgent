@@ -6,7 +6,7 @@
 
 | 功能 | 说明 |
 |------|------|
-| **标准字段映射** | 异构日志字段 → 统一标准字段（Levenshtein 编辑距离 + BM25 混合检索） |
+| **标准字段映射** | 异构日志字段 → 统一标准字段（Embedding 语义检索 + 中文同义词桥接） |
 | **威胁类型标准化** | 告警威胁类型归一化到威胁知识库 |
 | **枚举提取/填充** | 从日志提取映射规则词对，或批量填充枚举映射表 |
 | **日志格式识别** | LLM 识别日志数据结构类型（JSON/CSV/CEF/KeyValue/Header+JSON 等） |
@@ -50,15 +50,15 @@ toolswithagent/
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
 │   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
 │   │   ├── prompts.py               # .md Prompt 加载器
-│   │   ├── field_retriever.py       # BM25 + 向量混合检索
+│   │   ├── field_retriever.py       # Embedding 语义检索（中文同义词 + tag 规则 + 精确匹配）
 │   │   └── tracing.py               # OpenTelemetry 请求追踪
 │   ├── tools/                       # Agent 工具集
-│   │   ├── field_mapping_tool.py    # 字段映射工具
-│   │   ├── threat_mapping_tool.py   # 威胁类型匹配工具
-│   │   ├── enum_extract_tool.py     # 枚举提取工具
+│   │   ├── standard_mapper.py       # 字段映射工具
 │   │   ├── enum_field_tool.py       # 枚举填充工具
+│   │   ├── logs_enum_tool.py        # 枚举提取工具
 │   │   ├── base64_tool.py           # Base64 编解码
 │   │   ├── log_parser_pipeline.py   # 日志解析管道（4-step）
+│   │   ├── rule_generator/          # 规则生成（模块化包）
 │   │   └── log_pattern_store.py     # 日志模式知识库
 │   ├── shared/                      # 共享算法
 │   │   ├── field_mapping.py         # Levenshtein 编辑距离核心
@@ -72,7 +72,9 @@ toolswithagent/
 ├── config/                          # 共享配置
 │   ├── route_keywords.json          # 路由关键词
 │   ├── threat_type_config.json      # 威胁类型映射配置
-│   ├── 标准字段.txt                 # 标准字段列表
+│   ├── field_synonyms.json          # 字段同义词表（en/zh 双字段，缩写展开 + 中文桥接）
+│   ├── tag_rules.json              # 字段标签规则（token 级匹配）
+│   ├── 标准字段.txt                 # 标准字段列表（625条）
 │   └── 对象.xlsx                    # 系统属性映射表
 │
 ├── docs/                            # 项目文档
@@ -161,5 +163,5 @@ chainlit run web/chainlit_app.py
 - **Agent 框架**：Agno (Team Route Mode, 4+ MemberAgents)
 - **LLM Provider**：SiliconFlow (主) / DeepSeek (备用)，含 CircuitBreaker 熔断
 - **Web 界面**：Chainlit
-- **向量检索**：ChromaDB + BM25 混合检索
+- **向量检索**：SiliconFlow Embedding API（Qwen3-Embedding-8B）+ 中文同义词桥接 + token 重排序
 - **可观测性**：OpenTelemetry
