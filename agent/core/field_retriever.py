@@ -648,6 +648,7 @@ def _reverse_bridge(field_name: str) -> tuple[list[str], list[str]]:
     exact_keys: list[str] = []   # 精确相等命中的 key
     substr_hits: list[str] = []  # 子串命中的 en
     substr_keys: list[str] = []  # 子串命中的 key
+    substr_zhs: list[str] = []   # 子串命中对应的 zh（用于无精确命中时识别 base 概念）
     seen_en: set[str] = set()
 
     for key, entry in synonyms.items():
@@ -665,6 +666,7 @@ def _reverse_bridge(field_name: str) -> tuple[list[str], list[str]]:
             if name in zh or zh in name:
                 substr_hits.append(en)
                 substr_keys.append(key)
+                substr_zhs.append(zh)
                 seen_en.add(en)
                 break
 
@@ -682,6 +684,31 @@ def _reverse_bridge(field_name: str) -> tuple[list[str], list[str]]:
                 filtered_keys.append(k)
         substr_hits = filtered_hits
         substr_keys = filtered_keys
+    elif not exact_hits and substr_hits:
+        # base→复合 传播（无精确同义命中时）：query 含核心概念（zh ⊂ query 的子串
+        # 命中条目视为 base），向共享该核心的复合条目传播——即 key 含 base.key 且
+        # zh 含 base.zh 的条目。如「系统动作」含核心「动作」（base=action），传播到
+        # event_action（key 含 action、zh「事件动作」含「动作」），补 event_response
+        # 锚点；mail_cmd 等虽 zh 含「动作」但 key 不含 action，被排除。
+        # 仅在无精确命中时触发，已有的精确命中分支（动作/协议/攻击类型）不受影响。
+        bases = [(k, zh) for k, zh in zip(substr_keys, substr_zhs) if zh in name]
+        if bases:
+            for key, entry in synonyms.items():
+                en = entry.get("en", "")
+                if not en or en in seen_en:
+                    continue
+                added = False
+                for bk, bzh in bases:
+                    if bk in key:
+                        for zh in entry.get("zh", []):
+                            if bzh in zh:
+                                substr_hits.append(en)
+                                substr_keys.append(key)
+                                seen_en.add(en)
+                                added = True
+                                break
+                        if added:
+                            break
 
     # 精确匹配优先于子串匹配，最多取 5 个 en，避免 query 文本过长
     en_terms = (exact_hits + substr_hits)[:5]
