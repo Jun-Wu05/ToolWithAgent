@@ -614,108 +614,6 @@ def _collect_zh_synonyms(field_name: str) -> list[str]:
     return zh_set
 
 
-def _reverse_bridge(field_name: str) -> tuple[list[str], list[str]]:
-    """中文 query 反向桥接：从 synonyms 表的 zh 同义词反查英文。
-
-    _expand_field_name/_collect_zh_synonyms/_generate_field_tags 三件增强武器
-    均为「英文→中文」单向设计，对中文 query（如「攻击类型」「动作」）全部失效，
-    导致 query 退化为裸中文词做 embedding，召回不稳定。synonyms 表里其实已有
-    现成映射（threat_type.zh 含「攻击类型」、action.zh 含「动作」、
-    event_action.zh 含「事件动作」），本函数补上反向查找路径。
-
-    匹配规则（针对每个 entry 的 zh 列表逐项判断）：
-    - 精确相等：query 与 zh 完全相同
-    - 双向子串：query 含 zh 或 zh 含 query
-
-    Args:
-        field_name: 原始字段名（含中文时启用桥接）
-
-    Returns:
-        (en_terms, bridged_keys)：
-        - en_terms：命中条目的 en 英文全称列表（去重、精确匹配优先、最多 5 个）
-        - bridged_keys：命中条目的英文 key 列表（用于补打 tag）
-    """
-    # 仅对含中文的 query 启用，纯英文字段名走原有链路不受影响
-    if not re.search(r"[\u4e00-\u9fff]", field_name):
-        return [], []
-
-    synonyms = _load_synonyms()
-    if not synonyms:
-        return [], []
-
-    name = field_name.strip()
-    exact_hits: list[str] = []   # 精确相等命中的 en
-    exact_keys: list[str] = []   # 精确相等命中的 key
-    substr_hits: list[str] = []  # 子串命中的 en
-    substr_keys: list[str] = []  # 子串命中的 key
-    substr_zhs: list[str] = []   # 子串命中对应的 zh（用于无精确命中时识别 base 概念）
-    seen_en: set[str] = set()
-
-    for key, entry in synonyms.items():
-        en = entry.get("en", "")
-        if not en or en in seen_en:
-            continue
-        for zh in entry.get("zh", []):
-            if not zh:
-                continue
-            if name == zh:
-                exact_hits.append(en)
-                exact_keys.append(key)
-                seen_en.add(en)
-                break
-            if name in zh or zh in name:
-                substr_hits.append(en)
-                substr_keys.append(key)
-                substr_zhs.append(zh)
-                seen_en.add(en)
-                break
-
-    # 复合延伸过滤：当存在精确匹配的 base 同义词时，子串匹配仅保留 key 含该 base
-    # 的复合条目（如「动作」精确命中 action 后，仅延伸到 event_action——其 key 含
-    # action，排除 mail_cmd/method 等仅共享「动作」字面但语义无关的噪声条目）。
-    # 这避免短中文 query 因字面重叠引入噪声反过来压制正确候选。
-    if exact_hits and substr_hits:
-        exact_key_set = set(exact_keys)
-        filtered_hits: list[str] = []
-        filtered_keys: list[str] = []
-        for en, k in zip(substr_hits, substr_keys):
-            if any(ek in k for ek in exact_key_set):
-                filtered_hits.append(en)
-                filtered_keys.append(k)
-        substr_hits = filtered_hits
-        substr_keys = filtered_keys
-    elif not exact_hits and substr_hits:
-        # base→复合 传播（无精确同义命中时）：query 含核心概念（zh ⊂ query 的子串
-        # 命中条目视为 base），向共享该核心的复合条目传播——即 key 含 base.key 且
-        # zh 含 base.zh 的条目。如「系统动作」含核心「动作」（base=action），传播到
-        # event_action（key 含 action、zh「事件动作」含「动作」），补 event_response
-        # 锚点；mail_cmd 等虽 zh 含「动作」但 key 不含 action，被排除。
-        # 仅在无精确命中时触发，已有的精确命中分支（动作/协议/攻击类型）不受影响。
-        bases = [(k, zh) for k, zh in zip(substr_keys, substr_zhs) if zh in name]
-        if bases:
-            for key, entry in synonyms.items():
-                en = entry.get("en", "")
-                if not en or en in seen_en:
-                    continue
-                added = False
-                for bk, bzh in bases:
-                    if bk in key:
-                        for zh in entry.get("zh", []):
-                            if bzh in zh:
-                                substr_hits.append(en)
-                                substr_keys.append(key)
-                                seen_en.add(en)
-                                added = True
-                                break
-                        if added:
-                            break
-
-    # 精确匹配优先于子串匹配，最多取 5 个 en，避免 query 文本过长
-    en_terms = (exact_hits + substr_hits)[:5]
-    bridged_keys = (exact_keys + substr_keys)[:5]
-    return en_terms, bridged_keys
-
-
 def _build_query_text_for_embedding(field_name: str) -> str:
     """
     为 Embedding API 查询构建带标签与中文同义词的增强输入文本。
@@ -734,16 +632,7 @@ def _build_query_text_for_embedding(field_name: str) -> str:
     tags = _generate_field_tags(field_name)
     expanded = _expand_field_name(field_name)
     zh_synonyms = _collect_zh_synonyms(field_name)
-    # 中文 query 反向桥接：补回丢失的英文锚点与 tag 对齐。
-    # 纯英文字段名时 _reverse_bridge 返回空，不影响原有链路。
-    en_terms, bridged_keys = _reverse_bridge(field_name)
-    if bridged_keys:
-        for bk in bridged_keys:
-            tags.extend(_generate_field_tags(bk))
-        tags = sorted(set(tags))
     parts = [expanded]
-    if en_terms:
-        parts.append(" ".join(en_terms))
     if tags:
         parts.append(f"[TAGS:{' '.join(tags)}]")
     if zh_synonyms:
@@ -822,7 +711,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
 
     Args:
         raw_field_names: 原始字段名列表
-        top_k: 每个字段返回的候选数（默认 3）
+        top_k: 每个字段返回的候选数（默认 6，调用方常用 5）
 
     Returns:
         紧凑格式字符串，无候选时返回空字符串
