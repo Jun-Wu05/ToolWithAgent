@@ -28,7 +28,7 @@ from agent.shared.logger import get_logger
 logger = get_logger("field_retriever")
 
 # 缓存 schema 版本：标准字段表格式变更时递增，触发自动刷新
-CACHE_SCHEMA_VERSION = "3"  # v3: tag_rules.json 外置 + 中文同义词接入，需重建缓存
+CACHE_SCHEMA_VERSION = "4"  # v4: tag_rules 新增 http tag + synonyms_md5 追踪 + 复合 key 回退，需重建缓存
 
 # Embedding 模型配置
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
@@ -155,6 +155,11 @@ def _expand_field_name(field_name: str) -> str:
     for t in tokens:
         entry = synonyms.get(t.lower())
         expanded.append(entry["en"] if entry and entry.get("en") else t)
+    # 回退查询：整字段名作为复合 key 查 synonyms（如 attack_type/http_url）
+    # 修复 133 个带下划线死条目：单 token 查不到时，复合 key 的 en 定义才生效
+    full_entry = synonyms.get(name.lower())
+    if full_entry and full_entry.get("en"):
+        expanded.append(full_entry["en"])
     return " ".join(expanded)
 
 
@@ -334,10 +339,12 @@ def _save_cache_meta(file_md5: str, record_count: int) -> None:
     保存缓存元数据。
     """
     tag_md5 = _compute_file_md5(_TAG_RULES_PATH) if _TAG_RULES_PATH.exists() else ""
+    synonyms_md5 = _compute_file_md5(_SYNONYMS_PATH) if _SYNONYMS_PATH.exists() else ""
     meta = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "standard_fields_md5": file_md5,
         "tag_rules_md5": tag_md5,
+        "synonyms_md5": synonyms_md5,
         "record_count": record_count,
         "embedding_model": EMBEDDING_MODEL,
         "embedding_dim": EMBEDDING_DIM,
@@ -416,20 +423,24 @@ def init_field_cache(force_refresh: bool = False) -> bool:
         bool: 缓存是否就绪（可用）
     """
     if not force_refresh and _CACHE_EMBEDDINGS_PATH.exists() and _CACHE_RECORDS_PATH.exists():
-        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 + tag规则 MD5 是否匹配
+        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 + tag规则 MD5 + 同义词表 MD5 是否匹配
         meta = _get_cache_meta()
         if meta:
             meta_version = meta.get("schema_version", "")
             meta_md5 = meta.get("standard_fields_md5", "")
             meta_tag_md5 = meta.get("tag_rules_md5", "")
+            meta_synonyms_md5 = meta.get("synonyms_md5", "")
             current_md5 = _compute_file_md5(_STANDARD_FIELDS_PATH)
             # tag 规则影响索引端 _composite_text，变更需重建缓存
             current_tag_md5 = _compute_file_md5(_TAG_RULES_PATH) if _TAG_RULES_PATH.exists() else ""
+            # synonyms 影响索引端 _composite_text（_expand_field_name 展开），变更需重建缓存
+            current_synonyms_md5 = _compute_file_md5(_SYNONYMS_PATH) if _SYNONYMS_PATH.exists() else ""
 
             if (meta_version == CACHE_SCHEMA_VERSION
                     and meta_md5 == current_md5
-                    and meta_tag_md5 == current_tag_md5):
-                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5+tag规则），跳过初始化")
+                    and meta_tag_md5 == current_tag_md5
+                    and meta_synonyms_md5 == current_synonyms_md5):
+                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5+tag规则+同义词），跳过初始化")
                 return True
             else:
                 differ: list[str] = []
@@ -439,6 +450,8 @@ def init_field_cache(force_refresh: bool = False) -> bool:
                     differ.append(f"字段表MD5: {meta_md5[:8]}... → {current_md5[:8]}...")
                 if meta_tag_md5 != current_tag_md5:
                     differ.append(f"tag规则MD5: {meta_tag_md5[:8]}... → {current_tag_md5[:8]}...")
+                if meta_synonyms_md5 != current_synonyms_md5:
+                    differ.append(f"同义词MD5: {meta_synonyms_md5[:8]}... → {current_synonyms_md5[:8]}...")
                 logger.info(f"[CACHE] 标准字段表已变更 ({', '.join(differ)})，自动触发缓存刷新")
         else:
             logger.info("[CACHE] 缓存元数据缺失，触发缓存刷新")
@@ -504,6 +517,12 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
     构建「规范化字段名 → 记录索引」的精确匹配字典。
 
     遍历所有标准字段记录，对其「字段名称」列做规范化处理作为 key。
+    另注册两级中文 key 以修复中文 query 的精确匹配漏网：
+    - 中文系统属性名（如「协议」「事件动作」）直接作为 key
+    - synonyms.zh 反向索引：synonyms key 恰为某记录字段名称时，
+      其 zh 同义词全部注册指向同一记录（如 threat_type.zh 含「攻击类型」）
+    中文 query「协议」「攻击类型」原被迫走向量检索被字面相似词压过，
+    现可经 Layer1 精确命中 sim=1.0 置顶。
 
     Args:
         records: 标准字段记录列表
@@ -512,6 +531,8 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
         dict: 规范化字段名 → 在 records 中的索引位置
     """
     index: dict[str, int] = {}
+    # 字段名称（英文）→ 记录索引的反向映射，供 synonyms.zh 反向索引查用
+    field_name_to_idx: dict[str, int] = {}
     for i, rec in enumerate(records):
         field_name = rec.get("字段名称", "")
         if not field_name:
@@ -521,6 +542,25 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
             # 若存在多个记录映射到同一 key，保留第一个（最权威）
             if key not in index:
                 index[key] = i
+        # 记录原始字段名称（小写）→ 索引，供 synonyms.zh 反向桥接
+        fn_lower = field_name.lower()
+        if fn_lower not in field_name_to_idx:
+            field_name_to_idx[fn_lower] = i
+        # 中文系统属性名作为 key（中文不做 normalize，保持原值）
+        sys_name = rec.get("系统属性名称", "")
+        if sys_name and sys_name not in index:
+            index[sys_name] = i
+
+    # synonyms.zh 反向索引：synonyms key 命中某记录字段名称时，
+    # 其 zh 同义词全部注册指向同一记录（如「攻击类型」→ threat_type 记录）
+    synonyms = _load_synonyms()
+    for syn_key, entry in synonyms.items():
+        target_idx = field_name_to_idx.get(syn_key.lower())
+        if target_idx is None:
+            continue
+        for zh in entry.get("zh", []):
+            if zh and zh not in index:
+                index[zh] = target_idx
     return index
 
 
@@ -560,6 +600,14 @@ def _collect_zh_synonyms(field_name: str) -> list[str]:
         if not entry:
             continue
         for zh in entry.get("zh", []):
+            if zh and zh not in seen:
+                zh_set.append(zh)
+                seen.add(zh)
+    # 回退查询：整字段名作为复合 key 查 synonyms（如 attack_type → 威胁类型/攻击类型）
+    # 修复复合 key 死条目：单 token 命中不到中文同义词时，复合 key 的 zh 定义才生效
+    full_entry = synonyms.get(name.lower())
+    if full_entry:
+        for zh in full_entry.get("zh", []):
             if zh and zh not in seen:
                 zh_set.append(zh)
                 seen.add(zh)
@@ -663,7 +711,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
 
     Args:
         raw_field_names: 原始字段名列表
-        top_k: 每个字段返回的候选数（默认 3）
+        top_k: 每个字段返回的候选数（默认 6，调用方常用 5）
 
     Returns:
         紧凑格式字符串，无候选时返回空字符串
