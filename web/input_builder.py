@@ -8,6 +8,7 @@ import json
 
 from agent.shared.logger import get_logger
 from agent.core.field_retriever import batch_retrieve_candidates
+from web.history_store import format_history_for_prompt
 
 logger = get_logger("input_builder")
 
@@ -51,8 +52,12 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
     - intent="mapping"：拼接字段数据 + 日志样本，供 LLM 做字段映射
     - intent="general"：由 RouterAgent 自己判断
     """
-    # 威胁类型处理：上下文隔离 — 只传用户文本，不拼接任何字段数据
+    # 威胁类型处理：上下文隔离 — 只传用户文本，不拼接字段数据（保留历史让 Agent 感知上下文）
     if intent == "threat":
+        history_block = format_history_for_prompt(user_session)
+        if history_block:
+            logger.info(f"[LLM_INPUT] 威胁路由：拼接历史（{len(history_block)} 字符）+ 用户文本")
+            return f"{history_block}\n\n用户请求：{user_text}"
         logger.info(f"[LLM_INPUT] 威胁路由：仅传递用户文本（长度: {len(user_text)}）")
         return user_text
 
@@ -65,6 +70,18 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
         original_log_sample = simplified_data.get("original_log_sample", "")
 
         fields_json_str = json.dumps(fields_list, ensure_ascii=False)
+
+        # 上下文长度控制：字段列表超长时摘要显示（>30 个字段或 JSON >4000 字符）
+        # 映射任务走分批路径（>25 字段），此处 general 意图无需完整列表
+        _FIELDS_SUMMARY_THRESHOLD = 4000
+        _FIELDS_PREVIEW_COUNT = 30
+        if len(fields_json_str) > _FIELDS_SUMMARY_THRESHOLD:
+            preview_fields = fields_list[:_FIELDS_PREVIEW_COUNT]
+            fields_json_str = (
+                json.dumps(preview_fields, ensure_ascii=False)
+                + f"\n...（共 {len(fields_list)} 个字段，已截断显示前 {_FIELDS_PREVIEW_COUNT} 个）"
+            )
+            logger.info(f"[LLM_INPUT] 字段列表超长，摘要显示：{len(fields_list)} 个字段 → 前 {_FIELDS_PREVIEW_COUNT} 个")
 
         # 在 Python 侧预查询标准字段候选，注入 LLM 输入（消除 tool call 延迟）
         try:
@@ -93,6 +110,12 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
 📋 可用数据字段列表：
 {fields_json_str}"""
 
+        # 拼接对话历史（让 Agent 感知之前的交互，如已上传文件、已完成映射）
+        history_block = format_history_for_prompt(user_session)
+        if history_block:
+            full_input = f"{history_block}\n\n{full_input}"
+            logger.info(f"[LLM_INPUT] 已拼接对话历史（{len(history_block)} 字符）")
+
         # 注入预查询的候选字段数据
         if pre_query_candidates:
             full_input += f"\n\n{pre_query_candidates}\n"
@@ -120,8 +143,14 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
 
         logger.info(f"[LLM_INPUT] 发送给LLM的字段列表: {fields_json_str[:500]}...")
     else:
-        full_input = user_text
+        # 无数据场景：拼接历史 + 用户文本（让 Agent 至少知道之前聊了什么）
+        history_block = format_history_for_prompt(user_session)
+        if history_block:
+            full_input = f"{history_block}\n\n用户请求：{user_text}"
+        else:
+            full_input = user_text
 
+    logger.info(f"[LLM_INPUT] 输入构建完成，总长度: {len(full_input)} 字符")
     return full_input
 
 

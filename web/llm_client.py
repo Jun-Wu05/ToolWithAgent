@@ -13,10 +13,13 @@ import re as _re
 import sys
 import time
 
+import chainlit as cl
+
 from agent.shared.logger import get_logger
 from agent.core.resilience import CircuitBreaker, CircuitBreakerOpenError
 from agent.core.model_config import ModelConfig
 from web.route_config import ENUM_KEYWORDS, THREAT_KEYWORDS, LOG_PARSER_KEYWORDS
+from web.history_store import append_history
 
 logger = get_logger("llm_client")
 
@@ -106,6 +109,14 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
         else:
             content_str = str(result_content)
         logger.info(f"[API] LLM输出长度: {len(content_str)} 字符")
+
+        # 追加 assistant 响应到对话历史（统一入口，覆盖所有 call_team 调用方）
+        try:
+            _sess = cl.user_session.get("user_session")
+            if _sess is not None:
+                append_history(_sess, "assistant", content_str)
+        except Exception as _hist_e:
+            logger.debug(f"[HISTORY] 追加 assistant 历史失败（不影响主流程）: {_hist_e}")
 
         _log_token_usage(result)
         _team_circuit_breaker._on_success()

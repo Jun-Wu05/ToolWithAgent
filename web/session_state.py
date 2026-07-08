@@ -120,6 +120,12 @@ class SessionState:
     model_name: Optional[str] = None
     """模型名称（界面选择，覆盖环境变量）"""
 
+    # ---- 对话历史（自定义记忆，不依赖 Agno session）----
+    conversation_history: List[Dict[str, Any]] = field(default_factory=list)
+    """多轮对话历史，每项 {role: 'user'|'assistant', content: str}。
+    由 web/history_store.py 管理，build_llm_input 拼最近 N 轮进 prompt。
+    clear_decoded_data 时同步清空。"""
+
     # ---- 工厂方法 ----
 
     @classmethod
@@ -149,7 +155,7 @@ class SessionState:
         self.enum_preview = None
 
     def clear_decoded_data(self) -> None:
-        """清除解码后的数据及上传文件元信息"""
+        """清除解码后的数据及上传文件元信息，同步清空对话历史"""
         self.decoded_data = None
         self.decoded_fields = None
         self.decoded_text = None
@@ -158,6 +164,8 @@ class SessionState:
         self.simplified_data = None
         self.uploaded_file_name = None
         self.uploaded_file_time = None
+        # 数据清空时对话历史也应清空（旧文件上下文不再有效）
+        self.conversation_history = []
 
     def get_session_summary(self) -> str:
         """

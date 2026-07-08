@@ -17,12 +17,13 @@ logger = get_logger("user_message_handlers")
 
 # 从拆分模块导入业务函数
 from web.route_config import (
-    MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, 
-    ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS
+    MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS,
+    ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS, detect_intent
 )
 from web.llm_client import call_team
 from web.input_builder import build_llm_input, build_batch_llm_input
 from web.response_handler import process_team_response, _check_session_action
+from web.history_store import append_history
 from web.threat_handler import handle_threat_fill_flow
 from web.enum_handler import handle_enum_fill_flow, handle_enum_extract_flow
 from web.log_parser_handler import handle_log_parser
@@ -58,8 +59,9 @@ async def handle_user_message(user_session, team, user_text: str):
         team: Agno Team 实例
         user_text: 用户输入的文本
     """
-    # 记录用户输入
+    # 记录用户输入 + 追加到对话历史（让 Agent 记住多轮上下文）
     logger.info(f"[USER_INPUT] 用户消息: {user_text[:500]}")
+    append_history(user_session, "user", user_text)
     
     user_lower = user_text.lower()
     
@@ -73,12 +75,15 @@ async def handle_user_message(user_session, team, user_text: str):
         return
     # ====================================================================
     
-    # 意图检测（关键词匹配）
-    is_enum = any(kw in user_lower for kw in ENUM_KEYWORDS)
+    # 意图检测（带消歧规则的 detect_intent + 保留布尔标志用于早期分流）
     is_enum_extract = any(kw in user_lower for kw in ENUM_EXTRACT_KEYWORDS)
-    is_threat = any(kw in user_lower for kw in THREAT_KEYWORDS)
-    is_mapping = any(kw in user_lower for kw in MAPPING_KEYWORDS)
     is_log_parser = any(kw in user_lower for kw in LOG_PARSER_KEYWORDS)
+    # enum/threat/mapping 的冲突消歧交给 detect_intent
+    detected_intent, route_reason = detect_intent(user_text, user_session)
+    is_enum = detected_intent == "enum"
+    is_threat = detected_intent == "threat"
+    is_mapping = detected_intent == "mapping"
+    logger.info(f"[ROUTE] '{user_text[:60]}' → {detected_intent}（{route_reason}）")
     
     # 1. 威胁填充模式分流 → threat_handler
     if await handle_threat_fill_flow(user_session, user_text):
@@ -144,13 +149,9 @@ Excel 格式说明：
         await handle_log_parser(user_session, user_text)
         return
     
-    # 5. 构建 LLM 输入（按意图隔离上下文）
-    detected_intent = "general"
-    if is_threat:
-        detected_intent = "threat"
-    elif is_mapping:
-        detected_intent = "mapping"
-    elif is_log_parser:
+    # 5. 构建 LLM 输入（detected_intent 已由 detect_intent 带消歧规则确定）
+    # detect_intent 未覆盖 log_parser 时兜底（日志解析早期分流可能已 return）
+    if is_log_parser and detected_intent == "general":
         detected_intent = "log_parser"
     
     # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
