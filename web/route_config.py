@@ -78,9 +78,9 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
 
     # 上下文辅助：威胁/枚举填充模式开启时，强制对应意图（填充流程内部消息）
     if user_session is not None:
-        if getattr(user_session, "threat_fill_mode", False) or user_session.get("threat_fill_mode"):
+        if user_session.get("threat_fill_mode", False):
             return "threat", "threat_fill_mode 开启，强制 threat"
-        if getattr(user_session, "enum_fill_mode", False) or user_session.get("enum_fill_mode"):
+        if user_session.get("enum_fill_mode", False):
             return "enum", "enum_fill_mode 开启，强制 enum"
 
     # 基础子串匹配（各意图独立检测）
@@ -90,9 +90,22 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
     is_enum = any(kw in lower for kw in ENUM_KEYWORDS)
     is_log_parser = any(kw in lower for kw in LOG_PARSER_KEYWORDS)
 
+    # 填充动作识别：「填充」「填充到」是枚举/威胁填充的明确信号，
+    # 必须在 mapping 之前拦截（否则「填充到xxx字段」会被「字段」抢到 mapping）
+    is_fill_action = any(p in lower for p in ("填充到", "填充", "填入", "填到"))
+
     # 枚举提取优先级最高（精确动作词）
     if is_enum_extract:
         return "enum", f"命中枚举提取关键词"
+
+    # 填充动作分流：含「填充」且已有枚举映射表/威胁映射表时，走填充流程
+    if is_fill_action and user_session is not None:
+        has_enum_excel = bool(user_session.get("enum_excel_path"))
+        has_threat_table = bool(user_session.get("threat_mapping_table"))
+        if has_enum_excel:
+            return "enum", "填充动作 + 已有枚举映射表，走枚举填充"
+        if has_threat_table:
+            return "threat", "填充动作 + 已有威胁映射表，走威胁填充"
 
     # 日志解析（独立，与其他意图冲突少）
     if is_log_parser and not is_threat and not is_mapping:

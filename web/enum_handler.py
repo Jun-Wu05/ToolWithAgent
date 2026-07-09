@@ -81,6 +81,34 @@ async def handle_enum_fill_flow(user_session: dict, user_text: str) -> bool:
     return True
 
 
+def _resolve_fill_data_source(file_content: str) -> tuple:
+    """解析填充数据源：Base64 → JSON 两级降级。
+
+    Args:
+        file_content: 原始文件内容（Base64 字符串或 JSON 文本）
+
+    Returns:
+        (decoded_data, error_msg)：成功时 decoded_data 为 dict/list，error_msg 为 None；
+        失败时 decoded_data 为 None，error_msg 为错误描述。
+    """
+    from agent.core.agent import simple_decode
+    result = simple_decode(file_content)
+    if result["status"] == "success":
+        logger.info("[data_source] Base64 解码成功")
+        return result["decoded_json"], None
+
+    # Base64 解码失败，尝试直接作为 JSON
+    logger.info("[data_source] Base64解码失败，尝试直接解析 JSON")
+    try:
+        data = json.loads(file_content)
+        logger.info("[data_source] JSON 直接解析成功")
+        return data, None
+    except Exception:
+        error_msg = result.get('error_message', '未知错误')
+        logger.warning(f"[data_source] 数据源解析失败: {error_msg}")
+        return None, error_msg
+
+
 async def execute_enum_fill(user_session: dict, file_content: str):
     """
     执行枚举字段填充
@@ -101,21 +129,11 @@ async def execute_enum_fill(user_session: dict, file_content: str):
         user_session["enum_fill_mode"] = False
         return
 
-    # 尝试解析 Base64 文件内容
-    from agent.core.agent import simple_decode
-    result = simple_decode(file_content)
-
-    if result["status"] == "success":
-        decoded_data = result["decoded_json"]
-        logger.info("[execute_enum_fill] Base64 解码成功")
-    else:
-        # 如果解码失败，尝试直接使用文件内容作为 JSON
-        logger.info("[execute_enum_fill] Base64解码失败，尝试直接解析")
-        try:
-            decoded_data = json.loads(file_content)
-        except Exception:
-            await cl.Message(content=f"❌ 文件解析失败：{result.get('error_message', '未知错误')}").send()
-            return
+    # 解析数据源（委托 _resolve_fill_data_source）
+    decoded_data, error_msg = _resolve_fill_data_source(file_content)
+    if decoded_data is None:
+        await cl.Message(content=f"❌ 文件解析失败：{error_msg}").send()
+        return
 
     # 执行枚举填充
     try:

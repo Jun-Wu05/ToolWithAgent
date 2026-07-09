@@ -21,14 +21,13 @@ from web.route_config import (
     ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS, detect_intent
 )
 from web.llm_client import call_team
-from web.input_builder import build_llm_input, build_batch_llm_input
+from web.input_builder import build_llm_input
 from web.response_handler import process_team_response, _check_session_action
 from web.history_store import append_history
 from web.threat_handler import handle_threat_fill_flow
 from web.enum_handler import handle_enum_fill_flow, handle_enum_extract_flow
 from web.log_parser_handler import handle_log_parser
 from web.parsers import parse_json_mapping_result, create_dataframe_elements
-from web.file_handler import process_batched_mapping
 
 # 延迟导入 action_callbacks 避免循环依赖
 _action_callbacks = None
@@ -94,29 +93,24 @@ async def handle_user_message(user_session, team, user_text: str):
         return
     
     # 2.5 枚举填充自动触发：同时存在 raw_base64 + enum_excel_path 则直接执行填充
-    if (getattr(user_session, "enum_excel_path", None) or user_session.get("enum_excel_path")) and is_enum:
-        raw_base64 = getattr(user_session, "raw_base64", None) or user_session.get("raw_base64")
-        
+    enum_excel_path = user_session.get("enum_excel_path")
+    if enum_excel_path and is_enum:
+        raw_base64 = user_session.get("raw_base64")
+
         if raw_base64:
-            if hasattr(user_session, "enum_fill_mode"):
-                user_session.enum_fill_mode = True
-            else:
-                user_session["enum_fill_mode"] = True
+            user_session["enum_fill_mode"] = True
             logger.info("[ROUTE] raw_base64 + enum_excel_path 同时存在，自动触发枚举填充")
             from web.enum_handler import execute_enum_fill
             await execute_enum_fill(user_session, raw_base64)
             return
-        
+
         # 有 Excel 但无 Base64：提示上传
-        if hasattr(user_session, "enum_fill_mode"):
-            user_session.enum_fill_mode = True
-        else:
-            user_session["enum_fill_mode"] = True
+        user_session["enum_fill_mode"] = True
         logger.info("[ROUTE] 检测到已有枚举Excel，激活填充模式，等待Base64上传")
         await cl.Message(
             content=f"""📋 **枚举填充模式已激活**
 
-已选择映射表：{getattr(user_session, "enum_excel_path", None) or user_session.get("enum_excel_path")}
+已选择映射表：{enum_excel_path}
 
 请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
         ).send()
@@ -157,53 +151,29 @@ Excel 格式说明：
     # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
     BATCH_SIZE = 25
     if detected_intent == "mapping":
-        simplified_data = getattr(user_session, "simplified_data", None) or user_session.get("simplified_data", {})
+        simplified_data = user_session.get("simplified_data", {})
         fields_list = simplified_data.get("fields", []) if isinstance(simplified_data, dict) else []
         
         if len(fields_list) > BATCH_SIZE:
             import math
             total_batches_preview = math.ceil(len(fields_list) / BATCH_SIZE)
             logger.info(f"[BATCH] 字段数 {len(fields_list)} > {BATCH_SIZE}，进入分批模式，共 {total_batches_preview} 批")
-            
+
             loading_msg = cl.Message(content=f"⏳ **正在处理字段映射（第 1/{total_batches_preview} 批）...**")
-            await loading_msg.send()
-            
-            # 构建回调适配器
-            def build_batch_fn(u_text, u_sess, batch, idx, total):
-                return build_batch_llm_input(u_text, u_sess, batch, idx, total)
-            
-            async def call_team_fn(t, input_text, _loading, intent):
-                return await call_team(t, input_text, loading_msg, intent=intent)
-            
-            async def on_batch_complete(batch_idx: int, total: int, batch_count: int, total_count: int):
-                loading_msg.content = f"⏳ **正在处理字段映射（第 {batch_idx + 1}/{total} 批）...**"
-                try:
-                    await loading_msg.update()
-                except Exception:
-                    pass
-            
-            all_mapping_data, total_batches = await process_batched_mapping(
+
+            from web.batch_mapping_helper import run_batched_mapping
+            all_mapping_data, total_batches = await run_batched_mapping(
                 team=team,
                 fields_list=fields_list,
                 user_text=user_text,
                 user_session=user_session,
-                build_batch_fn=build_batch_fn,
-                call_team_fn=call_team_fn,
                 parse_fn=parse_json_mapping_result,
                 batch_size=BATCH_SIZE,
-                on_batch_complete=on_batch_complete,
+                loading_msg=loading_msg,
             )
             
-            try:
-                await loading_msg.remove()
-            except Exception:
-                pass
-            
             if all_mapping_data:
-                if hasattr(user_session, "last_mapping_data"):
-                    user_session.last_mapping_data = all_mapping_data
-                else:
-                    user_session["last_mapping_data"] = all_mapping_data
+                user_session["last_mapping_data"] = all_mapping_data
                 
                 matched_count = sum(1 for item in all_mapping_data if item.get("匹配状态") == "匹配成功")
                 unmatched_count = len(all_mapping_data) - matched_count
@@ -220,10 +190,7 @@ Excel 格式说明：
                         for item in all_mapping_data
                     ]
                 }]
-                if hasattr(user_session, "batch_mapping_results"):
-                    user_session.batch_mapping_results = batch_mapping_results
-                else:
-                    user_session["batch_mapping_results"] = batch_mapping_results
+                user_session["batch_mapping_results"] = batch_mapping_results
                 
                 summary = f"""✅ **字段映射完成！（分 {total_batches} 批处理）**
 

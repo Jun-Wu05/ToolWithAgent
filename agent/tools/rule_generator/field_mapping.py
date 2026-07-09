@@ -8,6 +8,11 @@ import copy
 from typing import Any
 
 
+# normalize entries 的 index 排除集合：系统自动生成的元字段，不参与用户字段映射
+# web/action_callbacks.py 也引用此常量（原散落 4 处 literal）
+EXCLUDED_FIELD_INDICES = frozenset({"original_log", "日志类型"})
+
+
 def extract_sub_rule_mapping_info(sub_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """从子规则列表中提取字段映射所需信息（字段列表 + 原始日志样本）。
 
@@ -25,11 +30,11 @@ def extract_sub_rule_mapping_info(sub_rules: list[dict[str, Any]]) -> list[dict[
         rule_name: str = rule.get("name", "")
         sample_log: str = rule.get("sample", "")
 
-        # 提取 normalize entries 的 index（排除 original_log 和 日志类型）
+        # 提取 normalize entries 的 index（排除元字段）
         fields: list[str] = []
         for entry in rule.get("normalize", []):
             idx = entry.get("index", "")
-            if idx and idx not in ("original_log", "日志类型"):
+            if idx and idx not in EXCLUDED_FIELD_INDICES:
                 fields.append(idx)
 
         result.append({
@@ -98,7 +103,7 @@ def apply_field_mapping_to_sub_rules(
 
         for entry in rule.get("normalize", []):
             idx = entry.get("index", "")
-            if not idx or idx in ("original_log", "日志类型"):
+            if not idx or idx in EXCLUDED_FIELD_INDICES:
                 continue
 
             mapping = field_map.get(idx)

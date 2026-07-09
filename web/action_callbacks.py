@@ -94,32 +94,18 @@ async def on_fill_threat_with_field(action: cl.Action):
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"带字段填充"按钮')
     
-    last_threat_data = getattr(user_session, "last_threat_data", None) or user_session.get("last_threat_data")
+    last_threat_data = user_session.get("last_threat_data")
     logger.info(f"[ACTION] 威胁填充模式，表格数据检查: {last_threat_data is not None}")
-    
+
     if not last_threat_data:
         await cl.Message(content="❌ 未找到填充数据，请先执行威胁类型映射。").send()
         return
-    
-    # 保存表格数据到会话
-    if hasattr(user_session, "threat_mapping_table"):
-        user_session.threat_mapping_table = last_threat_data
-    else:
-        user_session["threat_mapping_table"] = last_threat_data
-    
-    # 进入威胁填充模式
-    if hasattr(user_session, "threat_fill_mode"):
-        user_session.threat_fill_mode = True
-    else:
-        user_session["threat_fill_mode"] = True
-    if hasattr(user_session, "threat_target_field"):
-        user_session.threat_target_field = None
-    else:
-        user_session["threat_target_field"] = None
-    if hasattr(user_session, "pending_base64"):
-        user_session.pending_base64 = None
-    else:
-        user_session["pending_base64"] = None
+
+    # 保存表格数据到会话 + 进入威胁填充模式
+    user_session["threat_mapping_table"] = last_threat_data
+    user_session["threat_fill_mode"] = True
+    user_session["threat_target_field"] = None
+    user_session["pending_base64"] = None
     
     logger.info(f"[ACTION] 威胁填充模式已激活，映射数量: {len(last_threat_data)}")
     
@@ -141,8 +127,8 @@ async def on_confirm_fill(action: cl.Action):
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"确认填充"按钮')
     
-    mapping_data = getattr(user_session, "last_mapping_data", None) or user_session.get("last_mapping_data")
-    
+    mapping_data = user_session.get("last_mapping_data")
+
     if not mapping_data:
         logger.warning("[ACTION] 未找到映射数据")
         await cl.Message(content="❌ 未找到映射数据，请先执行字段映射。").send()
@@ -152,8 +138,8 @@ async def on_confirm_fill(action: cl.Action):
     
     # 执行字段填充
     try:
-        decoded_data = getattr(user_session, "decoded_data", None) or user_session.get("decoded_data")
-        
+        decoded_data = user_session.get("decoded_data")
+
         if not decoded_data:
             logger.warning("[ACTION] 未找到原始数据")
             await cl.Message(content="❌ 未找到原始数据，请先上传文件。").send()
@@ -189,18 +175,15 @@ async def on_start_enum_fill(action: cl.Action):
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"开始枚举填充"按钮')
     
-    enum_excel_path = getattr(user_session, "enum_excel_path", None) or user_session.get("enum_excel_path")
-    enum_preview = getattr(user_session, "enum_preview", None) or user_session.get("enum_preview")
-    
+    enum_excel_path = user_session.get("enum_excel_path")
+    enum_preview = user_session.get("enum_preview")
+
     if not enum_excel_path or not enum_preview:
         await cl.Message(content="❌ 枚举映射表丢失，请重新上传 Excel 映射表。").send()
         return
-    
+
     # 设置枚举填充模式
-    if hasattr(user_session, "enum_fill_mode"):
-        user_session.enum_fill_mode = True
-    else:
-        user_session["enum_fill_mode"] = True
+    user_session["enum_fill_mode"] = True
     
     field_count = len(enum_preview)
     logger.info(f"[ACTION] 枚举填充模式已激活，映射数量: {field_count}")
@@ -219,7 +202,7 @@ async def on_start_enum_fill(action: cl.Action):
 async def on_export_rules(action: cl.Action):
     """用户点击"导出入口规则"按钮"""
     user_session = cl.user_session.get("user_session")
-    classification = getattr(user_session, "log_classification", None) or user_session.get("log_classification")
+    classification = user_session.get("log_classification")
     logger.info('[ACTION] 用户点击"导出入口规则"按钮')
     
     if not classification or not isinstance(classification, dict):
@@ -250,7 +233,7 @@ async def on_export_rules(action: cl.Action):
 async def on_export_sub_rules(action: cl.Action):
     """用户点击"导出子规则"按钮"""
     user_session = cl.user_session.get("user_session")
-    classification = getattr(user_session, "log_classification", None) or user_session.get("log_classification")
+    classification = user_session.get("log_classification")
     logger.info('[ACTION] 用户点击"导出子规则"按钮')
     
     if not classification or not isinstance(classification, dict):
@@ -281,7 +264,7 @@ async def on_export_sub_rules(action: cl.Action):
 async def on_apply_field_mapping(action: cl.Action):
     """用户点击"标准字段映射"按钮"""
     user_session = cl.user_session.get("user_session")
-    classification = getattr(user_session, "log_classification", None) or user_session.get("log_classification")
+    classification = user_session.get("log_classification")
     logger.info('[ACTION] 用户点击"标准字段映射"按钮')
     
     if not classification or not isinstance(classification, dict):
@@ -292,7 +275,7 @@ async def on_apply_field_mapping(action: cl.Action):
         # 1. 生成子规则（用于获取字段列表）
         logger.info("[ACTION] 生成子规则用于字段映射")
         
-        raw_log_lines = getattr(user_session, "raw_log_lines", []) or user_session.get("raw_log_lines", [])
+        raw_log_lines = user_session.get("raw_log_lines", [])
         all_logs_str = "\n".join(str(line) for line in raw_log_lines) if raw_log_lines else ""
         
         sub_rules = generate_sub_rules(classification, all_logs_str=all_logs_str)
@@ -301,13 +284,14 @@ async def on_apply_field_mapping(action: cl.Action):
             await cl.Message(content="❌ 未生成任何子规则，无法进行字段映射。").send()
             return
         
-        # 2. 提取所有字段
+        # 2. 提取所有字段（排除 original_log / 日志类型 元字段）
+        from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
         all_fields = []
         for rule in sub_rules:
             fields = [
                 entry.get("index", "")
                 for entry in rule.get("normalize", [])
-                if entry.get("index", "") not in ("original_log", "日志类型")
+                if entry.get("index", "") not in EXCLUDED_FIELD_INDICES
             ]
             all_fields.extend(fields)
         
@@ -316,58 +300,27 @@ async def on_apply_field_mapping(action: cl.Action):
         
         logger.info(f"[ACTION] 共提取 {len(all_fields)} 个唯一字段")
         
-        # 3. 调用分批映射（复用 user_message_handlers 逻辑）
-        from web.user_message_handlers import _clear_session_data
-        from web.input_builder import build_batch_llm_input
-        from web.llm_client import call_team
+        # 3. 调用分批映射（委托 batch_mapping_helper）
+        from web.batch_mapping_helper import run_batched_mapping
         from web.parsers import parse_json_mapping_result, create_dataframe_elements
-        from web.file_handler import process_batched_mapping
         
         sample_logs_text = "\n".join(str(line) for line in raw_log_lines[:10]) if raw_log_lines else ""
         simplified_data = {
             "fields": all_fields,
             "original_log_sample": sample_logs_text
         }
-        if hasattr(user_session, "simplified_data"):
-            user_session.simplified_data = simplified_data
-        else:
-            user_session["simplified_data"] = simplified_data
+        user_session["simplified_data"] = simplified_data
         
         BATCH_SIZE = 25
-        
-        loading_msg = cl.Message(content="⏳ **正在处理字段映射...**")
-        await loading_msg.send()
-        
-        def build_batch_fn(u_text, u_sess, batch, idx, total):
-            return build_batch_llm_input(u_text, u_sess, batch, idx, total)
-        
-        async def call_team_fn(t, input_text, _loading, intent):
-            return await call_team(t, input_text, loading_msg, intent=intent)
-        
-        async def on_batch_complete(batch_idx: int, total: int, batch_count: int, total_count: int):
-            loading_msg.content = f"⏳ **正在处理字段映射（第 {batch_idx + 1}/{total} 批）...**"
-            try:
-                await loading_msg.update()
-            except Exception:
-                pass
-        
-        mapping_data, total_batches = await process_batched_mapping(
+        mapping_data, total_batches = await run_batched_mapping(
             team=user_session.team,
             fields_list=all_fields,
             user_text="标准字段映射",
             user_session=user_session,
-            build_batch_fn=build_batch_fn,
-            call_team_fn=call_team_fn,
             parse_fn=parse_json_mapping_result,
             batch_size=BATCH_SIZE,
-            on_batch_complete=on_batch_complete,
         )
-        
-        try:
-            await loading_msg.remove()
-        except Exception:
-            pass
-        
+
         if not mapping_data:
             await cl.Message(content="❌ 字段映射失败，请重试。").send()
             return
@@ -381,7 +334,7 @@ async def on_apply_field_mapping(action: cl.Action):
             rule_fields = [
                 entry.get("index", "")
                 for entry in rule.get("normalize", [])
-                if entry.get("index", "") not in ("original_log", "日志类型")
+                if entry.get("index", "") not in EXCLUDED_FIELD_INDICES
             ]
             
             rule_mappings = []
@@ -400,10 +353,7 @@ async def on_apply_field_mapping(action: cl.Action):
             })
         
         # 6. 保存到 session state
-        if hasattr(user_session, "sub_rule_mapping_results"):
-            user_session.sub_rule_mapping_results = all_sub_rule_results
-        else:
-            user_session["sub_rule_mapping_results"] = all_sub_rule_results
+        user_session["sub_rule_mapping_results"] = all_sub_rule_results
         
         # 7. 应用映射到子规则
         import os
@@ -414,10 +364,7 @@ async def on_apply_field_mapping(action: cl.Action):
             sub_rules, all_sub_rule_results, object_entity_map
         )
         
-        if hasattr(user_session, "mapped_sub_rules"):
-            user_session.mapped_sub_rules = mapped_sub_rules
-        else:
-            user_session["mapped_sub_rules"] = mapped_sub_rules
+        user_session["mapped_sub_rules"] = mapped_sub_rules
         
         logger.info(f"[ACTION] 映射后的子规则已保存，共 {len(mapped_sub_rules)} 条")
         
@@ -491,7 +438,7 @@ async def on_apply_field_mapping(action: cl.Action):
 async def on_export_mapped_sub_rules(action: cl.Action):
     """导出带标准字段映射的子规则"""
     user_session = cl.user_session.get("user_session")
-    mapped_sub_rules = getattr(user_session, "mapped_sub_rules", None) or user_session.get("mapped_sub_rules")
+    mapped_sub_rules = user_session.get("mapped_sub_rules")
     logger.info('[ACTION] 用户点击"导出映射后子规则"按钮')
     
     if not mapped_sub_rules:
@@ -517,7 +464,7 @@ async def on_export_mapped_sub_rules(action: cl.Action):
 async def on_export_field_mapping_excel(action: cl.Action):
     """导出字段映射结果为 Excel 文件（日志解析→标准字段映射路径）"""
     user_session = cl.user_session.get("user_session")
-    mapping_results = getattr(user_session, "sub_rule_mapping_results", None) or user_session.get("sub_rule_mapping_results")
+    mapping_results = user_session.get("sub_rule_mapping_results")
     logger.info('[ACTION] 用户点击"导出字段映射 Excel"按钮')
     
     if not mapping_results:
@@ -573,7 +520,7 @@ async def on_export_field_mapping_excel(action: cl.Action):
 async def on_export_batch_field_mapping_excel(action: cl.Action):
     """导出批量字段映射结果为 Excel 文件（聊天输入"映射"路径）"""
     user_session = cl.user_session.get("user_session")
-    mapping_results = getattr(user_session, "batch_mapping_results", None) or user_session.get("batch_mapping_results")
+    mapping_results = user_session.get("batch_mapping_results")
     logger.info('[ACTION] 用户点击"批量字段映射导出Excel"按钮')
     
     if not mapping_results:
