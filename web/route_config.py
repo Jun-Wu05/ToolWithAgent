@@ -125,8 +125,8 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
             return "mapping", f"含字段映射强信号，优先 mapping（尽管命中威胁词）"
         if has_threat_strong and has_threat_action:
             return "threat", f"含威胁类型强信号+动作词，判定 threat"
-        # 默认倾向 mapping（「威胁字段映射」「威胁的字段」等更可能是字段映射）
-        return "mapping", f"威胁+映射冲突，默认 mapping"
+        # 无法消歧 → 交 RouterAgent 判断（而非默认 mapping）
+        return "ambiguous", "威胁+映射冲突无法消歧，交 RouterAgent"
 
     if is_threat:
         return "threat", f"命中威胁关键词"

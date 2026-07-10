@@ -157,6 +157,10 @@ Excel 格式说明：
     # detect_intent 未覆盖 log_parser 时兜底（日志解析早期分流可能已 return）
     if is_log_parser and detected_intent == "general":
         detected_intent = "log_parser"
+    # ambiguous（威胁+映射无法消歧）→ 走 RouterAgent（当 general 处理，注入 session_context）
+    if detected_intent == "ambiguous":
+        logger.info("[ROUTE] 模糊意图，fallback RouterAgent（按 general 走 team.run）")
+        detected_intent = "general"
     
     # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
     BATCH_SIZE = 25

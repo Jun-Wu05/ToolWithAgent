@@ -169,25 +169,61 @@ class SessionState:
 
     def get_session_summary(self) -> str:
         """
-        构建当前会话的文本摘要，供 Agent 自决清空时感知上下文。
-        
+        构建当前会话的文本摘要，供 Agent 感知上下文（自决清空/激活填充/路由判断）。
+
         返回示例：
             - 已上传文件：syslog_config.txt
             - 字段数量：51 个
-            - 上传时间：10:55:30
-        
-        无数据时返回空字符串。
+            - 字段映射：已完成（批量映射）
+            - 子规则：已生成 3 条，已映射字段
+            - 枚举映射表：已加载（event_type）
+            - 威胁映射：已完成 12 条
+
+        无任何数据时返回空字符串。
         """
-        if not self.has_decoded_data():
-            return ""
-        field_count = len(self.decoded_fields) if self.decoded_fields else 0
         parts = []
-        if self.uploaded_file_name:
-            parts.append(f"- 已上传文件：{self.uploaded_file_name}")
-        parts.append(f"- 字段数量：{field_count} 个")
-        if self.uploaded_file_time:
-            parts.append(f"- 上传时间：{self.uploaded_file_time}")
-        return "\n".join(parts)
+
+        # 文件信息
+        if self.has_decoded_data():
+            field_count = len(self.decoded_fields) if self.decoded_fields else 0
+            if self.uploaded_file_name:
+                parts.append(f"- 已上传文件：{self.uploaded_file_name}")
+            parts.append(f"- 字段数量：{field_count} 个")
+            if self.uploaded_file_time:
+                parts.append(f"- 上传时间：{self.uploaded_file_time}")
+        elif self.last_mapping_data or self.mapped_sub_rules:
+            # 数据可能已清空但映射结果还在
+            parts.append("- 当前无文件数据，但有历史映射结果")
+
+        # 字段映射状态
+        if self.last_mapping_data:
+            parts.append(f"- 字段映射：已完成（{len(self.last_mapping_data)} 条）")
+        if self.batch_mapping_results:
+            parts.append("- 字段映射：已完成（批量映射）")
+
+        # 子规则状态
+        if self.mapped_sub_rules:
+            parts.append(f"- 子规则：已生成 {len(self.mapped_sub_rules)} 条，已映射字段")
+        elif self.sub_rule_mapping_results:
+            parts.append(f"- 子规则：已生成 {len(self.sub_rule_mapping_results)} 条")
+
+        # 枚举状态
+        if self.enum_excel_path:
+            parts.append(f"- 枚举映射表：已加载（{self.enum_excel_path}）")
+        if self.last_enum_extract_result:
+            parts.append("- 枚举提取：已有结果")
+
+        # 威胁状态
+        if self.last_threat_data:
+            parts.append(f"- 威胁映射：已完成 {len(self.last_threat_data)} 条")
+        if self.threat_mapping_table:
+            parts.append("- 威胁映射表：已加载，可用于填充")
+
+        # 日志解析状态
+        if self.log_classification:
+            parts.append("- 日志解析：已完成")
+
+        return "\n".join(parts) if parts else ""
 
     def clear_mapping_results(self) -> None:
         """清除映射结果"""

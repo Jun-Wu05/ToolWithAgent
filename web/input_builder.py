@@ -91,7 +91,7 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
             logger.warning(f"[LLM_INPUT] 语义检索候选获取失败，降级为无候选输入: {e}")
             pre_query_candidates = ""
 
-        # ====== P0 问题2：Agent 自决清空 — general 意图下注入会话摘要 ======
+        # ====== Agent 自决动作 — general 意图下注入会话摘要 + 动作标记说明 ======
         session_context = ""
         if intent == "general":
             session_summary = user_session.get_session_summary() if hasattr(user_session, "get_session_summary") else ""
@@ -100,9 +100,12 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
 📋 当前会话状态：
 {session_summary}
 
-⚠️ 重要提示：如果用户表达了切换数据、处理新文件、清空旧数据、重新开始等意图，请在回复末尾输出特殊标记 [SESSION_ACTION:clear]，系统将自动清空当前会话中的旧文件数据，以便接收新文件。
+⚠️ 可用动作标记（仅在需要时输出，放在回复末尾）：
+- [SESSION_ACTION:clear] — 用户要切换/清空数据时输出，系统自动清空旧文件数据
+- [SESSION_ACTION:activate_enum_fill] — 用户要做枚举填充时输出，系统自动激活填充流程
+- [SESSION_ACTION:activate_threat_fill] — 用户要做威胁填充时输出，系统自动激活填充流程
 """
-                logger.info(f"[LLM_INPUT] General 意图：注入会话摘要（字段数: {len(fields_list)}）")
+                logger.info(f"[LLM_INPUT] General 意图：注入会话摘要 + 动作标记（字段数: {len(fields_list)}）")
         # ========================================================================
 
         full_input = f"""用户请求：{user_text}
