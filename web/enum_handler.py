@@ -55,6 +55,11 @@ async def handle_enum_fill_flow(user_session: dict, user_text: str) -> bool:
     """
     枚举填充模式专属流程
 
+    数据源优先级（避免要求用户重传已上传的数据）：
+    1. mapped_sub_rules（Excel→解析→映射路径产出）→ apply_enum_fill_to_sub_rules
+    2. raw_base64（Base64 上传缓存）→ execute_enum_fill
+    3. 都没有 → 提示上传 Base64 文件
+
     Returns:
         True 表示已处理（调用方应直接 return），False 表示未命中枚举填充模式
     """
@@ -69,8 +74,22 @@ async def handle_enum_fill_flow(user_session: dict, user_text: str) -> bool:
         user_session["enum_fill_mode"] = False
         return True
 
-    # 枚举模式需要用户上传 Base64 文件
-    logger.info("[HANDLE] 枚举模式，等待用户上传Base64文件")
+    # 数据源 1：已有 mapped_sub_rules（Excel 数据表格 → 日志解析 → 字段映射 产出）
+    mapped_sub_rules = user_session.get("mapped_sub_rules")
+    if mapped_sub_rules:
+        logger.info("[HANDLE] 检测到已有 mapped_sub_rules，用子规则数据源直接填充（无需重传）")
+        await _execute_enum_fill_with_sub_rules(user_session, mapped_sub_rules, enum_excel_path)
+        return True
+
+    # 数据源 2：已有 raw_base64 缓存
+    raw_base64 = user_session.get("raw_base64")
+    if raw_base64:
+        logger.info("[HANDLE] 检测到已有 raw_base64 缓存，直接执行填充")
+        await execute_enum_fill(user_session, raw_base64)
+        return True
+
+    # 数据源 3：都没有，提示上传
+    logger.info("[HANDLE] 无已解码数据，等待用户上传Base64文件")
     await cl.Message(
         content=f"""📋 **枚举填充模式已开启**
 
@@ -79,6 +98,65 @@ async def handle_enum_fill_flow(user_session: dict, user_text: str) -> bool:
 请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
     ).send()
     return True
+
+
+async def _execute_enum_fill_with_sub_rules(user_session: dict, sub_rules: list, enum_excel_path: str):
+    """用已有 mapped_sub_rules 执行枚举填充（读 Excel 映射表 → apply_enum_fill_to_sub_rules → 导出）"""
+    from agent.tools.enum_field_tool import read_enum_mappings_from_excel
+    from agent.tools.rule_generator import apply_enum_fill_to_sub_rules, rules_to_base64_text
+
+    logger.info("[enum_fill_sub_rules] 开始执行（复用 mapped_sub_rules）")
+    enum_preview = user_session.get("enum_preview")
+
+    try:
+        # 读取枚举映射表（{字段名: [{mappingType, orgValue, mappingValue}, ...]}）
+        mapping_table = read_enum_mappings_from_excel(enum_excel_path)
+        if not mapping_table:
+            await cl.Message(content=f"❌ 枚举映射表未读取到有效规则：{enum_excel_path}").send()
+            return
+
+        updated_sub_rules = apply_enum_fill_to_sub_rules(sub_rules, mapping_table)
+        logger.info("[enum_fill_sub_rules] 枚举填充应用成功")
+
+        # 导出 Base64
+        base64_result = rules_to_base64_text(updated_sub_rules)
+        logger.info(f"[enum_fill_sub_rules] 导出成功，长度: {len(base64_result)}")
+
+        # 重置枚举填充模式
+        user_session["enum_fill_mode"] = False
+        user_session["enum_excel_path"] = None
+        user_session["enum_preview"] = None
+
+        field_count = len(enum_preview) if enum_preview else 0
+        await cl.Message(
+            content=f"""✅ **枚举字段填充完成！**
+
+📊 **填充统计：**
+- 映射表：{enum_excel_path}
+- 映射数量：{field_count} 条
+- 数据源：已映射子规则（无需重传）
+
+💾 点击下方按钮下载填充后的配置文件。"""
+        ).send()
+
+        base64_file = cl.File(
+            name="enum_filled_sub_rules.txt",
+            content=base64_result.encode('utf-8'),
+            mime="text/plain",
+        )
+        await cl.Message(
+            content="**📥 点击下载填充后的配置：**",
+            elements=[base64_file]
+        ).send()
+
+    except FileNotFoundError as e:
+        logger.error(f"[enum_fill_sub_rules] 文件未找到: {e}")
+        await cl.Message(content=f"❌ Excel 文件未找到：{str(e)}").send()
+    except Exception as e:
+        logger.error(f"[enum_fill_sub_rules] 填充异常: {e}")
+        import traceback
+        logger.error(f"[enum_fill_sub_rules] 详细错误: {traceback.format_exc()}")
+        await cl.Message(content=f"❌ 枚举填充异常：{str(e)}").send()
 
 
 def _resolve_fill_data_source(file_content: str) -> tuple:
@@ -198,9 +276,9 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
     """
     logger.info(f"[ENUM_EXTRACT] 开始枚举提取流程: {user_text}")
 
-    # 检查是否有原始日志数据
-    original_log = user_session.get("original_log")
-    if not original_log:
+    # 日志数据源：优先 raw_log_lines（Excel 原始日志列的干净文本），回退 original_log（JSON 包装行）
+    log_lines = user_session.get("raw_log_lines") or user_session.get("original_log")
+    if not log_lines:
         await cl.Message(
             content="""❌ **没有找到原始日志数据**
 
@@ -221,7 +299,7 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
 
     try:
         # 1. 从原始日志中采样
-        logs_str = '\n'.join(original_log)
+        logs_str = '\n'.join(log_lines)
         sampled_logs = sample_logs(logs_str, sample_size=20)
         logger.info(f"[ENUM_EXTRACT] 采样日志行数: {sampled_logs.count(chr(10)) + 1}")
 

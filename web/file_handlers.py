@@ -295,8 +295,8 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
         user_session["uploaded_file_name"] = file_name
         user_session["uploaded_file_time"] = file_time
 
-        # 保存路径供枚举填充等后续使用
-        user_session["enum_excel_path"] = excel_path
+        # 注意：数据表格不是枚举映射表，不应覆盖 enum_excel_path
+        # （enum_excel_path 仅由真正的枚举映射表上传设置，见 handle_file_upload 枚举表检测段）
         
         # 检测"原始日志"列并预提取，供 LogParserAgent 精简输入使用
         # CHANGED: 替换单元格内的换行符为空格，防止单条日志被拆散成多行碎片
