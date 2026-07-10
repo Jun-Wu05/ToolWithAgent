@@ -92,11 +92,21 @@ async def handle_user_message(user_session, team, user_text: str):
     if await handle_enum_fill_flow(user_session, user_text):
         return
     
-    # 2.5 枚举填充自动触发：同时存在 raw_base64 + enum_excel_path 则直接执行填充
+    # 2.5 枚举填充自动触发：已有 enum_excel_path 且检测到枚举意图时执行填充
+    # 数据源优先级：mapped_sub_rules > raw_base64 > 提示上传（与 handle_enum_fill_flow 一致）
+    # 注：detect_intent 已把填充动作优先于枚举提取，故 is_enum（来自 detected_intent）可信
     enum_excel_path = user_session.get("enum_excel_path")
     if enum_excel_path and is_enum:
-        raw_base64 = user_session.get("raw_base64")
+        mapped_sub_rules = user_session.get("mapped_sub_rules")
 
+        if mapped_sub_rules:
+            user_session["enum_fill_mode"] = True
+            logger.info("[ROUTE] enum_excel_path + mapped_sub_rules，直接填充子规则（无需重传）")
+            from web.enum_handler import _execute_enum_fill_with_sub_rules
+            await _execute_enum_fill_with_sub_rules(user_session, mapped_sub_rules, enum_excel_path)
+            return
+
+        raw_base64 = user_session.get("raw_base64")
         if raw_base64:
             user_session["enum_fill_mode"] = True
             logger.info("[ROUTE] raw_base64 + enum_excel_path 同时存在，自动触发枚举填充")
@@ -104,7 +114,7 @@ async def handle_user_message(user_session, team, user_text: str):
             await execute_enum_fill(user_session, raw_base64)
             return
 
-        # 有 Excel 但无 Base64：提示上传
+        # 有 Excel 但无数据：提示上传
         user_session["enum_fill_mode"] = True
         logger.info("[ROUTE] 检测到已有枚举Excel，激活填充模式，等待Base64上传")
         await cl.Message(

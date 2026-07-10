@@ -91,21 +91,22 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
     is_log_parser = any(kw in lower for kw in LOG_PARSER_KEYWORDS)
 
     # 填充动作识别：「填充」「填充到」是枚举/威胁填充的明确信号，
-    # 必须在 mapping 之前拦截（否则「填充到xxx字段」会被「字段」抢到 mapping）
+    # 必须在枚举提取和 mapping 之前拦截（否则「枚举值填充进子规则」会被「枚举值」抢到提取）
     is_fill_action = any(p in lower for p in ("填充到", "填充", "填入", "填到"))
 
-    # 枚举提取优先级最高（精确动作词）
-    if is_enum_extract:
-        return "enum", f"命中枚举提取关键词"
-
-    # 填充动作分流：含「填充」且已有枚举映射表/威胁映射表时，走填充流程
+    # 填充动作优先级最高：含「填充」且已有映射表时，走填充流程（先于枚举提取）
     if is_fill_action and user_session is not None:
         has_enum_excel = bool(user_session.get("enum_excel_path"))
+        has_mapped_sub = bool(user_session.get("mapped_sub_rules"))
         has_threat_table = bool(user_session.get("threat_mapping_table"))
-        if has_enum_excel:
-            return "enum", "填充动作 + 已有枚举映射表，走枚举填充"
+        if has_enum_excel or has_mapped_sub:
+            return "enum", "填充动作 + 已有枚举映射表/子规则，走枚举填充"
         if has_threat_table:
             return "threat", "填充动作 + 已有威胁映射表，走威胁填充"
+
+    # 枚举提取（精确动作词，填充之后）
+    if is_enum_extract:
+        return "enum", f"命中枚举提取关键词"
 
     # 日志解析（独立，与其他意图冲突少）
     if is_log_parser and not is_threat and not is_mapping:
