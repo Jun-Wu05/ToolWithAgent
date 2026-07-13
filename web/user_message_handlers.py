@@ -300,12 +300,12 @@ Excel 格式说明：
             if retry_attempt < max_retries:
                 logger.warning(
                     f"[HANDLE] LLM 未返回有效结果（尝试 {retry_attempt + 1}/{max_retries + 1}），"
-                    f"强制重试，追加禁止索要数据指令"
+                    f"重试，提示数据已提供但允许说明缺失项"
                 )
-                # 在输入中追加强制指令，让 LLM 知道数据已全部提供
+                # 重试指令：数据已提供，但允许 LLM 说明具体缺什么（而非一律禁止提问）
                 full_input = (
-                    f"[SYSTEM NOTE: 所有数据已在上述消息中提供，你不需要也不应该索要任何额外数据。"
-                    f"请现在立即使用提供的数据完成处理。禁止输出任何索取性文字。]\n\n{full_input}"
+                    f"[SYSTEM NOTE: 所有数据已在上述消息中提供。请基于现有数据完成处理。"
+                    f"如果确实缺少关键字段，请明确说明需要哪个字段及其用途，而非笼统索要数据。]\n\n{full_input}"
                 )
                 try:
                     await msg.remove()

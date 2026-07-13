@@ -154,7 +154,7 @@ def create_field_mapping_agent() -> Agent:
             field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
         ],
         output_schema=FieldMappingList,   # v4: API 层强制输出 JSON 且符合 schema，杜绝非规范格式
-        tool_call_limit=1,                # v2: 仅 1 个工具，1 次足够
+        tool_call_limit=3,                # v3: 允许重试/多次映射，提升复杂场景鲁棒性
         markdown=False,                   # v4: 配合 output_schema JSON 输出，禁止 Markdown 包装
         debug_mode=False,
     )
@@ -288,6 +288,8 @@ def create_data_mapping_team() -> Team:
         show_members_responses=_show_members,
         respond_directly=True,             # Leader 路由后直接返回 MemberAgent 结果，不再自己包装
         max_iterations=3,                  # 最多 3 轮迭代（默认 10），防止死循环
+        enable_agentic_state=True,         # 让 Team 有 update_session_state 工具，可读写 session_state
+        add_session_state_to_context=True, # 注入 session_state 到上下文，让 RouterAgent 感知会话状态
     )
     
     return team
