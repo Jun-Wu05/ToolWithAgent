@@ -24,16 +24,21 @@ async def process_team_response(
     user_lower: str,
     user_session: dict,
     loading_msg,
-    msg
+    msg,
+    intent: str = "general",
 ) -> bool:
     """
-    解析 Team 返回结果：识别映射/威胁类型并渲染表格，或流式输出原文
+    解析 Team 返回结果：识别映射/威胁类型并渲染表格，或流式输出原文。
+
+    按意图分流处理：
+    - general：直接流式输出（闲聊/引导/路由建议），不跑 JSON 解析
+    - mapping/threat：跑对应解析器，解析失败时按状态判断是否重试
 
     Returns:
-        True 表示已处理（调用方可 return）
+        True 表示已处理（调用方可 return），False 表示需重试
     """
     result_content = result.content if hasattr(result, 'content') else str(result)
-    
+
     # v3: 兼容 output_schema 返回的 Pydantic 对象 → dict
     if not isinstance(result_content, str):
         if hasattr(result_content, 'model_dump'):          # Pydantic v2
@@ -43,10 +48,14 @@ async def process_team_response(
         else:
             result_content = str(result_content)
 
-    # [Step2 改造] 不再依赖用户消息关键词判断响应类型，
-    # 而是尝试解析两种 JSON 格式，以实际解析结果为准。
+    # general 意图：直接流式输出（闲聊/引导/路由建议，无需 JSON 解析）
+    if intent == "general":
+        for i in range(0, len(result_content), 50):
+            await msg.stream_token(result_content[i:i + 50])
+        await msg.update()
+        return True
 
-    # 先尝试字段映射解析
+    # mapping/threat 意图：尝试解析 JSON
     mapping_data = parse_json_mapping_result(result_content)
     
     if mapping_data:
@@ -127,7 +136,6 @@ async def process_team_response(
 
     # 两个解析都失败后，才检查拒绝响应（避免威胁JSON前面的中文解释触发误判）
     if not mapping_data and not threat_data:
-        result_lower = result_content.lower()
         refusal_signatures = [
             ("请提供", "provide"), ("需要", "need"), ("无法", "cannot"),
             ("原始日志", "original log"), ("解码", "decode"), ("更多数据", "more data"),
@@ -135,8 +143,13 @@ async def process_team_response(
         ]
         is_refusal = any(sig[0] in result_content for sig in refusal_signatures)
         if is_refusal:
-            logger.warning("[HANDLE] 检测到 LLM 拒绝/索要数据响应，标记为重试候选")
-            return False  # 返回 False 表示未成功处理，需要重试
+            # 条件化拒绝判定：只有有数据但 LLM 仍索要时才判为拒绝（需重试）
+            # 无数据时 LLM 引导上传是正确行为，直接流式输出
+            has_data = hasattr(user_session, "has_decoded_data") and user_session.has_decoded_data()
+            if has_data:
+                logger.warning("[HANDLE] 有数据但 LLM 索要，标记为重试候选")
+                return False
+            logger.info("[HANDLE] 无数据时 LLM 引导上传，视为正常回复")
 
     # 流式输出原文
     for i in range(0, len(result_content), 50):

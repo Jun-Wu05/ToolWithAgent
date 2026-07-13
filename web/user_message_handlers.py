@@ -284,8 +284,8 @@ Excel 格式说明：
             msg = cl.Message(content="")
             await msg.send()
             
-            # 10. 解析响应 → response_handler
-            handled = await process_team_response(result, user_lower, user_session, loading_msg, msg)
+            # 10. 解析响应 → response_handler（传 intent 让 general 跳过 JSON 解析）
+            handled = await process_team_response(result, user_lower, user_session, loading_msg, msg, intent=detected_intent)
             
             # 11. 如果成功处理，退出重试循环
             if handled:

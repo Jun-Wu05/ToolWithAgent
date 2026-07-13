@@ -83,13 +83,14 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
             )
             logger.info(f"[LLM_INPUT] 字段列表超长，摘要显示：{len(fields_list)} 个字段 → 前 {_FIELDS_PREVIEW_COUNT} 个")
 
-        # 在 Python 侧预查询标准字段候选，注入 LLM 输入（消除 tool call 延迟）
-        try:
-            pre_query_candidates = _pre_query_field_candidates(fields_list)
-        except RuntimeError as e:
-            # embedding API 故障时降级：不带候选继续（避免 crash）
-            logger.warning(f"[LLM_INPUT] 语义检索候选获取失败，降级为无候选输入: {e}")
-            pre_query_candidates = ""
+        # 语义检索候选：仅在 mapping 意图时预查询（general 不需要，省 embedding API 调用）
+        pre_query_candidates = ""
+        if intent == "mapping":
+            try:
+                pre_query_candidates = _pre_query_field_candidates(fields_list)
+            except RuntimeError as e:
+                # embedding API 故障时降级：不带候选继续（避免 crash）
+                logger.warning(f"[LLM_INPUT] 语义检索候选获取失败，降级为无候选输入: {e}")
 
         # ====== Agent 自决动作 — general 意图下注入会话摘要 + 动作标记说明 ======
         session_context = ""

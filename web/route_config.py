@@ -57,6 +57,20 @@ _THREAT_STRONG_PHRASES = ("威胁类型", "威胁种类", "threat_type", "threat
 _THREAT_ACTION_PHRASES = ("标准化", "归一化", "映射", "处理", "转换", "识别")
 
 
+def _has_data_for_mapping(session) -> bool:
+    """检查是否有可供映射的数据（decoded_data/decoded_fields 或 simplified_data.fields）。
+
+    用于状态前置检查：用户说「映射」但没上传文件时，不应直调 FieldMappingAgent
+    （会报错重试），而应交 RouterAgent 引导上传。
+    """
+    if session is None:
+        return False
+    has_decoded = bool(session.get("decoded_data") or session.get("decoded_fields"))
+    simplified = session.get("simplified_data", {})
+    has_fields = bool(simplified.get("fields", [])) if isinstance(simplified, dict) else False
+    return has_decoded or has_fields
+
+
 def detect_intent(user_text: str, user_session=None) -> tuple:
     """带消歧规则的意图检测，返回 (intent, reason)。
 
@@ -133,6 +147,10 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
 
     if is_enum:
         return "enum", f"命中枚举关键词"
+
+    # 状态前置检查：mapping 意图但无数据 → 改为 general（交 RouterAgent 引导上传）
+    if is_mapping and not _has_data_for_mapping(user_session):
+        return "general", "映射意图但无数据，交 RouterAgent 引导上传"
 
     if is_mapping:
         return "mapping", f"命中映射关键词"
