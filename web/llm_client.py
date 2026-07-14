@@ -44,8 +44,9 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
         team: Agno Team 实例
         full_input: 完整输入文本
         loading_msg: Chainlit 加载消息对象
-        intent: 意图类型（"mapping" | "threat" | "enum" | "general"）
-               明确意图时直接调用对应 MemberAgent，跳过 RouterAgent 推理（省 40-60s）
+        intent: 意图类型（"mapping" | "threat" | "enum" | "general" | "log_parser"）
+               快路径：明确意图时直接调用对应 MemberAgent，跳过 RouterAgent（省 1 次 LLM 调用）
+               慢路径：intent="general" 时走 team.run()，由 RouterAgent 路由
     """
     # 关键词预筛：命中枚举/威胁则加入路由提示，减少 RouterAgent 推理时间
     lower_input = full_input.lower()
@@ -91,7 +92,7 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
             )
         else:
             logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
-            # 带超时保护：120s，Route 模式含 2 次串行 LLM + 工具调用
+            # 带超时保护：360s，Route 模式含 RouterAgent 路由 + MemberAgent 执行
             result = await asyncio_mod.wait_for(
                 asyncio_mod.to_thread(team.run, full_input),
                 timeout=360.0,
@@ -125,8 +126,8 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
     except asyncio_mod.TimeoutError:
         api_duration = time.time() - api_start_time
         _team_circuit_breaker._on_failure()
-        logger.error(f"[API] Team.run 超时，120s 内未返回，耗时: {api_duration:.2f}秒")
-        raise asyncio_mod.TimeoutError("Team.run 超时（120s），请检查 Agent 配置或重试")
+        logger.error(f"[API] Team.run 超时，360s 内未返回，耗时: {api_duration:.2f}秒")
+        raise asyncio_mod.TimeoutError("Team.run 超时（360s），请检查 Agent 配置或重试")
 
     except Exception as e:
         _team_circuit_breaker._on_failure()
