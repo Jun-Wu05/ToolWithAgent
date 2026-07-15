@@ -104,19 +104,12 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
     is_enum = any(kw in lower for kw in ENUM_KEYWORDS)
     is_log_parser = any(kw in lower for kw in LOG_PARSER_KEYWORDS)
 
-    # 填充动作识别：「填充」「填充到」是枚举/威胁填充的明确信号，
-    # 必须在枚举提取和 mapping 之前拦截（否则「枚举值填充进子规则」会被「枚举值」抢到提取）
+    # 填充动作识别：「填充」「填充到」是填充的明确信号，
+    # 统一返回 "fill"，具体类型（威胁/枚举）由 fill_dispatcher 根据语义+状态决定
     is_fill_action = any(p in lower for p in ("填充到", "填充", "填入", "填到"))
 
-    # 填充动作优先级最高：含「填充」且已有映射表时，走填充流程（先于枚举提取）
-    if is_fill_action and user_session is not None:
-        has_enum_excel = bool(user_session.get("enum_excel_path"))
-        has_mapped_sub = bool(user_session.get("mapped_sub_rules"))
-        has_threat_table = bool(user_session.get("threat_mapping_table"))
-        if has_enum_excel or has_mapped_sub:
-            return "enum", "填充动作 + 已有枚举映射表/子规则，走枚举填充"
-        if has_threat_table:
-            return "threat", "填充动作 + 已有威胁映射表，走威胁填充"
+    if is_fill_action:
+        return "fill", "填充动作，交 fill_dispatcher 决定类型"
 
     # 枚举提取（精确动作词，填充之后）
     if is_enum_extract:

@@ -129,58 +129,16 @@ def apply_enum_fill_to_sub_rules(
 ) -> list[dict[str, Any]]:
     """对子规则列表应用枚举/威胁填充（mappings 追加）。
 
-    桥接 apply_enum_fill（单 config dict 的 normalize）与 sub_rules（多 sub_rule 各有 normalize）。
-    复用 apply_enum_fill 的 index/field 匹配 + 去重逻辑，
-    以及 apply_field_mapping_to_sub_rules 的深拷贝 + sub_rule 迭代模式。
+    向后兼容包装：委托 agent.shared.mapping_utils.apply_fill_to_sub_rules。
+    威胁填充和枚举填充在 apply 层面是同一操作，统一到共享函数消除重复。
 
     Args:
         sub_rules: 子规则列表（generate_sub_rules 输出，字段映射后含 field 标注）
         mapping_table: {字段名: [{mappingType, orgValue, mappingValue}, ...]}
-                       来自 read_enum_mappings_from_excel 或 handle_enum_extract_flow 的 format_mapping_table 包装
         target_field: 可选，只填充该字段；None 表示填充 mapping_table 里所有字段
 
     Returns:
         深拷贝后的 sub_rules，匹配的 normalize 项已追加 mappings
     """
-    # 过滤目标字段
-    if target_field:
-        filtered = {k: v for k, v in mapping_table.items() if k == target_field}
-    else:
-        filtered = mapping_table
-
-    if not filtered:
-        logger = __import__("agent.shared.logger", fromlist=["get_logger"]).get_logger("field_mapping")
-        logger.warning(f"[enum_fill_sub_rules] 无匹配的映射表字段（target={target_field}）")
-        return copy.deepcopy(sub_rules)
-
-    result_rules = copy.deepcopy(sub_rules)
-
-    for rule in result_rules:
-        for norm_item in rule.get("normalize", []):
-            if not isinstance(norm_item, dict):
-                continue
-
-            index_value = str(norm_item.get("index", "")).strip()
-            field_value = str(norm_item.get("field", "")).strip()
-
-            for field_name, field_mappings in filtered.items():
-                matched = index_value == field_name or field_value == field_name
-                if not matched:
-                    continue
-
-                mappings = norm_item.get("mappings")
-                if mappings is None:
-                    mappings = []
-                    norm_item["mappings"] = mappings
-
-                existing_org = {m.get("orgValue", "") for m in mappings if isinstance(m, dict)}
-                for mapping in field_mappings:
-                    org_value = mapping.get("orgValue", "")
-                    if org_value not in existing_org:
-                        mappings.append({
-                            "mappingType": mapping.get("mappingType", "EQUAL"),
-                            "orgValue": org_value,
-                            "mappingValue": mapping.get("mappingValue", org_value),
-                        })
-
-    return result_rules
+    from agent.shared.mapping_utils import apply_fill_to_sub_rules
+    return apply_fill_to_sub_rules(sub_rules, mapping_table, target_field)

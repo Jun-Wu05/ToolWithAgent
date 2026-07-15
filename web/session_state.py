@@ -110,6 +110,10 @@ class SessionState:
     batch_mapping_results: Optional[List[Dict[str, Any]]] = None
     """批量字段映射结果（聊天输入"映射"路径），供 Excel 导出使用"""
 
+    # ---- 填充类型标记 ----
+    last_fill_type: Optional[str] = None
+    """最近一次映射类型（"threat" | "enum"），供 fill_dispatcher 在用户未显式指定时判定填充类型"""
+
     # ---- 模型配置 ----
     current_provider: Optional[str] = None
     """当前供应商（"deepseek" | "siliconflow"）"""

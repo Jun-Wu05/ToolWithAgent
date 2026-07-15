@@ -481,6 +481,7 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
 
         # 保存枚举提取结果到会话
         user_session["last_enum_extract_result"] = enum_result
+        user_session["last_fill_type"] = "enum"  # 标记最近映射类型，供 fill_dispatcher 判定
 
         # 8. 展示 mapping 表格
         mapping_table = format_mapping_table(enum_result)

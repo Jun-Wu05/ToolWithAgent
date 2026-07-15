@@ -107,6 +107,8 @@ async def process_team_response(
             logger.info(f"[HANDLE] 威胁类型去重: {len(threat_data)} -> {len(deduped)} 条")
         threat_data = deduped
         user_session["last_threat_data"] = threat_data
+        user_session["threat_mapping_table"] = threat_data  # 自动设映射表，支持自然语言填充
+        user_session["last_fill_type"] = "threat"  # 标记最近映射类型，供 fill_dispatcher 判定
         threat_count = len(threat_data)
 
         summary = f"""✅ **威胁类型映射完成！**

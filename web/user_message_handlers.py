@@ -84,47 +84,25 @@ async def handle_user_message(user_session, team, user_text: str):
     is_mapping = detected_intent == "mapping"
     logger.info(f"[ROUTE] '{user_text[:60]}' → {detected_intent}（{route_reason}）")
     
-    # 1. 威胁填充模式分流 → threat_handler
+    # 1. 威胁填充模式分流 → threat_handler（按钮驱动的两阶段流程）
     if await handle_threat_fill_flow(user_session, user_text):
         return
-    
-    # 2. 枚举填充模式分流 → enum_handler
+
+    # 2. 枚举填充模式分流 → enum_handler（按钮驱动的两阶段流程）
     if await handle_enum_fill_flow(user_session, user_text):
         return
-    
-    # 2.5 枚举填充自动触发：已有 enum_excel_path 且检测到枚举意图时执行填充
-    # 数据源优先级：mapped_sub_rules > raw_base64 > 提示上传（与 handle_enum_fill_flow 一致）
-    # 注：detect_intent 已把填充动作优先于枚举提取，故 is_enum（来自 detected_intent）可信
-    enum_excel_path = user_session.get("enum_excel_path")
-    if enum_excel_path and is_enum:
-        mapped_sub_rules = user_session.get("mapped_sub_rules")
 
-        if mapped_sub_rules:
-            user_session["enum_fill_mode"] = True
-            logger.info("[ROUTE] enum_excel_path + mapped_sub_rules，直接填充子规则（无需重传）")
-            from web.enum_handler import _execute_enum_fill_with_sub_rules
-            await _execute_enum_fill_with_sub_rules(user_session, mapped_sub_rules, enum_excel_path)
+    # 2.5 统一填充（自然语言驱动）：route_config 返回 "fill" 时委托 fill_dispatcher
+    if detected_intent == "fill":
+        from web.fill_dispatcher import handle_fill
+        if await handle_fill(user_session, user_text):
             return
 
-        raw_base64 = user_session.get("raw_base64")
-        if raw_base64:
-            user_session["enum_fill_mode"] = True
-            logger.info("[ROUTE] raw_base64 + enum_excel_path 同时存在，自动触发枚举填充")
-            from web.enum_handler import execute_enum_fill
-            await execute_enum_fill(user_session, raw_base64)
+    # 2.6 取消字段映射：「取消xxx的映射」
+    if any(kw in user_lower for kw in ("取消", "删除", "清除")) and "映射" in user_text:
+        from web.fill_dispatcher import handle_remove_fill
+        if await handle_remove_fill(user_session, user_text):
             return
-
-        # 有 Excel 但无数据：提示上传
-        user_session["enum_fill_mode"] = True
-        logger.info("[ROUTE] 检测到已有枚举Excel，激活填充模式，等待Base64上传")
-        await cl.Message(
-            content=f"""📋 **枚举填充模式已激活**
-
-已选择映射表：{enum_excel_path}
-
-请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
-        ).send()
-        return
     
     # 3. 枚举提取分流（精确匹配优先：含"提取"/"列举"/"列出"等词）
     if is_enum_extract:
