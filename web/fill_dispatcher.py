@@ -111,17 +111,24 @@ async def handle_fill(user_session, user_text: str) -> bool:
     if not sub_rules and not raw_base64:
         return False  # 无数据，不是填充场景
 
+    # 先判定填充类型（决定是否需要 target_field）
+    fill_type = _detect_fill_type(user_text, user_session)
+
     # 提取目标字段
     target_field = _extract_target_field(user_text)
     if not target_field:
-        logger.info("[FILL] 未从文本提取到目标字段，提示用户明确")
-        await cl.Message(
-            content="💡 请明确目标字段名，例如：`填充到alarm_category里` 或 `填充到event_type1字段`"
-        ).send()
-        return True
+        # 枚举填充：target_field 可选（映射表 sheet 名即目标字段）
+        if fill_type == "enum":
+            logger.info("[FILL] 枚举填充未指定字段，用映射表 sheet 名作为目标字段")
+            target_field = None
+        else:
+            # 威胁填充：必须指定目标字段（last_threat_data 是 flat list，不知填到哪）
+            logger.info("[FILL] 威胁填充未指定目标字段，提示用户明确")
+            await cl.Message(
+                content="💡 请明确目标字段名，例如：`威胁填充到alarm_category里`"
+            ).send()
+            return True
 
-    # 判定填充类型
-    fill_type = _detect_fill_type(user_text, user_session)
     logger.info(f"[FILL] target_field={target_field}, fill_type={fill_type}")
 
     # 获取映射表
