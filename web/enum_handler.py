@@ -269,6 +269,36 @@ async def execute_enum_fill(user_session: dict, file_content: str):
 
 # ============= 枚举提取 =============
 
+def _extract_log_type_filter(user_text: str, user_session) -> str | None:
+    """从用户文本提取日志类型限定词（如「把IPS的alarm_name」→ IPS）。
+
+    用 session.log_classification 的已知日志类型列表做精确匹配，避免误匹配。
+
+    Returns:
+        日志类型字符串（如 "IPS"），或 None（未指定类型限定词）
+    """
+    # 从 log_classification 获取已知日志类型列表
+    classification = user_session.get("log_classification") if user_session else None
+    if not classification or not isinstance(classification, dict):
+        return None
+
+    known_types: list[str] = []
+    for detail in classification.get("classification_details", []):
+        if isinstance(detail, dict):
+            logtype = detail.get("logtype", "")
+            if logtype:
+                known_types.append(str(logtype))
+
+    if not known_types:
+        return None
+
+    # 在用户文本中查找已知日志类型（精确匹配，大小写敏感——日志类型通常大写）
+    for log_type in known_types:
+        if log_type in user_text:
+            return log_type
+    return None
+
+
 async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
     """
     枚举提取模式专属流程
@@ -285,6 +315,13 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
 请先上传包含日志的配置文件（如 Base64/TXT），然后再提取枚举值。"""
         ).send()
         return
+
+    # 按日志类型过滤（用户「把IPS的alarm_name...」→ 只保留 IPS 行，提升匹配精准度）
+    log_type_filter = _extract_log_type_filter(user_text, user_session)
+    if log_type_filter:
+        original_count = len(log_lines)
+        log_lines = [l for l in log_lines if log_type_filter in l]
+        logger.info(f"[ENUM_EXTRACT] 按日志类型 {log_type_filter} 过滤：{original_count} → {len(log_lines)} 行")
 
     # 字段名由 LLM 从用户输入中推断，不再使用硬编码正则
     # 如果 decoded_fields 有值，作为提示传给 LLM；否则传空
@@ -399,8 +436,10 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
         validation = validate_regex_with_stats(regex_result, sampled_logs)
         logger.info(f"[ENUM_EXTRACT] 正则验证结果: valid={validation.get('valid')}, match_rate={validation.get('match_rate', 0)*100:.1f}%")
 
-        # 5.1 如果匹配率低，尝试自动修复
-        if not validation.get("valid") or validation.get("match_rate", 0) < 0.5:
+        # 5.1 只有零匹配（valid=False）才尝试自动修复
+        # 注：混合日志里某字段只存在于子类型是正常现象（如 alarm_name 只在 IPS 行），
+        # 30%匹配率不代表正则错了，不应判定为低匹配率需要修复
+        if not validation.get("valid"):
             logger.info("[ENUM_EXTRACT] 正则匹配率低，尝试自动修复...")
             fixed = validate_and_fix_regex(regex_result, sampled_logs, field_name)
 
