@@ -3,7 +3,8 @@
 
 提供:
 - handle_threat_fill_flow(user_session, user_text) → bool   (分流入口)
-- execute_threat_fill(user_session, file_content) → None    (执行填充)
+- execute_threat_fill(user_session, file_content) → None    (Base64 执行填充)
+- _try_execute_threat_fill(user_session, target_field) → bool (数据源优先级封装)
 """
 import json
 
@@ -11,6 +12,7 @@ import chainlit as cl
 
 from agent.shared.logger import get_logger
 from agent.shared.threat_fill import apply_threat_mapping, export_to_base64
+from agent.shared.mapping_utils import apply_fill_to_sub_rules
 
 logger = get_logger("threat_handler")
 
@@ -36,16 +38,9 @@ async def handle_threat_fill_flow(user_session: dict, user_text: str) -> bool:
             if field_text:
                 user_session["threat_target_field"] = field_text
                 logger.info(f"[HANDLE] 目标字段设置为: {field_text}")
-                # 检查是否有 pending_base64（用户同时发送了字段名和文件）
-                pending = user_session.pop("pending_base64", None)
-                if pending:
-                    logger.info("[HANDLE] 检测到 pending_base64，自动执行填充")
-                    try:
-                        await execute_threat_fill(user_session, pending)
-                    except Exception:
-                        user_session["pending_base64"] = pending  # 失败恢复
-                        raise
-                else:
+                # 尝试用已有数据执行填充（mapped_sub_rules > pending_base64 > raw_base64）
+                if not await _try_execute_threat_fill(user_session, field_text):
+                    # 所有数据源都没命中 → 提示上传
                     await cl.Message(
                         content=f"✅ 目标字段已设置为：**{field_text}**\n\n现在请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"
                     ).send()
@@ -65,6 +60,94 @@ async def handle_threat_fill_flow(user_session: dict, user_text: str) -> bool:
         return True
 
     return False
+
+
+async def _try_execute_threat_fill(user_session, target_field: str) -> bool:
+    """尝试用已有数据执行威胁填充（不要求重传）。
+
+    数据源优先级：mapped_sub_rules > pending_base64 > raw_base64。
+    成功执行返回 True；所有数据源都没命中返回 False（调用方提示上传）。
+    """
+    # 优先 mapped_sub_rules（字段映射产出，支持链式回写）
+    sub_rules = user_session.get("mapped_sub_rules")
+    if sub_rules:
+        logger.info("[HANDLE] 检测到 mapped_sub_rules，直接用子规则填充（无需重传）")
+        await _execute_threat_fill_with_sub_rules(user_session, sub_rules, target_field)
+        return True
+
+    # pending_base64（用户先传文件后输字段名的场景）
+    pending = user_session.pop("pending_base64", None)
+    if pending:
+        logger.info("[HANDLE] 检测到 pending_base64，执行填充")
+        try:
+            await execute_threat_fill(user_session, pending)
+        except Exception:
+            user_session["pending_base64"] = pending  # 失败恢复
+            raise
+        return True
+
+    # raw_base64 缓存
+    raw_base64 = user_session.get("raw_base64")
+    if raw_base64:
+        logger.info("[HANDLE] 检测到 raw_base64 缓存，执行填充")
+        await execute_threat_fill(user_session, raw_base64)
+        return True
+
+    return False
+
+
+async def _execute_threat_fill_with_sub_rules(user_session, sub_rules: list, target_field: str):
+    """用已有 mapped_sub_rules 执行威胁填充（复用 apply_fill_to_sub_rules + 链式回写）。"""
+    from agent.tools.rule_generator import rules_to_base64_text
+
+    logger.info(f"[threat_fill_sub_rules] 开始（target={target_field}）")
+    threat_data = user_session.get("threat_mapping_table") or user_session.get("last_threat_data")
+
+    if not threat_data:
+        await cl.Message(content="❌ 威胁映射数据丢失，请重新执行威胁类型映射").send()
+        return
+
+    try:
+        # 威胁映射表是 flat list，包装为 {target_field: mappings} 供 apply_fill_to_sub_rules 使用
+        mapping_table = {target_field: threat_data}
+        updated_sub_rules = apply_fill_to_sub_rules(sub_rules, mapping_table, target_field)
+        logger.info("[threat_fill_sub_rules] 填充应用成功")
+
+        # 链式回写：后续填充基于本次结果
+        user_session["mapped_sub_rules"] = updated_sub_rules
+
+        # 重置威胁填充模式
+        user_session["threat_fill_mode"] = False
+        user_session["threat_target_field"] = None
+        user_session["threat_mapping_table"] = None
+
+        # 导出下载
+        base64_result = rules_to_base64_text(updated_sub_rules)
+        logger.info(f"[threat_fill_sub_rules] 导出成功，长度: {len(base64_result)}")
+
+        await cl.Message(
+            content=f"""✅ **威胁类型填充完成！**
+
+📊 **填充统计：**
+- 目标字段：{target_field}
+- 映射数量：{len(threat_data)} 条
+- 数据源：已映射子规则（链式更新）
+
+💾 点击下方按钮下载填充后的配置文件。"""
+        ).send()
+
+        base64_file = cl.File(
+            name=f"threat_filled_{target_field}.txt",
+            content=base64_result.encode('utf-8'),
+            mime="text/plain",
+        )
+        await cl.Message(content="**📥 点击下载填充后的配置：**", elements=[base64_file]).send()
+
+    except Exception as e:
+        logger.error(f"[threat_fill_sub_rules] 填充异常: {e}")
+        import traceback
+        logger.error(f"[threat_fill_sub_rules] 详细错误: {traceback.format_exc()}")
+        await cl.Message(content=f"❌ 威胁填充异常：{str(e)}").send()
 
 
 async def execute_threat_fill(user_session: dict, file_content: str):
