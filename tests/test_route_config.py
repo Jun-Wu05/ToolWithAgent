@@ -142,3 +142,55 @@ class TestDisambiguation:
         session = FakeSession()
         intent, _ = detect_intent("威胁类型标准化", session)
         assert intent == "threat"
+
+
+# ============================================================
+# US-3：session_summary 全状态感知（Issue 02）
+# ============================================================
+
+class TestSessionSummary:
+    """session_summary 应包含当前状态全感知，供 RouterAgent 引导。"""
+
+    def test_empty_session_summary(self):
+        """空 session → 空字符串"""
+        from web.session_state import SessionState
+        sess = SessionState.create_default()
+        assert sess.get_session_summary() == ""
+
+    def test_summary_with_file(self):
+        """有文件 → 含文件名和字段数"""
+        from web.session_state import SessionState
+        sess = SessionState()
+        sess.decoded_fields = ["src_ip", "dst_ip"]
+        sess.uploaded_file_name = "test.xlsx"
+        summary = sess.get_session_summary()
+        assert "test.xlsx" in summary
+        assert "2" in summary
+
+    def test_summary_with_mapped_sub_rules(self):
+        """有子规则 → 含子规则信息"""
+        from web.session_state import SessionState
+        sess = SessionState()
+        sess.mapped_sub_rules = [{"name": "r1"}, {"name": "r2"}]
+        sess.decoded_fields = ["f1"]
+        summary = sess.get_session_summary()
+        assert "子规则" in summary
+        assert "2" in summary
+
+    def test_summary_with_threat_data(self):
+        """有威胁映射 → 含威胁映射信息"""
+        from web.session_state import SessionState
+        sess = SessionState()
+        sess.last_threat_data = [{"a": 1}, {"b": 2}]
+        sess.decoded_fields = ["f1"]
+        summary = sess.get_session_summary()
+        assert "威胁映射" in summary
+
+    def test_summary_with_enum_excel(self):
+        """有枚举映射表 → 含枚举映射表信息"""
+        from web.session_state import SessionState
+        sess = SessionState()
+        sess.enum_excel_path = "/tmp/enum.xlsx"
+        sess.decoded_fields = ["f1"]
+        summary = sess.get_session_summary()
+        assert "枚举" in summary
