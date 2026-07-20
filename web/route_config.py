@@ -143,7 +143,7 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
 
     # 状态前置检查：mapping 意图但无数据 → 改为 general（交 RouterAgent 引导上传）
     if is_mapping and not _has_data_for_mapping(user_session):
-        return "general", "映射意图但无数据，交 RouterAgent 引导上传"
+        return "general", "映射意图但无数据，请先上传 Excel 或 Base64 配置文件"
 
     if is_mapping:
         return "mapping", f"命中映射关键词"
