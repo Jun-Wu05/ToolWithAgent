@@ -19,6 +19,51 @@ from web.parsers import create_dataframe_elements, parse_json_mapping_result, pa
 logger = get_logger("response_handler")
 
 
+def _get_next_step_hint(user_session) -> str:
+    """根据 session 状态返回下一步操作建议（附加在各操作成功回复末尾）。
+
+    集中"下一步可以做什么"逻辑，避免散落在各操作分支里。
+    """
+    hints: list[str] = []
+
+    has_sub_rules = bool(user_session.get("mapped_sub_rules"))
+    has_mapping = bool(user_session.get("last_mapping_data") or user_session.get("batch_mapping_results"))
+    has_threat = bool(user_session.get("last_threat_data"))
+    has_enum = bool(user_session.get("last_enum_extract_result"))
+    has_enum_excel = bool(user_session.get("enum_excel_path"))
+
+    # 无数据（含无子规则）→ 提示上传
+    has_any_data = (
+        user_session.get("decoded_data")
+        or user_session.get("decoded_fields")
+        or has_sub_rules
+    )
+    if not has_any_data:
+        return "💡 下一步：请先上传 Excel 或 Base64 配置文件。"
+
+    # 有数据但无映射 → 提示映射或日志解析
+    if not has_mapping and not has_sub_rules:
+        hints.append("说「映射」进行字段映射")
+        hints.append("说「日志类型提取」识别日志格式")
+
+    # 有映射/子规则 → 提示值映射操作
+    if has_mapping or has_sub_rules:
+        if not has_threat and not has_enum:
+            hints.append("说「提取xxx的枚举值」提取枚举值")
+            hints.append("说「威胁类型映射」做威胁分类")
+        if has_threat or has_enum or has_enum_excel:
+            hints.append("说「填充到xxx字段」将值映射写入解析规则")
+
+    # 有填充数据 → 提示导出
+    if has_sub_rules and (has_threat or has_enum):
+        hints.append("说「导出」下载最终配置")
+
+    if not hints:
+        return ""
+
+    return "💡 下一步：" + " | ".join(hints)
+
+
 async def process_team_response(
     result,
     user_lower: str,

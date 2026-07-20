@@ -194,3 +194,53 @@ class TestSessionSummary:
         sess.decoded_fields = ["f1"]
         summary = sess.get_session_summary()
         assert "枚举" in summary
+
+
+# ============================================================
+# US-2：完成后下一步提示（Issue 03）
+# ============================================================
+
+class TestNextStepHint:
+    """_get_next_step_hint 根据 session 状态返回下一步操作建议。"""
+
+    def test_hint_after_mapping_with_data(self):
+        """字段映射完成 → 提示枚举提取或威胁映射"""
+        from web.response_handler import _get_next_step_hint
+        from web.session_state import SessionState
+        sess = SessionState()
+        sess.last_mapping_data = [{"原始字段名": "src_ip", "系统属性名称": "源地址"}]
+        sess.mapped_sub_rules = [{"name": "r1"}]
+        hint = _get_next_step_hint(sess)
+        assert hint  # 非空
+        assert "枚举" in hint or "威胁" in hint
+
+    def test_hint_after_threat_mapping(self):
+        """威胁映射完成 → 提示填充"""
+        from web.response_handler import _get_next_step_hint
+        from web.session_state import SessionState
+        sess = SessionState()
+        sess.last_threat_data = [{"orgValue": "xss", "mappingValue": "XSS"}]
+        sess.mapped_sub_rules = [{"name": "r1"}]
+        hint = _get_next_step_hint(sess)
+        assert hint
+        assert "填充" in hint
+
+    def test_hint_after_enum_extract(self):
+        """枚举提取完成 → 提示填充或威胁映射"""
+        from web.response_handler import _get_next_step_hint
+        from web.session_state import SessionState
+        sess = SessionState()
+        sess.last_enum_extract_result = {"field": "content", "value": ["a", "b"]}
+        sess.mapped_sub_rules = [{"name": "r1"}]
+        hint = _get_next_step_hint(sess)
+        assert hint
+        assert "填充" in hint or "威胁" in hint
+
+    def test_hint_empty_session(self):
+        """空 session → 提示上传"""
+        from web.response_handler import _get_next_step_hint
+        from web.session_state import SessionState
+        sess = SessionState()
+        hint = _get_next_step_hint(sess)
+        assert hint
+        assert "上传" in hint
