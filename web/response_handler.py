@@ -95,6 +95,11 @@ async def process_team_response(
 
     # general 意图：直接流式输出（闲聊/引导/路由建议，无需 JSON 解析）
     if intent == "general":
+        # 防御：过滤 RouterAgent 错误路由返回的空结构化输出（如 {"items": []}）
+        stripped = result_content.strip()
+        if stripped.startswith('{"items"') and ('[]' in stripped or len(stripped) < 30):
+            result_content = "请先上传 Excel 或 Base64 配置文件，上传后可以进行字段映射。"
+            logger.warning("[HANDLE] general 意图收到空结构化输出，替换为引导提示")
         for i in range(0, len(result_content), 50):
             await msg.stream_token(result_content[i:i + 50])
         await msg.update()
