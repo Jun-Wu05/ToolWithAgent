@@ -155,7 +155,7 @@ def setup_agno_logging_bridge():
         sys.path.insert(0, _project_root)
 
     from agent.core.model_config import ModelConfig
-    model_name = ModelConfig.MAIN_MODEL
+    model_name = ModelConfig.get_model_id()
 
     # 预编译正则
     _TOKEN_RE = _re.compile(
@@ -235,7 +235,7 @@ def _log_token_usage(result):
     """记录 LLM Token 用量（深度探测 RunResponse 上所有可能存放 token/metrics 的属性）"""
     try:
         from agent.core.model_config import ModelConfig
-        model_name = ModelConfig.MAIN_MODEL
+        model_name = ModelConfig.get_model_id()
 
         def _emit(label: str, input_tokens, output_tokens, total_tokens, cached_tokens=None, extra_info: str = ""):
             parts = [

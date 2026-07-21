@@ -159,6 +159,15 @@ class ModelConfig:
         return ModelConfig._build_model(model_id)
 
     @staticmethod
+    def get_model_id() -> str:
+        """获取当前模型 ID 字符串：运行时配置 > 环境变量。
+
+        供需要模型 ID 字符串（非模型实例）的代码使用，
+        如 Pipeline 直调 LLM、日志标签等。
+        """
+        return ModelConfig._runtime_model or ModelConfig.MAIN_MODEL
+
+    @staticmethod
     def get_fallback_model() -> Union[Siliconflow, DeepSeek]:
         """获取备用模型"""
         return ModelConfig._build_model(ModelConfig.FALLBACK_MODEL)

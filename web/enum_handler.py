@@ -531,8 +531,16 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
                 cl.Dataframe(data=df, display="inline", title="📋 枚举值映射表", pagination=0)
             ]
             await cl.Message(
-                content="**映射表（mappingType | orgValue | mappingValue）**",
-                elements=elements
+                content="**映射表（mappingType | orgValue | mappingValue）**\n\n💡 点击下方按钮下载 Excel，在本地填入 mappingValue 后重新上传填充。",
+                elements=elements,
+                actions=[
+                    cl.Action(
+                        name="export_enum_mapping_excel",
+                        label="📥 导出枚举映射表 Excel",
+                        description="下载 Excel 映射表，本地编辑后重新上传填充",
+                        payload={}
+                    )
+                ]
             ).send()
 
         # 9. 下载 JSON 文件

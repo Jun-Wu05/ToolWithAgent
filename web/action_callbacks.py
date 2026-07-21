@@ -570,3 +570,64 @@ async def on_export_batch_field_mapping_excel(action: cl.Action):
     except Exception as e:
         logger.error(f"[ACTION] 批量字段映射 Excel 导出异常: {e}")
         await cl.Message(content=f"❌ Excel 导出失败：{e}").send()
+
+
+@cl.action_callback("export_enum_mapping_excel")
+async def on_export_enum_mapping_excel(action: cl.Action):
+    """导出枚举提取结果为 Excel 映射表（供用户本地编辑 mappingValue 后回填）"""
+    user_session = cl.user_session.get("user_session")
+    logger.info('[ACTION] 用户点击"导出枚举映射表"按钮')
+
+    enum_result = user_session.get("last_enum_extract_result")
+    if not enum_result:
+        await cl.Message(content="❌ 未找到枚举提取结果，请先执行枚举提取。").send()
+        return
+
+    field_name = enum_result.get("field", "unknown")
+    values = enum_result.get("value", [])
+
+    if not values:
+        await cl.Message(content="❌ 枚举提取结果为空，无法导出。").send()
+        return
+
+    try:
+        # 构建 Excel 映射表（sheet 名 = field_name，列为 mappingType/orgValue/mappingValue）
+        excel_data = [{"mappingType": "EQUAL", "orgValue": v, "mappingValue": ""} for v in values]
+        df = pd.DataFrame(excel_data)
+
+        output = io.BytesIO()
+        # sheet 名最多 31 字符（Excel 限制），用 field_name
+        sheet_name = field_name[:31] if len(field_name) > 31 else field_name
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+        output.seek(0)
+
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"枚举映射表_{field_name}_{date_str}.xlsx"
+
+        excel_file = cl.File(
+            name=file_name,
+            content=output.getvalue(),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        await cl.Message(
+            content=f"""✅ **枚举映射表已导出！**
+
+📋 **映射表信息：**
+- 目标字段（Sheet 名）：{field_name}
+- 枚举值数量：{len(values)} 条
+
+💡 **下一步操作：**
+1. 下载后在本地填入 **mappingValue**（映射后的值）
+2. 重新上传此 Excel 文件
+3. 说「填充到{field_name}」将映射结果写入解析规则""",
+            elements=[excel_file]
+        ).send()
+
+    except ImportError:
+        logger.error("[ACTION] pandas 或 openpyxl 未安装")
+        await cl.Message(content="❌ 系统缺少 Excel 导出库 (pandas/openpyxl)，请联系管理员。").send()
+    except Exception as e:
+        logger.error(f"[ACTION] 枚举映射表 Excel 导出异常: {e}")
+        await cl.Message(content=f"❌ Excel 导出失败：{e}").send()
