@@ -72,83 +72,63 @@ def _has_data_for_mapping(session) -> bool:
 
 
 def detect_intent(user_text: str, user_session=None) -> tuple:
-    """带消歧规则的意图检测，返回 (intent, reason)。
+    """快路径预筛器：只处理高置信度单关键词命中。
 
-    相比裸 any(kw in text) 子串匹配，本函数处理多意图冲突：
-    - 威胁 vs 映射：「威胁字段映射」应走 mapping（用户要做字段映射），
-      但「我想标准化威胁类型」应走 threat（明确做威胁类型标准化）。
-    - 判定规则：含威胁强信号短语（威胁类型/threat_type）+ 威胁动作词（标准化/映射）
-      且不含字段映射动作（字段映射/生成映射表）时 → threat，否则 mapping。
+    设计原则：Python 只做确定性高、无需思考的快速判断；
+    涉及理解、消歧、状态感知的决策全部交给 RouterAgent。
+
+    - 单关键词命中 → 快路径直调 MemberAgent（省1次LLM调用）
+    - 多关键词冲突 / 无关键词 → general（交 RouterAgent 全权路由+引导）
 
     Args:
         user_text: 用户原始输入文本
-        user_session: 会话状态（用于上下文辅助，如 threat_fill_mode 开启时强制 threat）
+        user_session: 会话状态（用于填充模式强制）
 
     Returns:
-        (intent, reason)：intent 为 mapping/threat/enum/log_parser/general，
-        reason 为人类可读的判定依据（用于日志）。
+        (intent, reason)：intent 为 mapping/threat/enum/log_parser/fill/general
     """
     lower = user_text.lower()
 
-    # 上下文辅助：威胁/枚举填充模式开启时，强制对应意图（填充流程内部消息）
+    # 填充模式强制（按钮驱动的两阶段流程内部消息）
     if user_session is not None:
         if user_session.get("threat_fill_mode", False):
             return "threat", "threat_fill_mode 开启，强制 threat"
         if user_session.get("enum_fill_mode", False):
             return "enum", "enum_fill_mode 开启，强制 enum"
 
-    # 基础子串匹配（各意图独立检测）
+    # 填充动作识别 → fill_dispatcher
+    if any(p in lower for p in ("填充到", "填充", "填入", "填到")):
+        return "fill", "填充动作，交 fill_dispatcher 决定类型"
+
+    # 基础子串匹配
     is_enum_extract = any(kw in lower for kw in ENUM_EXTRACT_KEYWORDS)
     is_threat = any(kw in lower for kw in THREAT_KEYWORDS)
     is_mapping = any(kw in lower for kw in MAPPING_KEYWORDS)
     is_enum = any(kw in lower for kw in ENUM_KEYWORDS)
     is_log_parser = any(kw in lower for kw in LOG_PARSER_KEYWORDS)
 
-    # 填充动作识别：「填充」「填充到」是填充的明确信号，
-    # 统一返回 "fill"，具体类型（威胁/枚举）由 fill_dispatcher 根据语义+状态决定
-    is_fill_action = any(p in lower for p in ("填充到", "填充", "填入", "填到"))
+    # 枚举提取和枚举是同一操作域，合并为一个标志
+    is_enum_domain = is_enum_extract or is_enum
 
-    if is_fill_action:
-        return "fill", "填充动作，交 fill_dispatcher 决定类型"
+    # 统计命中的意图域数量（枚举域算一个，用于判断是否多域冲突）
+    hit_count = sum([is_enum_domain, is_threat, is_mapping, is_log_parser])
 
-    # 枚举提取（精确动作词，填充之后）
+    # 多关键词冲突 → 交 RouterAgent 消歧（不再有 ambiguous）
+    if hit_count > 1:
+        return "general", f"多关键词冲突（{hit_count}个），交 RouterAgent 语义判断"
+
+    # 单关键词域命中 → 快路径
     if is_enum_extract:
-        return "enum", f"命中枚举提取关键词"
-
-    # 日志解析（独立，与其他意图冲突少）
-    if is_log_parser and not is_threat and not is_mapping:
-        return "log_parser", f"命中日志解析关键词"
-
-    # ====== 核心：威胁 vs 映射消歧 ======
-    # 含威胁强信号（威胁类型/threat_type）+ 威胁动作词（标准化/处理）→ threat
-    has_threat_strong = any(p in lower for p in _THREAT_STRONG_PHRASES)
-    has_threat_action = any(p in lower for p in _THREAT_ACTION_PHRASES)
-    # 字段映射的强信号（明确要做字段映射，不是威胁类型映射）
-    has_mapping_strong = any(p in lower for p in ("字段映射", "生成映射表", "标准字段处理", "字段标准化", "映射字段"))
-
-    if is_threat and is_mapping:
-        # 冲突消歧
-        if has_mapping_strong:
-            return "mapping", f"含字段映射强信号，优先 mapping（尽管命中威胁词）"
-        if has_threat_strong and has_threat_action:
-            return "threat", f"含威胁类型强信号+动作词，判定 threat"
-        # 无法消歧 → 交 RouterAgent 判断（而非默认 mapping）
-        return "ambiguous", "威胁+映射冲突无法消歧，交 RouterAgent"
-
+        return "enum", "命中枚举提取关键词"
     if is_threat:
-        return "threat", f"命中威胁关键词"
-
-    if is_enum:
-        return "enum", f"命中枚举关键词"
-
-    # 状态前置检查：mapping 意图但无数据 → 改为 general（交 RouterAgent 引导上传）
-    if is_mapping and not _has_data_for_mapping(user_session):
-        return "general", "映射意图但无数据，请先上传 Excel 或 Base64 配置文件"
-
+        return "threat", "命中威胁关键词"
     if is_mapping:
-        return "mapping", f"命中映射关键词"
-
+        return "mapping", "命中映射关键词"
+    if is_enum:
+        return "enum", "命中枚举关键词"
     if is_log_parser:
-        return "log_parser", f"命中日志解析关键词"
+        return "log_parser", "命中日志解析关键词"
+    # 无关键词 → RouterAgent
 
+    # 无关键词 → RouterAgent
     return "general", "无关键词命中，走通用路由"

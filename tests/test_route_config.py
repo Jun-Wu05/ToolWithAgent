@@ -24,28 +24,19 @@ class FakeSession:
 # ============================================================
 
 class TestMappingNoData:
-    """字段映射意图但无数据时，应降级为 general 引导上传。"""
+    """字段映射意图：单关键词命中→快路径mapping，RouterAgent负责状态检查。"""
 
-    def test_mapping_no_data_returns_general(self):
-        """mapping 关键词 + 无数据 session → general"""
-        session = FakeSession(decoded_data=None, decoded_fields=None, simplified_data=None)
-        intent, reason = detect_intent("映射", session)
-        assert intent == "general"
-        assert "无数据" in reason or "引导" in reason
+    def test_mapping_single_keyword_returns_mapping(self):
+        """纯'映射'关键词 → mapping（快路径，RouterAgent后续检查有无数据）"""
+        session = FakeSession()
+        intent, _ = detect_intent("映射", session)
+        assert intent == "mapping"
 
-    def test_mapping_no_data_reason_contains_upload_hint(self):
-        """reason 应包含具体的上传引导提示（US-1 验收标准）"""
-        session = FakeSession(decoded_data=None, decoded_fields=None, simplified_data=None)
-        intent, reason = detect_intent("我要字段映射", session)
-        assert intent == "general"
-        # 引导提示应告诉用户上传什么
-        assert "上传" in reason or "Excel" in reason or "Base64" in reason or "文件" in reason
-
-    def test_mapping_no_data_with_explicit_request(self):
-        """'我要字段映射' + 无数据 → general"""
-        session = FakeSession(decoded_data=None, decoded_fields=None, simplified_data=None)
-        intent, reason = detect_intent("我要字段映射", session)
-        assert intent == "general"
+    def test_mapping_explicit_request_returns_mapping(self):
+        """'我要字段映射' → mapping（单关键词命中，不降级）"""
+        session = FakeSession()
+        intent, _ = detect_intent("我要字段映射", session)
+        assert intent == "mapping"
 
     def test_mapping_with_data_returns_mapping(self):
         """mapping 关键词 + 有数据 session → mapping"""
@@ -54,7 +45,7 @@ class TestMappingNoData:
             decoded_fields=["src_ip"],
             simplified_data={"fields": ["src_ip"]},
         )
-        intent, reason = detect_intent("映射", session)
+        intent, _ = detect_intent("映射", session)
         assert intent == "mapping"
 
 
@@ -115,30 +106,22 @@ class TestFillAction:
 # ============================================================
 
 class TestDisambiguation:
-    """威胁 vs 映射消歧。"""
+    """多关键词冲突 → general（交 RouterAgent 消歧，不再有 ambiguous）。"""
 
-    def test_threat_mapping_conflict_ambiguous(self):
-        """威胁+映射冲突无法消歧 → ambiguous"""
-        session = FakeSession(
-            decoded_data={"test": 1},
-            decoded_fields=["src_ip"],
-            simplified_data={"fields": ["src_ip"]},
-        )
+    def test_threat_mapping_conflict_returns_general(self):
+        """威胁+映射冲突 → general（交 RouterAgent 语义判断）"""
+        session = FakeSession()
         intent, _ = detect_intent("威胁类型字段", session)
-        assert intent == "ambiguous"
+        assert intent == "general"
 
-    def test_mapping_strong_overrides_threat(self):
-        """字段映射强信号优先于威胁词"""
-        session = FakeSession(
-            decoded_data={"test": 1},
-            decoded_fields=["src_ip"],
-            simplified_data={"fields": ["src_ip"]},
-        )
+    def test_threat_mapping_conflict_no_ambiguous(self):
+        """不再返回 ambiguous"""
+        session = FakeSession()
         intent, _ = detect_intent("威胁类型字段映射", session)
-        assert intent == "mapping"
+        assert intent != "ambiguous"
 
     def test_threat_strong_with_action(self):
-        """威胁类型强信号+动作词 → threat"""
+        """威胁类型标准化 → threat（单关键词命中）"""
         session = FakeSession()
         intent, _ = detect_intent("威胁类型标准化", session)
         assert intent == "threat"
