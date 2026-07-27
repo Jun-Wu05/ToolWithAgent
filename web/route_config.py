@@ -50,32 +50,13 @@ def _load_route_keywords():
 MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS = _load_route_keywords()
 
 
-# 威胁类型的「强信号」短语 — 命中时高置信度判定为 threat（优先级高于 mapping）
-# 这些短语明确表示用户要做威胁类型标准化，而非字段映射
-_THREAT_STRONG_PHRASES = ("威胁类型", "威胁种类", "threat_type", "threat type")
-# 威胁类型处理的「动作」短语 — 与强信号组合时锁定 threat
-_THREAT_ACTION_PHRASES = ("标准化", "归一化", "映射", "处理", "转换", "识别")
-
-
-def _has_data_for_mapping(session) -> bool:
-    """检查是否有可供映射的数据（decoded_data/decoded_fields 或 simplified_data.fields）。
-
-    用于状态前置检查：用户说「映射」但没上传文件时，不应直调 FieldMappingAgent
-    （会报错重试），而应交 RouterAgent 引导上传。
-    """
-    if session is None:
-        return False
-    has_decoded = bool(session.get("decoded_data") or session.get("decoded_fields"))
-    simplified = session.get("simplified_data", {})
-    has_fields = bool(simplified.get("fields", [])) if isinstance(simplified, dict) else False
-    return has_decoded or has_fields
-
 
 def detect_intent(user_text: str, user_session=None) -> tuple:
     """快路径预筛器：只处理高置信度单关键词命中。
 
     设计原则：Python 只做确定性高、无需思考的快速判断；
     涉及理解、消歧、状态感知的决策全部交给 RouterAgent。
+    状态前置检查（有无数据）和意图消歧由 RouterAgent 的 prompt 处理。
 
     - 单关键词命中 → 快路径直调 MemberAgent（省1次LLM调用）
     - 多关键词冲突 / 无关键词 → general（交 RouterAgent 全权路由+引导）
