@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日志解析 Pipeline 数据流 (v3)</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 24px; color: #333; }
+h1 { text-align: center; margin-bottom: 24px; font-size: 28px; }
+.flow { display: flex; flex-direction: column; gap: 12px; max-width: 900px; margin: 0 auto; }
+.step { background: #fff; border-radius: 8px; padding: 16px 24px; border-left: 4px solid #ccc; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.step.s1 { border-left-color: #e74c3c; }
+.step.s2a { border-left-color: #9b59b6; }
+.step.s2 { border-left-color: #f39c12; }
+.step.s2a-route { border-left-color: #8e44ad; }
+.step.s3 { border-left-color: #2ecc71; }
+.step h2 { font-size: 16px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 700; color: #fff; }
+.badge.red { background: #e74c3c; }
+.badge.purple { background: #9b59b6; }
+.badge.orange { background: #f39c12; }
+.badge.green { background: #2ecc71; }
+.arrow { text-align: center; font-size: 20px; color: #aaa; margin: 0; }
+.detail { margin-top: 8px; font-size: 14px; line-height: 1.6; }
+.detail table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+.detail th, .detail td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+.detail th { background: #f9f9f9; font-weight: 600; }
+code { background: #f0f0f0; padding: 1px 6px; border-radius: 3px; font-size: 13px; }
+.note { margin-top: 24px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 12px 20px; font-size: 14px; }
+.note strong { color: #856404; }
+.path-a { background: #f3e8ff; }
+.path-main { background: #fff8e1; }
+.route-box { display: flex; gap: 16px; margin-top: 10px; }
+.route-box > div { flex: 1; border-radius: 6px; padding: 12px; }
+.highlight { background: #e8f5e9; border: 1px solid #4caf50; border-radius: 4px; padding: 2px 6px; }
+</style>
+</head>
+<body>
+<h1>📊 日志解析 Pipeline 数据流 (v3)</h1>
+<div class="flow">
+
+<div class="step s1">
+<h2>
+<span class="badge red">Step 1</span>
+Format Identifier — 格式识别
+</h2>
+<div class="detail">
+<p><strong>负责模块：</strong><code>log_format_identifier.py</code></p>
+<p><strong>输入：</strong>原始日志字符串</p>
+<p><strong>LLM 调用：</strong>✅ 调用 LLM 分析格式</p>
+<p><strong>输出关键字段：</strong></p>
+<table>
+<tr><th>字段</th><th>说明</th><th>示例</th></tr>
+<tr><td><code>format</code></td><td>格式类型</td><td><code>JSON</code> / <code>unknown</code></td></tr>
+<tr><td><code>format_detail</code></td><td>格式描述</td><td><code>纯JSON</code> / <code>日志头+JSON</code></td></tr>
+<tr><td><code>has_header</code></td><td>是否有 syslog 头</td><td><code>true</code> / <code>false</code></td></tr>
+<tr><td><code>feature_field</code></td><td>分类字段名（初步建议）</td><td><code>categoryName</code></td></tr>
+<tr><td><code>header_end_marker</code></td><td>头与 body 分隔标记</td><td><code>" - - - - "</code></td></tr>
+</table>
+</div>
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="step s2">
+<h2>
+<span class="badge orange">Step 2</span>
+Classifier — 特征分类（路由入口）
+</h2>
+<div class="detail">
+<p><strong>负责模块：</strong><code>log_classifier.py</code> — <code>_do_classify_log_features()</code></p>
+<p><strong>路由规则：</strong></p>
+<table>
+<tr><th>条件</th><th>路径</th><th>说明</th></tr>
+<tr><td><code>format != json</code></td><td>UNSUPPORTED</td><td>非 JSON 暂不支持</td></tr>
+<tr><td><code>"日志头" in format_detail</code></td><td>→ Step 2a 定位</td><td>触发特征位置判断</td></tr>
+<tr><td><code>纯 JSON</code></td><td>→ Path Main</td><td>直接 JSON 特征提取</td></tr>
+</table>
+</div>
+</div>
+
+<div class="arrow">↓ 仅日志头+JSON 触发</div>
+
+<div class="step s2a">
+<h2>
+<span class="badge purple">Step 2a</span>
+Feature Locator — 特征定位（内嵌）
+</h2>
+<div class="detail">
+<p><strong>负责模块：</strong><code>log_feature_locator.py</code> — <code>locate_feature()</code></p>
+<p><strong>职责：</strong>LLM 判断分类特征在 <code>header</code> 还是 <code>body</code></p>
+<p><strong>输入：</strong>header 聚合统计 + body 字段候选 + 采样日志</p>
+<p><strong>输出：</strong></p>
+<table>
+<tr><th>feature_location</th><th>后续路径</th></tr>
+<tr><td><code>header</code></td><td>→ Path A: <code>log_header_processor.py</code></td></tr>
+<tr><td><code>body</code></td><td>→ Path Main: <code>_classify_json_features()</code></td></tr>
+<tr><td><code>unknown</code></td><td>→ FAILED</td></tr>
+</table>
+<p style="margin-top:8px"><span class="highlight">降级安全：Step 2a 失败时降级为 <code>body</code>，不阻塞流程</span></p>
+</div>
+</div>
+
+<div class="arrow">↓ 路由结果</div>
+
+<div class="step s2a-route">
+<h2>路径分支</h2>
+<div class="route-box">
+<div class="path-a">
+<h3>🟣 Path A — 日志头分类</h3>
+<p><strong>文件：</strong><code>log_header_processor.py</code></p>
+<p><strong>触发：</strong><code>feature_location=header</code></p>
+<p><strong>流程：</strong></p>
+<ol>
+<li><code>HeaderExtractor.aggregate_headers()</code> 聚合</li>
+<li>LLM 分类（<code>log_header_classify.md</code>）</li>
+<li><code>_replace_samples_with_raw()</code> 替换真实样例</li>
+<li>强制 <code>feature_identifier = (\{[\S\s]*\})</code></li>
+</ol>
+</div>
+<div class="path-main">
+<h3>🟡 Path Main — JSON 特征提取</h3>
+<p><strong>文件：</strong><code>log_classifier.py</code></p>
+<p><strong>触发：</strong><code>feature_location=body</code> 或 纯 JSON</p>
+<p><strong>流程：</strong></p>
+<ol>
+<li><code>JsonExtractor</code> 提取特征值</li>
+<li><code>aggregate_by_field()</code> 聚合统计</li>
+<li>LLM 语义分组（<code>log_classify_feature.md</code>）</li>
+<li><code>postprocess_llm_classification()</code> 后处理</li>
+</ol>
+</div>
+</div>
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="step s3">
+<h2>
+<span class="badge green">Step 3</span>
+Sample Filler — 样本回填
+</h2>
+<div class="detail">
+<p><strong>负责模块：</strong><code>log_sample_filler.py</code></p>
+<p><strong>职责：</strong>用 <code>feature_identifier</code> 正则从原始日志中匹配样本，补充/覆盖 <code>classification_details</code></p>
+</div>
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="step" style="border-left-color: #2ecc71; background: #e8f5e9;">
+<h2>✅ 最终输出 — ClassificationResult</h2>
+<div class="detail">
+<table>
+<tr><th>字段</th><th>说明</th><th>Path A / Path Main</th></tr>
+<tr><td><code>status</code></td><td>成功/失败状态</td><td>统一</td></tr>
+<tr><td><code>feature_identifier</code></td><td>JSON body 匹配正则</td><td><span class="highlight">统一固定 <code>(\{[\S\s]*\})</code></span></td></tr>
+<tr><td><code>Diversion_method</code></td><td>分类字段中文业务名</td><td>LLM 填写（如"告警类型"）</td></tr>
+<tr><td><code>classification_details</code></td><td>分类详情列表</td><td>统一</td></tr>
+<tr><td><code>sample</code></td><td>完整原始日志行</td><td>统一（含 syslog 头）</td></tr>
+<tr><td><code>real_samples</code></td><td>JSON body 样例</td><td><span class="highlight">去头后仅 JSON body</span></td></tr>
+</table>
+</div>
+</div>
+
+</div>
+
+<div class="note">
+<strong>⚠️ 关键设计：</strong>
+<ol>
+<li><code>feature_identifier</code> 所有 JSON 路径统一为 <code>(\{[\S\s]*\})</code>，后处理强制覆盖，不依赖 LLM 生成。</li>
+<li><code>Diversion_method</code> 为分类字段的中文业务名称，用于 <code>rule_generator.py</code> 子规则命名。</li>
+<li><code>real_samples</code> 提取逻辑（2026-06-05 优化）：
+   <ul>
+   <li><strong>JSON 格式</strong>：优先用 <code>header_end_marker</code> 分割，fallback 用 <code>{}</code> 定位</li>
+   <li><strong>KV 格式</strong>：优先用 <code>feature_identifier</code> 正则提取 body（支持 syslog+KV），降级用 <code>header_end_marker</code></li>
+   </ul>
+</li>
+<li>Step 2a 降级安全：失败时默认 <code>feature_location=body</code>，不阻塞流程。</li>
+<li><strong>LLM JSON 输出约束（2026-06-05）</strong>：
+   <ul>
+   <li>Prompt 层：所有 prompt 添加 JSON Schema 定义，明确输出格式要求</li>
+   <li>API 层：DeepSeek/硅基流动使用 <code>response_format={"type": "json_object"}</code> 强制 JSON</li>
+   <li>兼容性：智谱 GLM 等 API 依赖 Prompt 约束（不支持 response_format）</li>
+   </ul>
+</li>
+</ol>
+</div>
+
+</body>
+</html>

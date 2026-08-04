@@ -60,6 +60,8 @@ chainlit
 # CodeBuddy IDE 本地配置
 .codebuddy/
 .kilo/
+.cline/
+.zcode/
 
 tmp/
 archive/
@@ -67,7 +69,12 @@ context_summary/
 
 # 评估文档和脚本（运行时生成，不提交）
 eval/
-docs/
+# docs 下散落的历史计划 md 不提交，但放行工程文档（setup-skills / v1.2 skills 权威配置与 PRD/ADR/架构文档）
+docs/*
+!docs/agents/
+!docs/adr/
+!docs/prd/
+!docs/architecture/
 
 # GitHub Copilot Skills（自动生成，不提交）
 .github/
