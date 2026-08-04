@@ -67,7 +67,15 @@ def _prepare_body_analysis(
     """
     if format_type == "kv":
         from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
-        extractor = KvExtractor(delimit, tab)
+        # CHANGED (2026-08-03): 修复参数语义反转 bug。
+        # locate_feature 的参数语义：delimit=字段分隔符, tab=键值分隔符
+        # （与 log_classifier.py 第254行一致），但 KvExtractor 旧参数名
+        # delimit->kv_delimit, tab->field_delimit 语义正好相反，按位置传参会搞反。
+        # 改用新参数名显式传递，同时归一化 field_delimit：纯空格->"space"。
+        _field_delimit = delimit
+        if _field_delimit in (" ", "\t", ""):
+            _field_delimit = "space"
+        extractor = KvExtractor(field_delimit=_field_delimit, kv_delimit=tab)
     else:
         from agent.tools.pipeline.extractors.json_extractor import JsonExtractor
         extractor = JsonExtractor()

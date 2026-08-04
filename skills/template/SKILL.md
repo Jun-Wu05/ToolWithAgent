@@ -1,5 +1,5 @@
 ---
-name: _template
+name: template
 description: 技能模板 - 复制此目录并重命名为你的技能名称，然后修改本文件
 license: MIT
 metadata:

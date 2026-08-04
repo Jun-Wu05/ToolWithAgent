@@ -21,7 +21,9 @@ from agent.shared.logger import get_logger
 logger = get_logger("history_store")
 
 # 单条历史记录的 content 最大字符数（超长截断，防映射结果 JSON 撑爆历史）
-MAX_ENTRY_CHARS = 500
+# CHANGED (2026-07-28): 500 → 1500，容纳枚举值列表等结构化结果，
+# 避免后续步骤（如威胁映射）看不到上一步提取的完整枚举值。
+MAX_ENTRY_CHARS = 1500
 # 默认取最近几轮
 DEFAULT_HISTORY_ROUNDS = 5
 # 默认历史拼入 prompt 的最大字符数

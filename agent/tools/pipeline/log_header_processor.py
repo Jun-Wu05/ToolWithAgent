@@ -64,8 +64,10 @@ def _parse_regex_response(response: str) -> str:
     """
     text = response.strip()
     
-    # 尝试提取 r'...' 格式
-    m = _re.search(r"r['\"](.+?)['\"]", text)
+    # CHANGED (2026-08-03)
+    m = _re.search("r'([^']*)'", text)
+    if not m:
+        m = _re.search("r\"([^\"]*)\"", text)
     if m:
         return m.group(1)
     

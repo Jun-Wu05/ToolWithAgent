@@ -130,6 +130,11 @@ class SessionState:
     由 web/history_store.py 管理，build_llm_input 拼最近 N 轮进 prompt。
     clear_decoded_data 时同步清空。"""
 
+    # ---- 复合意图步骤队列（multi-step-plan skill 产出）----
+    pending_steps: Optional[List[str]] = None
+    """待执行的步骤类型队列（如 ["threat", "fill"]），由 step_planner 管理。
+    RouterAgent 分解复合意图后写入，execute_pending_steps 逐个执行并弹出。"""
+
     # ---- 工厂方法 ----
 
     @classmethod

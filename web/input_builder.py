@@ -52,12 +52,23 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
     - intent="mapping"：拼接字段数据 + 日志样本，供 LLM 做字段映射
     - intent="general"：由 RouterAgent 自己判断
     """
-    # 威胁类型处理：上下文隔离 — 只传用户文本，不拼接字段数据（保留历史让 Agent 感知上下文）
+    # 威胁类型处理：上下文隔离 — 不拼字段数据，但结构化注入上一步的枚举值（若有）
+    # CHANGED (2026-07-28): threat 路径显式注入 last_enum_extract_result 的枚举值，
+    # 让 ThreatAgent 直接拿到要映射的数据，而非依赖被截断的对话历史回忆。
     if intent == "threat":
         history_block = format_history_for_prompt(user_session)
-        if history_block:
-            logger.info(f"[LLM_INPUT] 威胁路由：拼接历史（{len(history_block)} 字符）+ 用户文本")
-            return f"{history_block}\n\n用户请求：{user_text}"
+        # 结构化注入枚举值（来自上一步「提取枚举值」）
+        enum_result = user_session.get("last_enum_extract_result") or {}
+        enum_values = enum_result.get("value", []) if isinstance(enum_result, dict) else []
+        enum_context = ""
+        if enum_values:
+            values_text = "\n".join(f"- {v}" for v in enum_values)
+            enum_context = f"\n\n📋 待映射的枚举值（来自上一步提取，共 {len(enum_values)} 个）：\n{values_text}"
+            logger.info(f"[LLM_INPUT] 威胁路由：注入 {len(enum_values)} 个枚举值")
+
+        if history_block or enum_context:
+            logger.info(f"[LLM_INPUT] 威胁路由：拼接历史（{len(history_block)} 字符）+ 枚举上下文 + 用户文本")
+            return f"{history_block}{enum_context}\n\n用户请求：{user_text}"
         logger.info(f"[LLM_INPUT] 威胁路由：仅传递用户文本（长度: {len(user_text)}）")
         return user_text
 
@@ -66,8 +77,25 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
 
     if has_data:
         simplified_data = user_session.get("simplified_data", {})
-        fields_list = simplified_data.get("fields", [])
         original_log_sample = simplified_data.get("original_log_sample", "")
+
+        # CHANGED (2026-07-28): 优先用日志真实字段，而非 Excel 列头。
+        # decoded_fields/simplified_data.fields 存的是 Excel 列头（发生时间/事件名称/...），
+        # 不是日志 KV 行里的字段（uuid/name/srcIp/...）。若已做日志解析，从
+        # log_classification 提取真实字段；否则回退到列头（兼容未解析场景）。
+        # CHANGED (2026-07-29): 从仅 mapping 扩展到 mapping+general——复合意图（如
+        # 「枚举提取+威胁映射」走 general）同样需要日志真实字段，否则 RouterAgent
+        # 看到的是 Excel 列头，无法理解 alarm_name 等日志字段。
+        fields_list = simplified_data.get("fields", [])
+        if intent in ("mapping", "general"):
+            from web.field_source import extract_log_fields_for_mapping
+            log_fields = extract_log_fields_for_mapping(
+                user_session.get("log_classification"),
+                user_session.get("raw_log_lines"),
+            )
+            if log_fields:
+                fields_list = log_fields
+                logger.info(f"[LLM_INPUT] {intent} 意图：使用日志真实字段（{len(fields_list)} 个），而非 Excel 列头")
 
         fields_json_str = json.dumps(fields_list, ensure_ascii=False)
 

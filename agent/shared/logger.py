@@ -110,8 +110,12 @@ def cleanup_old_logs(log_dir: Path, prefix: str = "app", keep_count: int = 3):
     log_files = sorted(log_dir.glob(pattern), key=lambda f: f.stat().st_mtime, reverse=True)
     
     # 删除多余的文件
+    # CHANGED (2026-07-31): 捕获 PermissionError，避免 Windows 文件锁导致整个 logger 初始化失败
     for old_file in log_files[keep_count:]:
-        old_file.unlink(missing_ok=True)
+        try:
+            old_file.unlink(missing_ok=True)
+        except PermissionError:
+            pass
 
 
 def get_logger(name: str = "agent") -> logging.Logger:

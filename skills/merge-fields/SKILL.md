@@ -20,8 +20,8 @@ metadata:
 
 ## 操作步骤
 
-### Step 1: 获取 Base64 数据
-从用户输入或 session 中获取 Base64 编码的配置数据。使用 `base64_decode_tool` 解码，得到 JSON 数组。
+### Step 1: 获取数据
+输入中已包含解码后的 JSON 数据（mapping entity 数组），直接使用。
 
 ### Step 2: 解析用户合并指令
 从用户输入中提取：
@@ -44,12 +44,8 @@ metadata:
    ```
    其中 result 的值 = 各源字段 `result[0]` 用 `sep` 拼接
 
-### Step 4: 编码输出
-使用 `base64_encode_tool` 将修改后的 JSON 数组重新编码为 Base64。
-
-### Step 5: 返回结果
-- 输出 Base64 编码的完整配置数据
-- 简要告知用户合并了哪些字段到哪个新字段
+### Step 4: 返回结果
+输出修改后的完整 JSON 数组。
 
 ## 输出格式示例
 

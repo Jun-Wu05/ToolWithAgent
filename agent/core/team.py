@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from agno.agent import Agent
 from agno.team.team import Team
 from agno.team.mode import TeamMode
+from agno.skills import Skills, LocalSkills
 
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
@@ -271,6 +272,11 @@ def create_data_mapping_team() -> Team:
     _debug = os.getenv("AGNO_DEBUG_MODE", "false").lower() == "true"
     _show_members = os.getenv("AGNO_SHOW_MEMBERS", "false").lower() == "true"
 
+    # 加载 skills 目录（绝对路径，避免工作目录依赖）
+    # skills 含 add-fields/delete-fields/merge-fields/multi-step-plan 等，
+    # RouterAgent 通过 Progressive Discovery 按需加载，自主决定何时使用。
+    _skills_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "skills")
+
     # 创建Team（Team Leader 使用主模型）
     team = Team(
         name="DataMappingTeam",
@@ -283,6 +289,7 @@ def create_data_mapping_team() -> Team:
             create_log_parser_agent(),
         ],
         instructions=_load_router_instructions(),
+        skills=Skills(loaders=[LocalSkills(_skills_dir)]),  # 挂载 skills 给 RouterAgent
         markdown=True,
         debug_mode=_debug,
         show_members_responses=_show_members,

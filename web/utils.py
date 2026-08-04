@@ -287,10 +287,11 @@ def render_log_parser_result(
         lines.append("")
         lines.append(f"### 📊 分类详情（{len(details)} 类）")
         lines.append("")
-        lines.append("| 特征值 | 真实样例 |")
-        lines.append("|---|---|")
+        # CHANGED (2026-07-28): 样例改用代码块展示，而非 Markdown 表格。
+        # 原因：KV 日志行含 | 分隔符（uuid=xxx|name=yyy|...），放进表格后
+        # | 被当作列分隔符，整行被切成多列，界面只显示第一个 | 之前的内容。
+        # 代码块内 | 不被解析，完整样例原样可见。
         for _d in details:
-            # CHANGED: 字段值与特征值列重复，已移除冗余列
             feature_val = str(_d.get("logtype", ""))
             real_samples = _d.get("real_samples", [])
             if isinstance(real_samples, str):
@@ -299,7 +300,9 @@ def render_log_parser_result(
                 sample = real_samples[0] if isinstance(real_samples, list) else str(real_samples)
             else:
                 sample = str(_d.get("sample", ""))
-            lines.append(f"| {feature_val} | {sample} |")
+            lines.append(f"**{feature_val}**")
+            lines.append(f"```\n{sample}\n```")
+            lines.append("")
 
     lines.append("")
     lines.append("*以上结果由 LogParser Pipeline 直接生成*")

@@ -16,10 +16,7 @@ from agent.shared.logger import get_logger
 logger = get_logger("user_message_handlers")
 
 # 从拆分模块导入业务函数
-from web.route_config import (
-    MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS,
-    ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS, detect_intent
-)
+from web.route_config import detect_intent
 from web.llm_client import call_team
 from web.input_builder import build_llm_input
 from web.response_handler import process_team_response, _check_session_action
@@ -74,16 +71,13 @@ async def handle_user_message(user_session, team, user_text: str):
         return
     # ====================================================================
     
-    # 意图检测（带消歧规则的 detect_intent + 保留布尔标志用于早期分流）
-    is_enum_extract = any(kw in user_lower for kw in ENUM_EXTRACT_KEYWORDS)
-    is_log_parser = any(kw in user_lower for kw in LOG_PARSER_KEYWORDS)
-    # enum/threat/mapping 的冲突消歧交给 detect_intent
+    # 意图检测：detect_intent 是路由的唯一真相来源。
+    # 不再在 handler 里做独立的关键词布尔检测——那会让「多关键词冲突交 RouterAgent」
+    # 的消歧规则被绕过（曾导致「把这些枚举值进行威胁类型的映射」被野生 is_enum_extract
+    # 抢路由到 enum_extract，进而触发 enum_handler 崩溃。见 2026-07-27 日志）。
     detected_intent, route_reason = detect_intent(user_text, user_session)
-    is_enum = detected_intent == "enum"
-    is_threat = detected_intent == "threat"
-    is_mapping = detected_intent == "mapping"
     logger.info(f"[ROUTE] '{user_text[:60]}' → {detected_intent}（{route_reason}）")
-    
+
     # 1. 威胁填充模式分流 → threat_handler（按钮驱动的两阶段流程）
     if await handle_threat_fill_flow(user_session, user_text):
         return
@@ -103,42 +97,16 @@ async def handle_user_message(user_session, team, user_text: str):
         from web.fill_dispatcher import handle_remove_fill
         if await handle_remove_fill(user_session, user_text):
             return
-    
-    # 3. 枚举提取分流（精确匹配优先：含"提取"/"列举"/"列出"等词）
-    if is_enum_extract:
+
+    # 3. 枚举提取分流（detected_intent == "enum" 覆盖提取/列举/列出/枚举值等子类）
+    if detected_intent == "enum":
         await handle_enum_extract_flow(user_session, team, user_text)
         return
-    
-    # 4. 枚举处理分流（宽泛匹配：仅含"枚举"但无提取意图）
-    if is_enum:
-        await cl.Message(
-            content="""📋 **枚举字段处理**
 
-请上传 **Excel 映射表** 文件来定义枚举映射规则。
-
-Excel 格式说明：
-- Sheet 名 = 目标字段名
-- 第一列：mappingType（EQUAL 或 REGULAR）
-- 第二列：orgValue（原始值）
-- 第三列：mappingValue（映射值）
-
-上传后将展示映射预览，确认后可执行填充。"""
-        ).send()
-        return
-    
-    # 4.5 日志解析分流
-    if is_log_parser:
+    # 4. 日志解析分流
+    if detected_intent == "log_parser":
         await handle_log_parser(user_session, user_text)
         return
-    
-    # 5. 构建 LLM 输入（detected_intent 已由 detect_intent 带消歧规则确定）
-    # detect_intent 未覆盖 log_parser 时兜底（日志解析早期分流可能已 return）
-    if is_log_parser and detected_intent == "general":
-        detected_intent = "log_parser"
-    # ambiguous（威胁+映射无法消歧）→ 走 RouterAgent（当 general 处理，注入 session_context）
-    if detected_intent == "ambiguous":
-        logger.info("[ROUTE] 模糊意图，fallback RouterAgent（按 general 走 team.run）")
-        detected_intent = "general"
     
     # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
     BATCH_SIZE = 25
@@ -237,7 +205,19 @@ Excel 格式说明：
             result = await call_team(team, full_input, loading_msg, intent=detected_intent)
             
             # 7.5 Agent 自决清空：检测 [SESSION_ACTION:clear] 标记
-            result_content = result.content if hasattr(result, 'content') else str(result)
+            # 防御：ThreatAgent 等带 output_schema 的 Agent 返回 Pydantic 对象（如
+            # ThreatMappingList），result.content 不是字符串。统一转字符串后再做标记检测，
+            # 否则 _check_session_action / parse_plan_marker 的字符串操作会抛
+            # 'expected string or bytes-like object'（response_handler 也有同样防御）。
+            import json as _json_for_result
+            result_content = result.content if hasattr(result, 'content') else result
+            if not isinstance(result_content, str):
+                if hasattr(result_content, 'model_dump'):
+                    result_content = _json_for_result.dumps(result_content.model_dump(), ensure_ascii=False)
+                elif hasattr(result_content, 'dict'):
+                    result_content = _json_for_result.dumps(result_content.dict(), ensure_ascii=False)
+                else:
+                    result_content = str(result_content)
             session_action_cleared = await _check_session_action(result_content, user_session, loading_msg)
             if session_action_cleared:
                 # Agent 判定需要清空会话，已通过 _check_session_action 发送通知
@@ -246,7 +226,32 @@ Excel 格式说明：
                 except Exception:
                     pass
                 return
-            
+
+            # 7.6 复合意图分解：检测 [PLAN:步骤1|步骤2] 标记（multi-step-plan skill 产出）
+            from web.step_planner import parse_plan_marker, execute_pending_steps
+            plan_steps = parse_plan_marker(result_content)
+            if plan_steps:
+                logger.info(f"[PLAN] RouterAgent 分解复合意图为 {len(plan_steps)} 步: {plan_steps}")
+                # 存入步骤队列（跳过第一步——第一步的意图已在当前 call_team 中隐含处理，
+                # 但 RouterAgent 的回复只是分解说明，不是执行结果，因此全部步骤都入队执行）
+                user_session["pending_steps"] = plan_steps
+                try:
+                    await loading_msg.remove()
+                except Exception:
+                    pass
+                # 展示 RouterAgent 的分解说明（去掉 PLAN 标记）
+                import re as _re_plan
+                clean_explanation = _re_plan.sub(r"\[PLAN:[a-z_|]+\]", "", result_content).strip()
+                if clean_explanation:
+                    plan_msg = cl.Message(content="")
+                    await plan_msg.send()
+                    for i in range(0, min(len(clean_explanation), 200), 50):
+                        await plan_msg.stream_token(clean_explanation[i:i + 50])
+                    await plan_msg.update()
+                # 自动执行步骤队列
+                await execute_pending_steps(user_session, team, user_text)
+                return
+
             # 8. 删除 loading 消息（重试时不删除，保留状态）
             if retry_attempt == 0:
                 await loading_msg.remove()
