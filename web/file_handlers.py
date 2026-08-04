@@ -61,29 +61,23 @@ async def handle_file_upload(user_session, element):
         file_content = read_element_content(element)
 
         # ========== 威胁填充模式状态隔离 ==========
-        if getattr(user_session, "threat_fill_mode", False) or user_session.get("threat_fill_mode", False):
-            mapping_table = getattr(user_session, "threat_mapping_table", None) or user_session.get("threat_mapping_table")
+        if user_session.get("threat_fill_mode", False):
+            mapping_table = user_session.get("threat_mapping_table")
 
             if not mapping_table:
                 await cl.Message(content="❌ 威胁映射表格丢失，请重新执行威胁类型映射").send()
-                if hasattr(user_session, "threat_fill_mode"):
-                    user_session.threat_fill_mode = False
-                else:
-                    user_session["threat_fill_mode"] = False
+                user_session["threat_fill_mode"] = False
                 return
 
             # 检查是否已有目标字段名
-            target_field = getattr(user_session, "threat_target_field", None) or user_session.get("threat_target_field")
+            target_field = user_session.get("threat_target_field")
 
             if target_field:
                 logger.info("[FILE_UPLOAD] 威胁填充模式，有字段名，直接执行填充")
                 await execute_threat_fill(user_session, file_content)
             else:
                 logger.info("[FILE_UPLOAD] 威胁填充模式，无字段名，保存文件到 pending_base64")
-                if hasattr(user_session, "pending_base64"):
-                    user_session.pending_base64 = file_content
-                else:
-                    user_session["pending_base64"] = file_content
+                user_session["pending_base64"] = file_content
                 await cl.Message(
                     content="📁 **Base64 文件已上传！**\n\n请在下方发送目标字段名（如：original_log）来完成填充。"
                 ).send()
@@ -91,15 +85,12 @@ async def handle_file_upload(user_session, element):
             return
 
         # ========== 枚举填充模式状态隔离 ==========
-        if getattr(user_session, "enum_fill_mode", False) or user_session.get("enum_fill_mode", False):
-            enum_excel_path = getattr(user_session, "enum_excel_path", None) or user_session.get("enum_excel_path")
+        if user_session.get("enum_fill_mode", False):
+            enum_excel_path = user_session.get("enum_excel_path")
 
             if not enum_excel_path:
                 await cl.Message(content="❌ 枚举映射表路径丢失，请重新上传Excel映射表").send()
-                if hasattr(user_session, "enum_fill_mode"):
-                    user_session.enum_fill_mode = False
-                else:
-                    user_session["enum_fill_mode"] = False
+                user_session["enum_fill_mode"] = False
                 return
 
             logger.info("[FILE_UPLOAD] 枚举填充模式，执行枚举填充")
@@ -137,15 +128,8 @@ async def handle_file_upload(user_session, element):
                     return
 
                 # 保存到会话
-                if hasattr(user_session, "enum_excel_path"):
-                    user_session.enum_excel_path = excel_path
-                else:
-                    user_session["enum_excel_path"] = excel_path
-                
-                if hasattr(user_session, "enum_preview"):
-                    user_session.enum_preview = enum_preview
-                else:
-                    user_session["enum_preview"] = enum_preview
+                user_session["enum_excel_path"] = excel_path
+                user_session["enum_preview"] = enum_preview
 
                 # 获取目标字段列表
                 target_fields = list(set(item["目标字段"] for item in enum_preview))
@@ -193,58 +177,27 @@ async def handle_file_upload(user_session, element):
         result = decode_file_content(file_content)
 
         if result["status"] == "success":
-            # 保存解码数据
-            if hasattr(user_session, "decoded_data"):
-                user_session.decoded_data = result["decoded_json"]
-            else:
-                user_session["decoded_data"] = result["decoded_json"]
-            
-            if hasattr(user_session, "decoded_fields"):
-                user_session.decoded_fields = result["fields"]
-            else:
-                user_session["decoded_fields"] = result["fields"]
-            
-            if hasattr(user_session, "original_log"):
-                user_session.original_log = result["original_log"]
-            else:
-                user_session["original_log"] = result["original_log"]
-            
-            if hasattr(user_session, "decoded_text"):
-                user_session.decoded_text = result.get("decoded_text", "")
-            else:
-                user_session["decoded_text"] = result.get("decoded_text", "")
+            # 保存解码数据（SessionState dict 兼容层支持 [] 赋值）
+            user_session["decoded_data"] = result["decoded_json"]
+            user_session["decoded_fields"] = result["fields"]
+            user_session["original_log"] = result["original_log"]
+            user_session["decoded_text"] = result.get("decoded_text", "")
 
             # 记录上传文件元信息
             file_name_val = get_element_file_name(element)
-            if hasattr(user_session, "uploaded_file_name"):
-                user_session.uploaded_file_name = file_name_val
-            else:
-                user_session["uploaded_file_name"] = file_name_val
-            
             file_time = datetime.now().strftime("%H:%M:%S")
-            if hasattr(user_session, "uploaded_file_time"):
-                user_session.uploaded_file_time = file_time
-            else:
-                user_session["uploaded_file_time"] = file_time
-            
+            user_session["uploaded_file_name"] = file_name_val
+            user_session["uploaded_file_time"] = file_time
             logger.info(f"[FILE_UPLOAD] 记录上传文件元信息: name={file_name_val}, time={file_time}")
 
             # 构建 simplified_data（委托 file_handler）
-            simplified_data = build_simplified_data(result)
-            if hasattr(user_session, "simplified_data"):
-                user_session.simplified_data = simplified_data
-            else:
-                user_session["simplified_data"] = simplified_data
+            user_session["simplified_data"] = build_simplified_data(result)
 
             # 缓存原始 Base64 内容，供枚举填充等后续操作使用
-            if hasattr(user_session, "raw_base64"):
-                user_session.raw_base64 = file_content
-            else:
-                user_session["raw_base64"] = file_content
+            user_session["raw_base64"] = file_content
 
             # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
-            enum_excel_path = getattr(user_session, "enum_excel_path", None) or user_session.get("enum_excel_path")
-            enum_preview_ = getattr(user_session, "enum_preview", None) or user_session.get("enum_preview")
+            enum_excel_path = user_session.get("enum_excel_path")
 
             logger.info(f"[FILE_UPLOAD] Base64解码成功，raw_base64已缓存，enum_excel_path={enum_excel_path is not None}")
 
@@ -329,52 +282,21 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
         original_log = [json.dumps(r, ensure_ascii=False) for r in records]
         decoded_text = df.to_string(index=False)
         
-        # 保存到会话
-        if hasattr(user_session, "original_log"):
-            user_session.original_log = original_log
-        else:
-            user_session["original_log"] = original_log
-        
-        if hasattr(user_session, "decoded_data"):
-            user_session.decoded_data = records
-        else:
-            user_session["decoded_data"] = records
-        
-        if hasattr(user_session, "decoded_fields"):
-            user_session.decoded_fields = fields
-        else:
-            user_session["decoded_fields"] = fields
-        
-        if hasattr(user_session, "decoded_text"):
-            user_session.decoded_text = decoded_text
-        else:
-            user_session["decoded_text"] = decoded_text
-        
-        simplified_data = {
+        # 保存到会话（SessionState dict 兼容层支持 [] 赋值）
+        user_session["original_log"] = original_log
+        user_session["decoded_data"] = records
+        user_session["decoded_fields"] = fields
+        user_session["decoded_text"] = decoded_text
+        user_session["simplified_data"] = {
             "fields": fields,
             "original_log_sample": decoded_text[:2000]
         }
-        if hasattr(user_session, "simplified_data"):
-            user_session.simplified_data = simplified_data
-        else:
-            user_session["simplified_data"] = simplified_data
-        
         file_time = datetime.now().strftime("%H:%M:%S")
-        if hasattr(user_session, "uploaded_file_name"):
-            user_session.uploaded_file_name = file_name
-        else:
-            user_session["uploaded_file_name"] = file_name
-        
-        if hasattr(user_session, "uploaded_file_time"):
-            user_session.uploaded_file_time = file_time
-        else:
-            user_session["uploaded_file_time"] = file_time
-        
-        # 保存路径供枚举填充等后续使用
-        if hasattr(user_session, "enum_excel_path"):
-            user_session.enum_excel_path = excel_path
-        else:
-            user_session["enum_excel_path"] = excel_path
+        user_session["uploaded_file_name"] = file_name
+        user_session["uploaded_file_time"] = file_time
+
+        # 注意：数据表格不是枚举映射表，不应覆盖 enum_excel_path
+        # （enum_excel_path 仅由真正的枚举映射表上传设置，见 handle_file_upload 枚举表检测段）
         
         # 检测"原始日志"列并预提取，供 LogParserAgent 精简输入使用
         # CHANGED: 替换单元格内的换行符为空格，防止单条日志被拆散成多行碎片
@@ -399,10 +321,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
                     raw_log_lines = raw_series.tolist()
                     logger.debug("[FILE_UPLOAD] 单元格内无换行符，无需预处理")
 
-                if hasattr(user_session, "raw_log_lines"):
-                    user_session.raw_log_lines = raw_log_lines
-                else:
-                    user_session["raw_log_lines"] = raw_log_lines
+                user_session["raw_log_lines"] = raw_log_lines
                 logger.info(f"[FILE_UPLOAD] 提取\"原始日志\"列({col})：{len(raw_log_lines)} 行")
                 break
         

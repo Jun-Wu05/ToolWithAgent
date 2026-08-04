@@ -36,7 +36,7 @@ def _init_llm_config() -> None:
     if _LLM_API_URL:
         return
     _LLM_API_KEY = ModelConfig.get_api_key()
-    if ModelConfig.MODEL_PROVIDER == "siliconflow":
+    if ModelConfig.get_provider() == "siliconflow":
         _LLM_API_URL = "https://api.siliconflow.cn/v1/chat/completions"
     else:
         base = "https://api.deepseek.com"
@@ -71,7 +71,7 @@ def _call_llm_direct(
     """
     _init_llm_config()
     if model_id is None:
-        model_id = ModelConfig.MAIN_MODEL
+        model_id = ModelConfig.get_model_id()
 
     start = time.time()
     payload: dict[str, Any] = {

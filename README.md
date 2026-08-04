@@ -33,10 +33,10 @@ toolswithagent/
 │   ├── action_callbacks.py          # 9个 Action 回调（按钮交互）
 │   ├── utils.py                     # 纯辅助函数（JSON 解析、渲染）
 │   ├── global_state.py              # 全局状态管理
-│   ├── route_config.py              # 路由关键词匹配（字段映射/威胁/枚举/日志解析）
+│   ├── route_config.py              # 路由意图检测（detect_intent 快路径/慢路径分流）
 │   ├── llm_client.py                # LLM 客户端（Team 调用 + CircuitBreaker）
-│   ├── input_builder.py             # LLM 输入构造
-│   ├── response_handler.py          # 响应解析 + cl.Dataframe 渲染
+│   ├── input_builder.py             # LLM 输入构造（对话历史 + embedding 候选）
+│   ├── response_handler.py          # 响应解析（按意图分流 + cl.Dataframe 渲染）
 │   ├── threat_handler.py            # 威胁填充模式分流
 │   ├── enum_handler.py              # 枚举填充/提取分流
 │   ├── file_handler.py              # 底层文件处理（数据层）
@@ -108,7 +108,7 @@ chainlit run web/chainlit_app.py
 启动后访问 `http://localhost:8000`，在聊天界面：
 1. **上传** Excel 或粘贴日志数据
 2. **输入指令**：`字段映射` / `威胁类型` / `枚举提取` / `枚举值填充` / `日志解析`
-3. Agent 自动识别意图并完成处理
+3. Agent 识别意图并完成处理（明确意图走快路径直调专家 Agent；模糊意图走 RouterAgent 智能路由）
 
 ### 环境变量
 

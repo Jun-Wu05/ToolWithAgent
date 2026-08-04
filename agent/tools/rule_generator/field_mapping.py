@@ -8,6 +8,11 @@ import copy
 from typing import Any
 
 
+# normalize entries 的 index 排除集合：系统自动生成的元字段，不参与用户字段映射
+# web/action_callbacks.py 也引用此常量（原散落 4 处 literal）
+EXCLUDED_FIELD_INDICES = frozenset({"original_log", "日志类型"})
+
+
 def extract_sub_rule_mapping_info(sub_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """从子规则列表中提取字段映射所需信息（字段列表 + 原始日志样本）。
 
@@ -25,11 +30,11 @@ def extract_sub_rule_mapping_info(sub_rules: list[dict[str, Any]]) -> list[dict[
         rule_name: str = rule.get("name", "")
         sample_log: str = rule.get("sample", "")
 
-        # 提取 normalize entries 的 index（排除 original_log 和 日志类型）
+        # 提取 normalize entries 的 index（排除元字段）
         fields: list[str] = []
         for entry in rule.get("normalize", []):
             idx = entry.get("index", "")
-            if idx and idx not in ("original_log", "日志类型"):
+            if idx and idx not in EXCLUDED_FIELD_INDICES:
                 fields.append(idx)
 
         result.append({
@@ -98,7 +103,7 @@ def apply_field_mapping_to_sub_rules(
 
         for entry in rule.get("normalize", []):
             idx = entry.get("index", "")
-            if not idx or idx in ("original_log", "日志类型"):
+            if not idx or idx in EXCLUDED_FIELD_INDICES:
                 continue
 
             mapping = field_map.get(idx)
@@ -115,3 +120,25 @@ def apply_field_mapping_to_sub_rules(
                 entry["core"] = False
 
     return result_rules
+
+
+def apply_enum_fill_to_sub_rules(
+    sub_rules: list[dict[str, Any]],
+    mapping_table: dict[str, list[dict]],
+    target_field: str = None,
+) -> list[dict[str, Any]]:
+    """对子规则列表应用枚举/威胁填充（mappings 追加）。
+
+    向后兼容包装：委托 agent.shared.mapping_utils.apply_fill_to_sub_rules。
+    威胁填充和枚举填充在 apply 层面是同一操作，统一到共享函数消除重复。
+
+    Args:
+        sub_rules: 子规则列表（generate_sub_rules 输出，字段映射后含 field 标注）
+        mapping_table: {字段名: [{mappingType, orgValue, mappingValue}, ...]}
+        target_field: 可选，只填充该字段；None 表示填充 mapping_table 里所有字段
+
+    Returns:
+        深拷贝后的 sub_rules，匹配的 normalize 项已追加 mappings
+    """
+    from agent.shared.mapping_utils import apply_fill_to_sub_rules
+    return apply_fill_to_sub_rules(sub_rules, mapping_table, target_field)

@@ -158,21 +158,30 @@ def build_kv_normalize_entries_from_all_logs(
 
     处理流程：
     1. delimit语义化名称转义（"space" → " "）
-    2. 遍历所有日志行，按delimit分割成key=value对
-    3. 对每个对，找第一个tab位置提取key
+    2. 按 logtype 过滤日志行（只保留属于当前日志类型的行）
+    3. 遍历过滤后的日志行，按delimit分割成key=value对
     4. 构建normalize条目（按字母序，result为空数组）
     5. 追加日志类型条目（永远最后）
 
     Args:
         all_logs_str: 所有日志字符串（多行KV格式）
-        logtype: 日志类型名称
+        logtype: 日志类型名称（如 "AUDIT"、"IPS"）
         delimit: 字段分隔符（如"space"、";"）
         tab: 键值分隔符（如"="）
 
     Returns:
         normalize条目列表
     """
-    keys = extract_kv_keys(all_logs_str, delimit, tab=tab)
+    # 按 logtype 过滤日志行：只保留属于当前日志类型的行
+    # logtype 通常出现在日志头或 type= 字段里，用子串匹配判断归属
+    if logtype and all_logs_str:
+        filtered_lines = [line for line in all_logs_str.split('\n') if logtype in line]
+        # 如果过滤后没有行（logtype 可能是中文或变体），回退到全部日志
+        filtered_logs_str = '\n'.join(filtered_lines) if filtered_lines else all_logs_str
+    else:
+        filtered_logs_str = all_logs_str
+
+    keys = extract_kv_keys(filtered_logs_str, delimit, tab=tab)
 
     entries: list[dict[str, Any]] = []
     for key in keys:

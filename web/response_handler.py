@@ -19,21 +19,71 @@ from web.parsers import create_dataframe_elements, parse_json_mapping_result, pa
 logger = get_logger("response_handler")
 
 
+def _get_next_step_hint(user_session) -> str:
+    """根据 session 状态返回下一步操作建议（附加在各操作成功回复末尾）。
+
+    集中"下一步可以做什么"逻辑，避免散落在各操作分支里。
+    """
+    hints: list[str] = []
+
+    has_sub_rules = bool(user_session.get("mapped_sub_rules"))
+    has_mapping = bool(user_session.get("last_mapping_data") or user_session.get("batch_mapping_results"))
+    has_threat = bool(user_session.get("last_threat_data"))
+    has_enum = bool(user_session.get("last_enum_extract_result"))
+    has_enum_excel = bool(user_session.get("enum_excel_path"))
+
+    # 无数据（含无子规则）→ 提示上传
+    has_any_data = (
+        user_session.get("decoded_data")
+        or user_session.get("decoded_fields")
+        or has_sub_rules
+    )
+    if not has_any_data:
+        return "💡 下一步：请先上传 Excel 或 Base64 配置文件。"
+
+    # 有数据但无映射 → 提示映射或日志解析
+    if not has_mapping and not has_sub_rules:
+        hints.append("说「映射」进行字段映射")
+        hints.append("说「日志类型提取」识别日志格式")
+
+    # 有映射/子规则 → 提示值映射操作
+    if has_mapping or has_sub_rules:
+        if not has_threat and not has_enum:
+            hints.append("说「提取xxx的枚举值」提取枚举值")
+            hints.append("说「威胁类型映射」做威胁分类")
+        if has_threat or has_enum or has_enum_excel:
+            hints.append("说「填充到xxx字段」将值映射写入解析规则")
+
+    # 有填充数据 → 提示导出
+    if has_sub_rules and (has_threat or has_enum):
+        hints.append("说「导出」下载最终配置")
+
+    if not hints:
+        return ""
+
+    return "💡 下一步：" + " | ".join(hints)
+
+
 async def process_team_response(
     result,
     user_lower: str,
     user_session: dict,
     loading_msg,
-    msg
+    msg,
+    intent: str = "general",
 ) -> bool:
     """
-    解析 Team 返回结果：识别映射/威胁类型并渲染表格，或流式输出原文
+    解析 Team 返回结果：识别映射/威胁类型并渲染表格，或流式输出原文。
+
+    按意图分流处理：
+    - general：直接流式输出（闲聊/引导/路由建议），不跑 JSON 解析
+    - mapping/threat：跑对应解析器，解析失败时按状态判断是否重试
 
     Returns:
-        True 表示已处理（调用方可 return）
+        True 表示已处理（调用方可 return），False 表示需重试
     """
     result_content = result.content if hasattr(result, 'content') else str(result)
-    
+
     # v3: 兼容 output_schema 返回的 Pydantic 对象 → dict
     if not isinstance(result_content, str):
         if hasattr(result_content, 'model_dump'):          # Pydantic v2
@@ -43,10 +93,19 @@ async def process_team_response(
         else:
             result_content = str(result_content)
 
-    # [Step2 改造] 不再依赖用户消息关键词判断响应类型，
-    # 而是尝试解析两种 JSON 格式，以实际解析结果为准。
+    # general 意图：直接流式输出（闲聊/引导/路由建议，无需 JSON 解析）
+    if intent == "general":
+        # 防御：过滤 RouterAgent 错误路由返回的空结构化输出（如 {"items": []}）
+        stripped = result_content.strip()
+        if stripped.startswith('{"items"') and ('[]' in stripped or len(stripped) < 30):
+            result_content = "请先上传 Excel 或 Base64 配置文件，上传后可以进行字段映射。"
+            logger.warning("[HANDLE] general 意图收到空结构化输出，替换为引导提示")
+        for i in range(0, len(result_content), 50):
+            await msg.stream_token(result_content[i:i + 50])
+        await msg.update()
+        return True
 
-    # 先尝试字段映射解析
+    # mapping/threat 意图：尝试解析 JSON
     mapping_data = parse_json_mapping_result(result_content)
     
     if mapping_data:
@@ -98,6 +157,8 @@ async def process_team_response(
             logger.info(f"[HANDLE] 威胁类型去重: {len(threat_data)} -> {len(deduped)} 条")
         threat_data = deduped
         user_session["last_threat_data"] = threat_data
+        user_session["threat_mapping_table"] = threat_data  # 自动设映射表，支持自然语言填充
+        user_session["last_fill_type"] = "threat"  # 标记最近映射类型，供 fill_dispatcher 判定
         threat_count = len(threat_data)
 
         summary = f"""✅ **威胁类型映射完成！**
@@ -127,7 +188,6 @@ async def process_team_response(
 
     # 两个解析都失败后，才检查拒绝响应（避免威胁JSON前面的中文解释触发误判）
     if not mapping_data and not threat_data:
-        result_lower = result_content.lower()
         refusal_signatures = [
             ("请提供", "provide"), ("需要", "need"), ("无法", "cannot"),
             ("原始日志", "original log"), ("解码", "decode"), ("更多数据", "more data"),
@@ -135,8 +195,13 @@ async def process_team_response(
         ]
         is_refusal = any(sig[0] in result_content for sig in refusal_signatures)
         if is_refusal:
-            logger.warning("[HANDLE] 检测到 LLM 拒绝/索要数据响应，标记为重试候选")
-            return False  # 返回 False 表示未成功处理，需要重试
+            # 条件化拒绝判定：只有有数据但 LLM 仍索要时才判为拒绝（需重试）
+            # 无数据时 LLM 引导上传是正确行为，直接流式输出
+            has_data = hasattr(user_session, "has_decoded_data") and user_session.has_decoded_data()
+            if has_data:
+                logger.warning("[HANDLE] 有数据但 LLM 索要，标记为重试候选")
+                return False
+            logger.info("[HANDLE] 无数据时 LLM 引导上传，视为正常回复")
 
     # 流式输出原文
     for i in range(0, len(result_content), 50):
@@ -147,23 +212,25 @@ async def process_team_response(
 
 async def _check_session_action(result_content: str, user_session, msg) -> bool:
     """
-    Agent 自决清空：检测 LLM 响应中的 [SESSION_ACTION:clear] 标记。
-    
-    若存在，则清空旧数据并通过 msg 发送「数据已清空」通知给前端。
-    
+    Agent 自决动作：检测 LLM 响应中的 [SESSION_ACTION:xxx] 标记并执行对应操作。
+
+    支持的标记：
+    - [SESSION_ACTION:clear] — 清空旧文件数据
+    - [SESSION_ACTION:activate_enum_fill] — 激活枚举填充流程
+    - [SESSION_ACTION:activate_threat_fill] — 激活威胁填充流程
+
     Returns:
-        True 表示已执行清空操作，调用方应跳过后续处理。
+        True 表示已执行操作，调用方应跳过后续处理。
     """
+    # 清空数据
     if "[SESSION_ACTION:clear]" in result_content:
         logger.info("[SESSION_ACTION] Agent 判定需要清空会话旧数据，执行 clear_decoded_data()")
         if hasattr(user_session, "clear_decoded_data"):
             user_session.clear_decoded_data()
         else:
-            # 兼容 dict 类型 session
             for key in ["decoded_data", "decoded_fields", "simplified_data", "decoded_text",
                          "original_log", "uploaded_file_name", "uploaded_file_time"]:
                 user_session.pop(key, None)
-        # 移除标记，避免前端看到
         clean_content = result_content.replace("[SESSION_ACTION:clear]", "").strip()
         await msg.stream_token(clean_content[:50])
         await msg.update()
@@ -171,6 +238,30 @@ async def _check_session_action(result_content: str, user_session, msg) -> bool:
             content="🗑️ **会话数据已清空** — 旧文件字段数据已清除，请上传新文件继续处理。"
         ).send()
         return True
+
+    # 激活枚举填充
+    if "[SESSION_ACTION:activate_enum_fill]" in result_content:
+        logger.info("[SESSION_ACTION] Agent 判定需要激活枚举填充")
+        user_session["enum_fill_mode"] = True
+        clean_content = result_content.replace("[SESSION_ACTION:activate_enum_fill]", "").strip()
+        await msg.stream_token(clean_content[:50])
+        await msg.update()
+        # 委托 handle_enum_fill_flow（阶段1已让它支持 mapped_sub_rules 数据源）
+        from web.enum_handler import handle_enum_fill_flow
+        await handle_enum_fill_flow(user_session, "")
+        return True
+
+    # 激活威胁填充
+    if "[SESSION_ACTION:activate_threat_fill]" in result_content:
+        logger.info("[SESSION_ACTION] Agent 判定需要激活威胁填充")
+        user_session["threat_fill_mode"] = True
+        clean_content = result_content.replace("[SESSION_ACTION:activate_threat_fill]", "").strip()
+        await msg.stream_token(clean_content[:50])
+        await msg.update()
+        from web.threat_handler import handle_threat_fill_flow
+        await handle_threat_fill_flow(user_session, "")
+        return True
+
     return False
 
 

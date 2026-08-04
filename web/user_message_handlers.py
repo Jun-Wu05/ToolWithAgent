@@ -17,17 +17,17 @@ logger = get_logger("user_message_handlers")
 
 # 从拆分模块导入业务函数
 from web.route_config import (
-    MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS, 
-    ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS
+    MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS,
+    ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS, detect_intent
 )
 from web.llm_client import call_team
-from web.input_builder import build_llm_input, build_batch_llm_input
+from web.input_builder import build_llm_input
 from web.response_handler import process_team_response, _check_session_action
+from web.history_store import append_history
 from web.threat_handler import handle_threat_fill_flow
 from web.enum_handler import handle_enum_fill_flow, handle_enum_extract_flow
 from web.log_parser_handler import handle_log_parser
 from web.parsers import parse_json_mapping_result, create_dataframe_elements
-from web.file_handler import process_batched_mapping
 
 # 延迟导入 action_callbacks 避免循环依赖
 _action_callbacks = None
@@ -58,8 +58,9 @@ async def handle_user_message(user_session, team, user_text: str):
         team: Agno Team 实例
         user_text: 用户输入的文本
     """
-    # 记录用户输入
+    # 记录用户输入 + 追加到对话历史（让 Agent 记住多轮上下文）
     logger.info(f"[USER_INPUT] 用户消息: {user_text[:500]}")
+    append_history(user_session, "user", user_text)
     
     user_lower = user_text.lower()
     
@@ -73,49 +74,35 @@ async def handle_user_message(user_session, team, user_text: str):
         return
     # ====================================================================
     
-    # 意图检测（关键词匹配）
-    is_enum = any(kw in user_lower for kw in ENUM_KEYWORDS)
+    # 意图检测（带消歧规则的 detect_intent + 保留布尔标志用于早期分流）
     is_enum_extract = any(kw in user_lower for kw in ENUM_EXTRACT_KEYWORDS)
-    is_threat = any(kw in user_lower for kw in THREAT_KEYWORDS)
-    is_mapping = any(kw in user_lower for kw in MAPPING_KEYWORDS)
     is_log_parser = any(kw in user_lower for kw in LOG_PARSER_KEYWORDS)
+    # enum/threat/mapping 的冲突消歧交给 detect_intent
+    detected_intent, route_reason = detect_intent(user_text, user_session)
+    is_enum = detected_intent == "enum"
+    is_threat = detected_intent == "threat"
+    is_mapping = detected_intent == "mapping"
+    logger.info(f"[ROUTE] '{user_text[:60]}' → {detected_intent}（{route_reason}）")
     
-    # 1. 威胁填充模式分流 → threat_handler
+    # 1. 威胁填充模式分流 → threat_handler（按钮驱动的两阶段流程）
     if await handle_threat_fill_flow(user_session, user_text):
         return
-    
-    # 2. 枚举填充模式分流 → enum_handler
+
+    # 2. 枚举填充模式分流 → enum_handler（按钮驱动的两阶段流程）
     if await handle_enum_fill_flow(user_session, user_text):
         return
-    
-    # 2.5 枚举填充自动触发：同时存在 raw_base64 + enum_excel_path 则直接执行填充
-    if (getattr(user_session, "enum_excel_path", None) or user_session.get("enum_excel_path")) and is_enum:
-        raw_base64 = getattr(user_session, "raw_base64", None) or user_session.get("raw_base64")
-        
-        if raw_base64:
-            if hasattr(user_session, "enum_fill_mode"):
-                user_session.enum_fill_mode = True
-            else:
-                user_session["enum_fill_mode"] = True
-            logger.info("[ROUTE] raw_base64 + enum_excel_path 同时存在，自动触发枚举填充")
-            from web.enum_handler import execute_enum_fill
-            await execute_enum_fill(user_session, raw_base64)
+
+    # 2.5 统一填充（自然语言驱动）：route_config 返回 "fill" 时委托 fill_dispatcher
+    if detected_intent == "fill":
+        from web.fill_dispatcher import handle_fill
+        if await handle_fill(user_session, user_text):
             return
-        
-        # 有 Excel 但无 Base64：提示上传
-        if hasattr(user_session, "enum_fill_mode"):
-            user_session.enum_fill_mode = True
-        else:
-            user_session["enum_fill_mode"] = True
-        logger.info("[ROUTE] 检测到已有枚举Excel，激活填充模式，等待Base64上传")
-        await cl.Message(
-            content=f"""📋 **枚举填充模式已激活**
 
-已选择映射表：{getattr(user_session, "enum_excel_path", None) or user_session.get("enum_excel_path")}
-
-请上传 **Base64 配置文件**（拖拽或点击上传）来完成填充。"""
-        ).send()
-        return
+    # 2.6 取消字段映射：「取消xxx的映射」
+    if any(kw in user_lower for kw in ("取消", "删除", "清除")) and "映射" in user_text:
+        from web.fill_dispatcher import handle_remove_fill
+        if await handle_remove_fill(user_session, user_text):
+            return
     
     # 3. 枚举提取分流（精确匹配优先：含"提取"/"列举"/"列出"等词）
     if is_enum_extract:
@@ -144,65 +131,41 @@ Excel 格式说明：
         await handle_log_parser(user_session, user_text)
         return
     
-    # 5. 构建 LLM 输入（按意图隔离上下文）
-    detected_intent = "general"
-    if is_threat:
-        detected_intent = "threat"
-    elif is_mapping:
-        detected_intent = "mapping"
-    elif is_log_parser:
+    # 5. 构建 LLM 输入（detected_intent 已由 detect_intent 带消歧规则确定）
+    # detect_intent 未覆盖 log_parser 时兜底（日志解析早期分流可能已 return）
+    if is_log_parser and detected_intent == "general":
         detected_intent = "log_parser"
+    # ambiguous（威胁+映射无法消歧）→ 走 RouterAgent（当 general 处理，注入 session_context）
+    if detected_intent == "ambiguous":
+        logger.info("[ROUTE] 模糊意图，fallback RouterAgent（按 general 走 team.run）")
+        detected_intent = "general"
     
     # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
     BATCH_SIZE = 25
     if detected_intent == "mapping":
-        simplified_data = getattr(user_session, "simplified_data", None) or user_session.get("simplified_data", {})
+        simplified_data = user_session.get("simplified_data", {})
         fields_list = simplified_data.get("fields", []) if isinstance(simplified_data, dict) else []
         
         if len(fields_list) > BATCH_SIZE:
             import math
             total_batches_preview = math.ceil(len(fields_list) / BATCH_SIZE)
             logger.info(f"[BATCH] 字段数 {len(fields_list)} > {BATCH_SIZE}，进入分批模式，共 {total_batches_preview} 批")
-            
+
             loading_msg = cl.Message(content=f"⏳ **正在处理字段映射（第 1/{total_batches_preview} 批）...**")
-            await loading_msg.send()
-            
-            # 构建回调适配器
-            def build_batch_fn(u_text, u_sess, batch, idx, total):
-                return build_batch_llm_input(u_text, u_sess, batch, idx, total)
-            
-            async def call_team_fn(t, input_text, _loading, intent):
-                return await call_team(t, input_text, loading_msg, intent=intent)
-            
-            async def on_batch_complete(batch_idx: int, total: int, batch_count: int, total_count: int):
-                loading_msg.content = f"⏳ **正在处理字段映射（第 {batch_idx + 1}/{total} 批）...**"
-                try:
-                    await loading_msg.update()
-                except Exception:
-                    pass
-            
-            all_mapping_data, total_batches = await process_batched_mapping(
+
+            from web.batch_mapping_helper import run_batched_mapping
+            all_mapping_data, total_batches = await run_batched_mapping(
                 team=team,
                 fields_list=fields_list,
                 user_text=user_text,
                 user_session=user_session,
-                build_batch_fn=build_batch_fn,
-                call_team_fn=call_team_fn,
                 parse_fn=parse_json_mapping_result,
                 batch_size=BATCH_SIZE,
-                on_batch_complete=on_batch_complete,
+                loading_msg=loading_msg,
             )
             
-            try:
-                await loading_msg.remove()
-            except Exception:
-                pass
-            
             if all_mapping_data:
-                if hasattr(user_session, "last_mapping_data"):
-                    user_session.last_mapping_data = all_mapping_data
-                else:
-                    user_session["last_mapping_data"] = all_mapping_data
+                user_session["last_mapping_data"] = all_mapping_data
                 
                 matched_count = sum(1 for item in all_mapping_data if item.get("匹配状态") == "匹配成功")
                 unmatched_count = len(all_mapping_data) - matched_count
@@ -219,10 +182,7 @@ Excel 格式说明：
                         for item in all_mapping_data
                     ]
                 }]
-                if hasattr(user_session, "batch_mapping_results"):
-                    user_session.batch_mapping_results = batch_mapping_results
-                else:
-                    user_session["batch_mapping_results"] = batch_mapping_results
+                user_session["batch_mapping_results"] = batch_mapping_results
                 
                 summary = f"""✅ **字段映射完成！（分 {total_batches} 批处理）**
 
@@ -302,8 +262,8 @@ Excel 格式说明：
             msg = cl.Message(content="")
             await msg.send()
             
-            # 10. 解析响应 → response_handler
-            handled = await process_team_response(result, user_lower, user_session, loading_msg, msg)
+            # 10. 解析响应 → response_handler（传 intent 让 general 跳过 JSON 解析）
+            handled = await process_team_response(result, user_lower, user_session, loading_msg, msg, intent=detected_intent)
             
             # 11. 如果成功处理，退出重试循环
             if handled:
@@ -318,12 +278,12 @@ Excel 格式说明：
             if retry_attempt < max_retries:
                 logger.warning(
                     f"[HANDLE] LLM 未返回有效结果（尝试 {retry_attempt + 1}/{max_retries + 1}），"
-                    f"强制重试，追加禁止索要数据指令"
+                    f"重试，提示数据已提供但允许说明缺失项"
                 )
-                # 在输入中追加强制指令，让 LLM 知道数据已全部提供
+                # 重试指令：数据已提供，但允许 LLM 说明具体缺什么（而非一律禁止提问）
                 full_input = (
-                    f"[SYSTEM NOTE: 所有数据已在上述消息中提供，你不需要也不应该索要任何额外数据。"
-                    f"请现在立即使用提供的数据完成处理。禁止输出任何索取性文字。]\n\n{full_input}"
+                    f"[SYSTEM NOTE: 所有数据已在上述消息中提供。请基于现有数据完成处理。"
+                    f"如果确实缺少关键字段，请明确说明需要哪个字段及其用途，而非笼统索要数据。]\n\n{full_input}"
                 )
                 try:
                     await msg.remove()

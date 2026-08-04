@@ -28,6 +28,7 @@ from .core import (
 from .field_mapping import (
     extract_sub_rule_mapping_info,
     apply_field_mapping_to_sub_rules,
+    apply_enum_fill_to_sub_rules,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     # 标准字段映射
     "extract_sub_rule_mapping_info",
     "apply_field_mapping_to_sub_rules",
+    "apply_enum_fill_to_sub_rules",
 ]

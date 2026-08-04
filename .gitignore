@@ -62,7 +62,6 @@ chainlit
 .kilo/
 
 tmp/
-tests/
 archive/
 context_summary/
 

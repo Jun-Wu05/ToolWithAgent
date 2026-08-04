@@ -5,37 +5,51 @@
 ## [Unreleased]
 
 ### Added
+- 对话记忆机制：`web/history_store.py` 自定义轻量记忆（append_history/format_history_for_prompt），SessionState 加 conversation_history 字段，build_llm_input 拼 最近5轮对话历史
+- 路由意图消歧：`detect_intent()` 带消歧规则（威胁vs映射冲突、「填充」动作识别优先于枚举提取、ambiguous→RouterAgent）
+- Excel→映射→枚举填充连续操作：`apply_enum_fill_to_sub_rules()` 桥接 sub_rules↔normalize[]，handle_enum_fill_flow 数据源优先级（mapped_sub_rules>raw_base64>提示上传），不再要求重传 Base64
+- LLM决策→web 动作桥接：扩展 `[SESSION_ACTION:]` 标记集（activate_enum_fill/activate_threat_fill），RouterAgent 决策可触发填充流程
+- Agent 自主性增强：Team 加 `enable_agentic_state` + `add_session_state_to_context`，FieldMappingAgent tool_call_limit 1→3
+- 快路径/慢路径分流（借鉴 ClaudeCode）：detect_intent 状态前置检查（mapping 无数据→general），general 意图跳过 embedding 检索 + JSON 解析 + 重试
+- session_summary 增强：全状态感知（文件/映射/子规则/枚举/威胁/日志解析）
+- 并发安全：per-session asyncio.Lock（message_router.py）
 - 字段映射导出新增「检索候选top3」列（`web/action_callbacks.py`），区分检索问题 vs LLM 误判
 - 检索链路 DEBUG 级诊断日志（`field_retriever.py` RETRIEVE_DEBUG_TRACE），逐字段打印候选排名轨迹
 - 中文同义词桥接：`field_synonyms.json` 升级为 264 条 `{en, zh}` 结构，query 文本拼接中文同义词提升跨语言召回
-- tag 规则外置：`config/tag_rules.json`（token 级匹配，修正 code/severity 误归类，新增 threat tag）
+- tag 规则外置：`config/tag_rules.json`（token 级匹配，修正 code/severity 误归类，新增 threat/http tag）
 - 精确匹配 compact key：`_compact_field_name()` 消除 file_name/filename 命名鸿沟
+- 复合 key 回退查询：`_expand_field_name`/`_collect_zh_synonyms` 修复 133 个带下划线死条目
+- Layer1 精确匹配扩展中文索引：系统属性名 + synonyms.zh 反向索引
 - 标准字段表扩充至 625 条（新增设备名称/主机名称/主机ID/事件名称/事件级别）
-- Prompt 迁移：将 `log_parser_pipeline.py` 中的 LLM prompt 从字符串常量迁移到独立 `.md` 文件（`agent/prompts/log_format_identify.md`、`agent/prompts/log_classify_feature.md`）
+- Prompt 迁移：将 `log_parser_pipeline.py` 中的 LLM prompt 从字符串常量迁移到独立 `.md` 文件
 - 枚举提取 Prompt 输出格式严格约束：禁止前导说明文字、markdown 代码块、多行输出
-- 枚举提取 LLM 输出格式遵从度检测日志（`[ENUM_EXTRACT] LLM 未遵守纯 JSON 输出格式`）
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- 可读性清理（-230行）：双重访问清理（getattr or get → .get()，hasattr/else 5行 → [k]=v），提取批处理 helper（batch_mapping_helper.py），提取数据源 helper（_resolve_fill_data_source），魔法字符串集中（EXCLUDED_FIELD_INDICES）
 - 移除 BM25 混合检索，回归纯向量检索（中文同义词接入后纯向量召回充分，BM25 净负面）
 - 删除 ABBR_EXPANSIONS 硬编码（69条），合并进外置 `field_synonyms.json`
 - 死代码清理（-1006行）：删除 `threat_type_tool.py`、`session_manager.py`、`team_web.py` + agent.py 死函数
 - `requirements.txt` 移除 `rank_bm25` 依赖
+- refusal-retry 指令放宽：从「禁止输出任何索取性文字」改为「允许说明具体缺什么字段及用途」
+- process_team_response 加 intent 参数，按意图分流处理（general 跳过 JSON 解析）
+- 枚举提取优先 raw_log_lines（Excel 原始日志列干净文本），回退 original_log
 - Prompt 改写为 XML 格式，移除硬编码测试数据
-- 移除分类表中废弃的 `severity`/`attack_type` 列
-- Pipeline 分类输出 schema 清理：移除废弃字段 `expert_summary`→`overall_summary`、`total_lines`/`matched_lines`→`total_valid_lines`/`covered_lines`、`matched_regex`/`meaning`/`fail_reason`/`field_uses_full_line`
+- Pipeline 分类输出 schema 清理：移除废弃字段
 
 ### Fixed
-- `_generate_feature_identifier` KV 正则 Group1 利用 `header_end_marker` 跳过 syslog 头部，`real_samples` 只输出 body 部分（之前 Group1 捕获整行含头部）
-- `fill_sample_logs` 自动从 `classification.get("feature_identifier")` 提取正则，修复 `chainlit_app.py` 调用未传参导致 `fi_pattern=None` → `real_samples` = 完整行的问题
-- `docs/log_pipeline_flow.html` 新增 Bug 1/2 修复说明 + Step 3 策略描述更新
+- 填充动作识别优先于枚举提取：「枚举值填充进子规则」不再被「枚举值」抢到提取
+- enum_excel_path 被数据表格覆盖：_handle_excel_data_table 不再错误覆盖枚举映射表路径
+- refusal 误判：无数据时 LLM 引导上传不再被误判为拒绝响应（加 has_decoded_data 条件）
+- general 意图跑 embedding 检索：「你好」不再触发全量字段语义检索
+- `_generate_feature_identifier` KV 正则 Group1 利用 `header_end_marker` 跳过 syslog 头部
+- `fill_sample_logs` 自动从 `classification.get("feature_identifier")` 提取正则
 - `header_regex` 特征提取在 JSON 格式下也能优先执行
-- `_aggregate_by_log_type` 支持非 JSON 格式（semicolon/kv/comma/space/cef）+ `value_count=0` 时继续调 LLM 而非早期失败
-- 传递 `format_info` 到 `_aggregate_by_log_type` 支持 `header_regex` 提取
+- `_aggregate_by_log_type` 支持非 JSON 格式 + `value_count=0` 时继续调 LLM
 - `log_parser_pipeline` timeout 90s + JSON 子串回退修复
-- `log_classify_feature.md` Prompt 双捕获组修复，确保 LLM 输出结构化 JSON
-- `_render_log_parser_result`（chainlit_app.py）对齐新 pipeline 输出字段，修复废弃字段引用导致的渲染异常
-- `rule_generator.py`、`log_sample_filler.py`、`log_classifier.py` 中 `matched_regex`/`meaning` 等废弃字段的残留引用清理
+- `log_classify_feature.md` Prompt 双捕获组修复
+- `_render_log_parser_result` 对齐新 pipeline 输出字段
+- `rule_generator.py`、`log_sample_filler.py`、`log_classifier.py` 废弃字段残留引用清理
 
 ---
 
