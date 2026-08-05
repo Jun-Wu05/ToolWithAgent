@@ -233,15 +233,18 @@ def match_real_samples(
             detail["real_samples"] = strip_header_to_body(
                 matched_line, header_end_marker, is_json=True
             )
-        elif matched_line and "{" in matched_line:
-            # fallback: header_end_marker 为空时，自动提取 JSON body
+        elif matched_line and matched_line.lstrip().startswith("{"):
+            # fallback: 无 header_end_marker 时，仅当整行以 { 开头（纯 JSON 日志）
+            # 才提取 {...} body。避免纯 KV 日志行内含 {…} 子串（如 dipGeo={...}）
+            # 被误当作 body 截断（曾导致 real_samples 丢失 uuid=…|name=… 等字段）。
             json_start = matched_line.find("{")
             json_end = matched_line.rfind("}")
-            if json_start != -1 and json_end > json_start:
+            if json_end > json_start:
                 detail["real_samples"] = matched_line[json_start:json_end + 1]
             else:
                 detail["real_samples"] = matched_line
         else:
+            # 纯 KV / 其他格式：原样返回完整行
             detail["real_samples"] = matched_line
         if not matched_line and lt:
             unmatched.append(lt)
