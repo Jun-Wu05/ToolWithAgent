@@ -93,16 +93,38 @@ class KvExtractor(ValueExtractor):
         self.delimit = kv_delimit    # 键值分隔符（向后兼容）
         self.tab = field_delimit     # 字段分隔符（向后兼容）
 
-        # CHANGED: 构建 field_delimit 分隔符模式（字段分隔符）
-        field_pattern = r'\s+' if field_delimit == "space" else _re.escape(field_delimit)
+        # CHANGED (2026-08-03): 归一化 field_delimit，兼容 " " 和 "space" 两种写法
+        if field_delimit in (" ", "space", "\t"):
+            field_delimit = "space"
+            field_pattern = r'\s+'
+        else:
+            field_pattern = _re.escape(field_delimit)
         # CHANGED: 构建 kv_delimit 分隔符模式（键值分隔符）
         kv_pattern = _re.escape(kv_delimit)
 
-        # CHANGED: 使用 \S+ 替代 \w+ 支持非 ASCII 字符（如中文 key）
-        # CHANGED: 在字段分隔符后面添加 \s*（可选空格），兼容分隔符后面有空格或没有空格的情况（2026-06-08 修复）
+        # CHANGED (2026-07-28 修复竖线分隔 KV 错位 bug):
+        # 键名捕获组原用 (\S+)，但 \S 匹配所有非空白字符（含 | 等分隔符），
+        # 导致 `key1=val1|key2=val2` 中 key1 贪婪吃成 `val1|key2`，字段全部错位。
+        # 修复：键名排除「field_delimit 的每个字符 + kv_delimit 的字符 + = + 空白」，
+        # 用字符类让每个字段独立对齐。对单字符分隔符（| : , 等）直接排除即可。
+        #
+        # CHANGED (2026-07-31 修复 bad escape \c 回归 bug):
+        # 上述修复假设 field_delimit 是真实分隔符字符（如 "|"），
+        # 但 field_delimit 可能是语义标记字符串 "space"（实际分隔符为空白），
+        # 若直接把 "space" 的字母加入排除集并逐字符加反斜杠转义，
+        # 会产生 \c / \e / \p 等无效转义序列，导致 re.compile 抛 bad escape。
+        # 修复：① "space" 时只取 kv_delimit 作为真实分隔符字符；
+        #       ② 字符类内只转义真正需要转义的元字符（] \ ^ -），而非每个字符。
+        if field_delimit == "space":
+            _key_exclude_raw = kv_delimit
+        else:
+            _key_exclude_raw = field_delimit + kv_delimit
+        _key_exclude_escaped = _re.sub(r"([\]\\^\-])", r"\\\1", _key_exclude_raw)
+        key_class = rf"[^{_key_exclude_escaped}=\s]+"
+
         # 构建动态正则：(行首或field_delimit分隔符+可选空格) + key + kv_delimit + "值" 或 非分隔符值
         self._pattern = _re.compile(
-            rf'(?:^|{field_pattern}\s*)(\S+)\s*{kv_pattern}'
+            rf'(?:^|{field_pattern}\s*)({key_class})\s*{kv_pattern}'
             rf'(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^{field_pattern}"]+))'
         )
 
