@@ -16,10 +16,7 @@ from agent.shared.logger import get_logger
 logger = get_logger("user_message_handlers")
 
 # 从拆分模块导入业务函数
-from web.route_config import (
-    MAPPING_KEYWORDS, THREAT_KEYWORDS, ENUM_KEYWORDS,
-    ENUM_EXTRACT_KEYWORDS, LOG_PARSER_KEYWORDS, detect_intent
-)
+from web.route_config import detect_intent
 from web.llm_client import call_team
 from web.input_builder import build_llm_input
 from web.response_handler import process_team_response, _check_session_action
@@ -75,16 +72,13 @@ async def handle_user_message(user_session, team, user_text: str):
         return
     # ====================================================================
     
-    # 意图检测（带消歧规则的 detect_intent + 保留布尔标志用于早期分流）
-    is_enum_extract = any(kw in user_lower for kw in ENUM_EXTRACT_KEYWORDS)
-    is_log_parser = any(kw in user_lower for kw in LOG_PARSER_KEYWORDS)
-    # enum/threat/mapping 的冲突消歧交给 detect_intent
+    # 意图检测：detect_intent 是路由的唯一真相来源（带消歧规则）。
+    # 不再维护独立的野生布尔（is_enum_extract/is_log_parser 等）——它们绕过
+    # detect_intent 的多关键词冲突消歧，导致「枚举值+威胁映射」等复合措辞
+    # 被误路由到单一快路径（enum_handler 收到错误类型对象崩溃）。
     detected_intent, route_reason = detect_intent(user_text, user_session)
-    is_enum = detected_intent == "enum"
-    is_threat = detected_intent == "threat"
-    is_mapping = detected_intent == "mapping"
     logger.info(f"[ROUTE] '{user_text[:60]}' → {detected_intent}（{route_reason}）")
-    
+
     # 1. 威胁填充模式分流 → threat_handler（按钮驱动的两阶段流程）
     if await handle_threat_fill_flow(user_session, user_text):
         return
@@ -104,43 +98,19 @@ async def handle_user_message(user_session, team, user_text: str):
         from web.fill_dispatcher import handle_remove_fill
         if await handle_remove_fill(user_session, user_text):
             return
-    
-    # 3. 枚举提取分流（精确匹配优先：含"提取"/"列举"/"列出"等词）
-    if is_enum_extract:
+
+    # 3. 枚举提取分流（detect_intent=="enum" 覆盖提取/列举/列出/枚举值等子类）
+    if detected_intent == "enum":
         await handle_enum_extract_flow(user_session, team, user_text)
         return
-    
-    # 4. 枚举处理分流（宽泛匹配：仅含"枚举"但无提取意图）
-    if is_enum:
-        await cl.Message(
-            content="""📋 **枚举字段处理**
 
-请上传 **Excel 映射表** 文件来定义枚举映射规则。
-
-Excel 格式说明：
-- Sheet 名 = 目标字段名
-- 第一列：mappingType（EQUAL 或 REGULAR）
-- 第二列：orgValue（原始值）
-- 第三列：mappingValue（映射值）
-
-上传后将展示映射预览，确认后可执行填充。"""
-        ).send()
-        return
-    
-    # 4.5 日志解析分流
-    if is_log_parser:
+    # 4. 日志解析分流
+    if detected_intent == "log_parser":
         await handle_log_parser(user_session, user_text)
         return
-    
+
     # 5. 构建 LLM 输入（detected_intent 已由 detect_intent 带消歧规则确定）
-    # detect_intent 未覆盖 log_parser 时兜底（日志解析早期分流可能已 return）
-    if is_log_parser and detected_intent == "general":
-        detected_intent = "log_parser"
-    # ambiguous（威胁+映射无法消歧）→ 走 RouterAgent（当 general 处理，注入 session_context）
-    if detected_intent == "ambiguous":
-        logger.info("[ROUTE] 模糊意图，fallback RouterAgent（按 general 走 team.run）")
-        detected_intent = "general"
-    
+
     # ====== P2 自动分批：字段 > 25 时分批调用，避免超时 ======
     BATCH_SIZE = 25
     if detected_intent == "mapping":
