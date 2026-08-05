@@ -52,12 +52,23 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
     - intent="mapping"：拼接字段数据 + 日志样本，供 LLM 做字段映射
     - intent="general"：由 RouterAgent 自己判断
     """
-    # 威胁类型处理：上下文隔离 — 只传用户文本，不拼接字段数据（保留历史让 Agent 感知上下文）
+    # 威胁类型处理：上下文隔离 — 不拼字段数据，但结构化注入上一步的枚举值（若有）
+    # CHANGED (2026-07-28): threat 路径显式注入 last_enum_extract_result 的枚举值，
+    # 让 ThreatAgent 直接拿到要映射的数据，而非依赖被截断的对话历史回忆。
     if intent == "threat":
         history_block = format_history_for_prompt(user_session)
-        if history_block:
-            logger.info(f"[LLM_INPUT] 威胁路由：拼接历史（{len(history_block)} 字符）+ 用户文本")
-            return f"{history_block}\n\n用户请求：{user_text}"
+        # 结构化注入枚举值（来自上一步「提取枚举值」）
+        enum_result = user_session.get("last_enum_extract_result") or {}
+        enum_values = enum_result.get("value", []) if isinstance(enum_result, dict) else []
+        enum_context = ""
+        if enum_values:
+            values_text = "\n".join(f"- {v}" for v in enum_values)
+            enum_context = f"\n\n📋 待映射的枚举值（来自上一步提取，共 {len(enum_values)} 个）：\n{values_text}"
+            logger.info(f"[LLM_INPUT] 威胁路由：注入 {len(enum_values)} 个枚举值")
+
+        if history_block or enum_context:
+            logger.info(f"[LLM_INPUT] 威胁路由：拼接历史（{len(history_block)} 字符）+ 枚举上下文 + 用户文本")
+            return f"{history_block}{enum_context}\n\n用户请求：{user_text}"
         logger.info(f"[LLM_INPUT] 威胁路由：仅传递用户文本（长度: {len(user_text)}）")
         return user_text
 
