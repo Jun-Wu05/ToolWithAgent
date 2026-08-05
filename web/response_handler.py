@@ -15,6 +15,7 @@ from agent.shared.logger import get_logger
 
 # 从本地 parsers 导入解析函数
 from web.parsers import create_dataframe_elements, parse_json_mapping_result, parse_json_threat_result
+from web.utils import content_to_str
 
 logger = get_logger("response_handler")
 
@@ -82,16 +83,8 @@ async def process_team_response(
     Returns:
         True 表示已处理（调用方可 return），False 表示需重试
     """
-    result_content = result.content if hasattr(result, 'content') else str(result)
-
-    # v3: 兼容 output_schema 返回的 Pydantic 对象 → dict
-    if not isinstance(result_content, str):
-        if hasattr(result_content, 'model_dump'):          # Pydantic v2
-            result_content = json.dumps(result_content.model_dump(), ensure_ascii=False)
-        elif hasattr(result_content, 'dict'):              # Pydantic v1
-            result_content = json.dumps(result_content.dict(), ensure_ascii=False)
-        else:
-            result_content = str(result_content)
+    result_content = result.content if hasattr(result, 'content') else result
+    result_content = content_to_str(result_content)
 
     # general 意图：直接流式输出（闲聊/引导/路由建议，无需 JSON 解析）
     if intent == "general":

@@ -20,6 +20,7 @@ from agent.core.resilience import CircuitBreaker, CircuitBreakerOpenError
 from agent.core.model_config import ModelConfig
 from web.route_config import ENUM_KEYWORDS, THREAT_KEYWORDS, LOG_PARSER_KEYWORDS
 from web.history_store import append_history
+from web.utils import content_to_str
 
 logger = get_logger("llm_client")
 
@@ -101,14 +102,8 @@ async def call_team(team, full_input: str, loading_msg=None, intent: str = "gene
         api_duration = time.time() - api_start_time
         logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
 
-        result_content = result.content if hasattr(result, 'content') else str(result)
-        # 兼容 output_schema 返回的 Pydantic 对象（无 __len__）
-        if hasattr(result_content, 'model_dump'):
-            content_str = result_content.model_dump_json()
-        elif isinstance(result_content, str):
-            content_str = result_content
-        else:
-            content_str = str(result_content)
+        result_content = result.content if hasattr(result, 'content') else result
+        content_str = content_to_str(result_content)
         logger.info(f"[API] LLM输出长度: {len(content_str)} 字符")
 
         # 追加 assistant 响应到对话历史（统一入口，覆盖所有 call_team 调用方）

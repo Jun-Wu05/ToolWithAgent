@@ -54,6 +54,36 @@ def is_enum_mapping_excel(excel_path: str) -> bool:
         return False
 
 
+def content_to_str(result_content: Any) -> str:
+    """
+    将 LLM/Agent 返回的 content 统一序列化为字符串。
+
+    覆盖四种情况：
+    - str：原样返回（避免对纯字符串做 json.dumps 包成带引号的 JSON 字符串）
+    - Pydantic v2 对象（有 model_dump）：model_dump() → json.dumps(ensure_ascii=False)
+    - Pydantic v1 对象（有 dict，无 model_dump）：dict() → json.dumps(ensure_ascii=False)
+    - 其他对象：str() 兜底
+
+    用于替代 llm_client / response_handler / user_message_handlers 中分散的
+    Pydantic→str 转换，避免 output_schema 返回的 Pydantic 对象在字符串操作
+    （如 'xxx' in content）上抛 TypeError。
+
+    Args:
+        result_content: 已从 RunResponse.content 取出的内容
+            （调用方负责 ``result.content if hasattr(result, 'content') else result``）
+
+    Returns:
+        字符串形式的 content
+    """
+    if isinstance(result_content, str):
+        return result_content
+    if hasattr(result_content, "model_dump"):          # Pydantic v2
+        return json.dumps(result_content.model_dump(), ensure_ascii=False)
+    if hasattr(result_content, "dict"):                # Pydantic v1
+        return json.dumps(result_content.dict(), ensure_ascii=False)
+    return str(result_content)
+
+
 def parse_json_safe(text: str) -> Optional[Dict[str, Any]]:
     """
     安全解析 JSON，支持 markdown 代码块包装

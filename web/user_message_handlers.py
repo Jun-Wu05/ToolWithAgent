@@ -28,6 +28,7 @@ from web.threat_handler import handle_threat_fill_flow
 from web.enum_handler import handle_enum_fill_flow, handle_enum_extract_flow
 from web.log_parser_handler import handle_log_parser
 from web.parsers import parse_json_mapping_result, create_dataframe_elements
+from web.utils import content_to_str
 
 # 延迟导入 action_callbacks 避免循环依赖
 _action_callbacks = None
@@ -237,7 +238,8 @@ Excel 格式说明：
             result = await call_team(team, full_input, loading_msg, intent=detected_intent)
             
             # 7.5 Agent 自决清空：检测 [SESSION_ACTION:clear] 标记
-            result_content = result.content if hasattr(result, 'content') else str(result)
+            result_content = result.content if hasattr(result, 'content') else result
+            result_content = content_to_str(result_content)
             session_action_cleared = await _check_session_action(result_content, user_session, loading_msg)
             if session_action_cleared:
                 # Agent 判定需要清空会话，已通过 _check_session_action 发送通知
