@@ -218,7 +218,30 @@ async def handle_user_message(user_session, team, user_text: str):
                 except Exception:
                     pass
                 return
-            
+
+            # 7.6 复合意图分解：检测 [PLAN:步骤1|步骤2] 标记（multi-step-plan skill 产出）
+            from web.step_planner import parse_plan_marker, execute_pending_steps
+            plan_steps = parse_plan_marker(result_content)
+            if plan_steps:
+                logger.info(f"[PLAN] RouterAgent 分解复合意图为 {len(plan_steps)} 步: {plan_steps}")
+                user_session["pending_steps"] = plan_steps
+                try:
+                    await loading_msg.remove()
+                except Exception:
+                    pass
+                # 展示 RouterAgent 的分解说明（去掉 PLAN 标记本身）
+                import re as _re_plan
+                clean_explanation = _re_plan.sub(r"\[PLAN:[a-z_|]+\]", "", result_content).strip()
+                if clean_explanation:
+                    plan_msg = cl.Message(content="")
+                    await plan_msg.send()
+                    for i in range(0, min(len(clean_explanation), 200), 50):
+                        await plan_msg.stream_token(clean_explanation[i:i + 50])
+                    await plan_msg.update()
+                # 自动执行步骤队列
+                await execute_pending_steps(user_session, team, user_text)
+                return
+
             # 8. 删除 loading 消息（重试时不删除，保留状态）
             if retry_attempt == 0:
                 await loading_msg.remove()
