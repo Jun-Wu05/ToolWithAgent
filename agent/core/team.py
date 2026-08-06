@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from agno.agent import Agent
 from agno.team.team import Team
 from agno.team.mode import TeamMode
+from agno.skills import Skills, LocalSkills
 
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
@@ -271,6 +272,21 @@ def create_data_mapping_team() -> Team:
     _debug = os.getenv("AGNO_DEBUG_MODE", "false").lower() == "true"
     _show_members = os.getenv("AGNO_SHOW_MEMBERS", "false").lower() == "true"
 
+    # 白名单挂载 skills：显式列出给 RouterAgent 用的技能。
+    # 用 LocalSkills 指向具体技能子目录（而非 skills/ 父目录），避免扫描
+    # _template 等脚手架目录——_template 含下划线会触发 SkillValidationError
+    # 导致应用启动失败，且不应作为可发现技能暴露给 RouterAgent。
+    _skills_root = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "skills",
+    )
+    _whitelisted_skills = [
+        "multi-step-plan",  # 复合意图分解：RouterAgent 输出 [PLAN:a|b] 标记供 step_planner 解析
+    ]
+    _skills_loaders = [
+        LocalSkills(os.path.join(_skills_root, name)) for name in _whitelisted_skills
+    ]
+
     # 创建Team（Team Leader 使用主模型）
     team = Team(
         name="DataMappingTeam",
@@ -283,6 +299,7 @@ def create_data_mapping_team() -> Team:
             create_log_parser_agent(),
         ],
         instructions=_load_router_instructions(),
+        skills=Skills(loaders=_skills_loaders) if _skills_loaders else None,  # Progressive Discovery 按需加载
         markdown=True,
         debug_mode=_debug,
         show_members_responses=_show_members,
