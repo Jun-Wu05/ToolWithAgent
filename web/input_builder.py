@@ -80,6 +80,19 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
         fields_list = simplified_data.get("fields", [])
         original_log_sample = simplified_data.get("original_log_sample", "")
 
+        # CHANGED (2026-07-28): 优先用日志真实字段（uuid/srcIp/...），而非 Excel 列头
+        # （decoded_fields/simplified_data.fields 存的是「发生时间/事件名称」等列头）。
+        # CHANGED (2026-07-29): 从仅 mapping 扩展到 mapping+general，两条路径都用日志字段。
+        if intent in ("mapping", "general"):
+            from web.field_source import extract_log_fields_for_mapping
+            log_fields = extract_log_fields_for_mapping(
+                user_session.get("log_classification"),
+                user_session.get("raw_log_lines"),
+            )
+            if log_fields:
+                fields_list = log_fields
+                logger.info(f"[LLM_INPUT] {intent} 意图：使用日志真实字段（{len(fields_list)} 个），而非 Excel 列头")
+
         fields_json_str = json.dumps(fields_list, ensure_ascii=False)
 
         # 上下文长度控制：字段列表超长时摘要显示（>30 个字段或 JSON >4000 字符）

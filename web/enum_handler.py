@@ -323,12 +323,22 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
         log_lines = [l for l in log_lines if log_type_filter in l]
         logger.info(f"[ENUM_EXTRACT] 按日志类型 {log_type_filter} 过滤：{original_count} → {len(log_lines)} 行")
 
-    # 字段名由 LLM 从用户输入中推断，不再使用硬编码正则
-    # 如果 decoded_fields 有值，作为提示传给 LLM；否则传空
-    decoded_fields = user_session.get("decoded_fields")
-    fields_hint = ", ".join(decoded_fields) if decoded_fields else "(请从日志样本中分析)"
-
-    logger.info(f"[ENUM_EXTRACT] 字段名由 LLM 从用户输入推断，字段提示: {fields_hint}")
+    # CHANGED (2026-07-30): 字段提示改用 field_source 提取日志真实字段，
+    # 而非 decoded_fields（Excel 列头）。否则 LLM 看到的提示是「发生时间/事件名称」
+    # 等列头，与日志里的真实字段（攻击类型/源IP/...）不符，导致推断失败。
+    from web.field_source import extract_log_fields_for_mapping
+    log_fields = extract_log_fields_for_mapping(
+        user_session.get("log_classification"),
+        user_session.get("raw_log_lines"),
+    )
+    if log_fields:
+        fields_hint = ", ".join(log_fields)
+        logger.info(f"[ENUM_EXTRACT] 字段提示用日志真实字段（{len(log_fields)} 个）")
+    else:
+        # 兜底：无日志解析结果时回退到 decoded_fields（兼容未解析场景）
+        decoded_fields = user_session.get("decoded_fields")
+        fields_hint = ", ".join(decoded_fields) if decoded_fields else "(请从日志样本中分析)"
+        logger.info(f"[ENUM_EXTRACT] 字段提示用 decoded_fields 兜底: {fields_hint[:60]}")
 
     # 发送 loading 消息
     loading_msg = cl.Message(content="⏳ **正在提取枚举值...**\n\n💭 分析日志格式并生成正则表达式...")
@@ -353,13 +363,19 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
 请先从用户输入中提取目标字段名，然后分析日志格式，为该字段生成提取正则表达式。只输出 JSON 格式结果，不要输出其他内容。"""
 
         # 3. 调用 LLM 生成正则表达式
-        result = await asyncio.to_thread(team.run, llm_input)
+        # CHANGED (2026-07-30): 改用 _call_llm_direct 直接调 LLM API（强制 JSON），
+        # 跳过 Agno team.run/RouterAgent。原先用 team.run 会经过 RouterAgent 路由，
+        # RouterAgent 输出路由解释（Markdown）而非纯 JSON，导致后续解析失败。
+        # enum_handler 只需要 LLM 生成一个正则 JSON，不需要 Agent 路由能力。
+        from agent.tools.pipeline.llm_client import _call_llm_direct
+        result_content = await asyncio.to_thread(
+            _call_llm_direct, llm_input, temperature=0.1, max_tokens=500, timeout=120
+        )
 
         # 删除 loading 消息
         await loading_msg.remove()
 
-        # 4. 解析 LLM 输出（field_name 也从 LLM 响应中提取）
-        result_content = result.content if hasattr(result, 'content') else str(result)
+        # 4. 解析 LLM 输出（_call_llm_direct 已返回字符串，无需再取 .content）
         logger.info(f"[ENUM_EXTRACT] LLM输出: {result_content[:500]}...")
 
         # 格式遵从度检测

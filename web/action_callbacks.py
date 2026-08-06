@@ -285,19 +285,15 @@ async def on_apply_field_mapping(action: cl.Action):
             return
         
         # 2. 提取所有字段（排除 original_log / 日志类型 元字段）
-        from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
-        all_fields = []
-        for rule in sub_rules:
-            fields = [
-                entry.get("index", "")
-                for entry in rule.get("normalize", [])
-                if entry.get("index", "") not in EXCLUDED_FIELD_INDICES
-            ]
-            all_fields.extend(fields)
-        
-        all_fields = list(set(all_fields))
-        all_fields.sort()
-        
+        # CHANGED (2026-07-28): 复用 field_source，与自然语言映射路径共用同一字段来源
+        from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES  # 供下方子规则循环用
+        from web.field_source import extract_log_fields_for_mapping
+        all_fields = extract_log_fields_for_mapping(classification, raw_log_lines)
+
+        if not all_fields:
+            await cl.Message(content="❌ 未从日志中提取到任何字段，无法进行字段映射。").send()
+            return
+
         logger.info(f"[ACTION] 共提取 {len(all_fields)} 个唯一字段")
         
         # 3. 调用分批映射（委托 batch_mapping_helper）
