@@ -264,27 +264,30 @@ def _classify_kv_features(
         # 符合规范 5：数据流向设计（上游数据格式 → 中间处理 → 下游使用）
         body_logs = logs_str
         if header_end_marker:
+            # CHANGED (2026-08-07 修复 issue #14): 改用 strip_header_to_body 从左 split(marker, 1)，
+            # 与全仓其它 8 处剥头一致。原 rpartition 从右切，当 header_end_marker 与 KV 字段
+            # 分隔符相同（如 skyeye_ioc 日志 marker='\t' 且字段也用 \t 分隔）时，只保留每行
+            # 最后一个字段，type= 等字段被切进 header 丢失，导致 matched=0。
+            from agent.tools.pipeline.common.json_utils import strip_header_to_body
             lines = logs_str.strip().split('\n')
             body_lines = []
             extracted_count = 0
             for line in lines:
-                # 使用 rpartition 从右到左分割，匹配最后一个 header_end_marker
-                # 这样会正确处理日志中有多个 header_end_marker 的情况（如时间戳）
-                header, sep, body = line.rpartition(header_end_marker)
-                if sep:  # 如果找到了 header_end_marker
-                    stripped_body = body.strip()
-                    if stripped_body:  # 确保日志体不为空
-                        body_lines.append(stripped_body)
-                        extracted_count += 1
-                    else:
-                        # 日志体为空，保留原始行（兼容性）
-                        body_lines.append(line)
-                        logger.warning(
-                            f"[_classify_kv_features] 日志体为空，保留原始行: {line[:100]}"
-                        )
-                else:
-                    # 如果匹配失败，保留原始行（兼容性）
+                body = strip_header_to_body(line, header_end_marker, is_json=False)
+                stripped_body = body.strip()
+                if stripped_body and stripped_body != line.strip():
+                    # 成功剥离头部，body 非空且与原行不同
+                    body_lines.append(stripped_body)
+                    extracted_count += 1
+                elif stripped_body:
+                    # marker 未匹配到（strip_header_to_body 返回原行），保留原始行（兼容性）
                     body_lines.append(line)
+                else:
+                    # 日志体为空，保留原始行（兼容性）
+                    body_lines.append(line)
+                    logger.warning(
+                        f"[_classify_kv_features] 日志体为空，保留原始行: {line[:100]}"
+                    )
             body_logs = '\n'.join(body_lines)
             logger.info(
                 f"[_classify_kv_features] 使用 header_end_marker='{header_end_marker}' 提取日志体: "
