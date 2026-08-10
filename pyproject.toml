@@ -1,0 +1,9 @@
+# pytest 配置 —— 锁定测试收集范围为本仓 tests/ 目录。
+# 根因：根目录下存在 agno_repo/（上游框架源码副本），其内部 conftest/test 模块会导致
+# 全量 pytest 收集时产生大量 ImportError。固定 testpaths 后无需每次手动 --ignore。
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 收集阶段忽略无关目录（双保险，防止未来再引入类似目录）
+norecursedirs = [".git", "agno_repo", "archive", "tmp", "eval", ".files"]
+# 控制台输出保持精简
+addopts = "-q"
