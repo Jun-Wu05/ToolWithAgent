@@ -145,12 +145,16 @@ class TestValidatePlanSemantics:
         assert result.valid is False
 
     def test_threat_with_enum_data_dep_passes(self):
-        """threat 步骤声明 data_deps=[enum]，且 session 有枚举结果 → 通过。"""
+        """threat 步骤声明 data_deps=[enum] → 语义校验通过（data_deps 合法性由结构校验负责）。
+
+        注：语义校验不检查 last_enum_extract_result 是否已产生——那是运行时状态。
+        逐步执行时 enum 步骤执行完才写入 session，threat 的语义校验发生在其后。
+        """
         steps = [
             {"type": "enum", "params": {"field": "vul_name"}},
             {"type": "threat", "data_deps": ["enum"]},
         ]
-        session = self._make_session(fields=["vul_name"], has_enum_result=True)
+        session = self._make_session(fields=["vul_name"])  # 故意不设 has_enum_result
         result = validate_plan_semantics(steps, session)
         assert result.valid is True
 

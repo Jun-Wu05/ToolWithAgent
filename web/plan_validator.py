@@ -155,13 +155,11 @@ def validate_plan_semantics(steps: List[Dict[str, Any]], user_session) -> Valida
                     )
 
         elif step_type == "threat":
-            data_deps = step.get("data_deps", [])
-            if "enum" in data_deps:
-                enum_result = _session_get(user_session, "last_enum_extract_result")
-                if not enum_result:
-                    errors.append(
-                        f"步骤 {i + 1} (threat): 声明 data_deps=[enum] 但 session 无枚举提取结果"
-                    )
+            # threat 步骤的 data_deps 引用合法性由结构校验负责（检查前序步骤存在）。
+            # 这里不检查 last_enum_extract_result 是否已产生——那是运行时状态：
+            # 逐步执行时，enum 步骤执行完才写入 session，threat 的语义校验发生在其后。
+            # 若在执行前对全计划做静态校验，data_deps 的结果还未产生，会误报。
+            pass
 
     if errors:
         return ValidationResult.fail(*errors)
