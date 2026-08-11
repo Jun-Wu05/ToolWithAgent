@@ -142,13 +142,16 @@ async def execute_step(step_type: str, user_session, team, original_text: str) -
         if step_type == "fill":
             # 填充：委托 fill_dispatcher（已有完整逻辑）
             from web.fill_dispatcher import handle_fill
-            return await handle_fill(user_session, original_text)
+            await handle_fill(user_session, original_text)
+            # 执行后验证：fill 后 mapped_sub_rules 的 mappings 必须非空
+            return verify_step_result("fill", user_session)
 
         if step_type == "enum":
             # 枚举提取：委托 enum_handler
             from web.enum_handler import handle_enum_extract_flow
             await handle_enum_extract_flow(user_session, team, original_text)
-            return True
+            # 执行后验证：enum 必须提取到至少 1 个值
+            return verify_step_result("enum", user_session)
 
         if step_type == "log_parser":
             # 日志解析：委托 log_parser_handler
@@ -178,6 +181,9 @@ async def execute_step(step_type: str, user_session, team, original_text: str) -
         handled = await process_team_response(
             result, original_text.lower(), user_session, loading_msg, msg, intent=step_type
         )
+        # threat 步骤额外验证：last_threat_data 必须非空
+        if step_type == "threat" and handled:
+            return verify_step_result("threat", user_session)
         return bool(handled)
 
     except Exception as e:
@@ -188,8 +194,13 @@ async def execute_step(step_type: str, user_session, team, original_text: str) -
 async def execute_pending_steps(user_session, team, original_text: str) -> None:
     """自动推进队列中所有剩余步骤。
 
-    在当前步骤完成后调用，依次执行 pending_steps 中的步骤。
-    每步用 original_text 调用 execute_step。
+    执行流程（ADR-0004 三层校验）：
+    1. 结构校验（整批一次）：validate_plan_structure 检查 JSON 计划格式
+    2. 逐步执行：
+       a. 语义校验（逐步）：validate_plan_semantics 检查当前步 params 对照 session
+       b. execute_step 执行
+       c. 执行后验证：verify_step_result 检查结果非空
+    任一步失败即停止并清空队列。
 
     双轨兼容（ADR-0004 迁移期）：pending_steps 的元素可能是：
     - 结构化 dict（新 JSON 格式）：取 ``step["type"]`` 传给 execute_step
@@ -200,15 +211,49 @@ async def execute_pending_steps(user_session, team, original_text: str) -> None:
         team: Agno Team 实例
         original_text: 用户原始消息全文
     """
+    from web.plan_validator import (
+        validate_plan_structure,
+        validate_plan_semantics,
+    )
+
+    # ① 结构校验（整批一次，仅对 dict 格式的步骤生效）
+    pending = user_session.get("pending_steps") if user_session else None
+    if pending and all(isinstance(s, dict) for s in pending):
+        struct_result = validate_plan_structure(pending)
+        if not struct_result.valid:
+            logger.warning(f"[STEP] 结构校验失败，停止执行: {struct_result.errors}")
+            import chainlit as cl
+            await cl.Message(
+                content=f"⚠️ 步骤计划格式有误，无法自动执行：\n"
+                + "\n".join(f"- {e}" for e in struct_result.errors)
+            ).send()
+            user_session["pending_steps"] = []
+            return
+
     while has_pending_steps(user_session):
         step = pop_next_step(user_session)
         if step is None:
             break
         # 双轨：dict 取 type，字符串直接用（#18 会改为传递完整 params）
         step_type = step["type"] if isinstance(step, dict) else step
+
+        # ② 语义校验（逐步，仅对 dict 格式生效）
+        if isinstance(step, dict):
+            sem_result = validate_plan_semantics([step], user_session)
+            if not sem_result.valid:
+                logger.warning(f"[STEP] 步骤 {step_type} 语义校验失败: {sem_result.errors}")
+                import chainlit as cl
+                await cl.Message(
+                    content=f"⚠️ 步骤「{step_type}」参数校验未通过，请补充信息：\n"
+                    + "\n".join(f"- {e}" for e in sem_result.errors)
+                ).send()
+                # 语义校验失败：追问而非静默跳过，停止后续步骤
+                user_session["pending_steps"] = []
+                break
+
         success = await execute_step(step_type, user_session, team, original_text)
         if not success:
-            logger.warning(f"[STEP] 步骤 {step_type} 未成功，停止后续步骤推进")
+            logger.warning(f"[STEP] 步骤 {step_type} 未成功（执行失败或结果为空），停止后续步骤推进")
             # 清空剩余步骤，避免残留
             user_session["pending_steps"] = []
             break
