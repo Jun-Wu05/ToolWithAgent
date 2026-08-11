@@ -120,14 +120,23 @@ def pop_next_step(user_session) -> Optional[str]:
     return step
 
 
-async def execute_step(step_type: str, user_session, team, original_text: str) -> bool:
+async def execute_step(
+    step_type: str,
+    user_session,
+    team,
+    original_text: str,
+    step_params: dict | None = None,
+) -> bool:
     """执行单个步骤，复用现有 handler。
 
     Args:
         step_type: 步骤类型（log_parser/mapping/enum/threat/fill）
         user_session: 会话状态
         team: Agno Team 实例
-        original_text: 用户原始消息全文（执行器自行提取所需信息）
+        original_text: 用户原始消息全文（日志类型过滤等仍需使用）
+        step_params: 步骤参数（ADR-0004，来自 PLAN 计划的 params）。
+            如 ``{"field": "漏洞名称", "source": "threat"}``。
+            None 时（旧式无参数标记）走 handler 的自然语言适配路径。
 
     Returns:
         True 表示步骤执行成功，False 表示失败或跳过。
@@ -136,20 +145,26 @@ async def execute_step(step_type: str, user_session, team, original_text: str) -
         logger.warning(f"[STEP] 未知步骤类型 '{step_type}'，跳过")
         return False
 
-    logger.info(f"[STEP] 执行步骤: {step_type}（原文: {original_text[:60]}）")
+    logger.info(f"[STEP] 执行步骤: {step_type}（原文: {original_text[:60]}，参数: {step_params}）")
 
     try:
         if step_type == "fill":
-            # 填充：委托 fill_dispatcher（已有完整逻辑）
-            from web.fill_dispatcher import handle_fill
-            await handle_fill(user_session, original_text)
+            # 填充：有显式参数走参数化核心接口，否则走自然语言适配器
+            from web.fill_dispatcher import handle_fill_from_params, handle_fill_from_text
+            if step_params and (step_params.get("field") or step_params.get("source")):
+                target_field = step_params.get("field")
+                fill_type = step_params.get("source", "threat")
+                await handle_fill_from_params(user_session, target_field, fill_type)
+            else:
+                await handle_fill_from_text(user_session, original_text)
             # 执行后验证：fill 后 mapped_sub_rules 的 mappings 必须非空
             return verify_step_result("fill", user_session)
 
         if step_type == "enum":
-            # 枚举提取：委托 enum_handler
+            # 枚举提取：有显式 field_name 传入，否则走 LLM 推断
             from web.enum_handler import handle_enum_extract_flow
-            await handle_enum_extract_flow(user_session, team, original_text)
+            field_name = step_params.get("field") if step_params else None
+            await handle_enum_extract_flow(user_session, team, original_text, field_name=field_name)
             # 执行后验证：enum 必须提取到至少 1 个值
             return verify_step_result("enum", user_session)
 
@@ -251,7 +266,10 @@ async def execute_pending_steps(user_session, team, original_text: str) -> None:
                 user_session["pending_steps"] = []
                 break
 
-        success = await execute_step(step_type, user_session, team, original_text)
+        success = await execute_step(
+            step_type, user_session, team, original_text,
+            step_params=step.get("params") if isinstance(step, dict) else None,
+        )
         if not success:
             logger.warning(f"[STEP] 步骤 {step_type} 未成功（执行失败或结果为空），停止后续步骤推进")
             # 清空剩余步骤，避免残留

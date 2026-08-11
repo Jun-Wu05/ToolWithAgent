@@ -96,13 +96,22 @@ def _get_mapping_table(fill_type: str, user_session, target_field: str | None) -
     return mapping_table, None  # dict 格式
 
 
-async def handle_fill(user_session, user_text: str) -> bool:
-    """统一填充分流入口。
+async def handle_fill_from_params(
+    user_session, target_field: str | None, fill_type: str, source: str | None = None
+) -> bool:
+    """填充分发核心接口 — 接收显式参数（ADR-0004 步骤指令自包含）。
 
-    从用户文本提取 target_field + 判定填充类型 + 获取映射表 + 执行填充 + 链式回写。
+    step_planner 从 PLAN 计划的 params 提取 target_field / fill_type 后调用本函数。
+    内部不做正则提取、不做隐式类型推断——参数由调用方提供。
+
+    Args:
+        user_session: 会话状态
+        target_field: 回填目标字段名（如 "vul_name"）。threat 类型必填，enum 可选
+        fill_type: 填充类型（"threat" 或 "enum"）
+        source: 数据来源（"threat"/"enum"，用于日志，可选）
 
     Returns:
-        True 表示已处理（调用方应 return），False 表示未命中填充（无数据/无字段）
+        True 表示已处理（调用方应 return），False 表示未命中填充（无数据）
     """
     # 检查是否有可供填充的数据
     sub_rules = user_session.get("mapped_sub_rules")
@@ -111,25 +120,18 @@ async def handle_fill(user_session, user_text: str) -> bool:
     if not sub_rules and not raw_base64:
         return False  # 无数据，不是填充场景
 
-    # 先判定填充类型（决定是否需要 target_field）
-    fill_type = _detect_fill_type(user_text, user_session)
-
-    # 提取目标字段
-    target_field = _extract_target_field(user_text)
+    # threat 类型必须有 target_field（last_threat_data 是 flat list，不知填到哪）
     if not target_field:
-        # 枚举填充：target_field 可选（映射表 sheet 名即目标字段）
         if fill_type == "enum":
             logger.info("[FILL] 枚举填充未指定字段，用映射表 sheet 名作为目标字段")
-            target_field = None
         else:
-            # 威胁填充：必须指定目标字段（last_threat_data 是 flat list，不知填到哪）
             logger.info("[FILL] 威胁填充未指定目标字段，提示用户明确")
             await cl.Message(
                 content="💡 请明确目标字段名，例如：`威胁填充到alarm_category里`"
             ).send()
             return True
 
-    logger.info(f"[FILL] target_field={target_field}, fill_type={fill_type}")
+    logger.info(f"[FILL] target_field={target_field}, fill_type={fill_type}, source={source}")
 
     # 获取映射表
     mapping_table, error_msg = _get_mapping_table(fill_type, user_session, target_field)
@@ -157,8 +159,8 @@ async def handle_fill(user_session, user_text: str) -> bool:
                 content=f"""✅ **字段填充完成！**
 
 📊 **填充统计：**
-- 目标字段：{target_field}
-- 填充类型：{'威胁类型' if fill_type == 'threat' else '枚举'}
+- 目标字段：{target_field or '(映射表 sheet 名)'}
+- 填充类型：{'威胁类型' if fill_type == "threat" else '枚举'}
 - 映射数量：{mapping_count} 条
 - 数据源：已映射子规则（链式更新）
 
@@ -166,7 +168,7 @@ async def handle_fill(user_session, user_text: str) -> bool:
             ).send()
 
             base64_file = cl.File(
-                name=f"filled_{target_field}.txt",
+                name=f"filled_{target_field or 'enum'}.txt",
                 content=base64_result.encode('utf-8'),
                 mime="text/plain",
             )
@@ -191,6 +193,36 @@ async def handle_fill(user_session, user_text: str) -> bool:
         return True
 
     return False
+
+
+async def handle_fill_from_text(user_session, user_text: str) -> bool:
+    """自然语言填充分流适配器 — 从 user_text 提取参数后调核心接口。
+
+    单意图自然语言入口（detect_intent="fill"）调用。
+    内部做正则提取 + 类型推断，然后调用 handle_fill_from_params。
+
+    Args:
+        user_session: 会话状态
+        user_text: 用户自然语言文本
+
+    Returns:
+        True 表示已处理，False 表示未命中填充（无数据/无字段）
+    """
+    fill_type = _detect_fill_type(user_text, user_session)
+    target_field = _extract_target_field(user_text)
+    return await handle_fill_from_params(user_session, target_field, fill_type)
+
+
+# 向后兼容别名：旧代码可能直接调 handle_fill
+# 阶段 4（#20）统一替换后可移除
+async def handle_fill(user_session, user_text: str) -> bool:
+    """向后兼容入口，等价于 handle_fill_from_text。
+
+    .. deprecated::
+        新代码应直接调用 handle_fill_from_params（参数化）或 handle_fill_from_text（适配器）。
+        本别名在 ADR-0004 阶段 4（#20）清理旧代码时移除。
+    """
+    return await handle_fill_from_text(user_session, user_text)
 
 
 async def handle_remove_fill(user_session, user_text: str) -> bool:

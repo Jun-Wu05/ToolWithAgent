@@ -299,12 +299,19 @@ def _extract_log_type_filter(user_text: str, user_session) -> str | None:
     return None
 
 
-async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
+async def handle_enum_extract_flow(user_session: dict, team, user_text: str, field_name: str | None = None):
+    """枚举提取模式专属流程 — 从日志中提取指定字段的枚举值。
+
+    Args:
+        user_session: 会话状态
+        team: Team 实例（本函数不使用 team.run，但保留接口兼容）
+        user_text: 用户原始消息（自然语言入口用于日志类型过滤等）
+        field_name: 显式字段名（ADR-0004 参数化）。
+            由 step_planner 从 PLAN 计划的 params.field 提取后传入。
+            有值时跳过 LLM 推断字段，直接用该字段名生成正则。
+            None 时（自然语言入口）走 LLM 从 user_text 推断。
     """
-    枚举提取模式专属流程
-    从日志中提取指定字段的枚举值
-    """
-    logger.info(f"[ENUM_EXTRACT] 开始枚举提取流程: {user_text}")
+    logger.info(f"[ENUM_EXTRACT] 开始枚举提取流程: {user_text}（显式字段: {field_name}）")
 
     # 日志数据源：优先 raw_log_lines（Excel 原始日志列的干净文本），回退 original_log（JSON 包装行）
     log_lines = user_session.get("raw_log_lines") or user_session.get("original_log")
@@ -433,8 +440,11 @@ async def handle_enum_extract_flow(user_session: dict, team, user_text: str):
         except Exception as exc:
             logger.warning(f"[ENUM_EXTRACT] JSON解析异常: {exc}")
 
-        # 使用 LLM 推断的字段名，回退方案
-        if field_name_from_llm:
+        # ADR-0004 参数化：显式传入的 field_name 优先（step_planner 从 PLAN params 提取）
+        # 无显式参数时（自然语言入口），走 LLM 推断 → decoded_fields 回退
+        if field_name:
+            logger.info(f"[ENUM_EXTRACT] 使用显式传入字段名: {field_name}（跳过 LLM 字段推断）")
+        elif field_name_from_llm:
             field_name = field_name_from_llm
         elif decoded_fields and len(decoded_fields) > 0:
             field_name = decoded_fields[0]
