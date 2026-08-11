@@ -1,12 +1,19 @@
 """
 步骤计划推进器 — 复合意图的自动分步执行。
 
-当 RouterAgent 通过 multi-step-plan skill 分解复合意图后，输出 [PLAN:步骤1|步骤2]
-标记。本模块负责：
-1. parse_plan_marker — 解析标记，返回步骤类型列表（纯函数）
-2. 步骤队列管理（pop_next_step / has_pending_steps）
-3. execute_step — 执行单个步骤（调用现有 handler）
-4. execute_pending_steps — 自动推进队列中剩余步骤
+当 RouterAgent 通过 multi-step-plan skill 分解复合意图后，输出 [PLAN:...] 标记。
+本模块负责：
+1. parse_plan_marker — 解析标记，返回结构化步骤列表（纯函数）
+2. clean_plan_marker — 从展示文本中清理 PLAN 标记（纯函数）
+3. 步骤队列管理（pop_next_step / has_pending_steps）
+4. execute_step — 执行单个步骤（调用现有 handler）
+5. execute_pending_steps — 自动推进队列中剩余步骤
+
+标记格式（ADR-0004）：
+  新格式（JSON，携带参数）：
+    [PLAN:{"steps":[{"type":"enum","params":{"field":"漏洞名称"}},...]}]
+  旧格式（无参数，向后兼容）：
+    [PLAN:enum|threat|fill]
 
 设计原则：
 - 标记解析与执行分离：parse_plan_marker 是纯函数，可单元测试
@@ -15,36 +22,82 @@
 """
 from __future__ import annotations
 
+import json
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from agent.shared.logger import get_logger
 
 logger = get_logger("step_planner")
 
-# PLAN 标记正则：[PLAN:threat|fill|...]
-_PLAN_RE = re.compile(r"\[PLAN:([a-z_|]+)\]")
+# JSON 格式标记：[PLAN:{...}]（ADR-0004 新格式，携带 params + data_deps）
+# 贪婪匹配到 }]]，正确处理 JSON 内部的嵌套花括号
+_PLAN_JSON_RE = re.compile(r"\[PLAN:(\{.*\})\]")
+
+# 旧式无参数标记：[PLAN:enum|threat|fill]（向后兼容）
+_PLAN_LEGACY_RE = re.compile(r"\[PLAN:([a-z_|]+)\]")
 
 # 合法的步骤类型（与 handler 的 intent 对应）
 _VALID_STEPS = {"log_parser", "mapping", "enum", "threat", "fill"}
 
 
-def parse_plan_marker(result_content: str) -> Optional[List[str]]:
-    """从 LLM 响应中解析 [PLAN:...] 标记，返回步骤类型列表。
+def parse_plan_marker(result_content: str) -> Optional[List[Dict[str, Any]]]:
+    """从 LLM 响应中解析 [PLAN:...] 标记，返回结构化步骤列表。
+
+    优先尝试 JSON 格式（ADR-0004 新格式），失败回退旧式无参数格式。
 
     Args:
         result_content: LLM 响应文本
 
     Returns:
-        步骤类型列表（如 ["threat", "fill"]），无标记时返回 None。
-        未知类型也会被提取（执行时由 execute_step 跳过并告警）。
+        步骤字典列表，每步至少含 ``type`` 键，可选 ``params`` / ``data_deps``。
+        如 ``[{"type":"enum","params":{"field":"漏洞名称"}}, {"type":"threat"}]``。
+        无标记或 JSON 解析失败时返回 None。空 steps 列表也返回 None。
     """
-    match = _PLAN_RE.search(result_content)
-    if not match:
-        return None
-    steps_str = match.group(1)
-    steps = [s.strip() for s in steps_str.split("|") if s.strip()]
-    return steps if steps else None
+    # 优先尝试 JSON 格式
+    json_match = _PLAN_JSON_RE.search(result_content)
+    if json_match:
+        try:
+            plan = json.loads(json_match.group(1))
+            steps = plan.get("steps", [])
+            if not steps:
+                return None
+            # 只保留有 type 的步骤（过滤无效条目）
+            valid = [s for s in steps if isinstance(s, dict) and s.get("type")]
+            return valid if valid else None
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.debug(f"[PLAN] JSON 标记解析失败，尝试旧式格式: {e}")
+            # 不 return，继续尝试旧式
+
+    # 回退旧式无参数格式
+    legacy_match = _PLAN_LEGACY_RE.search(result_content)
+    if legacy_match:
+        steps_str = legacy_match.group(1)
+        type_list = [s.strip() for s in steps_str.split("|") if s.strip()]
+        if not type_list:
+            return None
+        # 转为统一的结构化格式（只有 type，无 params/data_deps）
+        return [{"type": t} for t in type_list]
+
+    return None
+
+
+def clean_plan_marker(result_content: str) -> str:
+    """从展示文本中移除 PLAN 标记（新旧格式均处理）。
+
+    供 user_message_handlers 在向用户展示 RouterAgent 的分解说明时调用，
+    避免 [PLAN:...] 原始标记泄漏到用户可见文本。
+
+    Args:
+        result_content: 含 PLAN 标记的 LLM 响应文本
+
+    Returns:
+        清理后的文本（标记被移除，首尾空白被 strip）。无标记时原样返回。
+    """
+    # 先清理 JSON 格式标记，再清理旧式标记
+    cleaned = _PLAN_JSON_RE.sub("", result_content)
+    cleaned = _PLAN_LEGACY_RE.sub("", cleaned)
+    return cleaned.strip()
 
 
 def has_pending_steps(user_session) -> bool:
@@ -138,6 +191,10 @@ async def execute_pending_steps(user_session, team, original_text: str) -> None:
     在当前步骤完成后调用，依次执行 pending_steps 中的步骤。
     每步用 original_text 调用 execute_step。
 
+    双轨兼容（ADR-0004 迁移期）：pending_steps 的元素可能是：
+    - 结构化 dict（新 JSON 格式）：取 ``step["type"]`` 传给 execute_step
+    - 纯 type 字符串（旧式/直接构造）：直接传给 execute_step
+
     Args:
         user_session: 会话状态（含 pending_steps）
         team: Agno Team 实例
@@ -147,10 +204,12 @@ async def execute_pending_steps(user_session, team, original_text: str) -> None:
         step = pop_next_step(user_session)
         if step is None:
             break
-        success = await execute_step(step, user_session, team, original_text)
+        # 双轨：dict 取 type，字符串直接用（#18 会改为传递完整 params）
+        step_type = step["type"] if isinstance(step, dict) else step
+        success = await execute_step(step_type, user_session, team, original_text)
         if not success:
-            logger.warning(f"[STEP] 步骤 {step} 未成功，停止后续步骤推进")
+            logger.warning(f"[STEP] 步骤 {step_type} 未成功，停止后续步骤推进")
             # 清空剩余步骤，避免残留
             user_session["pending_steps"] = []
             break
-        logger.info(f"[STEP] 步骤 {step} 完成，剩余 {len(user_session.get('pending_steps') or [])} 步")
+        logger.info(f"[STEP] 步骤 {step_type} 完成，剩余 {len(user_session.get('pending_steps') or [])} 步")

@@ -219,8 +219,8 @@ async def handle_user_message(user_session, team, user_text: str):
                     pass
                 return
 
-            # 7.6 复合意图分解：检测 [PLAN:步骤1|步骤2] 标记（multi-step-plan skill 产出）
-            from web.step_planner import parse_plan_marker, execute_pending_steps
+            # 7.6 复合意图分解：检测 [PLAN:...] 标记（multi-step-plan skill 产出）
+            from web.step_planner import parse_plan_marker, execute_pending_steps, clean_plan_marker
             plan_steps = parse_plan_marker(result_content)
             if plan_steps:
                 logger.info(f"[PLAN] RouterAgent 分解复合意图为 {len(plan_steps)} 步: {plan_steps}")
@@ -229,9 +229,8 @@ async def handle_user_message(user_session, team, user_text: str):
                     await loading_msg.remove()
                 except Exception:
                     pass
-                # 展示 RouterAgent 的分解说明（去掉 PLAN 标记本身）
-                import re as _re_plan
-                clean_explanation = _re_plan.sub(r"\[PLAN:[a-z_|]+\]", "", result_content).strip()
+                # 展示 RouterAgent 的分解说明（去掉 PLAN 标记本身，新旧格式均清理）
+                clean_explanation = clean_plan_marker(result_content)
                 if clean_explanation:
                     plan_msg = cl.Message(content="")
                     await plan_msg.send()

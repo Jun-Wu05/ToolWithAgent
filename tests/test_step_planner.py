@@ -2,8 +2,12 @@
 step_planner 测试 — PLAN 标记解析 + 步骤队列管理。
 
 测试接缝：web/step_planner.py
-- parse_plan_marker: 纯函数，解析 [PLAN:threat|fill] → ["threat", "fill"]
+- parse_plan_marker: 纯函数，解析 [PLAN:threat|fill] → [{"type":"threat"},{"type":"fill"}]
 - pop_next_step / has_pending_steps: 步骤队列管理
+
+注：parse_plan_marker 返回结构化 dict 列表（ADR-0004），
+旧式标记自动转为 {"type": "..."} 无参数 dict。
+JSON 格式的完整测试见 test_plan_json_format.py。
 """
 import pytest
 
@@ -23,23 +27,27 @@ class FakeSession:
 
 
 class TestParsePlanMarker:
-    """parse_plan_marker 标记解析。"""
+    """parse_plan_marker 标记解析（旧式无参数格式，向后兼容）。"""
 
     def test_parse_two_steps(self):
-        """[PLAN:threat|fill] → ["threat", "fill"]"""
+        """[PLAN:threat|fill] → [{"type":"threat"},{"type":"fill"}]"""
         content = "我将分两步处理。\n\n[PLAN:threat|fill]"
         result = parse_plan_marker(content)
-        assert result == ["threat", "fill"]
+        assert result == [{"type": "threat"}, {"type": "fill"}]
 
     def test_parse_three_steps(self):
         """[PLAN:mapping|enum|threat] → 三个步骤"""
         content = "[PLAN:mapping|enum|threat]"
-        assert parse_plan_marker(content) == ["mapping", "enum", "threat"]
+        assert parse_plan_marker(content) == [
+            {"type": "mapping"},
+            {"type": "enum"},
+            {"type": "threat"},
+        ]
 
     def test_parse_single_step(self):
         """单步骤也能解析（虽然 skill 通常用于多步，但单步也合法）。"""
         content = "处理中\n[PLAN:threat]"
-        assert parse_plan_marker(content) == ["threat"]
+        assert parse_plan_marker(content) == [{"type": "threat"}]
 
     def test_no_marker_returns_none(self):
         """无标记返回 None。"""
@@ -53,11 +61,11 @@ class TestParsePlanMarker:
             "[PLAN:threat|fill]\n\n"
             "系统将自动按序执行。"
         )
-        assert parse_plan_marker(content) == ["threat", "fill"]
+        assert parse_plan_marker(content) == [{"type": "threat"}, {"type": "fill"}]
 
     def test_invalid_step_type_still_extracted(self):
         """未知步骤类型也会被提取（执行时由 execute_step 处理无效类型）。"""
-        assert parse_plan_marker("[PLAN:unknown_step]") == ["unknown_step"]
+        assert parse_plan_marker("[PLAN:unknown_step]") == [{"type": "unknown_step"}]
 
 
 class TestStepQueue:
