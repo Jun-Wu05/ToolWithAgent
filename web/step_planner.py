@@ -141,6 +141,8 @@ async def execute_step(
     Returns:
         True 表示步骤执行成功，False 表示失败或跳过。
     """
+    from web.plan_validator import verify_step_result
+
     if step_type not in _VALID_STEPS:
         logger.warning(f"[STEP] 未知步骤类型 '{step_type}'，跳过")
         return False
