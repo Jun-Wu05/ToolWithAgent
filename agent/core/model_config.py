@@ -138,13 +138,24 @@ class ModelConfig:
                 "https://api.deepseek.com"
             )
             logger.info(f"[MODEL] 使用 DeepSeek 原生 API, model={model_id}")
-            return DeepSeek(id=model_id, api_key=key, base_url=base_url)
+            return DeepSeek(
+                id=model_id,
+                api_key=key,
+                base_url=base_url,
+                timeout=90.0,
+                max_retries=0,
+            )
 
         # 默认 siliconflow
         if not key:
             raise ValueError("请设置环境变量 SILICONFLOW_API_KEY 或 DEEPSEEK_API_KEY")
         logger.info(f"[MODEL] 使用 SiliconFlow API, model={model_id}")
-        return Siliconflow(id=model_id, api_key=key)
+        return Siliconflow(
+            id=model_id,
+            api_key=key,
+            timeout=90.0,
+            max_retries=0,
+        )
 
     @staticmethod
     def get_main_model() -> Union[Siliconflow, DeepSeek]:

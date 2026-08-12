@@ -1,134 +1,19 @@
-"""
-LLM 客户端 — Team 调用、Token 统计、Agno 日志拦截
+"""Agno 日志桥接与 Token 用量观测。
 
-提供:
-- call_team(team, full_input, loading_msg) → result   (带熔断器)
-- setup_agno_logging_bridge() → handler            (安装 Agno 日志拦截)
-- 模块级状态: _agno_bridge_installed
+本模块不提供 Team 路由或专业 Agent 选择；执行适配器按类型化步骤直接选择成员。
 """
-import asyncio as asyncio_mod
 import logging as _logging
 import os
 import re as _re
 import sys
-import time
-
-import chainlit as cl
 
 from agent.shared.logger import get_logger
-from agent.core.resilience import CircuitBreaker, CircuitBreakerOpenError
 from agent.core.model_config import ModelConfig
-from web.route_config import ENUM_KEYWORDS, THREAT_KEYWORDS, LOG_PARSER_KEYWORDS
-from web.history_store import append_history
-from web.utils import content_to_str
 
 logger = get_logger("llm_client")
 
 # 模块级标志：Agno 日志拦截是否已安装
 _agno_bridge_installed: bool = False
-
-# 模块级熔断器（进程生命周期内持续）
-_team_circuit_breaker = CircuitBreaker(
-    failure_threshold=3,
-    recovery_timeout=60.0,
-    name="team_api",
-)
-
-
-# ============= 公共 API =============
-
-async def call_team(team, full_input: str, loading_msg=None, intent: str = "general") -> object:
-    """
-    调用 Team 或直接路由到 MemberAgent，带熔断器保护，记录 Token 用量。
-
-    Args:
-        team: Agno Team 实例
-        full_input: 完整输入文本
-        loading_msg: Chainlit 加载消息对象
-        intent: 意图类型（"mapping" | "threat" | "enum" | "general" | "log_parser"）
-               快路径：明确意图时直接调用对应 MemberAgent，跳过 RouterAgent（省 1 次 LLM 调用）
-               慢路径：intent="general" 时走 team.run()，由 RouterAgent 路由
-    """
-    # 关键词预筛：命中枚举/威胁则加入路由提示，减少 RouterAgent 推理时间
-    lower_input = full_input.lower()
-    if any(kw in lower_input for kw in LOG_PARSER_KEYWORDS):
-        full_input = f"[ROUTE_HINT: 日志解析] {full_input}"
-    elif any(kw in lower_input for kw in ENUM_KEYWORDS):
-        full_input = f"[ROUTE_HINT: 枚举处理] {full_input}"
-    elif any(kw in lower_input for kw in THREAT_KEYWORDS):
-        full_input = f"[ROUTE_HINT: 威胁类型] {full_input}"
-
-    try:
-        # 检查熔断器状态
-        if _team_circuit_breaker.state.name == "OPEN":
-            raise CircuitBreakerOpenError(
-                f"熔断器已开启，请等待 {_team_circuit_breaker.recovery_timeout}s 后重试"
-            )
-
-        api_start_time = time.time()
-
-        # 意图明确时直接调用 MemberAgent，跳过 RouterAgent（省一次 LLM 调用）
-        intent_agent_map = {
-            "mapping": "FieldMappingAgent",
-            "threat": "ThreatAgent",
-            "enum": "EnumAgent",
-            "log_parser": "LogParserAgent",
-        }
-        target_member = None
-        if intent in intent_agent_map:
-            target_name = intent_agent_map[intent]
-            target_member = next(
-                (m for m in team.members if getattr(m, 'name', '') == target_name),
-                None,
-            )
-
-        if target_member is not None:
-            logger.info(
-                f"[API] 直接调用 MemberAgent({target_name})，跳过 RouterAgent，输入长度: {len(full_input)}"
-            )
-            # 直接调用 MemberAgent.run()，和 team.run() 返回相同的 RunResponse 格式
-            result = await asyncio_mod.wait_for(
-                asyncio_mod.to_thread(target_member.run, full_input),
-                timeout=360.0,
-            )
-        else:
-            logger.info(f"[API] 开始调用 Team.run，输入长度: {len(full_input)}")
-            # 带超时保护：360s，Route 模式含 RouterAgent 路由 + MemberAgent 执行
-            result = await asyncio_mod.wait_for(
-                asyncio_mod.to_thread(team.run, full_input),
-                timeout=360.0,
-            )
-
-        api_duration = time.time() - api_start_time
-        logger.info(f"[API] Team.run 完成，耗时: {api_duration:.2f}秒")
-
-        result_content = result.content if hasattr(result, 'content') else result
-        content_str = content_to_str(result_content)
-        logger.info(f"[API] LLM输出长度: {len(content_str)} 字符")
-
-        # 追加 assistant 响应到对话历史（统一入口，覆盖所有 call_team 调用方）
-        try:
-            _sess = cl.user_session.get("user_session")
-            if _sess is not None:
-                append_history(_sess, "assistant", content_str)
-        except Exception as _hist_e:
-            logger.debug(f"[HISTORY] 追加 assistant 历史失败（不影响主流程）: {_hist_e}")
-
-        _log_token_usage(result)
-        _team_circuit_breaker._on_success()
-        return result
-
-    except asyncio_mod.TimeoutError:
-        api_duration = time.time() - api_start_time
-        _team_circuit_breaker._on_failure()
-        logger.error(f"[API] Team.run 超时，360s 内未返回，耗时: {api_duration:.2f}秒")
-        raise asyncio_mod.TimeoutError("Team.run 超时（360s），请检查 Agent 配置或重试")
-
-    except Exception as e:
-        _team_circuit_breaker._on_failure()
-        logger.error(f"[API] Team.run 失败: {type(e).__name__}: {e}")
-        raise
-
 
 def setup_agno_logging_bridge():
     """
@@ -162,12 +47,14 @@ def setup_agno_logging_bridge():
         """捕获 agno.* logger 的 token 信息并写入应用日志"""
 
         def __init__(self):
+            """初始化日志处理器及最近一次成员和耗时状态。"""
             super().__init__(level=_logging.DEBUG)
             self._last_duration_s: float | None = None
             self._last_member_name: str = ""
             self._name_pattern = _re.compile(r'\[(\w+Agent)\]|Member:\s*(\w+)')
 
         def emit(self, record: _logging.LogRecord):
+            """解析 Agno 日志记录，并输出不含敏感原值的用量摘要。"""
             msg = str(record.msg) if record.msg else ""
             args = record.args if record.args else ()
 
@@ -233,6 +120,7 @@ def _log_token_usage(result):
         model_name = ModelConfig.get_model_id()
 
         def _emit(label: str, input_tokens, output_tokens, total_tokens, cached_tokens=None, extra_info: str = ""):
+            """按统一格式记录一次模型调用的 Token 用量。"""
             parts = [
                 f"模型: {model_name}",
                 f"Tokens - 输入: {input_tokens}, 输出: {output_tokens}, 总计: {total_tokens}",
@@ -245,7 +133,7 @@ def _log_token_usage(result):
 
         found_any = False
 
-        # 1) result.usage
+        # 1）检查 result.usage
         usage = getattr(result, 'usage', None)
         if usage:
             inp = getattr(usage, 'input_tokens', None) or getattr(usage, 'prompt_tokens', None)
@@ -256,7 +144,7 @@ def _log_token_usage(result):
                 _emit("主调用", inp, out, total, cached)
                 found_any = True
 
-        # 2) result.metrics
+        # 2）检查 result.metrics
         metrics = getattr(result, 'metrics', None)
         if metrics is not None:
             if isinstance(metrics, dict):
@@ -277,7 +165,7 @@ def _log_token_usage(result):
                     _emit("主调用(metrics)", _inp, _out, _tot, None, _extra)
                     found_any = True
 
-        # 3) result.run_data / result.extra
+        # 3）检查 result.run_data 与 result.extra
         for attr_name in ('run_data', 'extra', 'run_response'):
             container = getattr(result, attr_name, None)
             if container is None:
@@ -292,7 +180,7 @@ def _log_token_usage(result):
                         logger.info(f"[API] {attr_name}.{key}: {val}")
                         found_any = True
 
-        # 4) result.members / result.member_responses
+        # 4）检查 result.members 与 result.member_responses
         for attr_name in ('members', 'member_responses'):
             val = getattr(result, attr_name, None)
             if val is None:

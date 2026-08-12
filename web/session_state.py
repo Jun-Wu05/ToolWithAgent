@@ -63,28 +63,9 @@ class SessionState:
     last_threat_data: Optional[List[Dict[str, Any]]] = None
     """最后一次威胁类型映射的结果列表"""
 
-    # ---- 威胁填充模式 ----
-    threat_fill_mode: bool = False
-    """威胁填充模式标志，开启后拦截用户输入/文件上传"""
-
-    threat_target_field: Optional[str] = None
-    """威胁填充的目标字段名（用户输入）"""
-
-    threat_mapping_table: Optional[List[Dict[str, Any]]] = None
-    """威胁映射表格数据（供填充使用）"""
-
-    pending_base64: Optional[str] = None
-    """待处理的 Base64 内容（先收到字段名后收到文件时暂存）"""
-
-    # ---- 枚举填充模式 ----
-    enum_fill_mode: bool = False
-    """枚举填充模式标志，开启后拦截用户输入/文件上传"""
-
-    enum_base64: Optional[str] = None
-    """枚举待处理的 Base64 内容"""
-
+    # ---- 枚举映射输入 ----
     raw_base64: Optional[str] = None
-    """原始 Base64 内容缓存，供枚举填充等后续操作直接使用（替代 pending_base64 的旧模式）"""
+    """原始 Base64 内容缓存，供确定性文件事件和类型化执行步骤使用"""
 
     enum_excel_path: Optional[str] = None
     """枚举映射表 Excel 文件路径"""
@@ -110,10 +91,6 @@ class SessionState:
     batch_mapping_results: Optional[List[Dict[str, Any]]] = None
     """批量字段映射结果（聊天输入"映射"路径），供 Excel 导出使用"""
 
-    # ---- 填充类型标记 ----
-    last_fill_type: Optional[str] = None
-    """最近一次映射类型（"threat" | "enum"），供 fill_dispatcher 在用户未显式指定时判定填充类型"""
-
     # ---- 模型配置 ----
     current_provider: Optional[str] = None
     """当前供应商（"deepseek" | "siliconflow"）"""
@@ -130,11 +107,6 @@ class SessionState:
     由 web/history_store.py 管理，build_llm_input 拼最近 N 轮进 prompt。
     clear_decoded_data 时同步清空。"""
 
-    # ---- 复合意图步骤队列（multi-step-plan skill 产出）----
-    pending_steps: Optional[List[str]] = None
-    """待执行的步骤类型队列（如 ["threat", "fill"]），由 step_planner 管理。
-    RouterAgent 分解复合意图后写入，execute_pending_steps 逐个执行并弹出。"""
-
     # ---- 工厂方法 ----
 
     @classmethod
@@ -147,21 +119,6 @@ class SessionState:
     def has_decoded_data(self) -> bool:
         """是否已有解码后的数据"""
         return self.decoded_data is not None or self.decoded_fields is not None
-
-    def clear_threat_fill_mode(self) -> None:
-        """重置威胁填充模式相关状态"""
-        self.threat_fill_mode = False
-        self.threat_target_field = None
-        self.threat_mapping_table = None
-        self.pending_base64 = None
-
-    def clear_enum_fill_mode(self) -> None:
-        """重置枚举填充模式相关状态"""
-        self.enum_fill_mode = False
-        self.enum_base64 = None
-        self.raw_base64 = None
-        self.enum_excel_path = None
-        self.enum_preview = None
 
     def clear_decoded_data(self) -> None:
         """清除解码后的数据及上传文件元信息，同步清空对话历史"""
@@ -178,7 +135,7 @@ class SessionState:
 
     def get_session_summary(self) -> str:
         """
-        构建当前会话的文本摘要，供 Agent 感知上下文（自决清空/激活填充/路由判断）。
+        构建当前会话的人类可读摘要，仅供界面展示和历史兼容。
 
         返回示例：
             - 已上传文件：syslog_config.txt
@@ -225,8 +182,6 @@ class SessionState:
         # 威胁状态
         if self.last_threat_data:
             parts.append(f"- 威胁映射：已完成 {len(self.last_threat_data)} 条")
-        if self.threat_mapping_table:
-            parts.append("- 威胁映射表：已加载，可用于填充")
 
         # 日志解析状态
         if self.log_classification:

@@ -50,7 +50,6 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
     上下文隔离原则：
     - intent="threat"：只传用户文本，不拼接字段数据（避免旧缓存污染威胁处理）
     - intent="mapping"：拼接字段数据 + 日志样本，供 LLM 做字段映射
-    - intent="general"：由 RouterAgent 自己判断
     """
     # 威胁类型处理：上下文隔离 — 不拼字段数据，但结构化注入上一步的枚举值（若有）
     # CHANGED (2026-07-28): threat 路径显式注入 last_enum_extract_result 的枚举值，
@@ -131,7 +130,7 @@ def build_llm_input(user_text: str, user_session: dict, intent: str = "general")
 - [SESSION_ACTION:activate_threat_fill] — 用户要做威胁填充时输出，系统自动激活填充流程
 """
                 logger.info(f"[LLM_INPUT] General 意图：注入会话摘要 + 动作标记（字段数: {len(fields_list)}）")
-        # ========================================================================
+        # ============================ 字段映射批处理 ============================
 
         full_input = f"""用户请求：{user_text}
 {session_context}

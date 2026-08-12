@@ -39,81 +39,125 @@ def append_mappings_to_normalize(normalize_item: dict, mappings: list[dict]) -> 
     return added
 
 
+def apply_fill_to_config(
+    config: Any,
+    mapping_table: dict[str, list[dict]] | list[dict],
+    target_field: str | None = None,
+) -> Any:
+    """在保持完整根结构的前提下递归填充所有 normalize 条目。
+
+    参数：
+        config: 解码后的完整配置或子规则列表。
+        mapping_table: 按字段分组的枚举映射，或单字段映射列表。
+        target_field: 当映射来源是列表时必须提供的目标字段。
+
+    返回值：
+        深拷贝后的完整配置；输入对象不会被修改。
+
+    不变量：
+        只修改目标 normalize 条目的 mappings，其他配置结构必须原样保留。
+    """
+    # 统一为按字段分组的结构，遍历阶段不再猜测映射来源类型。
+    if isinstance(mapping_table, list):
+        if not target_field:
+            return copy.deepcopy(config)
+        field_mappings = {target_field: mapping_table}
+    elif target_field:
+        field_mappings = {target_field: mapping_table.get(target_field, [])}
+    else:
+        field_mappings = mapping_table
+
+    updated_config = copy.deepcopy(config)
+    if not field_mappings:
+        return updated_config
+
+    def apply_to_node(node: Any) -> None:
+        """递归访问容器，并只在明确的 normalize 列表内追加映射。"""
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for normalize_item in normalize:
+                    if not isinstance(normalize_item, dict):
+                        continue
+                    index_value = str(normalize_item.get("index", "")).strip()
+                    field_value = str(normalize_item.get("field", "")).strip()
+                    for field_name, mappings in field_mappings.items():
+                        if mappings and (index_value == field_name or field_value == field_name):
+                            append_mappings_to_normalize(normalize_item, mappings)
+            for child in node.values():
+                apply_to_node(child)
+            return
+        if isinstance(node, list):
+            for child in node:
+                apply_to_node(child)
+
+    apply_to_node(updated_config)
+    return updated_config
+
+
+def count_field_mappings(config: Any, target_fields: tuple[str, ...]) -> int:
+    """递归统计目标字段 mappings 数量，供执行前后变更验证使用。"""
+    targets = set(target_fields)
+    count = 0
+
+    def count_node(node: Any) -> None:
+        """访问配置树并累计明确命中目标字段的 mappings。"""
+        nonlocal count
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for normalize_item in normalize:
+                    if not isinstance(normalize_item, dict):
+                        continue
+                    index_value = str(normalize_item.get("index", "")).strip()
+                    field_value = str(normalize_item.get("field", "")).strip()
+                    if index_value in targets or field_value in targets:
+                        count += len(normalize_item.get("mappings", []) or [])
+            for child in node.values():
+                count_node(child)
+            return
+        if isinstance(node, list):
+            for child in node:
+                count_node(child)
+
+    count_node(config)
+    return count
+
+
+def remove_field_mappings_from_config(config: Any, target_field: str) -> Any:
+    """在保持完整根结构的前提下递归清空目标字段 mappings。"""
+    updated_config = copy.deepcopy(config)
+
+    def remove_from_node(node: Any) -> None:
+        """访问配置树并清空明确命中的 normalize 映射。"""
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for normalize_item in normalize:
+                    if not isinstance(normalize_item, dict):
+                        continue
+                    index_value = str(normalize_item.get("index", "")).strip()
+                    field_value = str(normalize_item.get("field", "")).strip()
+                    if index_value == target_field or field_value == target_field:
+                        normalize_item["mappings"] = []
+            for child in node.values():
+                remove_from_node(child)
+            return
+        if isinstance(node, list):
+            for child in node:
+                remove_from_node(child)
+
+    remove_from_node(updated_config)
+    return updated_config
+
 def apply_fill_to_sub_rules(
     sub_rules: list[dict],
     mapping_table: dict[str, list[dict]] | list[dict],
     target_field: str | None = None,
 ) -> list[dict]:
-    """对子规则列表统一应用映射填充（mappings 追加）。
-
-    合并 apply_enum_fill_to_sub_rules 和威胁填充的 sub_rules 逻辑。
-    威胁填充和枚举填充在 apply 层面是同一操作（找 normalize 项 → 追加 mappings），
-    区别只是 mappingType（REGULAR vs EQUAL），由 mapping_table 内容决定。
-
-    Args:
-        sub_rules: 子规则列表（会被深拷贝，不修改原数据）
-        mapping_table: 映射表。支持两种格式：
-            - dict: {字段名: [{mappingType, orgValue, mappingValue}, ...]}（枚举填充，Excel 多 sheet）
-            - list: [{mappingType, orgValue, mappingValue}, ...]（威胁填充，单字段，需配 target_field）
-        target_field: 目标字段名。mapping_table 为 list 时必填；为 dict 时可选（None=填充表里所有字段）
-
-    Returns:
-        深拷贝后的 sub_rules，匹配的 normalize 项已追加 mappings
-    """
-    # 统一 mapping_table 为 dict 格式
-    if isinstance(mapping_table, list):
-        if not target_field:
-            return copy.deepcopy(sub_rules)
-        field_mappings_dict = {target_field: mapping_table}
-    else:
-        if target_field:
-            field_mappings_dict = {target_field: mapping_table.get(target_field, [])}
-        else:
-            field_mappings_dict = mapping_table
-
-    if not field_mappings_dict:
-        return copy.deepcopy(sub_rules)
-
-    result_rules = copy.deepcopy(sub_rules)
-
-    for rule in result_rules:
-        for norm_item in rule.get("normalize", []):
-            if not isinstance(norm_item, dict):
-                continue
-            index_value = str(norm_item.get("index", "")).strip()
-            field_value = str(norm_item.get("field", "")).strip()
-
-            for field_name, mappings in field_mappings_dict.items():
-                if not mappings:
-                    continue
-                matched = index_value == field_name or field_value == field_name
-                if matched:
-                    append_mappings_to_normalize(norm_item, mappings)
-
-    return result_rules
-
+    """兼容子规则调用，并委托保持根结构的通用配置填充实现。"""
+    return apply_fill_to_config(sub_rules, mapping_table, target_field)
 
 def remove_field_mappings(sub_rules: list[dict], target_field: str) -> list[dict]:
-    """取消指定字段的映射（清空其 mappings）。
-
-    支持「取消alarm_category的映射」等自然语言指令。
-
-    Args:
-        sub_rules: 子规则列表（会被深拷贝）
-        target_field: 要清除映射的字段名
-
-    Returns:
-        深拷贝后的 sub_rules，匹配的 normalize 项 mappings 已清空
-    """
-    result_rules = copy.deepcopy(sub_rules)
-
-    for rule in result_rules:
-        for norm_item in rule.get("normalize", []):
-            if not isinstance(norm_item, dict):
-                continue
-            index_value = str(norm_item.get("index", "")).strip()
-            field_value = str(norm_item.get("field", "")).strip()
-            if index_value == target_field or field_value == target_field:
-                norm_item["mappings"] = []
-
-    return result_rules
+    """兼容子规则调用，并委托保持根结构的通用取消映射实现。"""
+    return remove_field_mappings_from_config(sub_rules, target_field)
