@@ -1,0 +1,203 @@
+"""统一 Planner 公共契约测试。"""
+
+import pytest
+from pydantic import ValidationError
+
+
+def test_session_facts只暴露规划所需事实():
+    from web.session_facts import build_session_facts
+
+    session = {
+        "api_key": "secret-key",
+        "enum_excel_path": r"C:\private\mapping.xlsx",
+        "enum_preview": [
+            {"目标字段": "event_type3", "原始值": "a", "映射值": "b"},
+            {"目标字段": "event_type3", "原始值": "c", "映射值": "d"},
+        ],
+        "mapped_sub_rules": [
+            {"normalize": [{"index": "event_type3", "field": "事件类型"}]}
+        ],
+        "raw_base64": "sensitive-payload",
+    }
+
+    facts = build_session_facts(session)
+
+    assert facts.has_decoded_config is False
+    assert facts.has_mapped_sub_rules is True
+    assert facts.available_config_refs == ("session.mapped_sub_rules",)
+    assert facts.enum_mapping_target_fields == ("event_type3",)
+    dumped = facts.model_dump_json()
+    assert "secret-key" not in dumped
+    assert "private" not in dumped
+    assert "sensitive-payload" not in dumped
+
+
+def test_fill步骤必须显式声明目标字段和来源():
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "steps": [
+                    {
+                        "step_id": "s1",
+                        "type": "fill",
+                        "fill_kind": "enum",
+                        "target_fields": [],
+                        "source_ref": "session.enum_mapping_table",
+                        "config_ref": "session.decoded_config",
+                    }
+                ],
+            }
+        )
+
+
+def test_fill步骤必须显式声明被修改的配置来源():
+    """避免适配器在 decoded config 与 mapped sub-rules 之间隐式选择。"""
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "steps": [
+                    {
+                        "step_id": "s1",
+                        "type": "fill",
+                        "fill_kind": "enum",
+                        "target_fields": ["event_type3"],
+                        "source_ref": "session.enum_mapping_table",
+                    }
+                ],
+            }
+        )
+
+def test步骤依赖必须引用已出现的步骤():
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "steps": [
+                    {
+                        "step_id": "s2",
+                        "type": "threat_mapping",
+                        "source_ref": "step:s1",
+                        "depends_on": ["s1"],
+                    }
+                ],
+            }
+        )
+
+
+def test澄清决策不能同时携带执行步骤():
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "clarification",
+                "reason_code": "ambiguous_intent",
+                "question": "请选择要执行的操作",
+                "steps": [{"step_id": "s1", "type": "log_parse"}],
+            }
+        )
+
+def test威胁映射来源必须与依赖一致():
+    """防止 source_ref 指向未声明步骤，避免绕过本次结果账本。"""
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "steps": [
+                    {
+                        "step_id": "extract",
+                        "type": "enum_extract",
+                        "target_field": "event_type3",
+                    },
+                    {
+                        "step_id": "threat",
+                        "type": "threat_mapping",
+                        "source_ref": "step:extract",
+                    },
+                ],
+            }
+        )
+
+
+def test威胁填充不能读取session旧结果():
+    """强制威胁 Fill 引用本次步骤，禁止 last_threat_data 隐式兜底。"""
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "steps": [
+                    {
+                        "step_id": "fill",
+                        "type": "fill",
+                        "fill_kind": "threat",
+                        "target_fields": ["event_type3"],
+                        "source_ref": "session.last_threat_data",
+                        "config_ref": "session.mapped_sub_rules",
+                    }
+                ],
+            }
+        )
+
+def test步骤结果拒绝未知或无约束产物():
+    """防止执行接缝重新接受 artifact_type 加任意 payload 的旧协议。"""
+    from web.planner_models import StepResult
+
+    with pytest.raises(ValidationError):
+        StepResult.model_validate(
+            {
+                "step_id": "extract",
+                "operation_type": "enum_extract",
+                "status": "success",
+                "artifact": {
+                    "artifact_type": "unknown",
+                    "payload": {"任意": "数据"},
+                    "item_count": 1,
+                },
+            }
+        )
+
+def test_session_facts集中汇总日志分类字段(monkeypatch):
+    """证明 Planner 和执行器共享同一字段事实，不在各层重复解释日志状态。"""
+    import web.field_source as field_source
+    from web.session_facts import build_session_facts
+
+    monkeypatch.setattr(
+        field_source,
+        "extract_log_fields_for_mapping",
+        lambda classification, raw_log_lines: ["src_ip", "event_type3"],
+    )
+
+    facts = build_session_facts(
+        {
+            "log_classification": {"类型A": {}},
+            "raw_log_lines": ["src_ip=1.1.1.1 event_type3=attack"],
+        }
+    )
+
+    assert facts.available_fields == ("src_ip", "event_type3")
+
+
+def test对话历史必须符合受限类型契约():
+    """阻止任意 session 字典或额外敏感字段跨过 Planner 接缝。"""
+    from web.planner_models import ConversationTurn
+
+    with pytest.raises(ValidationError):
+        ConversationTurn.model_validate(
+            {
+                "role": "user",
+                "content": "执行字段映射",
+                "api_key": "不应进入 Planner",
+            }
+        )

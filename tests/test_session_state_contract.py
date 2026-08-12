@@ -4,7 +4,7 @@ SessionState 契约测试 — 防止「写入未定义的 session 字段」类 b
 背景：SessionState.__setitem__ 严格要求字段必须预先定义，否则抛
 'SessionState 没有字段: xxx'。但全代码库有 20+ 处 session[key]=value
 写入散落在多个文件。每次新增功能写 session 时，容易忘记在 SessionState
-里加字段，导致运行期崩溃（已发生多次，如 pending_steps）。
+里加字段，导致运行期崩溃。
 
 本测试扫描 web/ 下所有 session[...]= 写入，断言每个 key 都已定义，
 把「运行期 KeyError」提前到「测试期 AssertionError」。
@@ -59,7 +59,6 @@ class TestSessionStateContract:
         written = _collect_written_session_keys("web")
         defined = _collect_defined_session_fields()
 
-        # pending_steps 曾因此 bug 崩溃，作为典型用例单独标注
         missing = written - defined
 
         if missing:
@@ -88,7 +87,7 @@ class TestSessionStateContract:
         from web.session_state import SessionState
         s = SessionState()
         # 抽查几个关键字段
-        s["pending_steps"] = ["threat", "fill"]
-        assert s.pending_steps == ["threat", "fill"]
+        s["mapped_sub_rules"] = [{"normalize": []}]
+        assert s.mapped_sub_rules == [{"normalize": []}]
         s["last_threat_data"] = [{"a": 1}]
         assert s.last_threat_data == [{"a": 1}]

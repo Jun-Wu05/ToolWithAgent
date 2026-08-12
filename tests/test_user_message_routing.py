@@ -1,159 +1,165 @@
-"""
-handle_user_message 路由一致性测试 — 防止快路径绕过 detect_intent。
+"""自然语言统一 Planner 入口的离线回归测试。"""
 
-测试接缝：web/user_message_handlers.handle_user_message
-捕获点：用 monkeypatch 替换下游 handler，断言"被调用的 handler"与
-       detect_intent 的路由决策一致。
-
-回归背景（2026-07-27 日志 app_20260727_091154.log 行 159-163）：
-  用户输入「把这些枚举值进行威胁类型的映射」
-  - detect_intent 正确判定 general（多关键词冲突，交 RouterAgent）
-  - 但 handle_user_message 残留的「野生 is_enum_extract」绕过路由，
-    直接调用 handle_enum_extract_flow
-  - 最终 enum_handler 因收到 ThreatMappingList 对象而崩溃
-
-注：不依赖 pytest-asyncio，用 asyncio.run 直接驱动协程，保持测试自包含。
-"""
 import asyncio
-import sys
-import types
 
-import pytest
+from web.planner_models import ExecutionReport, PlanDecision, StepResult
 
 
-# ============================================================
-# 测试桩：构造一个最小的 chainlit 占位（handle_user_message 依赖 cl）
-# ============================================================
-@pytest.fixture(autouse=True)
-def _ensure_chainlit_stub(monkeypatch):
-    """总是强制注入 chainlit 桩，避免真实 chainlit 已被其它测试导入时失效。"""
-    stub = types.ModuleType("chainlit")
+class FakePlanner:
+    """返回预设决策并记录规划时业务执行器是否已被调用。"""
 
-    class _Msg:
-        def __init__(self, *a, **kw):
-            self.content = kw.get("content", "")
+    def __init__(self, decision, events):
+        self.decision = decision
+        self.events = events
+        self.calls = 0
 
-        async def send(self):
-            return self
-
-        async def remove(self):
-            return self
-
-        async def update(self):
-            return self
-
-        async def stream_token(self, tok):
-            self.content += tok
-
-    stub.Message = _Msg
-    stub.Action = lambda **kw: None
-    # 注意：web.enum_handler 等模块顶层已 `import chainlit as cl`，持有真实引用。
-    # 替换 sys.modules 后，需让被测模块的 cl 也指向桩——通过 monkeypatch 直接覆盖。
-    monkeypatch.setitem(sys.modules, "chainlit", stub)
-    import web.user_message_handlers as h
-    monkeypatch.setattr(h, "cl", stub, raising=False)
+    async def plan(self, **kwargs):
+        """记录一次规划调用和调用顺序。"""
+        self.calls += 1
+        self.events.append("planner")
+        return self.decision
 
 
-# ============================================================
-# 辅助：捕获 handle_user_message 究竟把请求交给了哪个下游 handler
-# ============================================================
-def _which_handler_called(user_text, session, monkeypatch):
-    """同步入口：用 asyncio.run 驱动 handle_user_message，返回被调用的下游 handler 名。"""
-    """运行 handle_user_message，返回被调用的下游 handler 名（或 'team_run'/'none'）。
+class FakeExecutor:
+    """记录执行调用，返回最小成功报告。"""
 
-    通过 monkeypatch 给所有下游 handler 打桩，记录首次被 await 的那个。
-    """
-    import web.user_message_handlers as h
+    events = None
+    calls = 0
 
-    called = {"name": "none"}
+    def __init__(self, adapters):
+        """忽略适配器内容，只验证入口层调用顺序。"""
 
-    def make_stub(name):
-        async def _stub(*a, **kw):
-            called["name"] = name
-        return _stub
+    async def execute(self, plan, context):
+        """在 Planner 决策之后记录执行。"""
+        type(self).calls += 1
+        type(self).events.append("executor")
+        step = plan.steps[0]
+        return ExecutionReport(
+            plan_id=plan.plan_id,
+            results=(StepResult(step_id=step.step_id, operation_type=step.type, status="success"),),
+        )
 
-    # 打桩所有分流出口
-    monkeypatch.setattr(h, "handle_threat_fill_flow", make_stub("threat_fill"), raising=False)
-    monkeypatch.setattr(h, "handle_enum_fill_flow", make_stub("enum_fill"), raising=False)
-    monkeypatch.setattr(h, "handle_enum_extract_flow", make_stub("enum_extract"), raising=False)
-    monkeypatch.setattr(h, "handle_log_parser", make_stub("log_parser"), raising=False)
 
-    # fill_dispatcher 延迟导入，打模块桩
-    import web.fill_dispatcher as fd
-    monkeypatch.setattr(fd, "handle_fill", make_stub("fill"), raising=False)
-    monkeypatch.setattr(fd, "handle_remove_fill", make_stub("remove_fill"), raising=False)
+def _run(monkeypatch, decision, user_text="处理请求", session=None):
+    """运行入口并返回 Planner、事件顺序和渲染类型。"""
+    import web.user_message_handlers as handlers
 
-    # team.run / call_team：general/_mapping 的最终出口
-    async def _call_team_stub(team, inp, loading_msg, intent=None):
-        called["name"] = f"team_run:{intent}"
-        # 返回一个带 content 的假结果，让 handler 正常退出
-        class _R:
-            content = "已处理"
-        return _R()
-    monkeypatch.setattr(h, "call_team", _call_team_stub, raising=False)
+    events = []
+    rendered = []
+    planner = FakePlanner(decision, events)
+    FakeExecutor.events = events
+    FakeExecutor.calls = 0
 
-    # 清空快捷键不触发
-    asyncio.get_event_loop().run_until_complete(
-        h.handle_user_message(session, team=object(), user_text=user_text)
+    monkeypatch.setattr(handlers, "_get_planner_service", lambda: planner)
+    monkeypatch.setattr(handlers, "PlanExecutor", FakeExecutor)
+    monkeypatch.setattr(handlers, "create_default_adapters", lambda team: {})
+
+    class _NoOpProgressSink:
+        """在离线入口测试中记录生命周期，不访问 Chainlit 会话。"""
+
+        async def publish(self, event):
+            """忽略安全进度事件。"""
+
+        async def close(self):
+            """记录请求结束时的关闭动作。"""
+
+    monkeypatch.setattr(handlers, "_create_progress_sink", _NoOpProgressSink)
+
+    async def render_decision(decision):
+        rendered.append(decision.decision)
+
+    async def render_report(report):
+        rendered.append("report")
+
+    async def clear_session(user_session):
+        events.append("clear")
+
+    monkeypatch.setattr(handlers, "render_decision", render_decision)
+    monkeypatch.setattr(handlers, "render_execution_report", render_report)
+    monkeypatch.setattr(handlers, "_clear_session_data", clear_session)
+
+    asyncio.run(handlers.handle_user_message(session or {}, object(), user_text))
+    return planner, events, rendered
+
+
+def test每条自然语言恰好调用planner一次且返回前不执行(monkeypatch):
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-one",
+            "steps": [{"step_id": "parse", "type": "log_parse"}],
+        }
     )
-    return called["name"]
+
+    planner, events, rendered = _run(monkeypatch, decision)
+
+    assert planner.calls == 1
+    assert events == ["planner", "executor"]
+    assert FakeExecutor.calls == 1
+    assert rendered == ["report"]
 
 
-# ============================================================
-# 回归：快路径不得绕过 detect_intent 的消歧判定
-# ============================================================
+def test意图冲突返回澄清且不调用执行器(monkeypatch):
+    decision = PlanDecision(
+        decision="clarification",
+        reason_code="ambiguous_intent",
+        question="请选择要执行的操作",
+        choices=("枚举提取", "威胁映射"),
+    )
 
-class TestRouteConsistency:
-    """detect_intent 判定为 general 的输入，handle_user_message 不得走快路径。"""
+    planner, events, rendered = _run(
+        monkeypatch,
+        decision,
+        user_text="日志类型字段有哪些枚举值",
+    )
 
-    def test_enum_threat_mapping_conflict_goes_to_router(self, monkeypatch):
-        """「把这些枚举值进行威胁类型的映射」→ general，不得走 enum_extract。
+    assert planner.calls == 1
+    assert events == ["planner"]
+    assert FakeExecutor.calls == 0
+    assert rendered == ["clarification"]
 
-        回归日志：app_20260727_091154.log 行 159-163。
-        修复前：野生 is_enum_extract 命中「枚举值」→ 直调 enum_extract → 崩溃。
-        修复后：detected_intent=general → 交 RouterAgent（team_run:general）。
-        """
-        session = {}  # 空 session，无填充模式
-        called = _which_handler_called(
-            "把这些枚举值进行威胁类型的映射", session, monkeypatch
-        )
-        # 不得进入任何快路径（enum_extract/enum_fill/threat_fill/log_parser/fill）
-        assert called != "enum_extract", (
-            "BUG：含「枚举值」但语义是威胁映射，却被野生快路径抢路由到 enum_extract"
-        )
-        assert called == "team_run:general", (
-            f"多关键词冲突应交 RouterAgent，实际走了：{called}"
-        )
 
-    def test_pure_enum_extract_still_fast_path(self, monkeypatch):
-        """纯枚举提取（无冲突）→ 仍走 enum_extract 快路径（保证不误伤）。"""
-        session = {"raw_log_lines": ["x"]}
-        called = _which_handler_called("提取src_ip的枚举值", session, monkeypatch)
-        assert called == "enum_extract", (
-            "纯枚举提取应保留快路径，实际走了：" + str(called)
-        )
+def testplanner不可用时不走关键词或router兜底(monkeypatch):
+    decision = PlanDecision(
+        decision="clarification",
+        reason_code="planner_unavailable",
+        question="服务暂时不可用，请重试",
+    )
 
-    def test_log_parser_with_enum_conflict_goes_to_router(self, monkeypatch):
-        """「日志类型字段有哪些枚举值」→ 多域冲突 → general（不得被 log_parser 抢）。"""
-        session = {}
-        called = _which_handler_called("日志类型字段有哪些枚举值", session, monkeypatch)
-        # 修复前：野生 is_log_parser 命中「日志类型」→ 直调 log_parser
-        assert called != "log_parser", (
-            "BUG：含「日志类型」但多域冲突，却被野生快路径抢路由到 log_parser"
-        )
-        assert called == "team_run:general", (
-            f"多关键词冲突应交 RouterAgent，实际走了：{called}"
-        )
+    planner, events, rendered = _run(
+        monkeypatch,
+        decision,
+        user_text="提取 src_ip 的枚举值",
+        session={"raw_log_lines": ["src_ip=1.1.1.1"]},
+    )
 
-    def test_pure_log_parser_still_fast_path(self, monkeypatch):
-        """纯日志解析（无冲突）→ 仍走 log_parser 快路径。"""
-        session = {}
-        called = _which_handler_called("识别日志格式", session, monkeypatch)
-        assert called == "log_parser"
+    assert planner.calls == 1
+    assert events == ["planner"]
+    assert FakeExecutor.calls == 0
+    assert rendered == ["clarification"]
 
-    def test_clear_keyword_shortcut_unchanged(self, monkeypatch):
-        """清空快捷键不受影响（不走任何业务 handler）。"""
-        session = {}
-        called = _which_handler_called("清空数据", session, monkeypatch)
-        # 清空走 _clear_session_data 内部 cl.Message，不触发任何打桩 handler
-        assert called == "none"
+
+def test明确清空事件不调用planner(monkeypatch):
+    decision = PlanDecision(
+        decision="guidance",
+        guidance_code="unused",
+    )
+
+    planner, events, rendered = _run(monkeypatch, decision, user_text="清空数据")
+
+    assert planner.calls == 0
+    assert events == ["clear"]
+    assert rendered == []
+
+
+def test包含清空词的普通句子仍交给planner(monkeypatch):
+    decision = PlanDecision(
+        decision="clarification",
+        reason_code="needs_context",
+        question="请说明要清空哪些映射",
+    )
+
+    planner, events, _ = _run(monkeypatch, decision, user_text="清空 event_type3 的映射")
+
+    assert planner.calls == 1
+    assert events == ["planner"]
