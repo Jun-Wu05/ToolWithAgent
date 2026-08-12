@@ -96,37 +96,68 @@ def setup_logger(name: str = "agent", level: int = logging.DEBUG) -> logging.Log
 def cleanup_old_logs(log_dir: Path, prefix: str = "app", keep_count: int = 3):
     """
     清理旧日志文件
-    
+
+    主日志（app_时间戳.log）与错误日志（app_errors_时间戳.log）分别匹配：
+    prefix="app" 只匹配 ``app_<数字>.log``，不匹配 ``app_errors_*.log``。
+
+    当前正在写入的活动文件永不进入删除集合。
+    文件被占用或删除失败时只记录告警，不抛出异常（WinError 32 降级）。
+
     Args:
         log_dir: 日志目录
-        prefix: 日志文件前缀
+        prefix: 日志文件前缀（"app" 主日志 / "app_errors" 错误日志）
         keep_count: 保留最近N个文件
     """
     if not log_dir.exists():
         return
-    
-    # 查找匹配的日志文件
-    pattern = f"{prefix}_*.log"
+
+    # 精确匹配：prefix 后必须紧跟数字时间戳（避免 app_ 匹配到 app_errors_）
+    pattern = f"{prefix}_[0-9]*.log"
     log_files = sorted(log_dir.glob(pattern), key=lambda f: f.stat().st_mtime, reverse=True)
-    
-    # 删除多余的文件
-    for old_file in log_files[keep_count:]:
-        old_file.unlink(missing_ok=True)
+
+    # 排除当前正在写入的活动文件（绝不删除打开中的文件）
+    active_files = {_shared_log_file, _shared_error_file}
+    candidates = [f for f in log_files if f not in active_files]
+
+    # 删除多余的文件（删除失败只告警，不中断业务）
+    for old_file in candidates[keep_count:]:
+        try:
+            old_file.unlink(missing_ok=True)
+        except (PermissionError, OSError) as e:
+            # WinError 32（文件被占用）等：只记录告警，不抛出
+            logging.getLogger("agent").warning(
+                f"日志清理跳过被占用文件: {old_file.name} ({e})"
+            )
 
 
 def get_logger(name: str = "agent") -> logging.Logger:
-    """获取已配置的日志记录器（单例模式）"""
+    """获取已配置的日志记录器（单例模式）
+
+    注意：本函数不触发日志清理。清理只在应用启动时由
+    ``initialize_log_retention()`` 显式执行一次（#25）。
+    """
     if name in _loggers:
         return _loggers[name]
-    
+
     logger = setup_logger(name)
     _loggers[name] = logger
-    
-    # 启动时清理旧日志（保留最近3个）
-    log_dir = Path(__file__).parent.parent / "logs"
-    cleanup_old_logs(log_dir, "app", keep_count=3)
-    
+
     return logger
+
+
+def initialize_log_retention(log_dir: Optional[Path] = None, keep_count: int = 3) -> None:
+    """应用启动时清理旧日志（主日志与错误日志分别保留）。
+
+    幂等：重复调用安全。应在应用入口（chainlit_app.py）启动时调用一次。
+
+    Args:
+        log_dir: 日志目录，默认为 agent/logs/
+        keep_count: 每类日志保留的文件数
+    """
+    if log_dir is None:
+        log_dir = Path(__file__).parent.parent / "logs"
+    cleanup_old_logs(log_dir, prefix="app", keep_count=keep_count)
+    cleanup_old_logs(log_dir, prefix="app_errors", keep_count=keep_count)
 
 
 class _StructuredTraceFormatter(logging.Formatter):

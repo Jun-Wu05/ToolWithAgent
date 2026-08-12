@@ -45,8 +45,11 @@ import chainlit as cl
 import logging
 
 # 初始化日志
-from agent.shared.logger import get_logger
+from agent.shared.logger import get_logger, initialize_log_retention
 logger = get_logger("chainlit_app")
+
+# 启动时清理旧日志（主日志与错误日志分别保留，活动文件不删，删除失败只告警）
+initialize_log_retention()
 
 # 隐藏第三方库的 DEBUG 日志
 logging.getLogger("openai").setLevel(logging.WARNING)
