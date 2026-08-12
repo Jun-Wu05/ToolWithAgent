@@ -104,7 +104,7 @@ class TestFillAction:
         """复合意图含'填充'不得被截断为 fill（#26 回归）。
 
         '攻击类型枚举值提取出来，进行威胁类型映射后填充回去输出'
-        命中 enum_domain + threat + fill = 3 域 → 应走 general 交 RouterAgent。
+        有顺序词（出来/后）→ 复合意图 → general。
         """
         session = FakeSession()
         intent, _ = detect_intent(
@@ -113,10 +113,25 @@ class TestFillAction:
         assert intent == "general", f"复合意图应走 general，实际: {intent}"
 
     def test_threat_fill_composite_not_truncated(self):
-        """威胁+填充复合意图 → general（不被 fill 截断）。"""
+        """威胁+填充复合意图（有顺序词'后'）→ general（不被 fill 截断）。"""
         session = FakeSession()
         intent, _ = detect_intent("威胁类型映射后填充到alarm_category里", session)
         assert intent == "general", f"威胁+填充复合意图应走 general，实际: {intent}"
+
+    def test_enum_fill_single_intent_not_general(self):
+        """'枚举值填充'是单意图（枚举型填充），不应走 general（app_20260812_103211 回归）。
+
+        无顺序词的"枚举+填充"→ fill（不是复合意图）。
+        """
+        session = FakeSession()
+        intent, _ = detect_intent("枚举值填充", session)
+        assert intent == "fill", f"'枚举值填充'应是 fill，实际: {intent}"
+
+    def test_threat_fill_single_intent_not_general(self):
+        """'威胁填充'是单意图（威胁型填充），不应走 general。"""
+        session = FakeSession()
+        intent, _ = detect_intent("威胁填充到alarm_category里", session)
+        assert intent == "fill", f"'威胁填充'应是 fill，实际: {intent}"
 
 
 # ============================================================

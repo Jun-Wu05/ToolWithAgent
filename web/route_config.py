@@ -91,8 +91,17 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
     # 统计命中的意图域数量（含填充域，用于判断是否多域冲突）
     hit_count = sum([is_enum_domain, is_threat, is_mapping, is_log_parser, is_fill])
 
-    # 多关键词冲突 → 交 RouterAgent 消歧（含填充的复合意图不得被截断 #26）
+    # 复合意图判定（#26：含填充的复合意图不得被截断）：
+    # 填充 + 其他域同时命中时，检查是否有顺序词区分复合 vs 单意图。
+    # "枚举填充"/"威胁填充" 是原子操作（无顺序词）→ fill。
+    # "提取枚举后填充"/"映射后填充" 是复合意图（有顺序词）→ general。
     if hit_count > 1:
+        if is_fill:
+            # 顺序词标志复合操作（先做A再做B）
+            has_sequence = any(w in lower for w in ("然后", "之后", "再", "接着", "后填充", "后填", "出来", "下去"))
+            if not has_sequence:
+                # 无顺序词的"X填充"→ 单意图填充（如"枚举填充"、"威胁填充"）
+                return "fill", "填充动作（含类型修饰），交 fill_dispatcher 决定类型"
         return "general", f"多关键词冲突（{hit_count}个），交 RouterAgent 语义判断"
 
     # 单关键词域命中 → 快路径
