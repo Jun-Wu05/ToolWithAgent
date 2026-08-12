@@ -82,23 +82,26 @@
 
 | 角色 | 职责 | 不做的事 |
 |---|---|---|
-| RouterAgent | 路由用户意图到对应 Agent | 不自行处理任务 |
-| FieldMappingAgent | 字段名 → 标准字段名映射 | 不做值映射 |
-| ThreatAgent | 原始值 → 标准威胁分类映射 | 不做字段映射 |
-| EnumAgent | 枚举提取 + 枚举填充 | 不做威胁分类 |
-| LogParserAgent | 日志格式识别 + 特征分类 | 不做字段/值映射 |
+| PlannerAgent | 结合用户原文、有限历史与 SessionFacts 生成类型化计划 | 不持有业务工具，不执行任务 |
+| PlanExecutor | 校验 session 语义、解析依赖、推进步骤并记录 ExecutionReport | 不理解用户原文，不做界面渲染 |
+| FieldMappingAgent | 字段名 → 标准字段名映射 | 不做值映射或意图理解 |
+| ThreatAgent | 原始值 → 标准威胁分类映射 | 不做字段映射或读取旧结果兜底 |
+| Enum Extract Adapter | 为显式目标字段提取枚举值 | 不猜测目标字段，不做填充 |
+| Log Parser Adapter | 日志格式识别 + 特征分类 | 不做字段/值映射 |
+| Renderer | 渲染 Clarification、Guidance 或 ExecutionReport | 不执行业务、不解释 session |
 
 ---
-
 ## 架构原则：步骤指令自包含
 
-> 参见 ADR-0004「统一意图管道」。借鉴 Claude Code Coordinator 模式。
+> 参见 ADR-0005「独立 PlannerAgent 与自然语言统一入口」。
 
 复合意图分解出的每个步骤，必须携带执行所需的全部参数（字段名、数据来源、目标位置）。Handler 接收显式参数执行，不从用户原文猜测，不依赖隐式 session 状态推断参数。
 
 **分层职责**：
-- **理解层（RouterAgent）**：读懂用户意图 + 感知 session 状态，做 Synthesis（综合判断），产出自包含的步骤计划（含参数）
-- **校验层（纯代码）**：计划格式校验 + 参数语义校验（对照 session），失败时不执行而追问用户
-- **执行层（handler）**：接收显式参数，只管执行 + 自验证结果
+- **事实层（SessionFacts）**：集中投影 session 状态，不暴露敏感值
+- **理解层（PlannerAgent）**：读懂用户意图，产出自包含的类型化步骤计划
+- **执行层（PlanExecutor）**：集中校验、依赖解析、步骤推进和执行后验证
+- **适配层（StepAdapter）**：接收类型化参数，只负责调用专业 Agent 或领域函数
+- **渲染层（Renderer）**：只消费决策或 ExecutionReport，统一输出一次汇总
 
-**反模式（禁止）**：把用户原文整句透传给执行层，让 handler 用正则/隐式状态自行抠参。这等同于把理解工作外包给执行器，是 #15 bug 的根因。
+**反模式（禁止）**把用户原文整句透传给执行层，让 handler 用正则/隐式状态自行抠参。这等同于把理解工作外包给执行器，是 #15 bug 的根因。

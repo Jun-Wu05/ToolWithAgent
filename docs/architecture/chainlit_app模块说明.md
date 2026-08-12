@@ -21,8 +21,7 @@
 | settings_handler.py | ~180 | 模型设置更新 |
 | message_router.py | ~30 | 消息路由分发 |
 | upload_handlers.py | ~250 | 文件上传处理 |
-| user_message_handlers.py | ~230 | 用户文本消息处理 |
-| log_parser_handler.py | ~120 | 日志解析 Pipeline |
+| user_message_handlers.py | ~140 | Planner、PlanExecutor 与 Renderer 的薄编排 |
 | action_callbacks.py | ~250 | Action 回调 |
 | utils.py | ~150 | 纯辅助函数 |
 | global_state.py | ~30 | 全局状态管理 |
@@ -44,53 +43,44 @@
 @cl.on_message 分发：文件 → upload_handlers，文本 → user_message_handlers
 
 ### 2.5 upload_handlers.py
-文件上传处理：威胁/枚举模式隔离、Excel 检测、Base64 解码
+文件上传处理：Excel 类型检测、Base64 解码和 SessionFacts 所需状态建立
 
 ### 2.6 user_message_handlers.py
-用户文本处理：意图检测、分流、分批映射、LLM 调用重试
+用户文本处理：调用 Planner 一次、执行类型化计划并统一渲染报告
 
-### 2.7 log_parser_handler.py
-日志解析 Pipeline：格式识别 → 特征分类 → 样例填充 → 结果渲染
+### 2.7 action_callbacks.py
+确定性事件适配：业务按钮构造 StepSpec 并复用 PlanExecutor；Excel 展示导出不改变领域状态
 
-### 2.8 action_callbacks.py
-9 个 Action 回调：确认填充、导出规则、标准字段映射等
-
-### 2.9 utils.py
+### 2.8 utils.py
 纯辅助函数：JSON 解析、结果渲染、Excel 检测（无 Chainlit 依赖）
 
-### 2.10 global_state.py
+### 2.9 global_state.py
 全局状态管理：Agno 日志桥接标志
 
 ---
 
 ## 3. 调用关系
 
+```text
+用户 → chainlit_app.py → message_router.py
+  ├─ 文件 → file_handlers.py → SessionFacts
+  └─ 文本 → user_message_handlers.py → PlannerAgent → PlanExecutor
+按钮 → action_callbacks.py → StepSpec → PlanExecutor
+PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.py
 ```
-用户 → chainlit_app.py
-  ├─ start → start_handler.py
-  ├─ settings → settings_handler.py
-  └─ message → message_router.py
-      ├─ 文件 → upload_handlers.py
-      └─ 文本 → user_message_handlers.py
-          ├─ 日志解析 → log_parser_handler.py
-          └→ utils.py
-Action → action_callbacks.py → utils.py
-```
-
-**特点**：新模块之间低耦合，避免循环依赖
 
 ---
 
 ## 4. 数据流
 
 ### 文件上传
-用户上传 → message_router → upload_handlers → file_handler → session
+用户上传 → 文件类型识别/解码 → 更新 SessionState → SessionFacts 投影
 
 ### 用户文本
-用户输入 → message_router → user_message_handlers → 意图检测 → handler → llm_client → response_handler
+用户输入 → PlannerAgent → PlanDecision → PlanExecutor → StepAdapter → 一次汇总
 
 ### 日志解析
-"日志解析" → user_message_handlers → log_parser_handler → 格式识别 → 特征分类 → 渲染
+类型化 LogParseStep → ProfessionalAgentAdapter → 日志 Pipeline → log_classification
 
 ---
 
@@ -99,7 +89,7 @@ Action → action_callbacks.py → utils.py
 1. **扁平化**：所有新文件直接放在 `web/` 目录下
 2. **避免循环依赖**：新模块之间不互相导入
 3. **会话类型统一**：使用 `SessionState` 数据类
-4. **向后兼容**：不修改已有模块
+4. **失败关闭**：Planner 或步骤校验失败时不回退关键词路由
 5. **职责单一**：每个模块职责明确
 
 ---
