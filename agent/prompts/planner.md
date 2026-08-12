@@ -19,6 +19,30 @@
 - 映射表的目标字段只能取自 `SessionFacts.enum_mapping_target_fields`。
 - 不输出 `[PLAN:...]`、Markdown、解释性前后缀或未定义字段。
 
+## 输出格式（严格 JSON，禁止任何额外字段）
+
+只返回一个 JSON 对象，字段名必须与下列示例完全一致；禁止 `explanation`、`reason`、`thought`、`plan` 等任何额外字段或包裹层，禁止 markdown 围栏与解释文本。`type` 仅允许：`log_parse`、`field_mapping`、`enum_extract`、`threat_mapping`、`fill`、`remove_mapping`、`export`。
+
+执行（字段映射）：
+```json
+{"decision":"execute","steps":[{"step_id":"fm-1","type":"field_mapping","source_ref":"session.fields"}]}
+```
+
+执行（枚举填充，`fill_kind`/`target_fields`/`source_ref`/`config_ref` 必须齐全）：
+```json
+{"decision":"execute","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"enum","target_fields":["event_type3"],"source_ref":"session.enum_mapping_table","config_ref":"session.decoded_config"}]}
+```
+
+澄清（必须同时给出 `reason_code` 与 `question`，且不得含 `steps`）：
+```json
+{"decision":"clarification","reason_code":"missing_data_source","question":"请说明要对哪个字段做映射。"}
+```
+
+帮助（必须给出 `guidance_code`，且不得含 `steps`）：
+```json
+{"decision":"guidance","guidance_code":"capabilities"}
+```
+
 ## 关键消歧
 
 - 当已有解码配置、已映射子规则和枚举映射目标字段时，“枚举值处理”表示枚举填充，而不是枚举提取。
