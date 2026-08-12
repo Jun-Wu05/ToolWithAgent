@@ -89,7 +89,7 @@ class TestFillAction:
     """填充动作识别：返回 fill 交 fill_dispatcher。"""
 
     def test_fill_returns_fill(self):
-        """'填充到xxx' → fill"""
+        """'填充到xxx' → fill（单意图填充走快路径）"""
         session = FakeSession(mapped_sub_rules=[{"name": "test"}])
         intent, _ = detect_intent("填充到alarm_category里", session)
         assert intent == "fill"
@@ -99,6 +99,24 @@ class TestFillAction:
         session = FakeSession()
         intent, _ = detect_intent("填充到event_type1", session)
         assert intent == "fill"
+
+    def test_fill_composite_not_truncated(self):
+        """复合意图含'填充'不得被截断为 fill（#26 回归）。
+
+        '攻击类型枚举值提取出来，进行威胁类型映射后填充回去输出'
+        命中 enum_domain + threat + fill = 3 域 → 应走 general 交 RouterAgent。
+        """
+        session = FakeSession()
+        intent, _ = detect_intent(
+            "攻击类型枚举值提取出来，进行威胁类型映射后填充回去输出", session
+        )
+        assert intent == "general", f"复合意图应走 general，实际: {intent}"
+
+    def test_threat_fill_composite_not_truncated(self):
+        """威胁+填充复合意图 → general（不被 fill 截断）。"""
+        session = FakeSession()
+        intent, _ = detect_intent("威胁类型映射后填充到alarm_category里", session)
+        assert intent == "general", f"威胁+填充复合意图应走 general，实际: {intent}"
 
 
 # ============================================================

@@ -77,11 +77,8 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
         if user_session.get("enum_fill_mode", False):
             return "enum", "enum_fill_mode 开启，强制 enum"
 
-    # 填充动作识别 → fill_dispatcher
-    if any(p in lower for p in ("填充到", "填充", "填入", "填到")):
-        return "fill", "填充动作，交 fill_dispatcher 决定类型"
-
-    # 基础子串匹配
+    # 基础子串匹配（所有域同时检测，含填充域）
+    is_fill = any(p in lower for p in ("填充到", "填充", "填入", "填到"))
     is_enum_extract = any(kw in lower for kw in ENUM_EXTRACT_KEYWORDS)
     is_threat = any(kw in lower for kw in THREAT_KEYWORDS)
     is_mapping = any(kw in lower for kw in MAPPING_KEYWORDS)
@@ -91,14 +88,16 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
     # 枚举提取和枚举是同一操作域，合并为一个标志
     is_enum_domain = is_enum_extract or is_enum
 
-    # 统计命中的意图域数量（枚举域算一个，用于判断是否多域冲突）
-    hit_count = sum([is_enum_domain, is_threat, is_mapping, is_log_parser])
+    # 统计命中的意图域数量（含填充域，用于判断是否多域冲突）
+    hit_count = sum([is_enum_domain, is_threat, is_mapping, is_log_parser, is_fill])
 
-    # 多关键词冲突 → 交 RouterAgent 消歧（不再有 ambiguous）
+    # 多关键词冲突 → 交 RouterAgent 消歧（含填充的复合意图不得被截断 #26）
     if hit_count > 1:
         return "general", f"多关键词冲突（{hit_count}个），交 RouterAgent 语义判断"
 
     # 单关键词域命中 → 快路径
+    if is_fill:
+        return "fill", "填充动作，交 fill_dispatcher 决定类型"
     if is_enum_extract:
         return "enum", "命中枚举提取关键词"
     if is_threat:
@@ -109,7 +108,6 @@ def detect_intent(user_text: str, user_session=None) -> tuple:
         return "enum", "命中枚举关键词"
     if is_log_parser:
         return "log_parser", "命中日志解析关键词"
-    # 无关键词 → RouterAgent
 
     # 无关键词 → RouterAgent
     return "general", "无关键词命中，走通用路由"

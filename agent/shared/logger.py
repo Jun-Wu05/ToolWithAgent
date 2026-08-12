@@ -145,14 +145,15 @@ def get_logger(name: str = "agent") -> logging.Logger:
     return logger
 
 
-def initialize_log_retention(log_dir: Optional[Path] = None, keep_count: int = 3) -> None:
+def initialize_log_retention(log_dir: Optional[Path] = None, keep_count: int = 2) -> None:
     """应用启动时清理旧日志（主日志与错误日志分别保留）。
 
     幂等：重复调用安全。应在应用入口（chainlit_app.py）启动时调用一次。
+    默认 keep_count=2：保留当前运行 + 上一次运行（用于对比调试）。
 
     Args:
         log_dir: 日志目录，默认为 agent/logs/
-        keep_count: 每类日志保留的文件数
+        keep_count: 每类日志保留的文件数（默认 2：当前 + 上一次）
     """
     if log_dir is None:
         log_dir = Path(__file__).parent.parent / "logs"
