@@ -119,6 +119,18 @@ def test意图冲突返回澄清且不调用执行器(monkeypatch):
     assert rendered == ["clarification"]
 
 
+def test帮助决策不调用执行器(monkeypatch):
+    """新手帮助返回 guidance，Planner 调用一次但不进入 PlanExecutor（回归 #42）。"""
+    decision = PlanDecision(decision="guidance", guidance_code="capabilities")
+
+    planner, events, rendered = _run(monkeypatch, decision, user_text="你能做什么")
+
+    assert planner.calls == 1
+    assert events == ["planner"]
+    assert FakeExecutor.calls == 0
+    assert rendered == ["guidance"]
+
+
 def testplanner不可用时不走关键词或router兜底(monkeypatch):
     decision = PlanDecision(
         decision="clarification",
