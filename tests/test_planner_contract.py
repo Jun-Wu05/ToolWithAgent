@@ -32,6 +32,19 @@ def test_session_facts只暴露规划所需事实():
     assert "sensitive-payload" not in dumped
 
 
+def test系统元字段不进入字段映射输入():
+    """original_log/日志类型 是系统元字段，必须从 available_fields 排除，不送给映射模型。"""
+    from web.session_facts import build_session_facts
+
+    facts = build_session_facts(
+        {"decoded_fields": ["original_log", "日志类型", "src_ip", "event_type3"]}
+    )
+
+    assert "original_log" not in facts.available_fields
+    assert "日志类型" not in facts.available_fields
+    assert facts.available_fields == ("src_ip", "event_type3")
+
+
 def test_fill步骤必须显式声明目标字段和来源():
     from web.planner_models import PlanDecision
 
