@@ -338,6 +338,245 @@ def test字段映射通过异步事件流并发执行三个批次(monkeypatch):
     assert member.max_active_calls == 3
     assert [row.original_field for row in result.artifact.mappings] == fields
 
+
+class _BackfillMappingMember:
+    """主批次（多字段）漏掉指定字段，补查（单字段）时返回，模拟 LLM 漏字段后补查成功。"""
+
+    name = "FieldMappingAgent"
+
+    def __init__(self, drop_field: str) -> None:
+        self.drop_field = drop_field
+        self.call_count = 0
+
+    async def arun(self, model_input, *, stream, stream_events):
+        import re
+
+        self.call_count += 1
+        match = re.search(r"字段列表（.*?）：\n(\[.*?\])", model_input, re.S)
+        fields = json.loads(match.group(1))
+        if len(fields) > 1:
+            fields = [field for field in fields if field != self.drop_field]
+        mappings = [
+            {"原始字段名": field, "系统属性名称": f"标准_{field}", "匹配状态": "匹配成功"}
+            for field in fields
+        ]
+        yield SimpleNamespace(event="RunCompleted", content=json.dumps(mappings, ensure_ascii=False))
+
+
+def test字段映射漏字段时补查缺失项后成功(monkeypatch):
+    """模型在主批次漏 1 个字段时，补查该字段并合并，整步仍成功（回归 #48）。"""
+    import web.input_builder as input_builder
+
+    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    fields = [f"field_{index:02d}" for index in range(26)]
+    member = _BackfillMappingMember(drop_field="field_01")
+    step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
+    adapter = ProfessionalAgentAdapter(
+        _Team(member),
+        mapping_policy=FieldMappingExecutionPolicy(
+            batch_size=25,
+            max_concurrency=3,
+            timeout_seconds=1,
+            max_retries=0,
+            retry_delay_seconds=0,
+            backfill_max_attempts=2,
+        ),
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(
+                session={"decoded_fields": fields},
+                session_facts=build_session_facts({"decoded_fields": fields}),
+            ),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.artifact.item_count == 26
+    assert [row.original_field for row in result.artifact.mappings] == fields
+    backfilled = next(row for row in result.artifact.mappings if row.original_field == "field_01")
+    assert backfilled.standard_field == "标准_field_01"
+    assert backfilled.match_status == "匹配成功"
+
+
+class _AlwaysDroppingMappingMember:
+    """总是漏掉指定字段（补查也漏），验证兜底为「未匹配」而非整步失败。"""
+
+    name = "FieldMappingAgent"
+
+    def __init__(self, drop_field: str) -> None:
+        self.drop_field = drop_field
+        self.call_count = 0
+
+    async def arun(self, model_input, *, stream, stream_events):
+        import re
+
+        self.call_count += 1
+        match = re.search(r"字段列表（.*?）：\n(\[.*?\])", model_input, re.S)
+        fields = json.loads(match.group(1))
+        fields = [field for field in fields if field != self.drop_field]
+        mappings = [
+            {"原始字段名": field, "系统属性名称": f"标准_{field}", "匹配状态": "匹配成功"}
+            for field in fields
+        ]
+        yield SimpleNamespace(event="RunCompleted", content=json.dumps(mappings, ensure_ascii=False))
+
+
+def test字段映射补查仍缺时兜底未匹配(monkeypatch):
+    """补查 backfill_max_attempts 次仍漏字段时，该字段兜底为「未匹配」，整步仍成功。"""
+    import web.input_builder as input_builder
+
+    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    member = _AlwaysDroppingMappingMember(drop_field="lonely")
+    step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
+    adapter = ProfessionalAgentAdapter(
+        _Team(member),
+        mapping_policy=FieldMappingExecutionPolicy(
+            batch_size=25,
+            max_concurrency=3,
+            timeout_seconds=1,
+            max_retries=0,
+            retry_delay_seconds=0,
+            backfill_max_attempts=2,
+        ),
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(
+                session={"decoded_fields": ["lonely"]},
+                session_facts=build_session_facts({"decoded_fields": ["lonely"]}),
+            ),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.artifact.item_count == 1
+    row = result.artifact.mappings[0]
+    assert row.original_field == "lonely"
+    assert row.standard_field == "未匹配"
+    assert row.match_status == "未匹配"
+    # 主调用 1 次 + 补查 2 次 = 3 次
+    assert member.call_count == 3
+
+
+class _ReorderedMappingMember:
+    """返回全部字段但乱序，验证不再因顺序不一致而误判失败。"""
+
+    name = "FieldMappingAgent"
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def arun(self, model_input, *, stream, stream_events):
+        import re
+
+        self.call_count += 1
+        match = re.search(r"字段列表（.*?）：\n(\[.*?\])", model_input, re.S)
+        fields = json.loads(match.group(1))
+        mappings = [
+            {"原始字段名": field, "系统属性名称": f"标准_{field}", "匹配状态": "匹配成功"}
+            for field in reversed(fields)
+        ]
+        yield SimpleNamespace(event="RunCompleted", content=json.dumps(mappings, ensure_ascii=False))
+
+
+def test字段映射乱序返回不再判为失败(monkeypatch):
+    """旧校验对返回顺序敏感会误判失败；现按集合归一、按输入顺序输出。"""
+    import web.input_builder as input_builder
+
+    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    fields = ["alpha", "beta", "gamma"]
+    member = _ReorderedMappingMember()
+    step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
+    adapter = ProfessionalAgentAdapter(
+        _Team(member),
+        mapping_policy=FieldMappingExecutionPolicy(
+            batch_size=25,
+            max_concurrency=3,
+            timeout_seconds=1,
+            max_retries=0,
+            retry_delay_seconds=0,
+            backfill_max_attempts=0,
+        ),
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(
+                session={"decoded_fields": fields},
+                session_facts=build_session_facts({"decoded_fields": fields}),
+            ),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert [row.original_field for row in result.artifact.mappings] == fields
+    assert member.call_count == 1
+
+
+class _DuplicateMappingMember:
+    """把首个字段重复返回一次，验证去重（保留首条）且不失败。"""
+
+    name = "FieldMappingAgent"
+
+    async def arun(self, model_input, *, stream, stream_events):
+        import re
+
+        match = re.search(r"字段列表（.*?）：\n(\[.*?\])", model_input, re.S)
+        fields = list(json.loads(match.group(1)))
+        if fields:
+            fields.append(fields[0])
+        mappings = [
+            {"原始字段名": field, "系统属性名称": f"标准_{field}", "匹配状态": "匹配成功"}
+            for field in fields
+        ]
+        yield SimpleNamespace(event="RunCompleted", content=json.dumps(mappings, ensure_ascii=False))
+
+
+def test字段映射重复字段去重后不失败(monkeypatch):
+    """模型把某字段重复返回时去重，整步成功且数量与输入一致。"""
+    import web.input_builder as input_builder
+
+    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    fields = ["alpha", "beta"]
+    member = _DuplicateMappingMember()
+    step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
+    adapter = ProfessionalAgentAdapter(
+        _Team(member),
+        mapping_policy=FieldMappingExecutionPolicy(
+            batch_size=25,
+            max_concurrency=3,
+            timeout_seconds=1,
+            max_retries=0,
+            retry_delay_seconds=0,
+            backfill_max_attempts=0,
+        ),
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(
+                session={"decoded_fields": fields},
+                session_facts=build_session_facts({"decoded_fields": fields}),
+            ),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.artifact.item_count == 2
+    assert [row.original_field for row in result.artifact.mappings] == ["alpha", "beta"]
+
+
 class _TimeoutMappingMember:
     """模拟永不在超时前完成的专业 Agent。"""
 

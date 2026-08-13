@@ -56,6 +56,7 @@ class FieldMappingExecutionPolicy:
     timeout_seconds: float = 90.0
     max_retries: int = 1
     retry_delay_seconds: float = 2.0
+    backfill_max_attempts: int = 2
 
 
 class FieldMappingBatchError(RuntimeError):
@@ -528,6 +529,122 @@ class ProfessionalAgentAdapter:
             EnumValuesArtifact(values=tuple(str(value) for value in values), item_count=len(values)),
         )
 
+    async def _backfill_field_mapping_rows(
+        self,
+        batch_rows: list[dict[str, Any]],
+        fields_batch: list[str],
+        context: ExecutionContext,
+        step: FieldMappingStep,
+        batch_number: int,
+        total_batches: int,
+    ) -> list[dict[str, Any]]:
+        """补齐模型漏掉的字段，仍缺失则兜底为「未匹配」，避免单字段缺失作废整步。
+
+        模型在 25 字段大 batch 上常漏 1～2 个字段（如线上 24/25）。这里先按字段名
+        去重归集、忽略批次外字段，再对缺失字段单独补查（重试 backfill_max_attempts
+        次），最后仍缺的标记「未匹配」。返回值严格按 fields_batch 顺序、数量一致，
+        原始字段名归一为输入名，顺带消除了旧校验对返回顺序的敏感。
+        """
+        from web.input_builder import build_batch_llm_input
+        from web.parsers import parse_json_mapping_result
+
+        policy = self._mapping_policy
+        fields_set = set(fields_batch)
+
+        # 按字段名归集模型返回；键以 strip 后比对以容忍首尾空白漂移。
+        covered: dict[str, dict[str, Any]] = {}
+        duplicate_count = 0
+        extra_count = 0
+        for row in batch_rows:
+            name = str(row.get("原始字段名", "")).strip()
+            if not name:
+                continue
+            if name not in fields_set:
+                extra_count += 1
+                continue
+            if name in covered:
+                duplicate_count += 1
+                continue
+            covered[name] = row
+
+        missing = [field for field in fields_batch if field not in covered]
+        for attempt in range(policy.backfill_max_attempts):
+            if not missing:
+                break
+            logger.info(
+                "[BATCH_BACKFILL] 补查缺失字段: plan_id=%s step_id=%s batch=%s/%s "
+                "attempt=%s missing_count=%s",
+                context.plan_id,
+                step.step_id,
+                batch_number,
+                total_batches,
+                attempt + 1,
+                len(missing),
+            )
+            try:
+                backfill_input = await asyncio.to_thread(
+                    build_batch_llm_input,
+                    "补查标准字段映射",
+                    context.session,
+                    missing,
+                    batch_number,
+                    total_batches,
+                )
+                content = await asyncio.wait_for(
+                    self._run_member(
+                        "FieldMappingAgent",
+                        backfill_input,
+                        plan_id=context.plan_id,
+                        step_id=step.step_id,
+                        batch_number=batch_number,
+                    ),
+                    timeout=policy.timeout_seconds,
+                )
+            except Exception as error:
+                logger.warning(
+                    "[BATCH_BACKFILL] 补查调用失败，停止补查并兜底未匹配: "
+                    "plan_id=%s step_id=%s batch=%s/%s error_category=%s remaining_count=%s",
+                    context.plan_id,
+                    step.step_id,
+                    batch_number,
+                    total_batches,
+                    type(error).__name__,
+                    len(missing),
+                )
+                break
+            for row in parse_json_mapping_result(content):
+                name = str(row.get("原始字段名", "")).strip()
+                if not name or name not in fields_set or name in covered:
+                    continue
+                covered[name] = row
+            missing = [field for field in fields_batch if field not in covered]
+
+        # 仍缺失的字段兜底为「未匹配」，保证每个输入字段都有结果，避免整步作废。
+        fallback_count = 0
+        for field in missing:
+            covered[field] = {
+                "原始字段名": field,
+                "系统属性名称": "未匹配",
+                "匹配状态": "未匹配",
+            }
+            fallback_count += 1
+
+        if duplicate_count or extra_count or fallback_count:
+            logger.warning(
+                "[BATCH_NORMALIZED] 批次结果归一化: plan_id=%s step_id=%s batch=%s/%s "
+                "duplicate_count=%s extra_count=%s fallback_count=%s",
+                context.plan_id,
+                step.step_id,
+                batch_number,
+                total_batches,
+                duplicate_count,
+                extra_count,
+                fallback_count,
+            )
+
+        # 按 fields_batch 顺序输出，原始字段名归一为输入名，保证下游顺序与数量一致。
+        return [{**covered[field], "原始字段名": field} for field in fields_batch]
+
     async def _execute_field_mapping(
         self,
         step: FieldMappingStep,
@@ -690,13 +807,14 @@ class ProfessionalAgentAdapter:
                             elapsed_seconds=time.monotonic() - model_started_at,
                         )
                         batch_rows = parse_json_mapping_result(content)
-                        returned_fields = [str(row.get("原始字段名", "")) for row in batch_rows]
-                        if returned_fields != fields_batch:
-                            raise FieldMappingBatchError(
-                                batch_number,
-                                "field_mapping_incomplete",
-                                f"第 {batch_number} 批字段映射结果与输入字段不一致",
-                            )
+                        batch_rows = await self._backfill_field_mapping_rows(
+                            batch_rows,
+                            fields_batch,
+                            context,
+                            step,
+                            batch_number,
+                            total_batches,
+                        )
                         logger.info(
                             "[BATCH_END] 字段映射批次完成: plan_id=%s step_id=%s batch=%s/%s "
                             "field_count=%s elapsed_seconds=%.3f",
