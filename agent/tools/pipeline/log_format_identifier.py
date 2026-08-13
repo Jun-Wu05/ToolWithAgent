@@ -25,6 +25,59 @@ from agent.tools.pipeline.llm_client import (
 logger = get_logger("log_parser_pipeline")
 
 
+def _strip_bodies(sampled: list[str], header_end_marker: str) -> list[str]:
+    """按 header_end_marker 剥离日志头，返回每行的 body 文本。"""
+    from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
+    if not header_end_marker:
+        return list(sampled)
+    return [strip_header_to_body(line, header_end_marker, is_json=False) for line in sampled]
+
+
+def _enforce_format_consistency(parsed: dict, sampled: list[str]) -> None:
+    """确定性一致性校验：LLM 报 JSON 但 body 无 JSON 对象、却呈 KV 结构时纠正为 KV。
+
+    避免 RFC5424 syslog 头 + KV body（如 ``msg_type="x" host_ip="y"``）被 LLM 误判为
+    「日志头+JSON」，导致 Step 2 走 JSON 聚合路径 matched=0。只在 body 确实不含
+    ``{...}`` 且多数采样行像 key=value 对时才纠正；真正的 JSON 不受影响。
+    """
+    from agent.tools.pipeline.common.json_utils import extract_json_body
+    from agent.tools.pipeline.extractors.kv_extractor import _DEFAULT_KV_PATTERN
+
+    if parsed.get("format") != "JSON":
+        return
+    header_end_marker = parsed.get("header_end_marker", "") or ""
+    # sample_logs 返回换行拼接的字符串，按行拆分后再剥离日志头。
+    sampled_lines = [line for line in str(sampled).splitlines() if line.strip()]
+    bodies = _strip_bodies(sampled_lines, header_end_marker)
+    # 任一采样行含真实 JSON 对象 → 认可 LLM 的 JSON 判定，不纠正。
+    if any(extract_json_body(body) for body in bodies):
+        return
+    # body 无 JSON 对象；统计呈 KV 结构（至少一个 key=value 对）的行数。
+    kv_like = sum(1 for body in bodies if _DEFAULT_KV_PATTERN.search(body))
+    if kv_like < max(1, len(bodies) // 2):
+        return
+    # 确定性检测分隔符：键值分隔符（= 或 :），字段分隔符（space / || / ;）。
+    text = " ".join(bodies)
+    tab = ":" if text.count(":") > text.count("=") else "="
+    if "||" in text:
+        delimit = "||"
+    elif text.count(";") >= 2:
+        delimit = ";"
+    else:
+        delimit = "space"
+    parsed["format"] = "KV"
+    parsed["format_detail"] = "日志头+KV" if header_end_marker else "KV"
+    parsed["tab"] = tab
+    parsed["delimit"] = delimit
+    parsed["kv_connector"] = tab
+    parsed["kv_separator"] = delimit
+    logger.warning(
+        "[identify_log_format] 一致性校验：LLM 报 JSON 但 body 无 JSON 对象、"
+        f"呈 KV 结构，纠正为 KV（tab='{tab}', delimit='{delimit}'）"
+    )
+
+
 def _do_identify_log_format(logs_str: str) -> str:
     """采样日志并由 LLM 识别格式类型。
 
@@ -127,6 +180,9 @@ def _do_identify_log_format(logs_str: str) -> str:
         # 归一化 format 字段为枚举值
         parsed["format"] = normalize_log_format(parsed.get("format", "unknown"))
         parsed.setdefault("format_detail", parsed.get("format_detail") or parsed.get("format", ""))
+
+        # 确定性一致性校验：纠正 LLM 误报 JSON（body 实为 KV）的情况
+        _enforce_format_consistency(parsed, sampled)
 
         # 非 JSON 格式标记为不支持
         if parsed["format"] == "unknown":
