@@ -16,7 +16,7 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
         StepStatus,
     )
 
-    captured = {"dataframes": [], "files": [], "message": None}
+    captured = {"dataframes": [], "files": [], "messages": []}
 
     class _FakeMessage:
         """记录发送时的文案与元素。"""
@@ -26,8 +26,9 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
             self.elements = elements or []
 
         async def send(self):
-            captured["message"] = self.content
-            captured["elements"] = self.elements
+            captured["messages"].append(
+                {"content": self.content, "elements": self.elements}
+            )
 
     monkeypatch.setattr(renderer.cl, "Message", _FakeMessage)
     monkeypatch.setattr(
@@ -79,7 +80,7 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
     asyncio.run(renderer.render_execution_report(report))
 
     # 步骤汇总文案仍包含步骤标识
-    assert "fm-1" in captured["message"]
+    assert "fm-1" in captured["messages"][0]["content"]
     # 字段映射产物落表，含全部行（含未匹配）
     assert len(captured["dataframes"]) == 1
     table = captured["dataframes"][0]["data"]
@@ -89,3 +90,9 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
     # 字段映射回填后附 mapped_config 下载，配置导出仍附 config 下载
     file_names = {f["name"] for f in captured["files"]}
     assert file_names == {"plan-mix_mapped_config.txt", "plan-mix_config.txt"}
+    assert len(captured["messages"]) == 2
+    download_message = captured["messages"][1]
+    assert "已回填" in download_message["content"]
+    assert "点击下载" in download_message["content"]
+    assert "plan-mix_mapped_config.txt" in download_message["content"]
+    assert len(download_message["elements"]) == 1
