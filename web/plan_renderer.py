@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import chainlit as cl
 
+from web.parsers import create_dataframe_elements
 from web.planner_models import ConfigExportArtifact, ExecutionReport, PlanDecision, StepStatus
 
 
@@ -21,23 +22,29 @@ async def render_decision(decision: PlanDecision) -> None:
 
 
 async def render_execution_report(execution_report: ExecutionReport) -> None:
-    """只发送一次步骤汇总，并为最终配置产物附加一个下载文件。"""
+    """发送一次步骤汇总；字段映射附映射表，配置导出附下载文件。"""
     status_icon = {
         StepStatus.SUCCESS: "✅",
         StepStatus.NEEDS_INPUT: "💡",
         StepStatus.FAILED: "❌",
     }
     lines = []
-    export_payload = None
+    elements = []
     for result in execution_report.results:
         detail = result.message or result.error_code or result.status.value
         lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
-        if result.artifact and result.artifact.artifact_type == "config_export":
-            export_payload = result.artifact.content
-    elements = []
-    if export_payload is not None:
-        content = export_payload if isinstance(export_payload, bytes) else str(export_payload).encode("utf-8")
-        elements.append(cl.File(name=f"{execution_report.plan_id}_config.txt", content=content, mime="text/plain"))
+        artifact = result.artifact
+        if artifact is None:
+            continue
+        if artifact.artifact_type == "config_export":
+            content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
+            elements.append(
+                cl.File(name=f"{execution_report.plan_id}_config.txt", content=content, mime="text/plain")
+            )
+        elif artifact.artifact_type == "field_mapping":
+            # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
+            rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
+            elements.extend(create_dataframe_elements(rows))
     await cl.Message(
         content=f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
         elements=elements,
