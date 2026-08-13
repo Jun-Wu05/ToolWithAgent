@@ -18,6 +18,9 @@ from agno.models.deepseek import DeepSeek
 from dotenv import load_dotenv
 load_dotenv()
 
+# 这些模型默认思考会把结构化输出留在 reasoning_content，导致 content 为空。
+_THINKING_DISABLED_MODELS = frozenset({"deepseek-v4-flash", "deepseek-v4-pro"})
+
 logger = logging.getLogger("model_config")
 
 
@@ -130,6 +133,10 @@ class ModelConfig:
         key = api_key or ModelConfig.get_api_key()
         current_provider = provider or ModelConfig.get_provider()
 
+        model_options = {}
+        if model_id in _THINKING_DISABLED_MODELS:
+            model_options["extra_body"] = {"thinking": {"type": "disabled"}}
+
         if current_provider == "deepseek":
             if not key:
                 raise ValueError("请设置环境变量 DEEPSEEK_API_KEY")
@@ -138,13 +145,26 @@ class ModelConfig:
                 "https://api.deepseek.com"
             )
             logger.info(f"[MODEL] 使用 DeepSeek 原生 API, model={model_id}")
-            return DeepSeek(id=model_id, api_key=key, base_url=base_url)
+            return DeepSeek(
+                id=model_id,
+                api_key=key,
+                base_url=base_url,
+                timeout=90.0,
+                max_retries=0,
+                **model_options,
+            )
 
         # 默认 siliconflow
         if not key:
             raise ValueError("请设置环境变量 SILICONFLOW_API_KEY 或 DEEPSEEK_API_KEY")
         logger.info(f"[MODEL] 使用 SiliconFlow API, model={model_id}")
-        return Siliconflow(id=model_id, api_key=key)
+        return Siliconflow(
+            id=model_id,
+            api_key=key,
+            timeout=90.0,
+            max_retries=0,
+            **model_options,
+        )
 
     @staticmethod
     def get_main_model() -> Union[Siliconflow, DeepSeek]:

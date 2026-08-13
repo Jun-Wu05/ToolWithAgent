@@ -64,7 +64,7 @@ def content_to_str(result_content: Any) -> str:
     - Pydantic v1 对象（有 dict，无 model_dump）：dict() → json.dumps(ensure_ascii=False)
     - 其他对象：str() 兜底
 
-    用于替代 llm_client / response_handler / user_message_handlers 中分散的
+    用于替代历史调用链中分散的
     Pydantic→str 转换，避免 output_schema 返回的 Pydantic 对象在字符串操作
     （如 'xxx' in content）上抛 TypeError。
 
@@ -77,9 +77,9 @@ def content_to_str(result_content: Any) -> str:
     """
     if isinstance(result_content, str):
         return result_content
-    if hasattr(result_content, "model_dump"):          # Pydantic v2
+    if hasattr(result_content, "model_dump"):          # 兼容 Pydantic v2
         return json.dumps(result_content.model_dump(), ensure_ascii=False)
-    if hasattr(result_content, "dict"):                # Pydantic v1
+    if hasattr(result_content, "dict"):                # 兼容 Pydantic v1
         return json.dumps(result_content.dict(), ensure_ascii=False)
     return str(result_content)
 

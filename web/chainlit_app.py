@@ -19,8 +19,7 @@
   - web/message_router.py       @cl.on_message 路由分发
   - web/upload_handlers.py      文件上传处理
   - web/user_message_handlers.py 用户文本消息处理
-  - web/log_parser_handler.py   日志解析 Pipeline
-  - web/action_callbacks.py     9个 Action 回调
+  - web/action_callbacks.py     确定性事件适配
   - web/utils.py                纯辅助函数
   - web/global_state.py         全局状态管理
 """

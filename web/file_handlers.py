@@ -1,12 +1,7 @@
-"""
-Chainlit 文件上传处理器 - 从 chainlit_app.py 提取
+"""Chainlit 文件事件适配层。
 
-本模块处理所有文件上传场景：
-- 威胁填充模式
-- 枚举填充模式
-- Excel 枚举映射表检测
-- Excel 数据表格解析
-- Base64 / TXT 解码
+文件上传只解析内容并建立结构化会话事实；不得执行自然语言意图判断，
+也不得开启会劫持下一条消息的填充状态。
 """
 
 import chainlit as cl
@@ -24,8 +19,6 @@ from web.file_handler import (
     build_simplified_data,
     get_element_file_name,
 )
-from web.threat_handler import execute_threat_fill
-from web.enum_handler import execute_enum_fill
 from agent.tools.enum_field_tool import get_enum_preview
 from web.parsers import create_dataframe_elements
 
@@ -43,59 +36,10 @@ except ImportError:
 
 
 async def handle_file_upload(user_session, element):
-    """
-    处理文件上传 — 委托给各 handler
-    
-    职责：
-    1. 检测威胁/枚举填充模式并分流
-    2. 检测 Excel 枚举映射表 vs 数据表格
-    3. 解码 Base64/TXT 内容
-    4. 更新会话状态
-    
-    Args:
-        user_session: 用户会话状态（SessionState 实例或 dict）
-        element: Chainlit 上传的文件元素
-    """
+    """解析上传文件并更新会话事实，不直接触发业务执行。"""
     try:
         # 获取文件内容（委托 file_handler）
         file_content = read_element_content(element)
-
-        # ========== 威胁填充模式状态隔离 ==========
-        if user_session.get("threat_fill_mode", False):
-            mapping_table = user_session.get("threat_mapping_table")
-
-            if not mapping_table:
-                await cl.Message(content="❌ 威胁映射表格丢失，请重新执行威胁类型映射").send()
-                user_session["threat_fill_mode"] = False
-                return
-
-            # 检查是否已有目标字段名
-            target_field = user_session.get("threat_target_field")
-
-            if target_field:
-                logger.info("[FILE_UPLOAD] 威胁填充模式，有字段名，直接执行填充")
-                await execute_threat_fill(user_session, file_content)
-            else:
-                logger.info("[FILE_UPLOAD] 威胁填充模式，无字段名，保存文件到 pending_base64")
-                user_session["pending_base64"] = file_content
-                await cl.Message(
-                    content="📁 **Base64 文件已上传！**\n\n请在下方发送目标字段名（如：original_log）来完成填充。"
-                ).send()
-
-            return
-
-        # ========== 枚举填充模式状态隔离 ==========
-        if user_session.get("enum_fill_mode", False):
-            enum_excel_path = user_session.get("enum_excel_path")
-
-            if not enum_excel_path:
-                await cl.Message(content="❌ 枚举映射表路径丢失，请重新上传Excel映射表").send()
-                user_session["enum_fill_mode"] = False
-                return
-
-            logger.info("[FILE_UPLOAD] 枚举填充模式，执行枚举填充")
-            await execute_enum_fill(user_session, file_content)
-            return
 
         # ========== 检测 Excel 枚举映射表 ==========
         file_name = getattr(element, 'name', '') or ''
@@ -231,10 +175,10 @@ async def handle_file_upload(user_session, element):
 def is_enum_mapping_excel(excel_path: str) -> bool:
     """
     通过列头判断 Excel 是否为枚举映射表（而非数据表格）。
-    
+
     Args:
         excel_path: Excel 文件路径
-    
+
     Returns:
         True 如果列头匹配枚举映射表关键词，False 表示是普通数据表格
     """
@@ -262,7 +206,7 @@ def is_enum_mapping_excel(excel_path: str) -> bool:
 async def _handle_excel_data_table(excel_path: str, file_name: str, user_session):
     """
     处理 Excel 数据表格（非枚举映射表）
-    
+
     Args:
         excel_path: Excel 文件路径
         file_name: 文件名
@@ -274,14 +218,14 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
         if df.empty:
             await cl.Message(content=f"⚠️ Excel 文件 `{file_name}` 为空，无法读取数据。").send()
             return
-        
+
         # 将 DataFrame 转为结构化数据，填入 user_session（与 Base64 解码流程对齐）
         records = df.fillna("").to_dict(orient="records")
         fields = list(df.columns)
-        # original_log 必须是字符串列表（enum_handler 中使用 '\n'.join() 拼接）
+        # original_log 必须是字符串列表，供类型化枚举与日志步骤稳定拼接。
         original_log = [json.dumps(r, ensure_ascii=False) for r in records]
         decoded_text = df.to_string(index=False)
-        
+
         # 保存到会话（SessionState dict 兼容层支持 [] 赋值）
         user_session["original_log"] = original_log
         user_session["decoded_data"] = records
@@ -297,7 +241,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
 
         # 注意：数据表格不是枚举映射表，不应覆盖 enum_excel_path
         # （enum_excel_path 仅由真正的枚举映射表上传设置，见 handle_file_upload 枚举表检测段）
-        
+
         # 检测"原始日志"列并预提取，供 LogParserAgent 精简输入使用
         # CHANGED: 替换单元格内的换行符为空格，防止单条日志被拆散成多行碎片
         raw_log_lines = None
@@ -324,7 +268,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
                 user_session["raw_log_lines"] = raw_log_lines
                 logger.info(f"[FILE_UPLOAD] 提取\"原始日志\"列({col})：{len(raw_log_lines)} 行")
                 break
-        
+
         await cl.Message(
             content=f"📊 已读取 Excel 文件 `{file_name}`\n\n"
                     f"📊 **行数**：{len(df)} 行\n"
@@ -334,7 +278,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
                     + (f"\n📊 **原始日志**：{len(raw_log_lines)} 行" if raw_log_lines else "")
         ).send()
         logger.info(f"[FILE_UPLOAD] Excel 数据表格读取成功：{len(df)} 行 × {len(fields)} 列")
-        
+
     except ImportError:
         logger.error("[FILE_UPLOAD] pandas 未安装，无法读取 Excel 数据")
         await cl.Message(content="⚠️ 系统缺少 Excel 解析库 (pandas)，请联系管理员。").send()

@@ -106,20 +106,27 @@ def parse_json_mapping_result(content: str) -> list:
                 return False
         # 值逻辑校验：系统属性名称 == "未匹配" 时，匹配状态必须也是"未匹配"
         if item.get("系统属性名称") == "未匹配" and item.get("匹配状态") != "未匹配":
-            logger.warning(f"[PARSER] 自动修正矛盾数据(未匹配状态不一致): {item}")
+            logger.warning("[PARSER] 检测到未匹配状态矛盾并完成自动修正")
             item["匹配状态"] = "未匹配"
         return True
     
-    # 记录原始内容（完整输出）- 移到 Pydantic 处理之前，确保所有情况都能记录
-    logger.info(f"[PARSER] 收到内容:\n{content}")
+    # 只记录内容边界元数据，结构化结果可能包含敏感字段原值。
+    logger.info("[PARSER] 收到模型结果: content_type=%s content_length=%s", type(content).__name__, len(str(content)))
     
-    # CHANGED: 优先处理 Pydantic 对象（output_schema 模式）
+    # 权威结构化输出（FieldMappingList 对象 / dict(items=[]) / list）：模型结构化结果是权威的，
+    # 空列表也表示"模型判定无映射"，直接返回，避免落入字符串兜底而误报"所有方法均解析失败"。
+    # 字段映射输出仅含字段名（不含日志原值），记录原始返回便于排查。
+    _is_structured = (
+        (hasattr(content, "items") and isinstance(getattr(content, "items"), list))
+        or (isinstance(content, dict) and isinstance(content.get("items"), list))
+        or isinstance(content, list)
+    )
     items = _extract_items_from_pydantic(content, "PARSER")
-    if items:
+    if items or _is_structured:
+        logger.debug("[PARSER] 模型原始返回: %s", content)
         valid_result = [item for item in items if validate_item(item)]
-        if valid_result:
-            logger.info(f"[PARSER] Pydantic 对象解析成功，获得 {len(valid_result)} 条有效记录")
-            return valid_result
+        logger.info("[PARSER] Pydantic 对象解析成功，获得 %s 条有效记录", len(valid_result))
+        return valid_result
     
     content_stripped = str(content).strip()  # CHANGED: 使用 str() 确保是字符串
     
@@ -246,8 +253,8 @@ def parse_json_threat_result(content: str) -> list:
             logger.info(f"[THREAT_PARSER] Pydantic 对象解析成功，获得 {len(valid_result)} 条有效记录")
             return valid_result
     
-    # 记录原始内容（完整输出）
-    logger.info(f"[THREAT_PARSER] 收到内容:\n{content}")
+    # 威胁映射结果同样只记录边界元数据，不记录用户提供的原始枚举值。
+    logger.info("[THREAT_PARSER] 收到模型结果: content_type=%s content_length=%s", type(content).__name__, len(str(content)))
     
     # 方法1：去除前后空白后直接尝试解析
     content_stripped = str(content).strip()  # CHANGED: 使用 str() 确保是字符串

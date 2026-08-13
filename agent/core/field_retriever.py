@@ -38,7 +38,7 @@ EMBEDDING_API_URL = "https://api.siliconflow.cn/v1/embeddings"
 EMBEDDING_BATCH_SIZE = 15  # 每次 API 调用最多嵌入 15 个文本（减半，降低服务端单次负载，防 413）
 EMBEDDING_BATCH_SLEEP = 0.3  # 每批请求间隔（秒），防止 API 429 限流（保持不变）
 EMBEDDING_TIMEOUT = 30.0  # 单次 API 调用超时（秒）— 8B 模型批量推理需更长时间，原 10s 易误超时
-EMBEDDING_MAX_RETRIES = 3  # 最多重试次数（+1 次容错）
+EMBEDDING_MAX_RETRIES = 1  # 瞬时故障最多重试一次，避免批处理长时间无反馈
 
 # 相似度阈值：低于此值的候选不返回
 SIMILARITY_THRESHOLD = 0.15
@@ -226,16 +226,7 @@ def _get_api_key() -> Optional[str]:
 
 
 def _call_embedding_api(texts: list[str], retries: int = EMBEDDING_MAX_RETRIES) -> Optional[np.ndarray]:
-    """
-    调用 SiliconFlow Embedding API，返回 (N, 1024) 的 numpy 数组。
-
-    Args:
-        texts: 待嵌入的文本列表
-        retries: 剩余重试次数
-
-    Returns:
-        numpy 数组 or None（API 调用失败）
-    """
+    """调用 Embedding API；只对瞬时故障重试且不记录输入或响应原文。"""
     import requests
 
     api_key = _get_api_key()
@@ -254,6 +245,16 @@ def _call_embedding_api(texts: list[str], retries: int = EMBEDDING_MAX_RETRIES) 
     }
 
     for attempt in range(retries + 1):
+        call_started_at = time.monotonic()
+        response = None
+        logger.info(
+            "[MODEL_CALL_START] Embedding API 调用开始: model=%s input_count=%s "
+            "attempt=%s timeout_seconds=%s",
+            EMBEDDING_MODEL,
+            len(texts),
+            attempt + 1,
+            EMBEDDING_TIMEOUT,
+        )
         try:
             response = requests.post(
                 EMBEDDING_API_URL,
@@ -263,25 +264,74 @@ def _call_embedding_api(texts: list[str], retries: int = EMBEDDING_MAX_RETRIES) 
             )
             response.raise_for_status()
             data = response.json()
-            # API 返回格式：{"data": [{"index": 0, "embedding": [...]}, ...]}
-            embeddings = sorted(data["data"], key=lambda x: x["index"])
+            embeddings = sorted(data["data"], key=lambda item: item["index"])
             vectors = np.array([item["embedding"] for item in embeddings], dtype=np.float32)
-            logger.info(f"[EMBEDDING] API 成功：{len(texts)} 个文本 → ({vectors.shape[0]}, {vectors.shape[1]})")
+            logger.info(
+                "[MODEL_CALL_END] Embedding API 调用完成: model=%s input_count=%s "
+                "output_count=%s elapsed_seconds=%.3f",
+                EMBEDDING_MODEL,
+                len(texts),
+                vectors.shape[0],
+                time.monotonic() - call_started_at,
+            )
             return vectors
         except requests.exceptions.Timeout:
-            logger.warning(f"[EMBEDDING] 超时 (第 {attempt + 1}/{retries + 1} 次)")
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"[EMBEDDING] 请求失败 (第 {attempt + 1}/{retries + 1} 次): {e}")
-        except (KeyError, IndexError, ValueError) as e:
-            logger.warning(f"[EMBEDDING] 响应解析失败 (第 {attempt + 1}/{retries + 1} 次): {e}")
+            retriable = True
+            logger.warning(
+                "[MODEL_CALL_TIMEOUT] Embedding API 调用超时: model=%s attempt=%s "
+                "timeout_seconds=%s",
+                EMBEDDING_MODEL,
+                attempt + 1,
+                EMBEDDING_TIMEOUT,
+            )
+        except requests.exceptions.RequestException as error:
+            status_code = getattr(getattr(error, "response", None), "status_code", None)
+            retriable = status_code is None or status_code == 429 or (
+                isinstance(status_code, int) and status_code >= 500
+            )
+            logger.warning(
+                "[MODEL_CALL_FAILED] Embedding API 请求失败: model=%s attempt=%s "
+                "status_code=%s error_category=%s retriable=%s",
+                EMBEDDING_MODEL,
+                attempt + 1,
+                status_code if status_code is not None else "none",
+                type(error).__name__,
+                retriable,
+            )
+        except (KeyError, IndexError, ValueError) as error:
+            logger.warning(
+                "[MODEL_CALL_FAILED] Embedding 响应结构非法: model=%s attempt=%s "
+                "error_category=%s",
+                EMBEDDING_MODEL,
+                attempt + 1,
+                type(error).__name__,
+            )
+            return None
 
-        if attempt < retries:
-            backoff = 2 ** attempt  # 1s, 2s
-            time.sleep(backoff)
+        if not retriable or attempt >= retries:
+            break
+        retry_after = None
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+        try:
+            delay_seconds = min(max(float(retry_after), 0.0), 10.0)
+        except (TypeError, ValueError):
+            delay_seconds = 2.0
+        logger.info(
+            "[BATCH_RETRY] Embedding API 准备重试: model=%s next_attempt=%s "
+            "delay_seconds=%s",
+            EMBEDDING_MODEL,
+            attempt + 2,
+            delay_seconds,
+        )
+        time.sleep(delay_seconds)
 
-    logger.error(f"[EMBEDDING] API 调用全部失败，已重试 {retries} 次")
+    logger.error(
+        "[MODEL_CALL_FAILED] Embedding API 调用最终失败: model=%s attempt_count=%s",
+        EMBEDDING_MODEL,
+        retries + 1,
+    )
     return None
-
 
 def _cosine_similarity(query_vec: np.ndarray, corpus_mat: np.ndarray) -> np.ndarray:
     """
@@ -680,24 +730,32 @@ def _log_retrieve_trace(
     candidates_tmp: list[tuple[str, str, float]],
     candidates: list[str],
     records: list[dict],
+    elapsed_seconds: float,
 ) -> None:
-    """打印单个字段检索各阶段候选排名的诊断日志（DEBUG 级别）。
+    """打印单个字段检索各阶段候选排名与相似度的诊断日志（DEBUG 级别）。
 
     阶段说明：
     - 阶段1 纯向量：embedding 余弦相似度 top5（即喂给 Layer2 的 sims）
     - 阶段2 收集候选：Layer1/1.5/2/2.5 汇总的候选（含精确匹配与去前缀变体）
     - 阶段3 重排序后：token 重排序后的最终输出（即注入 LLM 的候选）
+
+    记录字段名、候选标准字段名与相似度分数，供字段映射优化分析；这里不接触日志原值。
     """
     stage1 = _format_top_n(similarity_matrix[i], records)
     stage2 = " | ".join(fmt for fmt, _, _ in candidates_tmp) or "(空)"
     stage3 = " | ".join(candidates) or "(空-被阈值过滤/重排序丢弃)"
     logger.debug(
-        f"[TRACE] '{field_name}'\n"
-        f"  阶段1 纯向量top5 : {stage1}\n"
-        f"  阶段2 收集候选({len(candidates_tmp)}): {stage2}\n"
-        f"  阶段3 重排序输出 : {stage3}"
+        "[RETRIEVE_TRACE] field=%s elapsed_seconds=%.3f\n"
+        "  阶段1 纯向量top5 : %s\n"
+        "  阶段2 收集候选(%s): %s\n"
+        "  阶段3 重排序输出 : %s",
+        field_name,
+        elapsed_seconds,
+        stage1,
+        len(candidates_tmp),
+        stage2,
+        stage3,
     )
-
 
 def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str:
     """
@@ -799,6 +857,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
 
     lines: list[str] = []
     for i, field_name in enumerate(raw_field_names):
+        field_started_at = time.monotonic()
         sims = similarity_matrix[i]
 
         # 取 top_k（用 argpartition 比 argsort 更快）
@@ -892,11 +951,16 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         reranked_rows.sort()
         candidates = [row[3] for row in reranked_rows]
 
-        # 检索诊断：追踪候选在「纯向量 → 候选收集 → token重排序」各阶段的排名
+        # 检索诊断：追踪候选在「纯向量 → 候选收集 → token 重排序」各阶段的排名与相似度。
         if RETRIEVE_DEBUG_TRACE and logger.isEnabledFor(logging.DEBUG):
             _log_retrieve_trace(
-                field_name, i, similarity_matrix,
-                candidates_tmp, candidates, records,
+                field_name,
+                i,
+                similarity_matrix,
+                candidates_tmp,
+                candidates,
+                records,
+                elapsed_seconds=time.monotonic() - field_started_at,
             )
 
         if candidates:

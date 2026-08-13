@@ -1,29 +1,19 @@
-"""
-Agno Team 配置 - 多Agent架构
+"""专业 Agent 注册表。
 
-使用 Agno Team Route 模式实现：
-- RouterAgent: 意图理解、任务路由
-- FieldMappingAgent: 字段映射
-- ThreatAgent: 威胁类型标准化
-- EnumAgent: 枚举处理
-
-Route 模式：Team Leader 路由到单个 MemberAgent，直接返回结果
+自然语言理解只由独立 PlannerAgent 负责；本模块创建字段映射、威胁映射、
+枚举处理和日志解析 Agent，并以不可路由的注册表提供给执行适配器。
 """
 
-import os
+from dataclasses import dataclass
 from typing import List, Optional
 
 from pydantic import BaseModel
 
 from agno.agent import Agent
-from agno.team.team import Team
-from agno.team.mode import TeamMode
-from agno.skills import Skills, LocalSkills
 
 from agent.core.model_config import ModelConfig
-from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt, load_router_prompt
+from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt
 from agent.tools import (
-    field_mapping_tool,
     enum_field_tool,
     extract_enum_from_logs,
     extract_enum_with_regex,
@@ -43,19 +33,12 @@ def _load_prompts() -> dict:
     }
 
 
-# ============= 路由指令（从 router.md 加载）=============
-
-def _load_router_instructions() -> str:
-    """加载 Team Router 路由指令"""
-    return load_router_prompt()
-
-
-# ============= FieldMappingAgent =============
+# ============= 字段映射 Agent =============
 
 def _get_field_mapping_instructions() -> str:
     """获取字段映射Agent指令（标准字段候选已由系统预检索注入，Agent 无需调用查询工具）"""
     prompts = _load_prompts()
-    
+
     return f"""你是网络安全日志标准化专家。
 
 {prompts['field']}
@@ -71,7 +54,7 @@ def _get_field_mapping_instructions() -> str:
 - 当日志样本或解码数据包含字段值时，优先根据字段值和字段名语义进行匹配
 - 当仅有字段名时，根据候选相似度排序选择最佳匹配
 - **禁止**输出"请提供原始日志"、"需要更多数据"等索取性回复
-- **必须使用工具** `field_mapping` 完成映射
+- **禁止调用任何工具**；直接按 `output_schema` 返回本批字段的结构化映射
 - **严禁调用任何标准字段查询函数**
 
 注意：
@@ -111,12 +94,12 @@ class FieldMappingList(BaseModel):
     items: List[FieldMappingItem]
 
 
-# ============= ThreatAgent =============
+# ============= 威胁映射 Agent =============
 
 def _get_threat_instructions() -> str:
     """获取威胁类型Agent指令"""
     prompts = _load_prompts()
-    
+
     # 直接引用 threat_type.md
     return f"""You are a threat alert to standard classification mapper.
 
@@ -127,7 +110,7 @@ def _get_threat_instructions() -> str:
 """
 
 
-# ============= EnumAgent =============
+# ============= 枚举处理 Agent =============
 
 def _get_enum_instructions() -> str:
     """获取枚举Agent指令"""
@@ -145,17 +128,13 @@ def _get_enum_instructions() -> str:
 # ============= 创建专业Agent =============
 
 def create_field_mapping_agent() -> Agent:
-    """创建字段映射Agent（挂载工具：field_mapping）"""
+    """创建纯结构化字段映射 Agent；字段回写由执行适配器负责。"""
     return Agent(
         name="FieldMappingAgent",
         role="字段映射专家",
         model=ModelConfig.get_main_model(),
         instructions=_get_field_mapping_instructions(),
-        tools=[
-            field_mapping_tool,            # 单字段标准化映射（编辑距离算法）
-        ],
         output_schema=FieldMappingList,   # v4: API 层强制输出 JSON 且符合 schema，杜绝非规范格式
-        tool_call_limit=3,                # v3: 允许重试/多次映射，提升复杂场景鲁棒性
         markdown=False,                   # v4: 配合 output_schema JSON 输出，禁止 Markdown 包装
         debug_mode=False,
     )
@@ -192,7 +171,7 @@ def create_enum_agent() -> Agent:
     )
 
 
-# ============= LogParserAgent =============
+# ============= 日志解析 Agent =============
 
 def _get_log_parser_instructions() -> str:
     """获取日志解析Agent指令"""
@@ -217,7 +196,7 @@ def _get_log_parser_instructions() -> str:
 
 def create_log_parser_agent() -> Agent:
     """创建日志解析Agent（挂载工具：identify_log_format, classify_log_features）
-    
+
     设计意图：工具内部通过 httpx 直调 LLM，不经 Agno 路由循环，省 40-60s。
     """
     return Agent(
@@ -235,96 +214,56 @@ def create_log_parser_agent() -> Agent:
     )
 
 
-# ============= 创建Team =============
+# ============= 创建专业 Agent 注册表 =============
 
-def create_data_mapping_team() -> Team:
+
+@dataclass(frozen=True)
+class ProfessionalAgentRegistry:
+    """保存可由执行适配器按名称选择的专业 Agent，不提供自主路由能力。"""
+
+    members: tuple[Agent, ...]
+
+
+def create_data_mapping_team() -> ProfessionalAgentRegistry:
+    """创建专业 Agent 注册表；缺少必需模型配置时立即失败。
+
+    返回值：
+        仅含专业 Agent 成员的不可变注册表。
+
+    不变量：
+        注册表不提供 run 或路由指令，用户意图只能由 PlannerAgent 理解。
     """
-    创建数据映射Team
-    
-    使用 Route 模式：
-    - Team Leader 做路由
-    - 路由到对应 MemberAgent
-    - MemberAgent 直接返回结果
-    
-    Returns:
-        Team实例
-    """
-    # 验证 API Key 已配置（DeepSeek 必需，SiliconFlow 可选）
     api_key = ModelConfig.get_api_key()
     provider = ModelConfig.get_provider()
-    
+
     if provider == "deepseek" and not api_key:
         raise ValueError(
             "DeepSeek 需要 API Key，请设置环境变量 DEEPSEEK_API_KEY 或在侧边栏配置"
         )
-    
-    # SiliconFlow 允许无 API Key（使用静态模型列表）
+
     if provider == "siliconflow" and not api_key:
         import logging
+
         logging.warning("[TEAM] SiliconFlow 未配置 API Key，将使用静态模型列表")
-    
-    # 创建专业Agent
-    field_mapping_agent = create_field_mapping_agent()
-    threat_agent = create_threat_agent()
-    enum_agent = create_enum_agent()
-    
-    # 调试模式通过环境变量控制，默认生产环境关闭
-    _debug = os.getenv("AGNO_DEBUG_MODE", "false").lower() == "true"
-    _show_members = os.getenv("AGNO_SHOW_MEMBERS", "false").lower() == "true"
 
-    # 白名单挂载 skills：显式列出给 RouterAgent 用的技能。
-    # 用 LocalSkills 指向具体技能子目录（而非 skills/ 父目录），避免扫描
-    # _template 等脚手架目录——_template 含下划线会触发 SkillValidationError
-    # 导致应用启动失败，且不应作为可发现技能暴露给 RouterAgent。
-    _skills_root = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "skills",
-    )
-    _whitelisted_skills = [
-        "multi-step-plan",  # 复合意图分解：RouterAgent 输出 [PLAN:a|b] 标记供 step_planner 解析
-    ]
-    _skills_loaders = [
-        LocalSkills(os.path.join(_skills_root, name)) for name in _whitelisted_skills
-    ]
-
-    # 创建Team（Team Leader 使用主模型）
-    team = Team(
-        name="DataMappingTeam",
-        model=ModelConfig.get_main_model(),
-        mode=TeamMode.route,  # 路由模式
-        members=[
-            field_mapping_agent,
-            threat_agent,
-            enum_agent,
+    return ProfessionalAgentRegistry(
+        members=(
+            create_field_mapping_agent(),
+            create_threat_agent(),
+            create_enum_agent(),
             create_log_parser_agent(),
-        ],
-        instructions=_load_router_instructions(),
-        skills=Skills(loaders=_skills_loaders) if _skills_loaders else None,  # Progressive Discovery 按需加载
-        markdown=True,
-        debug_mode=_debug,
-        show_members_responses=_show_members,
-        respond_directly=True,             # Leader 路由后直接返回 MemberAgent 结果，不再自己包装
-        max_iterations=3,                  # 最多 3 轮迭代（默认 10），防止死循环
-        enable_agentic_state=True,         # 让 Team 有 update_session_state 工具，可读写 session_state
-        add_session_state_to_context=True, # 注入 session_state 到上下文，让 RouterAgent 感知会话状态
+        )
     )
-    
-    return team
 
 
-# ============= Team 单例缓存 =============
+# ============= 专业 Agent 注册表缓存 =============
 
-_team_instance: Optional[Team] = None
-"""模块级 Team 单例缓存，避免每次调用重建 Agent 和加载指令"""
+_team_instance: Optional[ProfessionalAgentRegistry] = None
+"""模块级注册表缓存，避免每次请求重建专业 Agent。"""
 
 
-def get_team_instance() -> Team:
-    """
-    获取 Team 单例（用于 Web 应用），首次调用创建，后续调用返回缓存实例。
-
-    Returns:
-        Team 实例（单例）
-    """
+def get_team_instance() -> ProfessionalAgentRegistry:
+    """获取专业 Agent 注册表单例，首次调用时延迟创建。"""
     global _team_instance
     if _team_instance is None:
         _team_instance = create_data_mapping_team()
@@ -332,9 +271,6 @@ def get_team_instance() -> Team:
 
 
 def reset_team_instance() -> None:
-    """
-    重置 Team 单例（用于测试或需要重建的场景）。
-    注意：调用后下次 get_team_instance() 会重新创建。
-    """
+    """清空专业 Agent 注册表缓存，使模型配置变更在下次创建时生效。"""
     global _team_instance
     _team_instance = None

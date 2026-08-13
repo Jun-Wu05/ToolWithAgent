@@ -40,11 +40,6 @@ def load_enum_field_prompt() -> str:
     return _load_md_or_fail("enum_field.md", "枚举字段处理")
 
 
-def load_router_prompt() -> str:
-    """加载 Team Router 路由指令提示词"""
-    return _load_md_or_fail("router.md", "Team 路由指令")
-
-
 def load_standard_fields() -> str:
     """加载标准字段表（全量返回）"""
     data_path = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
