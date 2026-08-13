@@ -627,6 +627,37 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     assert downloaded == session["decoded_data"]
 
 
+def test威胁映射依赖产物不是枚举值时失败():
+    """依赖步骤产物不是 EnumValuesArtifact 时返回 dependency_type_mismatch（回归 #38）。"""
+    from web.planner_models import ConfigExportArtifact, StepResult, ThreatMappingStep
+
+    step = ThreatMappingStep(
+        step_id="threat",
+        type="threat_mapping",
+        source_ref="step:enum",
+        depends_on=("enum",),
+    )
+    bad_dependency = StepResult(
+        step_id="enum",
+        operation_type="enum_extract",
+        status=StepStatus.SUCCESS,
+        artifact=ConfigExportArtifact(content="e30=", item_count=1),
+    )
+    adapter = ProfessionalAgentAdapter(_Team(None))
+    session = {}
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {"enum": bad_dependency},
+        )
+    )
+
+    assert result.status == StepStatus.FAILED
+    assert result.error_code == "dependency_type_mismatch"
+
+
 class _TimeoutMappingMember:
     """模拟永不在超时前完成的专业 Agent。"""
 

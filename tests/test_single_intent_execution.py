@@ -139,6 +139,166 @@ def test枚举提取单步可运行(monkeypatch):
     assert set(report.results[0].artifact.values) == {"attack", "scan"}
 
 
+def test枚举提取模型返回非JSON时失败关闭(monkeypatch):
+    """模型返回非合法 JSON 时返回 enum_regex_invalid，不静默成功（回归 #37）。"""
+    import agent.tools.pipeline.llm_client as llm_client
+
+    monkeypatch.setattr(llm_client, "_call_llm_direct", lambda *a, **kw: "这不是JSON")
+    session = {
+        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
+        "decoded_fields": ["event_type3"],
+    }
+
+    report = _execute_single_step(
+        session,
+        {
+            "step_id": "enum",
+            "type": "enum_extract",
+            "target_field": "event_type3",
+            "source_ref": "session.logs",
+        },
+    )
+
+    assert report.status == StepStatus.FAILED
+    assert report.results[0].error_code == "enum_regex_invalid"
+    assert report.results[0].artifact is None
+
+
+def test枚举提取字段不一致时失败关闭(monkeypatch):
+    """模型返回的 field 与目标字段不一致时失败关闭（回归 #37）。"""
+    import agent.tools.pipeline.llm_client as llm_client
+
+    monkeypatch.setattr(
+        llm_client,
+        "_call_llm_direct",
+        lambda *a, **kw: json.dumps({"field": "别的字段", "regex": r"(\w+)"}, ensure_ascii=False),
+    )
+    session = {
+        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
+        "decoded_fields": ["event_type3"],
+    }
+
+    report = _execute_single_step(
+        session,
+        {
+            "step_id": "enum",
+            "type": "enum_extract",
+            "target_field": "event_type3",
+            "source_ref": "session.logs",
+        },
+    )
+
+    assert report.status == StepStatus.FAILED
+    assert report.results[0].error_code == "enum_regex_invalid"
+
+
+def test枚举提取正则无法匹配时失败关闭(monkeypatch):
+    """生成的正则校验与修复均失败时返回 enum_regex_no_match（回归 #37）。"""
+    import agent.tools.enum_extract_tool as enum_tool
+    import agent.tools.pipeline.llm_client as llm_client
+
+    monkeypatch.setattr(
+        llm_client,
+        "_call_llm_direct",
+        lambda *a, **kw: json.dumps({"field": "event_type3", "regex": r"event_type3=(\w+)"}, ensure_ascii=False),
+    )
+    monkeypatch.setattr(enum_tool, "validate_regex_with_stats", lambda *a, **kw: {"valid": False})
+    monkeypatch.setattr(enum_tool, "validate_and_fix_regex", lambda *a, **kw: {"valid": False})
+    session = {
+        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
+        "decoded_fields": ["event_type3"],
+    }
+
+    report = _execute_single_step(
+        session,
+        {
+            "step_id": "enum",
+            "type": "enum_extract",
+            "target_field": "event_type3",
+            "source_ref": "session.logs",
+        },
+    )
+
+    assert report.status == StepStatus.FAILED
+    assert report.results[0].error_code == "enum_regex_no_match"
+
+
+def test枚举提取空结果时失败关闭(monkeypatch):
+    """正则合法但提取不到枚举值时返回 enum_extract_empty（回归 #37）。"""
+    import agent.tools.enum_extract_tool as enum_tool
+    import agent.tools.pipeline.llm_client as llm_client
+
+    monkeypatch.setattr(
+        llm_client,
+        "_call_llm_direct",
+        lambda *a, **kw: json.dumps({"field": "event_type3", "regex": r"event_type3=(\w+)"}, ensure_ascii=False),
+    )
+    monkeypatch.setattr(enum_tool, "validate_regex_with_stats", lambda *a, **kw: {"valid": True})
+    monkeypatch.setattr(enum_tool, "extract_enum_with_field", lambda *a, **kw: {"value": []})
+    session = {
+        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
+        "decoded_fields": ["event_type3"],
+    }
+
+    report = _execute_single_step(
+        session,
+        {
+            "step_id": "enum",
+            "type": "enum_extract",
+            "target_field": "event_type3",
+            "source_ref": "session.logs",
+        },
+    )
+
+    assert report.status == StepStatus.FAILED
+    assert report.results[0].error_code == "enum_extract_empty"
+
+
+def test枚举提取无日志时在适配器调用前拦截():
+    """无日志时执行器以 logs_required 拦截，不进入适配器（回归 #37）。"""
+    session = {}
+
+    report = _execute_single_step(
+        session,
+        {
+            "step_id": "enum",
+            "type": "enum_extract",
+            "target_field": "event_type3",
+            "source_ref": "session.logs",
+        },
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "logs_required"
+
+
+def test枚举提取失败不被旧枚举结果掩盖(monkeypatch):
+    """session 残留旧 last_enum_extract_result 时，本次失败仍报失败，不误报成功（回归 #37）。"""
+    import agent.tools.pipeline.llm_client as llm_client
+
+    monkeypatch.setattr(llm_client, "_call_llm_direct", lambda *a, **kw: "bad-json")
+    session = {
+        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
+        "decoded_fields": ["event_type3"],
+        "last_enum_extract_result": {"value": ["旧值不得掩盖失败"]},
+    }
+
+    report = _execute_single_step(
+        session,
+        {
+            "step_id": "enum",
+            "type": "enum_extract",
+            "target_field": "event_type3",
+            "source_ref": "session.logs",
+        },
+    )
+
+    assert report.status == StepStatus.FAILED
+    assert report.results[0].artifact is None
+    # 旧值既未被当作本次成功产物上报，也未被清空。
+    assert session["last_enum_extract_result"]["value"] == ["旧值不得掩盖失败"]
+
+
 def test威胁类型映射单步可运行():
     """用户显式值可直接进入威胁映射，不读取旧枚举结果。"""
     member = _StaticMember(

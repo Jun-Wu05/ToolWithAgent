@@ -159,6 +159,63 @@ def test字段不存在时在调用适配器前拦截():
     assert adapter.calls == []
 
 
+def test字段映射无可用字段时在适配器前拦截():
+    """无可用字段时以 fields_required 拦截，适配器不被调用（回归 #40）。"""
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-field-mapping",
+            "steps": [{"step_id": "mapping", "type": "field_mapping", "source_ref": "session.fields"}],
+        }
+    )
+    adapter = RecordingAdapter([])
+
+    report = _execute(
+        decision,
+        {"field_mapping": adapter},
+        SessionFacts(available_fields=()),
+    )
+
+    assert report.results[0].status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "fields_required"
+    assert adapter.calls == []
+
+
+def test枚举填充目标字段不在映射表时在适配器前拦截():
+    """目标字段不在枚举映射表时以 mapping_target_unavailable 拦截（回归 #36）。"""
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-enum-fill",
+            "steps": [
+                {
+                    "step_id": "fill",
+                    "type": "fill",
+                    "fill_kind": "enum",
+                    "target_fields": ["missing"],
+                    "source_ref": "session.enum_mapping_table",
+                    "config_ref": "session.mapped_sub_rules",
+                }
+            ],
+        }
+    )
+    adapter = RecordingAdapter([])
+
+    report = _execute(
+        decision,
+        {"fill": adapter},
+        SessionFacts(
+            has_mapped_sub_rules=True,
+            available_config_refs=("session.mapped_sub_rules",),
+            enum_mapping_target_fields=("event_type3",),
+        ),
+    )
+
+    assert report.results[0].status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "mapping_target_unavailable"
+    assert adapter.calls == []
+
+
 def test填充声称成功但零变更时判定失败():
     decision = PlanDecision.model_validate(
         {
