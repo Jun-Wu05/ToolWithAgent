@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 import time
@@ -180,10 +181,19 @@ class PlannerService:
         )
 
         async def invoke_runner() -> Any:
-            """在异步边界调用 Planner；同步测试替身放入工作线程。"""
-            if asyncio.iscoroutinefunction(runner):
-                return await runner(planner_input)
-            return await asyncio.to_thread(runner, planner_input)
+            """调用 Planner，并按返回值是否可 await 决定是否等待。
+
+            注意：Agno 的 Agent.arun 是「返回协程的普通方法」而非 coroutine function
+            （inspect.iscoroutinefunction(Agent.arun) 为 False）。若用 iscoroutinefunction
+            判定分支，arun 会被当作同步函数在 to_thread 里调用，返回一个未被 await 的协程，
+            表现为 response/content 是 coroutine、模型实际从未被调用。这里改为对调用结果
+            用 inspect.isawaitable 判定，兼容真协程函数、arun 这类返回协程的普通函数，
+            以及同步测试替身。
+            """
+            raw = runner(planner_input)
+            if inspect.isawaitable(raw):
+                return await raw
+            return raw
 
         content: Any = None
         try:

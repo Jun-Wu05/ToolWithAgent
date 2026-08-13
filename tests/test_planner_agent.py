@@ -79,3 +79,29 @@ def testplanner非法输出不会进入执行计划():
     assert decision.decision == "clarification"
     assert decision.reason_code == "invalid_plan"
     assert decision.steps == ()
+
+
+def testplanner支持返回协程的同步runner():
+    """Agno Agent.arun 是返回协程的普通方法（iscoroutinefunction=False），必须正确 await。
+
+    回归 2026-08-13 线上故障：invoke_runner 曾用 iscoroutinefunction 判定分支，导致 arun
+    被当作同步函数调用、协程未被 await，content_kind=coroutine，模型从未真正执行。
+    """
+    from agent.core.planner import PlannerService
+
+    async def arun_impl(_input):
+        return PlanDecision.model_validate(
+            {"decision": "clarification", "reason_code": "test", "question": "请补充信息"}
+        )
+
+    def arun_like(input):  # 同步函数、返回协程——模拟 Agno Agent.arun
+        return arun_impl(input)
+
+    decision = asyncio.run(PlannerService(runner=arun_like).plan(
+        user_text="枚举值处理",
+        conversation_history=[],
+        session_facts=SessionFacts(),
+    ))
+
+    assert decision.decision == "clarification"
+    assert decision.reason_code == "test"
