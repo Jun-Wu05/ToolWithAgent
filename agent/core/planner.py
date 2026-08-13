@@ -34,11 +34,14 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "planner.md"
 
 
 def create_planner_agent() -> Agent:
-    """创建无业务工具的 PlannerAgent，并由 Agno 强制校验输出结构。"""
+    """创建确定性 PlannerAgent，并由 Agno 强制校验输出结构。"""
+    model = ModelConfig.get_main_model()
+    # 相同事实与指令必须产生稳定计划；禁止用失败后重调破坏“一次 Planner”不变量。
+    model.temperature = 0
     return Agent(
         name="PlannerAgent",
         role="用户指令规划器",
-        model=ModelConfig.get_main_model(),
+        model=model,
         instructions=_PROMPT_PATH.read_text(encoding="utf-8"),
         tools=[],
         output_schema=PlanDecision,

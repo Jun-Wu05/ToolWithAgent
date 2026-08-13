@@ -105,3 +105,17 @@ def testplanner支持返回协程的同步runner():
 
     assert decision.decision == "clarification"
     assert decision.reason_code == "test"
+
+
+def test真实Planner使用零温度且仍不挂载业务工具(monkeypatch):
+    """稳定性不得依靠非法输出重试，单次 Planner 调用本身应确定。"""
+    from agno.models.deepseek import DeepSeek
+
+    from agent.core import planner as planner_module
+
+    model = DeepSeek(id="deepseek-chat", api_key="test-key")
+    monkeypatch.setattr(planner_module.ModelConfig, "get_main_model", lambda: model)
+
+    agent = planner_module.create_planner_agent()
+
+    assert agent.model.temperature == 0

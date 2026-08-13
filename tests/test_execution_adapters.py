@@ -1,6 +1,7 @@
 """执行适配器对真实领域数据变更的回归测试。"""
 
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 
@@ -319,7 +320,7 @@ def test字段映射通过异步事件流并发执行三个批次(monkeypatch):
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=0,
             retry_delay_seconds=0,
         ),
@@ -376,7 +377,7 @@ def test字段映射漏字段时补查缺失项后成功(monkeypatch):
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=0,
             retry_delay_seconds=0,
             backfill_max_attempts=2,
@@ -437,7 +438,7 @@ def test字段映射补查仍缺时兜底未匹配(monkeypatch):
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=0,
             retry_delay_seconds=0,
             backfill_max_attempts=2,
@@ -499,7 +500,7 @@ def test字段映射乱序返回不再判为失败(monkeypatch):
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=0,
             retry_delay_seconds=0,
             backfill_max_attempts=0,
@@ -554,7 +555,7 @@ def test字段映射重复字段去重后不失败(monkeypatch):
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=0,
             retry_delay_seconds=0,
             backfill_max_attempts=0,
@@ -586,7 +587,10 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
     session = {
         "decoded_fields": ["alpha", "beta"],
-        "decoded_data": {"name": "r", "normalize": [{"index": "alpha"}, {"index": "beta"}]},
+        # simple_decode 的真实 decoded_json 根对象是规则列表，而不是包装字典。
+        "decoded_data": [
+            {"name": "r", "normalize": [{"index": "alpha"}, {"index": "beta"}]}
+        ],
     }
     member = _AsyncMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
@@ -595,7 +599,7 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=0,
             retry_delay_seconds=0,
             backfill_max_attempts=0,
@@ -615,9 +619,12 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
 
     assert result.status == StepStatus.SUCCESS
     assert result.artifact.filled_config is not None
-    norm = {entry["index"]: entry for entry in session["decoded_data"]["normalize"]}
+    norm = {entry["index"]: entry for entry in session["decoded_data"][0]["normalize"]}
     assert norm["alpha"]["field"] == "标准_alpha"
     assert norm["beta"]["field"] == "标准_beta"
+    downloaded = json.loads(base64.b64decode(result.artifact.filled_config).decode("utf-8"))
+    assert isinstance(downloaded, list)
+    assert downloaded == session["decoded_data"]
 
 
 class _TimeoutMappingMember:
@@ -642,7 +649,7 @@ class _TimeoutMappingMember:
             yield SimpleNamespace(event="RunCompleted", content="[]")
 
 
-def test字段映射批次超时后只重试一次且不写入部分结果(monkeypatch):
+def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypatch):
     """任一批次超时应取消剩余任务，并保持 session 原子不变。"""
     import web.input_builder as input_builder
 
@@ -654,9 +661,10 @@ def test字段映射批次超时后只重试一次且不写入部分结果(monke
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=0.02,
+            watchdog_timeout_seconds=0.02,
             max_retries=1,
             retry_delay_seconds=0,
+            max_timeout_split_depth=0,
         ),
     )
     step = FieldMappingStep(
@@ -675,8 +683,8 @@ def test字段映射批次超时后只重试一次且不写入部分结果(monke
 
     assert result.status == StepStatus.FAILED
     assert result.error_code == "field_mapping_timeout"
-    assert member.call_count == 6
-    assert member.cancel_count == 6
+    assert member.call_count == 3
+    assert member.cancel_count == 3
     assert "last_mapping_data" not in session
     assert "mapped_sub_rules" not in session
 
@@ -695,7 +703,7 @@ def test字段映射291字段形成12批且最大并发为3(monkeypatch):
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=0,
             retry_delay_seconds=0,
         ),
@@ -747,7 +755,7 @@ def test字段映射不可重试错误只调用一次(monkeypatch):
     adapter = ProfessionalAgentAdapter(
         _Team(member),
         mapping_policy=FieldMappingExecutionPolicy(
-            timeout_seconds=1,
+            watchdog_timeout_seconds=1,
             max_retries=1,
             retry_delay_seconds=0,
         ),

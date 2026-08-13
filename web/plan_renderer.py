@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import chainlit as cl
 
+from agent.shared.logger import get_logger
 from web.parsers import create_dataframe_elements
 from web.planner_models import ConfigExportArtifact, ExecutionReport, PlanDecision, StepStatus
+
+
+logger = get_logger("plan_renderer")
 
 
 async def render_decision(decision: PlanDecision) -> None:
@@ -30,6 +34,7 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
     }
     lines = []
     elements = []
+    mapped_config_downloads: list[tuple[str, bytes]] = []
     for result in execution_report.results:
         detail = result.message or result.error_code or result.status.value
         lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
@@ -46,11 +51,10 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             elements.extend(create_dataframe_elements(rows))
             if artifact.filled_config:
-                elements.append(
-                    cl.File(
-                        name=f"{execution_report.plan_id}_mapped_config.txt",
-                        content=artifact.filled_config.encode("utf-8"),
-                        mime="text/plain",
+                mapped_config_downloads.append(
+                    (
+                        f"{execution_report.plan_id}_mapped_config.txt",
+                        artifact.filled_config.encode("utf-8"),
                     )
                 )
     await cl.Message(
@@ -58,3 +62,31 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
         elements=elements,
     ).send()
 
+    for file_name, content in mapped_config_downloads:
+        logger.info(
+            "[RENDER_FIELD_MAPPING] 准备发送回填配置下载: "
+            "plan_id=%s file_name=%s content_bytes=%s",
+            execution_report.plan_id,
+            file_name,
+            len(content),
+        )
+        await cl.Message(
+            content=(
+                "✅ **字段映射已回填到上传配置**\n\n"
+                f"📥 点击下载：`{file_name}`"
+            ),
+            elements=[
+                cl.File(
+                    name=file_name,
+                    content=content,
+                    display="inline",
+                    mime="text/plain",
+                )
+            ],
+        ).send()
+        logger.info(
+            "[RENDER_FIELD_MAPPING] 回填配置下载已发送: "
+            "plan_id=%s file_name=%s",
+            execution_report.plan_id,
+            file_name,
+        )
