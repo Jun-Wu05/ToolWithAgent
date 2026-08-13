@@ -53,10 +53,12 @@ class FieldMappingExecutionPolicy:
 
     batch_size: int = 25
     max_concurrency: int = 3
-    timeout_seconds: float = 90.0
+    watchdog_timeout_seconds: float = 105.0
     max_retries: int = 1
     retry_delay_seconds: float = 2.0
     backfill_max_attempts: int = 2
+    timeout_split_size: int = 13
+    max_timeout_split_depth: int = 1
 
 
 class FieldMappingBatchError(RuntimeError):
@@ -537,6 +539,7 @@ class ProfessionalAgentAdapter:
         step: FieldMappingStep,
         batch_number: int,
         total_batches: int,
+        semaphore: asyncio.Semaphore,
     ) -> list[dict[str, Any]]:
         """补齐模型漏掉的字段，仍缺失则兜底为「未匹配」，避免单字段缺失作废整步。
 
@@ -590,16 +593,17 @@ class ProfessionalAgentAdapter:
                     batch_number,
                     total_batches,
                 )
-                content = await asyncio.wait_for(
-                    self._run_member(
-                        "FieldMappingAgent",
-                        backfill_input,
-                        plan_id=context.plan_id,
-                        step_id=step.step_id,
-                        batch_number=batch_number,
-                    ),
-                    timeout=policy.timeout_seconds,
-                )
+                async with semaphore:
+                    content = await asyncio.wait_for(
+                        self._run_member(
+                            "FieldMappingAgent",
+                            backfill_input,
+                            plan_id=context.plan_id,
+                            step_id=step.step_id,
+                            batch_number=batch_number,
+                        ),
+                        timeout=policy.watchdog_timeout_seconds,
+                    )
             except Exception as error:
                 logger.warning(
                     "[BATCH_BACKFILL] 补查调用失败，停止补查并兜底未匹配: "
@@ -650,7 +654,7 @@ class ProfessionalAgentAdapter:
         step: FieldMappingStep,
         context: ExecutionContext,
     ) -> StepResult:
-        """并发执行字段映射批次，并在全部校验成功后一次性写回 session。"""
+        """并发执行字段映射；超时批只拆分一层，全部成功后才原子写回。"""
         from web.input_builder import build_batch_llm_input
         from web.parsers import parse_json_mapping_result
 
@@ -659,123 +663,153 @@ class ProfessionalAgentAdapter:
         total_batches = (len(available_fields) + policy.batch_size - 1) // policy.batch_size
         semaphore = asyncio.Semaphore(policy.max_concurrency)
 
-        async def execute_batch(batch_index: int) -> tuple[int, list[dict[str, Any]]]:
-            """执行一个受并发限制的批次，并返回经过字段集合校验的映射。"""
-            fields_batch = available_fields[
-                batch_index * policy.batch_size : (batch_index + 1) * policy.batch_size
-            ]
-            batch_number = batch_index + 1
-            async with semaphore:
-                batch_started_at = time.monotonic()
-                await _publish_progress(
-                    context,
-                    step,
-                    ProgressPhase.RETRIEVAL,
-                    ProgressStatus.RUNNING,
-                    "field_candidates_retrieving",
-                    current_batch=batch_number,
-                    total_batches=total_batches,
-                )
-                logger.info(
-                    "[BATCH_START] 字段映射批次开始: plan_id=%s step_id=%s "
-                    "batch=%s/%s field_count=%s",
-                    context.plan_id,
-                    step.step_id,
+        class ModelCallTimeout(RuntimeError):
+            """携带稳定超时来源，避免 Provider 与 Adapter deadline 混淆。"""
+
+            def __init__(self, origin: str, error: Exception) -> None:
+                """保存稳定来源和底层异常，供拆批决策及安全错误消息使用。"""
+                super().__init__(str(error))
+                self.origin = origin
+                self.error = error
+
+        def timeout_origin(error: Exception) -> str | None:
+            """按异常类型区分 SDK 主动超时与 Adapter watchdog 超时。"""
+            if type(error).__name__ in {
+                "APITimeoutError",
+                "ConnectTimeout",
+                "ReadTimeout",
+                "WriteTimeout",
+            }:
+                return "provider_sdk"
+            if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+                return "adapter_watchdog"
+            return None
+
+        async def build_model_input(
+            fields_batch: list[str],
+            batch_number: int,
+            split_depth: int,
+        ) -> str:
+            """为原始批或子批检索候选；检索失败仍按原始批原子失败。"""
+            retrieval_started_at = time.monotonic()
+            await _publish_progress(
+                context,
+                step,
+                ProgressPhase.RETRIEVAL,
+                ProgressStatus.RUNNING,
+                "field_candidates_retrieving",
+                current_batch=batch_number,
+                total_batches=total_batches,
+            )
+            logger.info(
+                "[MODEL_CALL_START] Embedding 调用开始: plan_id=%s step_id=%s "
+                "batch=%s/%s split_depth=%s model=%s field_count=%s timeout_seconds=%s",
+                context.plan_id,
+                step.step_id,
+                batch_number,
+                total_batches,
+                split_depth,
+                "Qwen/Qwen3-Embedding-8B",
+                len(fields_batch),
+                30,
+            )
+            try:
+                model_input = await asyncio.to_thread(
+                    build_batch_llm_input,
+                    "执行标准字段映射",
+                    context.session,
+                    fields_batch,
                     batch_number,
                     total_batches,
-                    len(fields_batch),
                 )
-                retrieval_started_at = time.monotonic()
-                logger.info(
-                    "[MODEL_CALL_START] Embedding 调用开始: plan_id=%s step_id=%s "
-                    "batch=%s/%s model=%s field_count=%s timeout_seconds=%s",
-                    context.plan_id,
-                    step.step_id,
-                    batch_number,
-                    total_batches,
-                    "Qwen/Qwen3-Embedding-8B",
-                    len(fields_batch),
-                    30,
-                )
-                try:
-                    model_input = await asyncio.to_thread(
-                        build_batch_llm_input,
-                        "执行标准字段映射",
-                        context.session,
-                        fields_batch,
-                        batch_number,
-                        total_batches,
-                    )
-                except Exception as error:
-                    retrieval_elapsed = time.monotonic() - retrieval_started_at
-                    logger.warning(
-                        "[MODEL_CALL_FAILED] Embedding 调用失败: plan_id=%s step_id=%s "
-                        "batch=%s/%s elapsed_seconds=%.3f error_category=%s",
-                        context.plan_id,
-                        step.step_id,
-                        batch_number,
-                        total_batches,
-                        retrieval_elapsed,
-                        type(error).__name__,
-                    )
-                    await _publish_progress(
-                        context,
-                        step,
-                        ProgressPhase.RETRIEVAL,
-                        ProgressStatus.FAILED,
-                        "field_candidates_failed",
-                        current_batch=batch_number,
-                        total_batches=total_batches,
-                        elapsed_seconds=retrieval_elapsed,
-                    )
-                    raise FieldMappingBatchError(
-                        batch_number,
-                        "field_retrieval_failed",
-                        f"第 {batch_number} 批字段候选检索失败",
-                    ) from error
+            except Exception as error:
                 retrieval_elapsed = time.monotonic() - retrieval_started_at
-                logger.info(
-                    "[MODEL_CALL_END] Embedding 调用完成: plan_id=%s step_id=%s "
-                    "batch=%s/%s elapsed_seconds=%.3f field_count=%s",
+                logger.warning(
+                    "[MODEL_CALL_FAILED] Embedding 调用失败: plan_id=%s step_id=%s "
+                    "batch=%s/%s split_depth=%s elapsed_seconds=%.3f error_category=%s",
                     context.plan_id,
                     step.step_id,
                     batch_number,
                     total_batches,
+                    split_depth,
                     retrieval_elapsed,
-                    len(fields_batch),
+                    type(error).__name__,
                 )
                 await _publish_progress(
                     context,
                     step,
                     ProgressPhase.RETRIEVAL,
-                    ProgressStatus.SUCCESS,
-                    "field_candidates_ready",
+                    ProgressStatus.FAILED,
+                    "field_candidates_failed",
                     current_batch=batch_number,
                     total_batches=total_batches,
                     elapsed_seconds=retrieval_elapsed,
                 )
-                for attempt in range(policy.max_retries + 1):
-                    try:
-                        model_started_at = time.monotonic()
-                        await _publish_progress(
-                            context,
-                            step,
-                            ProgressPhase.MODEL_CALL,
-                            ProgressStatus.RUNNING,
-                            "field_mapping_batch_running",
-                            current_batch=batch_number,
-                            total_batches=total_batches,
-                        )
-                        logger.info(
-                            "[MODEL_CALL_START] 专业模型调用开始: plan_id=%s step_id=%s operation=field_mapping "
-                            "batch=%s/%s attempt=%s model_input_length=%s",
-                            context.plan_id,
-                            step.step_id,
-                            batch_number,
-                            total_batches,
-                            attempt + 1,
-                            len(model_input),
-                        )
+                raise FieldMappingBatchError(
+                    batch_number,
+                    "field_retrieval_failed",
+                    f"第 {batch_number} 批字段候选检索失败",
+                ) from error
+            retrieval_elapsed = time.monotonic() - retrieval_started_at
+            logger.info(
+                "[MODEL_CALL_END] Embedding 调用完成: plan_id=%s step_id=%s "
+                "batch=%s/%s split_depth=%s elapsed_seconds=%.3f field_count=%s",
+                context.plan_id,
+                step.step_id,
+                batch_number,
+                total_batches,
+                split_depth,
+                retrieval_elapsed,
+                len(fields_batch),
+            )
+            await _publish_progress(
+                context,
+                step,
+                ProgressPhase.RETRIEVAL,
+                ProgressStatus.SUCCESS,
+                "field_candidates_ready",
+                current_batch=batch_number,
+                total_batches=total_batches,
+                elapsed_seconds=retrieval_elapsed,
+            )
+            return model_input
+
+        async def call_model(
+            fields_batch: list[str],
+            batch_number: int,
+            split_depth: int,
+        ) -> list[dict[str, Any]]:
+            """每次模型尝试独立占用并发槽；等待重试或拆批时不持有槽。"""
+            model_input = await build_model_input(fields_batch, batch_number, split_depth)
+            last_error: Exception = RuntimeError("模型调用未开始")
+            error_code = "field_mapping_model_failed"
+            for attempt in range(policy.max_retries + 1):
+                model_started_at = time.monotonic()
+                await _publish_progress(
+                    context,
+                    step,
+                    ProgressPhase.MODEL_CALL,
+                    ProgressStatus.RUNNING,
+                    "field_mapping_batch_running",
+                    current_batch=batch_number,
+                    total_batches=total_batches,
+                )
+                logger.info(
+                    "[MODEL_CALL_START] 专业模型调用开始: plan_id=%s step_id=%s "
+                    "operation=field_mapping batch=%s/%s split_depth=%s attempt=%s "
+                    "field_count=%s model_input_length=%s watchdog_seconds=%s",
+                    context.plan_id,
+                    step.step_id,
+                    batch_number,
+                    total_batches,
+                    split_depth,
+                    attempt + 1,
+                    len(fields_batch),
+                    len(model_input),
+                    policy.watchdog_timeout_seconds,
+                )
+                try:
+                    async with semaphore:
                         content = await asyncio.wait_for(
                             self._run_member(
                                 "FieldMappingAgent",
@@ -784,107 +818,183 @@ class ProfessionalAgentAdapter:
                                 step_id=step.step_id,
                                 batch_number=batch_number,
                             ),
-                            timeout=policy.timeout_seconds,
+                            timeout=policy.watchdog_timeout_seconds,
                         )
-                        logger.info(
-                            "[MODEL_CALL_END] 专业模型调用完成: plan_id=%s step_id=%s operation=field_mapping "
-                            "batch=%s/%s attempt=%s elapsed_seconds=%.3f",
-                            context.plan_id,
-                            step.step_id,
-                            batch_number,
-                            total_batches,
-                            attempt + 1,
-                            time.monotonic() - model_started_at,
-                        )
-                        await _publish_progress(
-                            context,
-                            step,
-                            ProgressPhase.MODEL_CALL,
-                            ProgressStatus.SUCCESS,
-                            "field_mapping_batch_completed",
-                            current_batch=batch_number,
-                            total_batches=total_batches,
-                            elapsed_seconds=time.monotonic() - model_started_at,
-                        )
-                        batch_rows = parse_json_mapping_result(content)
-                        batch_rows = await self._backfill_field_mapping_rows(
-                            batch_rows,
-                            fields_batch,
-                            context,
-                            step,
-                            batch_number,
-                            total_batches,
-                        )
-                        logger.info(
-                            "[BATCH_END] 字段映射批次完成: plan_id=%s step_id=%s batch=%s/%s "
-                            "field_count=%s elapsed_seconds=%.3f",
-                            context.plan_id,
-                            step.step_id,
-                            batch_number,
-                            total_batches,
-                            len(batch_rows),
-                            time.monotonic() - batch_started_at,
-                        )
-                        return batch_index, batch_rows
-                    except FieldMappingBatchError:
-                        raise
-                    except asyncio.TimeoutError as error:
-                        error_code = "field_mapping_timeout"
+                except Exception as error:
+                    last_error = error
+                    origin = timeout_origin(error)
+                    if origin is not None:
                         logger.warning(
-                            "[MODEL_CALL_TIMEOUT] 专业模型调用超时: plan_id=%s step_id=%s operation=field_mapping "
-                            "batch=%s/%s attempt=%s timeout_seconds=%s",
+                            "[MODEL_CALL_TIMEOUT] 专业模型调用超时: plan_id=%s step_id=%s "
+                            "operation=field_mapping batch=%s/%s split_depth=%s attempt=%s "
+                            "field_count=%s timeout_origin=%s watchdog_seconds=%s "
+                            "error_category=%s",
                             context.plan_id,
                             step.step_id,
                             batch_number,
                             total_batches,
+                            split_depth,
                             attempt + 1,
-                            policy.timeout_seconds,
-                        )
-                        last_error = error
-                        retriable = True
-                    except Exception as error:
-                        error_code = "field_mapping_model_failed"
-                        logger.warning(
-                            "[MODEL_CALL_FAILED] 专业模型调用失败: plan_id=%s step_id=%s operation=field_mapping "
-                            "batch=%s/%s attempt=%s error_category=%s",
-                            context.plan_id,
-                            step.step_id,
-                            batch_number,
-                            total_batches,
-                            attempt + 1,
+                            len(fields_batch),
+                            origin,
+                            policy.watchdog_timeout_seconds,
                             type(error).__name__,
                         )
-                        last_error = error
-                        retriable = _is_retriable_model_error(error)
-                    if retriable and attempt < policy.max_retries:
-                        retry_delay = _retry_delay_seconds(last_error, policy.retry_delay_seconds)
-                        logger.info(
-                            "[BATCH_RETRY] 字段映射批次重试: plan_id=%s step_id=%s batch=%s/%s "
-                            "next_attempt=%s delay_seconds=%s",
-                            context.plan_id,
-                            step.step_id,
-                            batch_number,
-                            total_batches,
-                            attempt + 2,
-                            retry_delay,
-                        )
-                        await _publish_progress(
-                            context,
-                            step,
-                            ProgressPhase.MODEL_CALL,
-                            ProgressStatus.RUNNING,
-                            "field_mapping_batch_retry",
-                            current_batch=batch_number,
-                            total_batches=total_batches,
-                        )
-                        await asyncio.sleep(retry_delay)
-                    else:
+                        raise ModelCallTimeout(origin, error) from error
+
+                    retriable = _is_retriable_model_error(error)
+                    logger.warning(
+                        "[MODEL_CALL_FAILED] 专业模型调用失败: plan_id=%s step_id=%s "
+                        "operation=field_mapping batch=%s/%s split_depth=%s attempt=%s "
+                        "error_category=%s retriable=%s",
+                        context.plan_id,
+                        step.step_id,
+                        batch_number,
+                        total_batches,
+                        split_depth,
+                        attempt + 1,
+                        type(error).__name__,
+                        retriable,
+                    )
+                    if not retriable or attempt >= policy.max_retries:
                         break
-                raise FieldMappingBatchError(
+                    retry_delay = _retry_delay_seconds(error, policy.retry_delay_seconds)
+                    logger.info(
+                        "[BATCH_RETRY] 字段映射批次重试: plan_id=%s step_id=%s "
+                        "batch=%s/%s split_depth=%s next_attempt=%s delay_seconds=%s",
+                        context.plan_id,
+                        step.step_id,
+                        batch_number,
+                        total_batches,
+                        split_depth,
+                        attempt + 2,
+                        retry_delay,
+                    )
+                    await _publish_progress(
+                        context,
+                        step,
+                        ProgressPhase.MODEL_CALL,
+                        ProgressStatus.RUNNING,
+                        "field_mapping_batch_retry",
+                        current_batch=batch_number,
+                        total_batches=total_batches,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+
+                elapsed = time.monotonic() - model_started_at
+                logger.info(
+                    "[MODEL_CALL_END] 专业模型调用完成: plan_id=%s step_id=%s "
+                    "operation=field_mapping batch=%s/%s split_depth=%s attempt=%s "
+                    "field_count=%s elapsed_seconds=%.3f",
+                    context.plan_id,
+                    step.step_id,
                     batch_number,
-                    error_code,
-                    f"第 {batch_number} 批字段映射失败: {type(last_error).__name__}",
+                    total_batches,
+                    split_depth,
+                    attempt + 1,
+                    len(fields_batch),
+                    elapsed,
                 )
+                await _publish_progress(
+                    context,
+                    step,
+                    ProgressPhase.MODEL_CALL,
+                    ProgressStatus.SUCCESS,
+                    "field_mapping_batch_completed",
+                    current_batch=batch_number,
+                    total_batches=total_batches,
+                    elapsed_seconds=elapsed,
+                )
+                batch_rows = parse_json_mapping_result(content)
+                return await self._backfill_field_mapping_rows(
+                    batch_rows,
+                    fields_batch,
+                    context,
+                    step,
+                    batch_number,
+                    total_batches,
+                    semaphore,
+                )
+
+            raise FieldMappingBatchError(
+                batch_number,
+                error_code,
+                f"第 {batch_number} 批字段映射失败: {type(last_error).__name__}",
+            )
+
+        async def execute_fields(
+            fields_batch: list[str],
+            batch_number: int,
+            split_depth: int,
+        ) -> list[dict[str, Any]]:
+            """执行字段集合；仅超时可触发一次受限拆批。"""
+            batch_started_at = time.monotonic()
+            try:
+                rows = await call_model(fields_batch, batch_number, split_depth)
+            except ModelCallTimeout as timeout:
+                can_split = (
+                    split_depth < policy.max_timeout_split_depth
+                    and len(fields_batch) > 1
+                )
+                if not can_split:
+                    raise FieldMappingBatchError(
+                        batch_number,
+                        "field_mapping_timeout",
+                        f"第 {batch_number} 批字段映射失败: {type(timeout.error).__name__}",
+                    ) from timeout
+                child_batches = [
+                    fields_batch[index : index + policy.timeout_split_size]
+                    for index in range(0, len(fields_batch), policy.timeout_split_size)
+                ]
+                logger.warning(
+                    "[BATCH_TIMEOUT_SPLIT] 超时批拆分: plan_id=%s step_id=%s "
+                    "batch=%s/%s timeout_origin=%s split_depth=%s child_sizes=%s",
+                    context.plan_id,
+                    step.step_id,
+                    batch_number,
+                    total_batches,
+                    timeout.origin,
+                    split_depth + 1,
+                    [len(child) for child in child_batches],
+                )
+                child_results = await asyncio.gather(
+                    *(
+                        execute_fields(child, batch_number, split_depth + 1)
+                        for child in child_batches
+                    )
+                )
+                rows = [row for child_rows in child_results for row in child_rows]
+
+            logger.info(
+                "[BATCH_END] 字段映射批次完成: plan_id=%s step_id=%s batch=%s/%s "
+                "split_depth=%s field_count=%s elapsed_seconds=%.3f",
+                context.plan_id,
+                step.step_id,
+                batch_number,
+                total_batches,
+                split_depth,
+                len(rows),
+                time.monotonic() - batch_started_at,
+            )
+            return rows
+
+        async def execute_batch(batch_index: int) -> tuple[int, list[dict[str, Any]]]:
+            """按正常 25 字段策略启动原始批，拆分仅由该批超时触发。"""
+            fields_batch = available_fields[
+                batch_index * policy.batch_size : (batch_index + 1) * policy.batch_size
+            ]
+            batch_number = batch_index + 1
+            logger.info(
+                "[BATCH_START] 字段映射批次开始: plan_id=%s step_id=%s "
+                "batch=%s/%s field_count=%s",
+                context.plan_id,
+                step.step_id,
+                batch_number,
+                total_batches,
+                len(fields_batch),
+            )
+            return batch_index, await execute_fields(fields_batch, batch_number, 0)
 
         tasks = [
             asyncio.create_task(execute_batch(batch_index))
@@ -964,7 +1074,7 @@ class ProfessionalAgentAdapter:
                 object_entity_map,
             )
 
-        # 把字段映射回填到上传的解码配置，产出 Base64 下载，供用户取回填充后的配置（与枚举填充一致）。
+        staged_decoded_data = None
         filled_config_payload = None
         decoded_data = _session_get(context.session, "decoded_data")
         if isinstance(decoded_data, dict) and decoded_data:
@@ -973,15 +1083,17 @@ class ProfessionalAgentAdapter:
 
             object_mapping_path = Path(__file__).resolve().parent.parent / "config" / "对象.xlsx"
             object_entity_map = _load_object_mapping(str(object_mapping_path))
-            filled_config = apply_field_mapping_to_config(
-                decoded_data, mapping_rows, object_entity_map
+            staged_decoded_data = apply_field_mapping_to_config(
+                copy.deepcopy(decoded_data),
+                mapping_rows,
+                object_entity_map,
             )
-            _session_set(context.session, "decoded_data", filled_config)
             filled_config_payload = _build_config_artifact(
-                filled_config, len(typed_mappings)
+                staged_decoded_data,
+                len(typed_mappings),
             ).content
 
-        # 所有类型校验和领域计算完成后才提交，失败路径不会留下中间状态。
+        # 所有模型批次、类型校验和领域写回计算完成后，才进入一次性 session 提交。
         await _publish_progress(
             context,
             step,
@@ -993,6 +1105,8 @@ class ProfessionalAgentAdapter:
         if staged_sub_rule_results is not None and staged_mapped_sub_rules is not None:
             _session_set(context.session, "sub_rule_mapping_results", staged_sub_rule_results)
             _session_set(context.session, "mapped_sub_rules", staged_mapped_sub_rules)
+        if staged_decoded_data is not None:
+            _session_set(context.session, "decoded_data", staged_decoded_data)
         return _success(
             step,
             FieldMappingArtifact(
