@@ -33,7 +33,7 @@ def test_session_facts只暴露规划所需事实():
 
 
 def test系统元字段不进入字段映射输入():
-    """original_log/日志类型 是系统元字段，必须从 available_fields 排除，不送给映射模型。"""
+    """original_log/日志类型 是系统元字段，必须从 available_fields 排除，不送给映射模型（回归 #50）。"""
     from web.session_facts import build_session_facts
 
     facts = build_session_facts(

@@ -579,7 +579,7 @@ def test字段映射重复字段去重后不失败(monkeypatch):
 
 
 def test字段映射回填解码配置并产出下载(monkeypatch):
-    """有 decoded_data 时，字段映射回填配置并产出 Base64 下载（filled_config）。"""
+    """有 decoded_data 时，字段映射回填配置并产出 Base64 下载（filled_config）（回归 #51）。"""
     import agent.tools.standard_mapper as standard_mapper
     import web.input_builder as input_builder
 
