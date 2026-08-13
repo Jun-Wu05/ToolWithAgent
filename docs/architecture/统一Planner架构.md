@@ -28,4 +28,4 @@ Fill、取消映射和配置导出必须携带显式配置来源。`session.deco
 
 核心层通过 `ProgressEvent` 和 `ProgressSink` 发布安全阶段。无 UI 时使用 `NullProgressSink`；Chainlit 使用一个持续更新的 `TaskList` 展示“理解指令、检索候选、处理第 N/M 批、校验写回、完成或失败”。超过 10 秒没有新阶段时只刷新等待时长，不展示模型推理或结构化 token。
 
-模型边界日志使用 `MODEL_CALL_START/END/TIMEOUT`、`BATCH_START/END/RETRY` 和 `MODEL_USAGE`，包含 `plan_id`、`step_id`、批次、模型、数量、耗时、token 计数和稳定错误类别。字段检索 DEBUG 日志只记录不可逆字段哈希、候选数量与耗时；禁止记录字段原值、API token、IP、日志样本和完整模型 JSON。
+模型边界日志使用 `MODEL_CALL_START/END/TIMEOUT`、`BATCH_START/END/RETRY` 和 `MODEL_USAGE`，包含 `plan_id`、`step_id`、批次、模型、数量、耗时、token 计数和稳定错误类别。字段检索 DEBUG 日志记录字段名、候选标准字段名与相似度分数（供字段映射优化分析），以及候选数量与耗时；仍禁止记录字段原值（日志取值）、API token、IP、日志样本和完整模型 JSON。

@@ -3,24 +3,38 @@
 import logging
 
 
-def test字段检索诊断只记录哈希与数量(caplog):
-    """字段名、候选名和日志样本不得进入 DEBUG trace。"""
+def test字段检索诊断完整记录字段名与相似度(caplog):
+    """字段名、候选标准字段名与相似度分数必须进入 DEBUG trace，供字段映射优化分析。"""
+    import numpy as np
+
     from agent.core.field_retriever import _log_retrieve_trace
 
     caplog.set_level(logging.DEBUG)
+    records = [
+        {"系统属性名称": "源IP"},
+        {"系统属性名称": "事件类型"},
+        {"系统属性名称": "目的IP"},
+    ]
+    similarity_matrix = np.array([[0.90, 0.40, 0.82]])
+    candidates_tmp = [("源IP(0.90, src_ip)", "src_ip", 0.90)]
+    candidates = ["源IP(0.90, src_ip)"]
+
     _log_retrieve_trace(
-        field_name="token=secret-token;src_ip=10.0.0.1",
-        candidate_count=8,
-        final_candidate_count=6,
+        field_name="src_ip",
+        i=0,
+        similarity_matrix=similarity_matrix,
+        candidates_tmp=candidates_tmp,
+        candidates=candidates,
+        records=records,
         elapsed_seconds=0.125,
     )
 
     log_text = caplog.text
-    assert "field_hash=" in log_text
-    assert "candidate_count=8" in log_text
-    assert "elapsed_seconds=0.125" in log_text
-    assert "secret-token" not in log_text
-    assert "10.0.0.1" not in log_text
+    # 真实字段名、候选标准字段名、相似度分数与耗时都必须可见
+    assert "src_ip" in log_text
+    assert "源IP" in log_text
+    assert "0.90" in log_text
+    assert "elapsed_seconds=" in log_text
 
 
 def test字段映射解析日志不记录完整模型输出(caplog):
