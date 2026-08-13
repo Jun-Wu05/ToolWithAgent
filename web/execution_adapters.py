@@ -937,6 +937,7 @@ class ProfessionalAgentAdapter:
                 sub_rules = generate_sub_rules(classification, all_logs_str=logs_text)
         if sub_rules:
             from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_sub_rules
+            from agent.tools.standard_mapper import _load_object_mapping
 
             staged_sub_rule_results = []
             for sub_rule in sub_rules:
@@ -955,8 +956,6 @@ class ProfessionalAgentAdapter:
                         ],
                     }
                 )
-            from agent.tools.standard_mapper import _load_object_mapping
-
             object_mapping_path = Path(__file__).resolve().parent.parent / "config" / "对象.xlsx"
             object_entity_map = _load_object_mapping(str(object_mapping_path))
             staged_mapped_sub_rules = apply_field_mapping_to_sub_rules(
@@ -964,6 +963,23 @@ class ProfessionalAgentAdapter:
                 staged_sub_rule_results,
                 object_entity_map,
             )
+
+        # 把字段映射回填到上传的解码配置，产出 Base64 下载，供用户取回填充后的配置（与枚举填充一致）。
+        filled_config_payload = None
+        decoded_data = _session_get(context.session, "decoded_data")
+        if isinstance(decoded_data, dict) and decoded_data:
+            from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_config
+            from agent.tools.standard_mapper import _load_object_mapping
+
+            object_mapping_path = Path(__file__).resolve().parent.parent / "config" / "对象.xlsx"
+            object_entity_map = _load_object_mapping(str(object_mapping_path))
+            filled_config = apply_field_mapping_to_config(
+                decoded_data, mapping_rows, object_entity_map
+            )
+            _session_set(context.session, "decoded_data", filled_config)
+            filled_config_payload = _build_config_artifact(
+                filled_config, len(typed_mappings)
+            ).content
 
         # 所有类型校验和领域计算完成后才提交，失败路径不会留下中间状态。
         await _publish_progress(
@@ -979,7 +995,11 @@ class ProfessionalAgentAdapter:
             _session_set(context.session, "mapped_sub_rules", staged_mapped_sub_rules)
         return _success(
             step,
-            FieldMappingArtifact(mappings=typed_mappings, item_count=len(typed_mappings)),
+            FieldMappingArtifact(
+                mappings=typed_mappings,
+                item_count=len(typed_mappings),
+                filled_config=filled_config_payload,
+            ),
         )
     async def _execute_threat_mapping(
         self,

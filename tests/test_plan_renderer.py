@@ -62,6 +62,7 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
                             match_status="未匹配",
                         ),
                     ),
+                    filled_config="filled-base64-config",
                 ),
                 message="步骤执行成功",
             ),
@@ -85,5 +86,6 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
     assert table.shape[0] == 2
     assert "src_ip" in set(table["原始字段名"])
     assert "未匹配" in set(table["匹配状态"])
-    # 配置导出仍附下载文件，且不回归
-    assert captured["files"][0]["name"] == "plan-mix_config.txt"
+    # 字段映射回填后附 mapped_config 下载，配置导出仍附 config 下载
+    file_names = {f["name"] for f in captured["files"]}
+    assert file_names == {"plan-mix_mapped_config.txt", "plan-mix_config.txt"}

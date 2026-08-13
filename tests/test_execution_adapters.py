@@ -577,6 +577,49 @@ def test字段映射重复字段去重后不失败(monkeypatch):
     assert [row.original_field for row in result.artifact.mappings] == ["alpha", "beta"]
 
 
+def test字段映射回填解码配置并产出下载(monkeypatch):
+    """有 decoded_data 时，字段映射回填配置并产出 Base64 下载（filled_config）。"""
+    import agent.tools.standard_mapper as standard_mapper
+    import web.input_builder as input_builder
+
+    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
+    session = {
+        "decoded_fields": ["alpha", "beta"],
+        "decoded_data": {"name": "r", "normalize": [{"index": "alpha"}, {"index": "beta"}]},
+    }
+    member = _AsyncMappingMember()
+    step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
+    adapter = ProfessionalAgentAdapter(
+        _Team(member),
+        mapping_policy=FieldMappingExecutionPolicy(
+            batch_size=25,
+            max_concurrency=3,
+            timeout_seconds=1,
+            max_retries=0,
+            retry_delay_seconds=0,
+            backfill_max_attempts=0,
+        ),
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(
+                session=session,
+                session_facts=build_session_facts(session),
+            ),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.artifact.filled_config is not None
+    norm = {entry["index"]: entry for entry in session["decoded_data"]["normalize"]}
+    assert norm["alpha"]["field"] == "标准_alpha"
+    assert norm["beta"]["field"] == "标准_beta"
+
+
 class _TimeoutMappingMember:
     """模拟永不在超时前完成的专业 Agent。"""
 

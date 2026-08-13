@@ -45,6 +45,14 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             elements.extend(create_dataframe_elements(rows))
+            if artifact.filled_config:
+                elements.append(
+                    cl.File(
+                        name=f"{execution_report.plan_id}_mapped_config.txt",
+                        content=artifact.filled_config.encode("utf-8"),
+                        mime="text/plain",
+                    )
+                )
     await cl.Message(
         content=f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
         elements=elements,

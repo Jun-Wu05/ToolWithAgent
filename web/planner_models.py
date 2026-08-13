@@ -247,6 +247,8 @@ class FieldMappingArtifact(ArtifactContract):
 
     artifact_type: Literal["field_mapping"] = "field_mapping"
     mappings: tuple[FieldMappingRow, ...]
+    # 回填后的配置（Base64），存在时渲染器附下载，供用户取回填充后的配置；无回填目标时为 None。
+    filled_config: str | None = None
 
 
 class LogClassificationArtifact(ArtifactContract):
