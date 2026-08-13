@@ -6,7 +6,7 @@ import chainlit as cl
 
 from agent.shared.logger import get_logger
 from web.parsers import create_dataframe_elements
-from web.planner_models import ConfigExportArtifact, ExecutionReport, PlanDecision, StepStatus
+from web.planner_models import ExecutionReport, PlanDecision, StepStatus
 
 
 logger = get_logger("plan_renderer")

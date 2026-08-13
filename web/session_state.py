@@ -104,7 +104,7 @@ class SessionState:
     # ---- 对话历史（自定义记忆，不依赖 Agno session）----
     conversation_history: List[Dict[str, Any]] = field(default_factory=list)
     """多轮对话历史，每项 {role: 'user'|'assistant', content: str}。
-    由 web/history_store.py 管理，build_llm_input 拼最近 N 轮进 prompt。
+    由 web/history_store.py 管理，统一 Planner 消费最近 N 轮。
     clear_decoded_data 时同步清空。"""
 
     # ---- 工厂方法 ----
