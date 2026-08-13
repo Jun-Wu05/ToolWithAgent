@@ -658,6 +658,131 @@ def test威胁映射依赖产物不是枚举值时失败():
     assert result.error_code == "dependency_type_mismatch"
 
 
+def test三步复合真实链路依次传递账本并产出唯一导出(monkeypatch):
+    """enum_extract→threat_mapping→threat_fill 经真实执行器链式传递本次账本，
+    威胁填充真实改变配置，最终一次汇总 + 一个下载文件（回归 #39）。"""
+    import agent.tools.pipeline.llm_client as llm_client
+    import web.plan_renderer as renderer
+    from web.plan_executor import ExecutionContext, PlanExecutor
+    from web.planner_models import (
+        ConfigExportArtifact,
+        EnumValuesArtifact,
+        PlanDecision,
+        ThreatMappingArtifact,
+    )
+
+    monkeypatch.setattr(
+        llm_client,
+        "_call_llm_direct",
+        lambda *a, **kw: json.dumps(
+            {"field": "event_type3", "regex": r"event_type3=(\w+)"}, ensure_ascii=False
+        ),
+    )
+
+    class _ThreatMember:
+        """同步返回预设威胁映射的测试替身。"""
+
+        name = "ThreatAgent"
+
+        def __init__(self, response):
+            self._response = response
+
+        def run(self, model_input):
+            return self._response
+
+    team = _Team(
+        _ThreatMember(
+            json.dumps(
+                [
+                    {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "恶意活动"},
+                    {"mappingType": "EQUAL", "orgValue": "scan", "mappingValue": "扫描"},
+                ],
+                ensure_ascii=False,
+            )
+        )
+    )
+    session = {
+        "raw_log_lines": ["event_type3=attack src=10.0.0.1", "event_type3=scan src=10.0.0.2"],
+        "decoded_fields": ["event_type3"],
+        "decoded_data": [{"name": "rule-1", "normalize": [{"index": "event_type3", "mappings": []}]}],
+    }
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "composite",
+            "steps": [
+                {
+                    "step_id": "extract",
+                    "type": "enum_extract",
+                    "target_field": "event_type3",
+                    "source_ref": "session.logs",
+                },
+                {
+                    "step_id": "threat",
+                    "type": "threat_mapping",
+                    "source_ref": "step:extract",
+                    "depends_on": ["extract"],
+                },
+                {
+                    "step_id": "fill",
+                    "type": "fill",
+                    "fill_kind": "threat",
+                    "target_fields": ["event_type3"],
+                    "source_ref": "step:threat",
+                    "config_ref": "session.decoded_config",
+                    "depends_on": ["threat"],
+                },
+            ],
+        }
+    )
+
+    report = asyncio.run(
+        PlanExecutor(create_default_adapters(team)).execute(
+            decision,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+
+    # 三步全部成功，账本依次传递正确类型的产物（威胁映射消费枚举值、填充消费威胁映射）。
+    assert report.status == StepStatus.SUCCESS
+    assert [result.operation_type for result in report.results] == [
+        "enum_extract",
+        "threat_mapping",
+        "fill",
+    ]
+    assert isinstance(report.results[0].artifact, EnumValuesArtifact)
+    assert set(report.results[0].artifact.values) == {"attack", "scan"}
+    assert isinstance(report.results[1].artifact, ThreatMappingArtifact)
+    assert isinstance(report.results[2].artifact, ConfigExportArtifact)
+    assert report.results[2].changed_count == 2
+    # 威胁填充真实写回目标字段 mappings。
+    mappings = session["decoded_data"][0]["normalize"][0]["mappings"]
+    assert {mapping["orgValue"] for mapping in mappings} == {"attack", "scan"}
+
+    # 渲染：一次汇总消息 + 一个下载文件（无字段映射回填的第二条消息）。
+    sent_messages = []
+
+    class _File:
+        def __init__(self, *, name, content, mime, **_kwargs):
+            self.name = name
+
+    class _Message:
+        def __init__(self, *, content, elements):
+            self.content = content
+            self.elements = elements
+
+        async def send(self):
+            sent_messages.append(self)
+
+    monkeypatch.setattr(renderer.cl, "File", _File)
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert len(sent_messages) == 1
+    assert len(sent_messages[0].elements) == 1
+    assert sent_messages[0].elements[0].name == "composite_config.txt"
+
+
 class _TimeoutMappingMember:
     """模拟永不在超时前完成的专业 Agent。"""
 
