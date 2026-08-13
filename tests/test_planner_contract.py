@@ -142,6 +142,25 @@ def test威胁映射来源必须与依赖一致():
         )
 
 
+def test威胁映射来源禁止引用session旧结果():
+    """source_ref 仅允许 user.values 或本次步骤引用，禁止读 session 旧结果（回归 #38）。"""
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "steps": [
+                    {
+                        "step_id": "threat",
+                        "type": "threat_mapping",
+                        "source_ref": "session.last_enum_extract_result",
+                    }
+                ],
+            }
+        )
+
+
 def test威胁填充不能读取session旧结果():
     """强制威胁 Fill 引用本次步骤，禁止 last_threat_data 隐式兜底。"""
     from web.planner_models import PlanDecision
