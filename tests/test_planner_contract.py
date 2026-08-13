@@ -118,6 +118,55 @@ def test澄清决策不能同时携带执行步骤():
             }
         )
 
+def test执行决策不能没有步骤():
+    """执行决策至少需要一个步骤（回归 #42）。"""
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate({"decision": "execute", "plan_id": "p", "steps": []})
+
+
+def test帮助决策必须含guidance_code且不含步骤():
+    """guidance 必须携带 guidance_code 且不能包含步骤（回归 #42）。"""
+    from web.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate({"decision": "guidance"})
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "guidance",
+                "guidance_code": "capabilities",
+                "steps": [{"step_id": "s1", "type": "log_parse"}],
+            }
+        )
+
+
+def test导出session来源不能声明步骤依赖():
+    """session 导出来源不应声明步骤依赖（回归 #42）。"""
+    from web.planner_models import ExportStep
+
+    with pytest.raises(ValidationError):
+        ExportStep.model_validate(
+            {
+                "step_id": "exp",
+                "type": "export",
+                "source_ref": "session.mapped_sub_rules",
+                "depends_on": ["other"],
+            }
+        )
+
+
+def test导出步骤引用必须出现在依赖中():
+    """step:<id> 导出来源必须声明在 depends_on 中（回归 #42）。"""
+    from web.planner_models import ExportStep
+
+    with pytest.raises(ValidationError):
+        ExportStep.model_validate(
+            {"step_id": "exp", "type": "export", "source_ref": "step:other"}
+        )
+
+
 def test威胁映射来源必须与依赖一致():
     """防止 source_ref 指向未声明步骤，避免绕过本次结果账本。"""
     from web.planner_models import PlanDecision

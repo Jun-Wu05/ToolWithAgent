@@ -96,3 +96,30 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
     assert "点击下载" in download_message["content"]
     assert "plan-mix_mapped_config.txt" in download_message["content"]
     assert len(download_message["elements"]) == 1
+
+
+def test帮助决策渲染能力说明(monkeypatch):
+    """guidance 决策渲染统一的能力说明消息，不进入执行渲染（回归 #42）。"""
+    import web.plan_renderer as renderer
+    from web.planner_models import PlanDecision
+
+    sent = []
+
+    class _Message:
+        """记录发送文案，忽略元素。"""
+
+        def __init__(self, content, elements=None):
+            self.content = content
+
+        async def send(self):
+            sent.append(self.content)
+
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+
+    asyncio.run(
+        renderer.render_decision(PlanDecision(decision="guidance", guidance_code="capabilities"))
+    )
+
+    assert len(sent) == 1
+    assert "日志类型提取" in sent[0]
+    assert "字段映射" in sent[0]
