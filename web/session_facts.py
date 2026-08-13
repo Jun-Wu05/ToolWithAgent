@@ -40,11 +40,19 @@ def _collect_available_fields(session: Any) -> tuple[str, ...]:
     ordered_fields: list[str] = []
     seen_fields: set[str] = set()
 
+    # 系统自动生成的元字段（original_log、日志类型）不参与用户字段映射，在汇合点统一排除，
+    # 覆盖 decoded_fields 与 mapped_sub_rules 等 3 个来源（含已过滤的日志来源，幂等）。
+    from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
+
     def append_fields(values: Any) -> None:
-        """追加合法字段；重复值不改变首次出现位置。"""
+        """追加合法字段；重复值不改变首次出现位置；跳过系统元字段。"""
         for item in values or []:
             field_name = str(item).strip()
-            if field_name and field_name not in seen_fields:
+            if (
+                field_name
+                and field_name not in seen_fields
+                and field_name not in EXCLUDED_FIELD_INDICES
+            ):
                 seen_fields.add(field_name)
                 ordered_fields.append(field_name)
 

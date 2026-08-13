@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
-import uuid
+import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -32,11 +34,14 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "planner.md"
 
 
 def create_planner_agent() -> Agent:
-    """创建无业务工具的 PlannerAgent，并由 Agno 强制校验输出结构。"""
+    """创建确定性 PlannerAgent，并由 Agno 强制校验输出结构。"""
+    model = ModelConfig.get_main_model()
+    # 相同事实与指令必须产生稳定计划；禁止用失败后重调破坏“一次 Planner”不变量。
+    model.temperature = 0
     return Agent(
         name="PlannerAgent",
         role="用户指令规划器",
-        model=ModelConfig.get_main_model(),
+        model=model,
         instructions=_PROMPT_PATH.read_text(encoding="utf-8"),
         tools=[],
         output_schema=PlanDecision,
@@ -64,6 +69,68 @@ def build_planner_input(
         "session_facts": session_facts.model_dump(mode="json"),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+# PlanDecision 顶层合法字段。模型常自添 explanation/rationale 等多余键，剥离这些键
+# 仅作兜底；步骤级 extra=forbid 与判别联合校验不受影响，结构安全性不降级。
+_PLAN_DECISION_KEYS = frozenset(
+    {
+        "decision",
+        "plan_id",
+        "steps",
+        "reason_code",
+        "question",
+        "choices",
+        "guidance_code",
+        "parameters",
+    }
+)
+
+
+def _extract_json_object(text: str) -> str:
+    """从可能含 markdown 围栏或解释性前后缀的文本中取出首个 JSON 对象片段。"""
+    fenced = _JSON_FENCE_RE.search(text)
+    if fenced:
+        return fenced.group(1)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def _coerce_plan_decision(content: Any) -> PlanDecision:
+    """把模型/Agno 返回内容规整为 PlanDecision。
+
+    Agno 在自身结构化解析失败时会保留 content 为原始字符串，直接交给
+    ``PlanDecision.model_validate`` 会抛 "Input should be a valid dictionary"；
+    这里先抽 JSON 再解析。顶层多余字段（如 explanation）兜底剥离，步骤结构仍走
+    严格判别联合校验，整体返回值始终经过 PlanDecision 的全部语义校验。
+    """
+    if isinstance(content, PlanDecision):
+        return content
+
+    payload: Any = content
+    if isinstance(content, str):
+        try:
+            payload = json.loads(_extract_json_object(content))
+        except json.JSONDecodeError as error:
+            raise ValueError(f"模型输出不是合法 JSON: {error.msg}") from error
+
+    if isinstance(payload, dict):
+        try:
+            return PlanDecision.model_validate(payload)
+        except ValidationError:
+            unknown_keys = set(payload) - _PLAN_DECISION_KEYS
+            # 只有存在顶层多余键时才剥离重试；否则原样抛出，保留错误可观测性。
+            if not unknown_keys:
+                raise
+            cleaned = {key: value for key, value in payload.items() if key in _PLAN_DECISION_KEYS}
+            return PlanDecision.model_validate(cleaned)
+
+    raise TypeError(f"不支持的 Planner 输出类型: {type(content).__name__}")
 
 
 class PlannerService:
@@ -117,11 +184,21 @@ class PlannerService:
         )
 
         async def invoke_runner() -> Any:
-            """在异步边界调用 Planner；同步测试替身放入工作线程。"""
-            if asyncio.iscoroutinefunction(runner):
-                return await runner(planner_input)
-            return await asyncio.to_thread(runner, planner_input)
+            """调用 Planner，并按返回值是否可 await 决定是否等待。
 
+            注意：Agno 的 Agent.arun 是「返回协程的普通方法」而非 coroutine function
+            （inspect.iscoroutinefunction(Agent.arun) 为 False）。若用 iscoroutinefunction
+            判定分支，arun 会被当作同步函数在 to_thread 里调用，返回一个未被 await 的协程，
+            表现为 response/content 是 coroutine、模型实际从未被调用。这里改为对调用结果
+            用 inspect.isawaitable 判定，兼容真协程函数、arun 这类返回协程的普通函数，
+            以及同步测试替身。
+            """
+            raw = runner(planner_input)
+            if inspect.isawaitable(raw):
+                return await raw
+            return raw
+
+        content: Any = None
         try:
             response = await asyncio.wait_for(invoke_runner(), timeout=self._timeout_seconds)
             metrics = getattr(response, "metrics", None)
@@ -135,10 +212,7 @@ class PlannerService:
                     getattr(metrics, "total_tokens", 0),
                 )
             content = getattr(response, "content", response)
-            if isinstance(content, PlanDecision):
-                decision = content
-            else:
-                decision = PlanDecision.model_validate(content)
+            decision = _coerce_plan_decision(content)
             if decision.plan_id == "pending":
                 decision = decision.model_copy(update={"plan_id": f"plan-{uuid.uuid4().hex[:12]}"})
             elapsed_seconds = time.monotonic() - started_at
@@ -183,7 +257,26 @@ class PlannerService:
                 question="指令理解服务响应超时，本次未执行任何操作。请稍后重试。",
             )
         except (ValidationError, TypeError, ValueError) as error:
-            logger.error("[PLANNER] 输出非法，拒绝执行: error_category=invalid_plan error_type=%s", type(error).__name__)
+            # 仅记录结构形状与校验失败位置，绝不输出模型原文/字段值，满足脱敏要求。
+            shape_hint = ""
+            if isinstance(content, dict):
+                shape_hint = f" keys={sorted(content.keys())}"
+            elif isinstance(content, str):
+                shape_hint = f" len={len(content)}"
+            error_locs = ""
+            if isinstance(error, ValidationError):
+                error_locs = " locs=" + json.dumps(
+                    [{"loc": list(item["loc"]), "type": item["type"]} for item in error.errors()],
+                    ensure_ascii=False,
+                )
+            logger.error(
+                "[PLANNER] 输出非法，拒绝执行: error_category=invalid_plan error_type=%s "
+                "content_kind=%s%s%s",
+                type(error).__name__,
+                type(content).__name__,
+                shape_hint,
+                error_locs,
+            )
             await sink.publish(
                 ProgressEvent(
                     plan_id=progress_plan_id,

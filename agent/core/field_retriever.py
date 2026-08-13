@@ -712,21 +712,49 @@ def _strip_field_prefix(name: str) -> list[str]:
     return variants
 
 
+def _format_top_n(sims_row: Optional[np.ndarray], records: list[dict], n: int = 5) -> str:
+    """将一行相似度向量格式化为 "名(分数) | 名(分数) ..." 的 top-N 文本（诊断用）。"""
+    if sims_row is None:
+        return "(未启用诊断)"
+    k = min(n, len(sims_row))
+    top = np.argsort(sims_row)[::-1][:k]
+    return " | ".join(
+        f"{records[idx].get('系统属性名称', '')}({float(sims_row[idx]):.2f})" for idx in top
+    )
+
+
 def _log_retrieve_trace(
     field_name: str,
-    candidate_count: int,
-    final_candidate_count: int,
+    i: int,
+    similarity_matrix: np.ndarray,
+    candidates_tmp: list[tuple[str, str, float]],
+    candidates: list[str],
+    records: list[dict],
     elapsed_seconds: float,
 ) -> None:
-    """记录不可逆字段哈希、候选数量和耗时，不记录任何字段或候选原值。"""
-    field_hash = hashlib.sha256(field_name.encode("utf-8")).hexdigest()[:12]
+    """打印单个字段检索各阶段候选排名与相似度的诊断日志（DEBUG 级别）。
+
+    阶段说明：
+    - 阶段1 纯向量：embedding 余弦相似度 top5（即喂给 Layer2 的 sims）
+    - 阶段2 收集候选：Layer1/1.5/2/2.5 汇总的候选（含精确匹配与去前缀变体）
+    - 阶段3 重排序后：token 重排序后的最终输出（即注入 LLM 的候选）
+
+    记录字段名、候选标准字段名与相似度分数，供字段映射优化分析；这里不接触日志原值。
+    """
+    stage1 = _format_top_n(similarity_matrix[i], records)
+    stage2 = " | ".join(fmt for fmt, _, _ in candidates_tmp) or "(空)"
+    stage3 = " | ".join(candidates) or "(空-被阈值过滤/重排序丢弃)"
     logger.debug(
-        "[RETRIEVE_TRACE] field_hash=%s candidate_count=%s "
-        "final_candidate_count=%s elapsed_seconds=%.3f",
-        field_hash,
-        candidate_count,
-        final_candidate_count,
+        "[RETRIEVE_TRACE] field=%s elapsed_seconds=%.3f\n"
+        "  阶段1 纯向量top5 : %s\n"
+        "  阶段2 收集候选(%s): %s\n"
+        "  阶段3 重排序输出 : %s",
+        field_name,
         elapsed_seconds,
+        stage1,
+        len(candidates_tmp),
+        stage2,
+        stage3,
     )
 
 def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str:
@@ -923,12 +951,15 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         reranked_rows.sort()
         candidates = [row[3] for row in reranked_rows]
 
-        # 诊断日志只保留不可逆标识和计数，避免字段、token、IP 或候选原文泄漏。
+        # 检索诊断：追踪候选在「纯向量 → 候选收集 → token 重排序」各阶段的排名与相似度。
         if RETRIEVE_DEBUG_TRACE and logger.isEnabledFor(logging.DEBUG):
             _log_retrieve_trace(
-                field_name=field_name,
-                candidate_count=len(candidates_tmp),
-                final_candidate_count=len(candidates),
+                field_name,
+                i,
+                similarity_matrix,
+                candidates_tmp,
+                candidates,
+                records,
                 elapsed_seconds=time.monotonic() - field_started_at,
             )
 

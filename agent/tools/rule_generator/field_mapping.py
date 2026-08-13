@@ -122,6 +122,55 @@ def apply_field_mapping_to_sub_rules(
     return result_rules
 
 
+def apply_field_mapping_to_config(
+    config: Any,
+    mappings: list[dict[str, Any]],
+    object_entity_map: dict[str, str] | None = None,
+) -> Any:
+    """把字段映射结果递归应用到配置的所有 normalize 条目。
+
+    遍历范围与 _extract_normalize_indexes 一致（递归 dict/list），对匹配 index 且
+    「匹配成功」的条目设置 field（标准字段名）、entity（对象）、sim=True、core=False。
+    未匹配、未匹配状态、以及 EXCLUDED_FIELD_INDICES 中的元字段保持不变。不修改原对象。
+    """
+    if object_entity_map is None:
+        object_entity_map = {}
+
+    field_map: dict[str, dict] = {
+        m.get("原始字段名", ""): m for m in mappings if m.get("原始字段名", "")
+    }
+    updated = copy.deepcopy(config)
+
+    def _apply(obj: Any) -> None:
+        if isinstance(obj, dict):
+            normalize = obj.get("normalize")
+            if isinstance(normalize, list):
+                for entry in normalize:
+                    if not isinstance(entry, dict):
+                        continue
+                    idx = entry.get("index", "")
+                    if not idx or idx in EXCLUDED_FIELD_INDICES:
+                        continue
+                    mapping = field_map.get(idx)
+                    if not mapping:
+                        continue
+                    match_status = mapping.get("匹配状态", "")
+                    system_prop = mapping.get("系统属性名称", "")
+                    if "匹配成功" in match_status and system_prop and system_prop != "未匹配":
+                        entry["field"] = system_prop
+                        entry["entity"] = object_entity_map.get(system_prop, "事件")
+                        entry["sim"] = True
+                        entry["core"] = False
+            for value in obj.values():
+                _apply(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                _apply(item)
+
+    _apply(updated)
+    return updated
+
+
 def apply_enum_fill_to_sub_rules(
     sub_rules: list[dict[str, Any]],
     mapping_table: dict[str, list[dict]],

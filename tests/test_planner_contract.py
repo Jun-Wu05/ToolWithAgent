@@ -32,6 +32,19 @@ def test_session_facts只暴露规划所需事实():
     assert "sensitive-payload" not in dumped
 
 
+def test系统元字段不进入字段映射输入():
+    """original_log/日志类型 是系统元字段，必须从 available_fields 排除，不送给映射模型。"""
+    from web.session_facts import build_session_facts
+
+    facts = build_session_facts(
+        {"decoded_fields": ["original_log", "日志类型", "src_ip", "event_type3"]}
+    )
+
+    assert "original_log" not in facts.available_fields
+    assert "日志类型" not in facts.available_fields
+    assert facts.available_fields == ("src_ip", "event_type3")
+
+
 def test_fill步骤必须显式声明目标字段和来源():
     from web.planner_models import PlanDecision
 
@@ -201,3 +214,80 @@ def test对话历史必须符合受限类型契约():
                 "api_key": "不应进入 Planner",
             }
         )
+
+
+def _execute_payload():
+    return {
+        "decision": "execute",
+        "steps": [
+            {"step_id": "fm-1", "type": "field_mapping", "source_ref": "session.fields"}
+        ],
+    }
+
+
+def test_coerce接受字典输出():
+    from agent.core.planner import _coerce_plan_decision
+
+    decision = _coerce_plan_decision(_execute_payload())
+    assert decision.decision == "execute"
+    assert decision.steps[0].type == "field_mapping"
+
+
+def test_coerce接受裸JSON字符串():
+    """Agno 解析失败时常保留 content 为原始字符串，必须能从中还原计划。"""
+    import json
+
+    from agent.core.planner import _coerce_plan_decision
+
+    decision = _coerce_plan_decision(json.dumps(_execute_payload(), ensure_ascii=False))
+    assert decision.decision == "execute"
+
+
+def test_coerce接受带围栏和解释文本的JSON字符串():
+    import json
+
+    from agent.core.planner import _coerce_plan_decision
+
+    fenced = "这是计划：\n```json\n" + json.dumps(_execute_payload(), ensure_ascii=False) + "\n```\n已完成。"
+    decision = _coerce_plan_decision(fenced)
+    assert decision.decision == "execute"
+
+
+def test_coerce剥离顶层多余字段后仍校验():
+    """模型自添 explanation 等顶层多余键时兜底剥离，步骤结构仍严格。"""
+    from agent.core.planner import _coerce_plan_decision
+
+    payload = _execute_payload()
+    payload["explanation"] = "我决定执行字段映射"
+    decision = _coerce_plan_decision(payload)
+    assert decision.decision == "execute"
+
+
+def test_coerce不会掩盖语义错误():
+    """剥离多余键只在存在多余键时生效；clarification 缺 reason_code 仍必须失败。"""
+    from agent.core.planner import _coerce_plan_decision
+
+    with pytest.raises(ValidationError):
+        _coerce_plan_decision({"decision": "clarification", "question": "缺少原因"})
+
+
+def test_coerce拒绝非法JSON字符串():
+    from agent.core.planner import _coerce_plan_decision
+
+    with pytest.raises(ValueError):
+        _coerce_plan_decision("这不是一段 JSON")
+
+
+def test_coerce拒绝不支持类型():
+    from agent.core.planner import _coerce_plan_decision
+
+    with pytest.raises(TypeError):
+        _coerce_plan_decision(42)
+
+
+def test_coerce透传已解析的PlanDecision():
+    from agent.core.planner import _coerce_plan_decision
+    from web.planner_models import PlanDecision
+
+    original = PlanDecision.model_validate(_execute_payload())
+    assert _coerce_plan_decision(original) is original
