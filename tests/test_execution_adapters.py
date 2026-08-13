@@ -1,6 +1,7 @@
 """执行适配器对真实领域数据变更的回归测试。"""
 
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 
@@ -586,7 +587,10 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
     session = {
         "decoded_fields": ["alpha", "beta"],
-        "decoded_data": {"name": "r", "normalize": [{"index": "alpha"}, {"index": "beta"}]},
+        # simple_decode 的真实 decoded_json 根对象是规则列表，而不是包装字典。
+        "decoded_data": [
+            {"name": "r", "normalize": [{"index": "alpha"}, {"index": "beta"}]}
+        ],
     }
     member = _AsyncMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
@@ -615,9 +619,12 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
 
     assert result.status == StepStatus.SUCCESS
     assert result.artifact.filled_config is not None
-    norm = {entry["index"]: entry for entry in session["decoded_data"]["normalize"]}
+    norm = {entry["index"]: entry for entry in session["decoded_data"][0]["normalize"]}
     assert norm["alpha"]["field"] == "标准_alpha"
     assert norm["beta"]["field"] == "标准_beta"
+    downloaded = json.loads(base64.b64decode(result.artifact.filled_config).decode("utf-8"))
+    assert isinstance(downloaded, list)
+    assert downloaded == session["decoded_data"]
 
 
 class _TimeoutMappingMember:

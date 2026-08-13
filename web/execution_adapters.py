@@ -1077,7 +1077,7 @@ class ProfessionalAgentAdapter:
         staged_decoded_data = None
         filled_config_payload = None
         decoded_data = _session_get(context.session, "decoded_data")
-        if isinstance(decoded_data, dict) and decoded_data:
+        if isinstance(decoded_data, (dict, list)) and decoded_data:
             from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_config
             from agent.tools.standard_mapper import _load_object_mapping
 
@@ -1092,6 +1092,14 @@ class ProfessionalAgentAdapter:
                 staged_decoded_data,
                 len(typed_mappings),
             ).content
+            logger.info(
+                "[FIELD_MAPPING_FILLED_CONFIG] 回填配置产物已生成: "
+                "plan_id=%s step_id=%s root_type=%s content_bytes=%s",
+                context.plan_id,
+                step.step_id,
+                type(staged_decoded_data).__name__,
+                len(filled_config_payload.encode("utf-8")),
+            )
 
         # 所有模型批次、类型校验和领域写回计算完成后，才进入一次性 session 提交。
         await _publish_progress(
