@@ -7,8 +7,6 @@ field_source 字段提取测试 — 日志解析结果路径 + 原始日志直�
   根因：field_source 只在 intent=mapping 时生效，且无日志解析时无兜底。
   修复：① general 意图也用日志字段 ② 无日志解析时从原始日志直接提取 KV 字段。
 """
-import pytest
-
 from web.field_source import extract_log_fields_for_mapping, _extract_kv_fields_from_lines
 
 
@@ -63,45 +61,3 @@ class TestExtractFromRawLogFallback:
         assert "name" in fields
         assert "severity" in fields
         assert "srcIp" in fields
-
-
-class TestGeneralIntentUsesLogFields:
-    """general 意图也应使用日志真实字段（核心回归点）。"""
-
-    def test_general_intent_with_log_classification_uses_log_fields(self):
-        """有 log_classification 时，general 意图用日志字段而非 Excel 列头。"""
-        from web.input_builder import build_llm_input
-
-        class FakeSession:
-            def __init__(self):
-                self.decoded_data = {"a": 1}
-                self.decoded_fields = ["发生时间", "事件名称"]  # Excel 列头
-                self.simplified_data = {
-                    "fields": ["发生时间", "事件名称"],
-                    "original_log_sample": "",
-                }
-                self.log_classification = {
-                    "status": "SUCCESS",
-                    "log_format": "KV",
-                    "feature_field": "alarm_name",
-                    "analysis": {"delimit": "space", "tab": "="},
-                    "classification_details": [
-                        {"logtype": "IPS", "sample": KV_LOG_LINES[0]}
-                    ],
-                }
-                self.raw_log_lines = KV_LOG_LINES
-                self.conversation_history = []
-                self.last_enum_extract_result = None
-
-            def get(self, k, d=None):
-                return getattr(self, k, d)
-
-            def has_decoded_data(self):
-                return True
-
-        result = build_llm_input("alarm_name枚举提取", FakeSession(), intent="general")
-        # 修复前：general 用 Excel 列头
-        # 修复后：general 也用日志真实字段
-        assert "src_ip" in result or "alarm_name" in result, (
-            "general 意图应用日志真实字段，而非 Excel 列头"
-        )

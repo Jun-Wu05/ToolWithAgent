@@ -10,7 +10,7 @@
 - 历史存在 SessionState.conversation_history（天然 per-session 隔离）
 - 单条 content 截断（防大映射结果撑爆历史）
 - format 时从最新向前取，累计不超 max_chars（滑动窗口）
-- Team 保持无状态单例，历史由 build_llm_input 拼进 prompt
+- Team 保持无状态单例，历史由统一 Planner 消费拼进 prompt
 """
 from __future__ import annotations
 
