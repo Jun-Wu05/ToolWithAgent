@@ -203,6 +203,34 @@ def _build_config_artifact(updated_config: Any, item_count: int) -> ConfigExport
     ).decode("ascii")
     return ConfigExportArtifact(content=encoded_config, item_count=item_count)
 
+
+def _count_tagged_normalize(config: Any) -> int:
+    """递归统计已设置标准字段（field 非空）的 normalize 条目数。
+
+    用于字段映射前后差分，得出本次「实际更新的 normalize 项数」，
+    与「唯一字段映射数」区分（#23）：同一字段在 N 条子规则会被更新 N 次。
+    """
+    count = 0
+
+    def _walk(node: Any) -> None:
+        """递归遍历 dict/list，累计 field 非空的 normalize 条目。"""
+        nonlocal count
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for entry in normalize:
+                    if isinstance(entry, dict) and entry.get("field"):
+                        count += 1
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(config)
+    return count
+
+
 class EnumFillAdapter:
     """以显式目标字段和配置来源执行枚举填充。"""
 
@@ -1115,12 +1143,35 @@ class ProfessionalAgentAdapter:
             _session_set(context.session, "mapped_sub_rules", staged_mapped_sub_rules)
         if staged_decoded_data is not None:
             _session_set(context.session, "decoded_data", staged_decoded_data)
+        # 区分「唯一字段映射数」与「实际更新的 normalize 项数」（#23）：
+        # 同一字段在多条子规则会被更新多次，故更新数 ≥ 唯一映射数。
+        updated_normalize_count = 0
+        if staged_mapped_sub_rules is not None:
+            updated_normalize_count += max(
+                0, _count_tagged_normalize(staged_mapped_sub_rules) - _count_tagged_normalize(sub_rules)
+            )
+        if staged_decoded_data is not None:
+            updated_normalize_count += max(
+                0, _count_tagged_normalize(staged_decoded_data) - _count_tagged_normalize(decoded_data)
+            )
+        logger.info(
+            "[FIELD_MAPPING_WRITEBACK] plan_id=%s step_id=%s 唯一字段映射数=%s "
+            "实际更新normalize项数=%s",
+            context.plan_id,
+            step.step_id,
+            len(typed_mappings),
+            updated_normalize_count,
+        )
         return _success(
             step,
             FieldMappingArtifact(
                 mappings=typed_mappings,
                 item_count=len(typed_mappings),
                 filled_config=filled_config_payload,
+            ),
+            message=(
+                f"字段映射完成：唯一字段 {len(typed_mappings)} 项，"
+                f"实际更新 {updated_normalize_count} 个 normalize 项"
             ),
         )
     async def _execute_threat_mapping(
@@ -1210,14 +1261,14 @@ class ProfessionalAgentAdapter:
         response = await asyncio.to_thread(sync_runner, model_input)
         return getattr(response, "content", response)
 
-def _success(step: StepSpec, artifact: StepArtifact) -> StepResult:
+def _success(step: StepSpec, artifact: StepArtifact, message: str | None = None) -> StepResult:
     """把已验证的类型化领域产物转换为统一成功结果。"""
     return StepResult(
         step_id=step.step_id,
         operation_type=step.type,
         status=StepStatus.SUCCESS,
         artifact=artifact,
-        message="步骤执行成功",
+        message=message or "步骤执行成功",
     )
 def _failed(step: StepSpec, error_code: str, message: str) -> StepResult:
     """把领域失败转换为稳定错误码，不携带敏感原值。"""
