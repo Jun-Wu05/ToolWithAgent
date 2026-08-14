@@ -39,3 +39,10 @@ def test提示词包含三步复合计划与冲突澄清():
     assert '"type":"fill","fill_kind":"threat"' in PROMPT
     assert '"reason_code":"conflicting_intent"' in PROMPT
     assert "## 静默自检" in PROMPT
+
+
+def test提示词允许decoded_config直接执行枚举填充():
+    """上传 Base64 配置时，枚举填充不得错误要求先生成子规则。"""
+    assert "`session.decoded_config` 或 `session.mapped_sub_rules` 均可" in PROMPT
+    assert "无需先做字段映射" in PROMPT
+    assert "可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）" in PROMPT

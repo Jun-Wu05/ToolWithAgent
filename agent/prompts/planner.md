@@ -14,13 +14,13 @@
 2. `field_mapping`（字段映射）：原始字段名映射到标准字段名，固定 `source_ref=session.fields`。`available_fields` 非空时执行，否则 Clarification。
 3. `enum_extract`（枚举提取）：从日志提取一个**明确字段**的不同值。只有“提取 <字段> 的枚举值”等表达属于此操作。必须有 `target_field`、`source_ref=session.logs` 且 `has_logs=true`，缺任一条件都 Clarification。
 4. `threat_mapping`（威胁类型映射）：把本次显式值或本计划前序枚举提取产物映射到标准威胁分类。显式值使用 `source_ref=user.values` 并提供 `values`；步骤产物使用 `source_ref=step:<step_id>` 且声明同一 `depends_on`。禁止读取旧 session 枚举结果。
-5. `fill`（填充）：把值映射写入解析规则的 `normalize[].mappings`。必须显式提供 `fill_kind`、`target_fields`、映射 `source_ref` 和被修改配置 `config_ref`。枚举填充使用 `source_ref=session.enum_mapping_table`，目标字段只能取自 `enum_mapping_target_fields`；威胁填充必须引用本计划前序 Threat Mapping 步骤。
+5. `fill`（填充）：把值映射写入解析规则的 `normalize[].mappings`。必须显式提供 `fill_kind`、`target_fields`、映射 `source_ref` 和被修改配置 `config_ref`。枚举填充使用 `source_ref=session.enum_mapping_table`，目标字段只能取自 `enum_mapping_target_fields`，`config_ref` 取自 `available_config_refs`（`session.decoded_config` 或 `session.mapped_sub_rules` 均可，**无需先做字段映射**）；威胁填充必须引用本计划前序 Threat Mapping 步骤。
 6. `remove_mapping`（取消映射）：清空指定字段的值映射，必须有 `target_fields` 和可用 `config_ref`。
 7. `export`（导出）：导出当前配置、入口规则或子规则，必须有合法 `source_ref`；本计划产物还要声明对应 `depends_on`。
 
 ## 合法来源与依赖
 
-- `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`。
+- `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`，但仅有 `session.decoded_config` 时也必须允许枚举填充。
 - 配置导出来源：`session.decoded_config`、`session.mapped_sub_rules` 或本计划的 `step:<step_id>`。
 - 日志规则导出来源：`session.log_classification.entry_rules` 或 `session.log_classification.sub_rules`。
 - `step:<step_id>` 必须与 `depends_on` 中的同一前序步骤一致；依赖只能引用此前声明的唯一步骤。
@@ -31,7 +31,7 @@
 - “日志类型提取”是 `log_parse`，不是 `enum_extract`；它处理整列原始日志，不存在“选择哪个字段”。
 - 只有明确的“提取 <字段> 的枚举值”才是 `enum_extract`，并且必须携带 `target_field`。
 - “日志分类”指日志类型分类；“提取事件级别的枚举值”指字段枚举提取，两者不可互换。
-- “枚举值处理”：有配置、已映射子规则和枚举映射目标字段时表示枚举填充；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
+- “枚举值处理”：有可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）、枚举映射表和枚举映射目标字段时表示枚举填充；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
 - 同一句要求互相冲突的操作（如“日志类型提取，但按事件级别做枚举提取，只执行一步”）时 Clarification，不自行选择。
 - “把这些值做威胁映射”仅在当前文本明确给值，或本计划含可依赖的 Enum Extract 步骤时执行。
 - 参数缺失、意图冲突或事实不足时必须 Clarification 并停止，不得生成猜测计划。
@@ -54,9 +54,9 @@
 ```json
 {"decision":"execute","plan_id":"plan-threat","steps":[{"step_id":"threat-1","type":"threat_mapping","source_ref":"user.values","values":["SQL注入","暴力破解"]}]}
 ```
-把枚举映射表填充回事件级别（映射表与子规则可用）：
+把枚举映射表填充回事件级别（映射表与可用配置；`config_ref` 用 `decoded_config` 或 `mapped_sub_rules` 均可）：
 ```json
-{"decision":"execute","plan_id":"plan-fill","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"enum","target_fields":["事件级别"],"source_ref":"session.enum_mapping_table","config_ref":"session.mapped_sub_rules"}]}
+{"decision":"execute","plan_id":"plan-fill","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"enum","target_fields":["事件级别"],"source_ref":"session.enum_mapping_table","config_ref":"session.decoded_config"}]}
 ```
 取消事件级别的值映射（子规则可用）：
 ```json
