@@ -72,7 +72,6 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                     )
                 )
         elif artifact.artifact_type == "threat_mapping":
-            # 威胁映射产物落表展示（原始值/映射值/类型），不再只显示「步骤执行成功」。
             rows = [
                 {
                     "原始值": mapping.original_value,
@@ -83,7 +82,6 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             ]
             elements.extend(create_dataframe_elements(rows))
         elif artifact.artifact_type == "enum_values":
-            # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
             rows = [{"枚举值": value} for value in artifact.values]
             elements.extend(create_dataframe_elements(rows))
             elements.append(
@@ -94,8 +92,10 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 )
             )
         elif artifact.artifact_type == "log_classification":
-            # 日志类型提取产物落表展示（日志类型/特征字段/样本数）。
-            rows = [_log_classification_row(type_name, info) for type_name, info in artifact.classification.items()]
+            rows = [
+                _log_classification_row(type_name, info)
+                for type_name, info in artifact.classification.items()
+            ]
             elements.extend(create_dataframe_elements(rows))
     await cl.Message(
         content=f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),

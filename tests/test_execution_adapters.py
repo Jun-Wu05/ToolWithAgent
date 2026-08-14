@@ -759,9 +759,8 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     mappings = session["decoded_data"][0]["normalize"][0]["mappings"]
     assert {mapping["orgValue"] for mapping in mappings} == {"attack", "scan"}
 
-    # 渲染：复合计划的全部产物进入同一条汇总消息（无字段映射回填的第二条消息）。
+    # 渲染：一次汇总消息；枚举/威胁产物落表，最终配置和枚举值各附一个下载文件。
     sent_messages = []
-    dataframe_count = {"count": 0}
 
     class _File:
         def __init__(self, *, name, content, mime, **_kwargs):
@@ -775,20 +774,15 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
         async def send(self):
             sent_messages.append(self)
 
-    def _dataframe(**_kwargs):
-        dataframe_count["count"] += 1
-        return SimpleNamespace()
-
     monkeypatch.setattr(renderer.cl, "File", _File)
     monkeypatch.setattr(renderer.cl, "Message", _Message)
-    monkeypatch.setattr(renderer.cl, "Dataframe", _dataframe)
+    monkeypatch.setattr(renderer.cl, "Dataframe", lambda **_kwargs: SimpleNamespace())
     asyncio.run(renderer.render_execution_report(report))
 
-    # 一条汇总消息；枚举值/威胁映射落表，配置导出附下载文件。
     assert len(sent_messages) == 1
-    assert dataframe_count["count"] == 2
+    assert len(sent_messages[0].elements) == 4
     file_names = {element.name for element in sent_messages[0].elements if hasattr(element, "name")}
-    assert "composite_config.txt" in file_names
+    assert file_names == {"composite_config.txt", "composite_enum_values.txt"}
 
 
 class _TimeoutMappingMember:
