@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import copy
 import json
 from types import SimpleNamespace
 
@@ -266,6 +267,98 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     assert len(member.calls) == 2
     normalized_fields = [item["field"] for item in session["mapped_sub_rules"][0]["normalize"]]
     assert normalized_fields == [f"标准_{field}" for field in fields]
+
+
+def testExcel日志字段映射导出映射后子规则而不是Excel记录配置(monkeypatch):
+    """Excel 行数据不是解析配置，自动下载必须来自本次生成的 mapped_sub_rules。"""
+    import agent.tools.rule_generator as rule_generator
+    import agent.tools.standard_mapper as standard_mapper
+    import web.field_source as field_source
+    import web.input_builder as input_builder
+
+    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    monkeypatch.setattr(
+        field_source,
+        "extract_log_fields_for_mapping",
+        lambda classification, raw_log_lines: ["alarm_name"],
+    )
+    monkeypatch.setattr(
+        rule_generator,
+        "generate_sub_rules",
+        lambda classification, all_logs_str: [
+            {
+                "name": "AUDIT",
+                "normalize": [
+                    {"index": "alarm_name", "field": "", "mappings": []}
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
+    excel_rows = [{"原始日志": 'alarm_name="attack"', "设备": "ips"}]
+    session = {
+        "decoded_data": copy.deepcopy(excel_rows),
+        "raw_log_lines": ['alarm_name="attack"'],
+        "log_classification": {
+            "status": "SUCCESS",
+            "classification_details": [{"logtype": "AUDIT"}],
+        },
+    }
+    facts = build_session_facts(session)
+    assert facts.available_config_refs == ()
+
+    result = asyncio.run(
+        ProfessionalAgentAdapter(_Team(_MappingMember())).execute(
+            FieldMappingStep(
+                step_id="mapping-excel",
+                type="field_mapping",
+                source_ref="session.fields",
+            ),
+            ExecutionContext(session=session, session_facts=facts),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.artifact.download_kind == "mapped_sub_rules"
+    decoded_download = json.loads(
+        base64.b64decode(result.artifact.download_content).decode("utf-8")
+    )
+    assert decoded_download == session["mapped_sub_rules"]
+    downloaded_normalize = decoded_download[0]["normalize"][0]
+    assert downloaded_normalize["index"] == "alarm_name"
+    assert downloaded_normalize["field"] == "标准_alarm_name"
+    assert downloaded_normalize["mappings"] == []
+    assert session["decoded_data"] == excel_rows
+    assert "原始日志" not in json.dumps(decoded_download, ensure_ascii=False)
+
+
+def test字段映射无可回填目标时不产出下载(monkeypatch):
+    """既无真实配置也无子规则来源时，产物不得携带任何下载契约字段。"""
+    import web.input_builder as input_builder
+
+    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    session = {"decoded_fields": ["alpha", "beta"]}
+    facts = build_session_facts(session)
+    assert facts.available_config_refs == ()
+
+    result = asyncio.run(
+        ProfessionalAgentAdapter(_Team(_MappingMember())).execute(
+            FieldMappingStep(
+                step_id="mapping-only",
+                type="field_mapping",
+                source_ref="session.fields",
+            ),
+            ExecutionContext(session=session, session_facts=facts),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.artifact.download_kind is None
+    assert result.artifact.download_content is None
+    assert "mapped_sub_rules" not in session
+
 
 class _AsyncMappingMember:
     """通过 Agno 风格异步事件流返回当前批次映射。"""
@@ -579,7 +672,7 @@ def test字段映射重复字段去重后不失败(monkeypatch):
 
 
 def test字段映射回填解码配置并产出下载(monkeypatch):
-    """有 decoded_data 时，字段映射回填配置并产出 Base64 下载（filled_config）（回归 #51）。"""
+    """有真实 decoded_config 时，字段映射回填配置并标记为 mapped_config（回归 #51）。"""
     import agent.tools.standard_mapper as standard_mapper
     import web.input_builder as input_builder
 
@@ -618,11 +711,14 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     )
 
     assert result.status == StepStatus.SUCCESS
-    assert result.artifact.filled_config is not None
+    assert result.artifact.download_kind == "mapped_config"
+    assert result.artifact.download_content is not None
     norm = {entry["index"]: entry for entry in session["decoded_data"][0]["normalize"]}
     assert norm["alpha"]["field"] == "标准_alpha"
     assert norm["beta"]["field"] == "标准_beta"
-    downloaded = json.loads(base64.b64decode(result.artifact.filled_config).decode("utf-8"))
+    downloaded = json.loads(
+        base64.b64decode(result.artifact.download_content).decode("utf-8")
+    )
     assert isinstance(downloaded, list)
     assert downloaded == session["decoded_data"]
 
@@ -752,6 +848,9 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     ]
     assert isinstance(report.results[0].artifact, EnumValuesArtifact)
     assert set(report.results[0].artifact.values) == {"attack", "scan"}
+    assert report.results[0].artifact.field == "event_type3"
+    assert report.results[0].artifact.regex
+    assert report.results[0].artifact.original_log
     assert isinstance(report.results[1].artifact, ThreatMappingArtifact)
     assert isinstance(report.results[2].artifact, ConfigExportArtifact)
     assert report.results[2].changed_count == 2
@@ -1039,3 +1138,35 @@ def test入口规则导出按钮与自然语言共用ExportAdapter(monkeypatch):
     assert result.artifact.content == "encoded-entry-rules"
     assert result.artifact.item_count == 1
     assert calls == ["entry"]
+
+
+def test映射后子规则导出消费mapped_sub_rules而不是重新生成配置(monkeypatch):
+    """映射后子规则导出应保留字段映射结果，并通过统一配置产物编码。"""
+    import base64
+    import json
+
+    session = {
+        "mapped_sub_rules": [
+            {
+                "name": "AUDIT",
+                "normalize": [{"index": "alarm_name", "field": "事件名称"}],
+            }
+        ]
+    }
+    step = ExportStep(
+        step_id="export-mapped",
+        type="export",
+        source_ref="session.mapped_sub_rules",
+    )
+
+    result = asyncio.run(
+        ExportAdapter().execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    decoded = json.loads(base64.b64decode(result.artifact.content).decode("utf-8"))
+    assert decoded[0]["normalize"][0]["field"] == "事件名称"
