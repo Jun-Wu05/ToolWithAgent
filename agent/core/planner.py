@@ -167,6 +167,10 @@ class PlannerService:
         runner = self._get_runner()
         sink = progress_sink or NullProgressSink()
         started_at = time.monotonic()
+        model_id = ModelConfig.get_model_id()
+        provider = ModelConfig.get_provider()
+        call_phase = "runner_start"
+        response_received = False
         await sink.publish(
             ProgressEvent(
                 plan_id=progress_plan_id,
@@ -177,10 +181,14 @@ class PlannerService:
             )
         )
         logger.info(
-            "[MODEL_CALL_START] Planner 模型调用开始: plan_id=%s timeout_seconds=%s input_length=%s",
+            "[MODEL_CALL_START] Planner 模型调用开始: plan_id=%s provider=%s model=%s "
+            "timeout_seconds=%s input_length=%s phase=%s",
             progress_plan_id,
+            provider,
+            model_id,
             self._timeout_seconds,
             len(planner_input),
+            call_phase,
         )
 
         async def invoke_runner() -> Any:
@@ -193,14 +201,20 @@ class PlannerService:
             用 inspect.isawaitable 判定，兼容真协程函数、arun 这类返回协程的普通函数，
             以及同步测试替身。
             """
+            nonlocal call_phase
+            call_phase = "runner_wait"
             raw = runner(planner_input)
             if inspect.isawaitable(raw):
-                return await raw
+                response = await raw
+                call_phase = "response_received"
+                return response
+            call_phase = "response_received"
             return raw
 
         content: Any = None
         try:
             response = await asyncio.wait_for(invoke_runner(), timeout=self._timeout_seconds)
+            response_received = True
             metrics = getattr(response, "metrics", None)
             if metrics is not None:
                 logger.info(
@@ -217,10 +231,15 @@ class PlannerService:
                 decision = decision.model_copy(update={"plan_id": f"plan-{uuid.uuid4().hex[:12]}"})
             elapsed_seconds = time.monotonic() - started_at
             logger.info(
-                "[MODEL_CALL_END] Planner 模型调用完成: plan_id=%s elapsed_seconds=%.3f decision=%s",
+                "[MODEL_CALL_END] Planner 模型调用完成: plan_id=%s provider=%s model=%s "
+                "elapsed_seconds=%.3f decision=%s phase=%s response_received=%s",
                 decision.plan_id,
+                provider,
+                model_id,
                 elapsed_seconds,
                 decision.decision,
+                call_phase,
+                response_received,
             )
             await sink.publish(
                 ProgressEvent(
@@ -236,9 +255,15 @@ class PlannerService:
         except asyncio.TimeoutError:
             elapsed_seconds = time.monotonic() - started_at
             logger.error(
-                "[MODEL_CALL_TIMEOUT] Planner 模型调用超时: plan_id=%s timeout_seconds=%s",
+                "[MODEL_CALL_TIMEOUT] Planner 模型调用超时: plan_id=%s provider=%s model=%s "
+                "timeout_seconds=%s elapsed_seconds=%.3f phase=%s response_received=%s",
                 progress_plan_id,
+                provider,
+                model_id,
                 self._timeout_seconds,
+                elapsed_seconds,
+                call_phase,
+                response_received,
             )
             await sink.publish(
                 ProgressEvent(
@@ -271,8 +296,14 @@ class PlannerService:
                 )
             logger.error(
                 "[PLANNER] 输出非法，拒绝执行: error_category=invalid_plan error_type=%s "
+                "provider=%s model=%s elapsed_seconds=%.3f phase=%s response_received=%s "
                 "content_kind=%s%s%s",
                 type(error).__name__,
+                provider,
+                model_id,
+                time.monotonic() - started_at,
+                call_phase,
+                response_received,
                 type(content).__name__,
                 shape_hint,
                 error_locs,
@@ -294,7 +325,16 @@ class PlannerService:
                 question="我没有生成可安全执行的计划。请补充目标操作、字段和数据来源后重试。",
             )
         except Exception as error:
-            logger.error("[PLANNER] 服务不可用，拒绝执行: error_category=planner_unavailable error_type=%s", type(error).__name__)
+            logger.error(
+                "[PLANNER] 服务不可用，拒绝执行: error_category=planner_unavailable error_type=%s "
+                "provider=%s model=%s elapsed_seconds=%.3f phase=%s response_received=%s",
+                type(error).__name__,
+                provider,
+                model_id,
+                time.monotonic() - started_at,
+                call_phase,
+                response_received,
+            )
             await sink.publish(
                 ProgressEvent(
                     plan_id=progress_plan_id,
