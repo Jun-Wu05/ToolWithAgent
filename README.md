@@ -27,7 +27,7 @@ toolswithagent/
 │   ├── start_handler.py             # @cl.on_chat_start 实现
 │   ├── settings_handler.py          # @cl.on_settings_update 实现
 │   ├── message_router.py            # @cl.on_message 路由分发
-│   ├── upload_handlers.py           # 文件上传处理（含 Excel 检测）
+│   ├── file_handlers.py             # 文件上传处理（含 Excel 检测，数据表须含"原始日志"列）
 │   ├── user_message_handlers.py     # 用户文本消息处理
 │   ├── log_parser_handler.py        # 日志解析 Pipeline（独立）
 │   ├── action_callbacks.py          # 9个 Action 回调（按钮交互）
@@ -106,7 +106,7 @@ chainlit run web/chainlit_app.py
 ```
 
 启动后访问 `http://localhost:8000`，在聊天界面：
-1. **上传** Excel 或粘贴日志数据
+1. **上传** Excel 或粘贴日志数据。数据表 Excel 必须包含"**原始日志**"列，否则上传将被拒绝并提示重新上传正确格式（枚举映射表 Excel 不受此限制）
 2. **输入指令**：`字段映射` / `威胁类型` / `枚举提取` / `枚举值填充` / `日志解析`
 3. Agent 识别意图并完成处理（明确意图走快路径直调专家 Agent；模糊意图走 RouterAgent 智能路由）
 
