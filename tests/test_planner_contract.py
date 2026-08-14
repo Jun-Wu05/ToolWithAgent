@@ -270,6 +270,37 @@ def test_session_facts集中汇总日志分类字段(monkeypatch):
     assert facts.available_fields == ("src_ip", "event_type3")
 
 
+def test有日志字段时Excel列头不进入字段映射输入(monkeypatch):
+    """有真实日志字段时，Excel 列头（decoded_fields）不得混入映射候选（回归 #78）。"""
+    import web.field_source as field_source
+    from web.session_facts import build_session_facts
+
+    monkeypatch.setattr(
+        field_source,
+        "extract_log_fields_for_mapping",
+        lambda classification, raw_log_lines: ["alarm_name", "src_ip"],
+    )
+
+    facts = build_session_facts(
+        {
+            "decoded_fields": ["发生时间", "事件名称", "设备"],
+            "log_classification": {"AUDIT": {}},
+            "raw_log_lines": ['alarm_name="attack" src_ip=1.1.1.1'],
+        }
+    )
+
+    assert facts.available_fields == ("alarm_name", "src_ip")
+
+
+def test无日志字段时回退使用配置字段():
+    """Base64/TXT 配置上传场景没有日志字段，decoded_fields 仍参与映射。"""
+    from web.session_facts import build_session_facts
+
+    facts = build_session_facts({"decoded_fields": ["event_type3", "src_ip"]})
+
+    assert facts.available_fields == ("event_type3", "src_ip")
+
+
 def test对话历史必须符合受限类型契约():
     """阻止任意 session 字典或额外敏感字段跨过 Planner 接缝。"""
     from web.planner_models import ConversationTurn
