@@ -123,3 +123,175 @@ def test帮助决策渲染能力说明(monkeypatch):
     assert len(sent) == 1
     assert "日志类型提取" in sent[0]
     assert "字段映射" in sent[0]
+
+
+def _mount_chainlit_captures(monkeypatch, renderer):
+    """挂载 Chainlit 消息/表格/文件捕获桩，返回 captured 字典。"""
+    captured = {"dataframes": [], "files": [], "messages": []}
+
+    class _Message:
+        def __init__(self, *, content, elements):
+            self.content = content
+            self.elements = elements
+
+        async def send(self):
+            captured["messages"].append({"content": self.content, "elements": self.elements})
+
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+    monkeypatch.setattr(
+        renderer.cl,
+        "Dataframe",
+        lambda **kwargs: captured["dataframes"].append(kwargs) or SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        renderer.cl,
+        "File",
+        lambda **kwargs: captured["files"].append(kwargs) or SimpleNamespace(),
+    )
+    return captured
+
+
+def test威胁映射产物渲染为表格(monkeypatch):
+    """威胁映射落表展示原始值、映射值和映射类型。"""
+    import web.plan_renderer as renderer
+    from web.planner_models import (
+        ExecutionReport,
+        StepResult,
+        StepStatus,
+        ThreatMappingArtifact,
+        ThreatMappingRow,
+    )
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-threat",
+        results=(
+            StepResult(
+                step_id="threat-1",
+                operation_type="threat_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=ThreatMappingArtifact(
+                    item_count=2,
+                    mappings=(
+                        ThreatMappingRow(mappingType="EQUAL", orgValue="attack", mappingValue="恶意活动"),
+                        ThreatMappingRow(mappingType="EQUAL", orgValue="scan", mappingValue="扫描"),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert len(captured["dataframes"]) == 1
+    table = captured["dataframes"][0]["data"]
+    assert set(table["原始值"]) == {"attack", "scan"}
+    assert set(table["映射值"]) == {"恶意活动", "扫描"}
+    assert set(table["类型"]) == {"EQUAL"}
+
+
+def test枚举提取产物渲染为列表并附下载(monkeypatch):
+    """枚举值落表展示并附文本下载。"""
+    import web.plan_renderer as renderer
+    from web.planner_models import EnumValuesArtifact, ExecutionReport, StepResult, StepStatus
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-enum",
+        results=(
+            StepResult(
+                step_id="enum-1",
+                operation_type="enum_extract",
+                status=StepStatus.SUCCESS,
+                artifact=EnumValuesArtifact(item_count=2, values=("attack", "scan")),
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert len(captured["dataframes"]) == 1
+    assert set(captured["dataframes"][0]["data"]["枚举值"]) == {"attack", "scan"}
+    assert {item["name"] for item in captured["files"]} == {"plan-enum_enum_values.txt"}
+
+
+def test日志类型提取产物渲染为类型表(monkeypatch):
+    """日志分类产物落表展示日志类型、特征字段和样本数。"""
+    import web.plan_renderer as renderer
+    from web.planner_models import ExecutionReport, LogClassificationArtifact, StepResult, StepStatus
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-log",
+        results=(
+            StepResult(
+                step_id="log-1",
+                operation_type="log_parse",
+                status=StepStatus.SUCCESS,
+                artifact=LogClassificationArtifact(
+                    item_count=2,
+                    classification={
+                        "攻击日志": {"feature": "attack", "samples": ["a", "b"]},
+                        "审计日志": {"feature": "audit"},
+                    },
+                ),
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert len(captured["dataframes"]) == 1
+    table = captured["dataframes"][0]["data"]
+    assert set(table["日志类型"]) == {"攻击日志", "审计日志"}
+
+
+def test多产物复合计划渲染为单条汇总(monkeypatch):
+    """复合计划的表格和配置下载进入同一条汇总消息。"""
+    import web.plan_renderer as renderer
+    from web.planner_models import (
+        ConfigExportArtifact,
+        EnumValuesArtifact,
+        ExecutionReport,
+        StepResult,
+        StepStatus,
+        ThreatMappingArtifact,
+        ThreatMappingRow,
+    )
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-compound",
+        results=(
+            StepResult(
+                step_id="enum-1",
+                operation_type="enum_extract",
+                status=StepStatus.SUCCESS,
+                artifact=EnumValuesArtifact(item_count=1, values=("attack",)),
+            ),
+            StepResult(
+                step_id="threat-1",
+                operation_type="threat_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=ThreatMappingArtifact(
+                    item_count=1,
+                    mappings=(
+                        ThreatMappingRow(mappingType="EQUAL", orgValue="attack", mappingValue="恶意活动"),
+                    ),
+                ),
+            ),
+            StepResult(
+                step_id="fill-1",
+                operation_type="fill",
+                status=StepStatus.SUCCESS,
+                changed_count=1,
+                artifact=ConfigExportArtifact(item_count=1, content="config-text"),
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert len(captured["messages"]) == 1
+    assert len(captured["dataframes"]) == 2
+    assert {item["name"] for item in captured["files"]} == {"plan-compound_config.txt", "plan-compound_enum_values.txt"}

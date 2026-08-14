@@ -759,7 +759,7 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     mappings = session["decoded_data"][0]["normalize"][0]["mappings"]
     assert {mapping["orgValue"] for mapping in mappings} == {"attack", "scan"}
 
-    # 渲染：一次汇总消息 + 一个下载文件（无字段映射回填的第二条消息）。
+    # 渲染：一次汇总消息；枚举/威胁产物落表，最终配置和枚举值各附一个下载文件。
     sent_messages = []
 
     class _File:
@@ -776,11 +776,13 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
 
     monkeypatch.setattr(renderer.cl, "File", _File)
     monkeypatch.setattr(renderer.cl, "Message", _Message)
+    monkeypatch.setattr(renderer.cl, "Dataframe", lambda **_kwargs: SimpleNamespace())
     asyncio.run(renderer.render_execution_report(report))
 
     assert len(sent_messages) == 1
-    assert len(sent_messages[0].elements) == 1
-    assert sent_messages[0].elements[0].name == "composite_config.txt"
+    assert len(sent_messages[0].elements) == 4
+    file_names = {element.name for element in sent_messages[0].elements if hasattr(element, "name")}
+    assert file_names == {"composite_config.txt", "composite_enum_values.txt"}
 
 
 class _TimeoutMappingMember:
