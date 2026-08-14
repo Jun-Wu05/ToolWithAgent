@@ -139,6 +139,40 @@ def test枚举提取单步可运行(monkeypatch):
     assert set(report.results[0].artifact.values) == {"attack", "scan"}
 
 
+def test枚举提取从原始日志读取未进入字段映射列表的event_name(monkeypatch):
+    """目标字段来自原始日志内容时，不要求它先出现在 available_fields。"""
+    import agent.tools.pipeline.llm_client as llm_client
+
+    monkeypatch.setattr(
+        llm_client,
+        "_call_llm_direct",
+        lambda *a, **kw: json.dumps(
+            {"field": "event_name", "regex": r'"event_name"\s*:\s*"([^"]+)"'},
+            ensure_ascii=False,
+        ),
+    )
+    session = {
+        "raw_log_lines": [
+            '{"data":{"event_name":"login"}}',
+            '{"data":{"event_name":"logout"}}',
+        ],
+        "decoded_fields": ["src"],
+    }
+
+    report = _execute_single_step(
+        session,
+        {
+            "step_id": "enum",
+            "type": "enum_extract",
+            "target_field": "event_name",
+            "source_ref": "session.logs",
+        },
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert set(report.results[0].artifact.values) == {"login", "logout"}
+
+
 def test枚举提取模型返回非JSON时失败关闭(monkeypatch):
     """模型返回非合法 JSON 时返回 enum_regex_invalid，不静默成功（回归 #37）。"""
     import agent.tools.pipeline.llm_client as llm_client

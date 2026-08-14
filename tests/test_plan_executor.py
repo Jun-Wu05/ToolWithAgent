@@ -138,7 +138,8 @@ def test三步计划只消费本次显式依赖的产物():
     assert fill_adapter.calls[0][1] == {"threat": report.results[1]}
 
 
-def test字段不存在时在调用适配器前拦截():
+def test枚举提取目标字段未出现在字段映射列表时仍进入适配器():
+    """枚举提取消费原始日志，不应复用字段映射的 available_fields 门槛。"""
     decision = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -146,7 +147,16 @@ def test字段不存在时在调用适配器前拦截():
             "steps": [{"step_id": "extract", "type": "enum_extract", "target_field": "missing"}],
         }
     )
-    adapter = RecordingAdapter([])
+    adapter = RecordingAdapter(
+        [
+            StepResult(
+                step_id="extract",
+                operation_type="enum_extract",
+                status=StepStatus.SUCCESS,
+                artifact=EnumValuesArtifact(item_count=1, values=("value",)),
+            )
+        ]
+    )
 
     report = _execute(
         decision,
@@ -154,9 +164,9 @@ def test字段不存在时在调用适配器前拦截():
         SessionFacts(has_logs=True, available_fields=("event_type3",)),
     )
 
-    assert report.results[0].status == StepStatus.NEEDS_INPUT
-    assert report.results[0].error_code == "target_field_unavailable"
-    assert adapter.calls == []
+    assert report.results[0].status == StepStatus.SUCCESS
+    assert report.results[0].artifact.values == ("value",)
+    assert len(adapter.calls) == 1
 
 
 def test字段映射无可用字段时在适配器前拦截():
