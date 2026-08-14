@@ -239,12 +239,6 @@ class PlanExecutor:
         if isinstance(step, EnumExtractStep):
             if not session_facts.has_logs:
                 return self._needs_input_result(step, "logs_required", "请先上传包含日志的数据")
-            if step.target_field not in session_facts.available_fields:
-                return self._needs_input_result(
-                    step,
-                    "target_field_unavailable",
-                    f"字段 {step.target_field} 不在当前可用字段中",
-                )
         if isinstance(step, FillStep):
             if step.config_ref not in session_facts.available_config_refs:
                 return self._needs_input_result(
