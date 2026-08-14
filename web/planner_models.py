@@ -213,6 +213,9 @@ class EnumValuesArtifact(ArtifactContract):
 
     artifact_type: Literal["enum_values"] = "enum_values"
     values: tuple[str, ...]
+    field: str = ""
+    regex: str = ""
+    original_log: tuple[str, ...] = ()
 
 
 class ThreatMappingRow(StrictContract):

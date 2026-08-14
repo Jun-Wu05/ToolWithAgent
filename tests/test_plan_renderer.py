@@ -1,6 +1,8 @@
 """统一渲染器把执行产物落到界面的回归测试。"""
 
 import asyncio
+import io
+import json
 from types import SimpleNamespace
 
 
@@ -183,17 +185,23 @@ def test威胁映射产物渲染为表格(monkeypatch):
     assert len(captured["messages"]) == 1
     assert len(captured["dataframes"]) == 1
     table = captured["dataframes"][0]["data"]
-    assert set(table["原始值"]) == {"attack", "scan"}
-    assert set(table["映射值"]) == {"恶意活动", "扫描"}
+    assert list(table.columns) == ["mappingType", "orgValue", "mappingValue"]
+    assert set(table["orgValue"]) == {"attack", "scan"}
+    assert set(table["mappingValue"]) == {"恶意活动", "扫描"}
     file_names = {f["name"] for f in captured["files"]}
-    assert "plan-threat_threat_mapping.txt" in file_names
+    assert "plan-threat_threat_mapping.xlsx" in file_names
+    assert "plan-threat_threat_mapping.txt" not in file_names
     threat_file = next(
-        f for f in captured["files"] if f["name"] == "plan-threat_threat_mapping.txt"
+        f for f in captured["files"] if f["name"] == "plan-threat_threat_mapping.xlsx"
     )
-    threat_text = threat_file["content"].decode("utf-8")
-    assert "attack" in threat_text
-    assert "恶意活动" in threat_text
-    assert "EQUAL" in threat_text
+    import openpyxl
+
+    workbook = openpyxl.load_workbook(io.BytesIO(threat_file["content"]), read_only=True)
+    worksheet = workbook.active
+    rows = list(worksheet.values)
+    assert rows[0] == ("mappingType", "orgValue", "mappingValue")
+    assert rows[1] == ("EQUAL", "attack", "恶意活动")
+    assert rows[2] == ("EQUAL", "scan", "扫描")
 
 
 def test枚举提取产物渲染为列表并附下载(monkeypatch):
@@ -214,7 +222,13 @@ def test枚举提取产物渲染为列表并附下载(monkeypatch):
                 step_id="enum-1",
                 operation_type="enum_extract",
                 status=StepStatus.SUCCESS,
-                artifact=EnumValuesArtifact(item_count=2, values=("attack", "scan")),
+                artifact=EnumValuesArtifact(
+                    item_count=2,
+                    values=("attack", "scan"),
+                    field="event_name",
+                    regex=r'event_name="([^"]+)"',
+                    original_log=("event_name=attack", "event_name=scan"),
+                ),
                 message="步骤执行成功",
             ),
         ),
@@ -226,7 +240,12 @@ def test枚举提取产物渲染为列表并附下载(monkeypatch):
     assert len(captured["dataframes"]) == 1
     assert set(captured["dataframes"][0]["data"]["枚举值"]) == {"attack", "scan"}
     file_names = {f["name"] for f in captured["files"]}
-    assert "plan-enum_enum_values.txt" in file_names
+    assert "plan-enum_enum_values.json" in file_names
+    assert "plan-enum_enum_values.txt" not in file_names
+    enum_file = next(f for f in captured["files"] if f["name"] == "plan-enum_enum_values.json")
+    enum_data = json.loads(enum_file["content"].decode("utf-8"))
+    assert set(enum_data) == {"field", "regex", "original_log", "value"}
+    assert enum_data["value"] == ["attack", "scan"]
 
 
 def test日志类型提取产物渲染为类型表(monkeypatch):
@@ -278,21 +297,24 @@ def test日志类型提取产物渲染为类型表(monkeypatch):
     asyncio.run(renderer.render_execution_report(report))
 
     assert len(captured["messages"]) == 1
-    assert len(captured["dataframes"]) == 1
-    table = captured["dataframes"][0]["data"]
-    assert set(table["日志类型"]) == {"攻击日志", "审计日志"}
-    assert set(table["样本数"]) == {"2", "1"}
-    assert set(table["匹配数量"]) == {"2", "1"}
-    assert set(table["特征字段"]) == {"msg_type"}
+    assert len(captured["dataframes"]) == 0
+    content = captured["messages"][0]["content"]
+    assert "### 📊 分类详情" in content
+    assert "攻击日志" in content
+    assert "attack event=1" in content
+    assert "classification_details" not in content
     file_names = {f["name"] for f in captured["files"]}
-    assert "plan-log_log_classification.txt" in file_names
+    assert "plan-log_log_classification.json" in file_names
+    assert "plan-log_log_classification.txt" not in file_names
     log_file = next(
-        f for f in captured["files"] if f["name"] == "plan-log_log_classification.txt"
+        f for f in captured["files"] if f["name"] == "plan-log_log_classification.json"
     )
-    log_text = log_file["content"].decode("utf-8")
-    assert "攻击日志" in log_text
-    assert "attack event=1" in log_text
-    assert "audit event=1" in log_text
+    log_data = json.loads(log_file["content"].decode("utf-8"))
+    assert log_data["classification_details"][0]["logtype"] == "攻击日志"
+    assert log_data["classification_details"][0]["real_samples"] == [
+        "attack event=1",
+        "attack event=2",
+    ]
 
 
 def test多产物复合计划渲染为单条汇总(monkeypatch):
@@ -347,3 +369,5 @@ def test多产物复合计划渲染为单条汇总(monkeypatch):
     assert len(captured["dataframes"]) == 2
     file_names = {f["name"] for f in captured["files"]}
     assert "plan-compound_config.txt" in file_names
+    assert "plan-compound_enum_values.json" in file_names
+    assert "plan-compound_threat_mapping.xlsx" in file_names

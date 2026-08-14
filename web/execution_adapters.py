@@ -562,7 +562,13 @@ class ProfessionalAgentAdapter:
         _session_set(context.session, "last_enum_extract_result", enum_result)
         return _success(
             step,
-            EnumValuesArtifact(values=tuple(str(value) for value in values), item_count=len(values)),
+            EnumValuesArtifact(
+                values=tuple(str(value) for value in values),
+                item_count=len(values),
+                field=str(enum_result.get("field") or step.target_field),
+                regex=str(enum_result.get("regex") or regex),
+                original_log=tuple(str(line) for line in enum_result.get("original_log", [])),
+            ),
         )
 
     async def _backfill_field_mapping_rows(

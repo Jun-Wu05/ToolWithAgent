@@ -752,6 +752,9 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     ]
     assert isinstance(report.results[0].artifact, EnumValuesArtifact)
     assert set(report.results[0].artifact.values) == {"attack", "scan"}
+    assert report.results[0].artifact.field == "event_type3"
+    assert report.results[0].artifact.regex
+    assert report.results[0].artifact.original_log
     assert isinstance(report.results[1].artifact, ThreatMappingArtifact)
     assert isinstance(report.results[2].artifact, ConfigExportArtifact)
     assert report.results[2].changed_count == 2
