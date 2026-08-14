@@ -185,6 +185,15 @@ def test威胁映射产物渲染为表格(monkeypatch):
     table = captured["dataframes"][0]["data"]
     assert set(table["原始值"]) == {"attack", "scan"}
     assert set(table["映射值"]) == {"恶意活动", "扫描"}
+    file_names = {f["name"] for f in captured["files"]}
+    assert "plan-threat_threat_mapping.txt" in file_names
+    threat_file = next(
+        f for f in captured["files"] if f["name"] == "plan-threat_threat_mapping.txt"
+    )
+    threat_text = threat_file["content"].decode("utf-8")
+    assert "attack" in threat_text
+    assert "恶意活动" in threat_text
+    assert "EQUAL" in threat_text
 
 
 def test枚举提取产物渲染为列表并附下载(monkeypatch):
@@ -241,8 +250,24 @@ def test日志类型提取产物渲染为类型表(monkeypatch):
                 artifact=LogClassificationArtifact(
                     item_count=2,
                     classification={
-                        "攻击日志": {"feature": "attack", "samples": ["a", "b"]},
-                        "审计日志": {"feature": "audit"},
+                        "status": "SUCCESS",
+                        "feature_field": "msg_type",
+                        "classification_details": [
+                            {
+                                "logtype": "攻击日志",
+                                "count": 2,
+                                "matched_regex": "attack",
+                                "coverage_pct": 66.7,
+                                "real_samples": ["attack event=1", "attack event=2"],
+                            },
+                            {
+                                "logtype": "审计日志",
+                                "count": 1,
+                                "matched_regex": "audit",
+                                "coverage_pct": 33.3,
+                                "real_samples": ["audit event=1"],
+                            },
+                        ],
                     },
                 ),
                 message="步骤执行成功",
@@ -256,6 +281,18 @@ def test日志类型提取产物渲染为类型表(monkeypatch):
     assert len(captured["dataframes"]) == 1
     table = captured["dataframes"][0]["data"]
     assert set(table["日志类型"]) == {"攻击日志", "审计日志"}
+    assert set(table["样本数"]) == {"2", "1"}
+    assert set(table["匹配数量"]) == {"2", "1"}
+    assert set(table["特征字段"]) == {"msg_type"}
+    file_names = {f["name"] for f in captured["files"]}
+    assert "plan-log_log_classification.txt" in file_names
+    log_file = next(
+        f for f in captured["files"] if f["name"] == "plan-log_log_classification.txt"
+    )
+    log_text = log_file["content"].decode("utf-8")
+    assert "攻击日志" in log_text
+    assert "attack event=1" in log_text
+    assert "audit event=1" in log_text
 
 
 def test多产物复合计划渲染为单条汇总(monkeypatch):

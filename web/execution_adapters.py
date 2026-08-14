@@ -500,11 +500,17 @@ class ProfessionalAgentAdapter:
             return _failed(step, "log_parse_failed", "日志类型提取没有生成有效结果")
         classification = fill_sample_logs(classification, logs_text)
         _session_set(context.session, "log_classification", classification)
+        classification_details = classification.get("classification_details")
+        item_count = (
+            len(classification_details)
+            if isinstance(classification_details, list)
+            else len(classification)
+        )
         return _success(
             step,
             LogClassificationArtifact(
                 classification=classification,
-                item_count=len(classification),
+                item_count=item_count,
             ),
         )
 

@@ -39,6 +39,110 @@ def _log_classification_row(type_name: str, info: object) -> dict[str, str]:
     return {"日志类型": str(type_name), "特征字段": feature, "样本数": sample_count}
 
 
+def _classification_detail_rows(classification: dict[str, object]) -> list[dict[str, str]]:
+    """把当前 Pipeline 的分类明细或旧版字典统一转换为表格行。"""
+    details = classification.get("classification_details")
+    if isinstance(details, list):
+        feature_field = str(
+            classification.get("feature_field")
+            or classification.get("feature_identifier")
+            or classification.get("categorical_features")
+            or ""
+        )
+        rows = []
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            type_name = detail.get("logtype") or detail.get("log_type") or detail.get("type")
+            if not type_name:
+                continue
+            samples = detail.get("real_samples") or detail.get("samples") or detail.get("sample")
+            if isinstance(samples, list):
+                sample_count = len(samples)
+            elif samples:
+                sample_count = 1
+            else:
+                sample_count = detail.get("count", "")
+            rows.append(
+                {
+                    "日志类型": str(type_name),
+                    "特征字段": feature_field,
+                    "样本数": str(sample_count),
+                    "匹配数量": str(detail.get("count") or ""),
+                    "匹配规则": str(detail.get("matched_regex") or ""),
+                    "覆盖率": str(detail.get("coverage_pct") or ""),
+                }
+            )
+        return rows
+    return [
+        _log_classification_row(type_name, info)
+        for type_name, info in classification.items()
+        if type_name not in {"status", "error", "analysis"}
+    ]
+
+
+def _classification_details(classification: dict[str, object]) -> list[dict[str, object]]:
+    """返回分类明细列表，兼容旧版日志类型字典以支持 TXT 导出。"""
+    details = classification.get("classification_details")
+    if isinstance(details, list):
+        return [detail for detail in details if isinstance(detail, dict)]
+    legacy_details = []
+    for type_name, info in classification.items():
+        if type_name in {"status", "error", "analysis"} or not isinstance(info, dict):
+            continue
+        legacy_details.append({"logtype": type_name, **info})
+    return legacy_details
+
+
+def _classification_download_text(classification: dict[str, object]) -> str:
+    """生成日志分类 TXT，包含结构化结果和每类原始日志样本。"""
+    summary_keys = (
+        "status",
+        "log_format",
+        "feature_field",
+        "feature_count",
+        "total_valid_lines",
+        "covered_lines",
+    )
+    lines = ["日志分类结果", "=" * 20]
+    for key in summary_keys:
+        if key in classification:
+            lines.append(f"{key}: {classification[key]}")
+    for detail in _classification_details(classification):
+        lines.extend(["", f"日志类型: {detail.get('logtype', '')}"])
+        for key, label in (
+            ("count", "匹配数量"),
+            ("matched_regex", "匹配规则"),
+            ("coverage_pct", "覆盖率"),
+        ):
+            if detail.get(key) not in (None, ""):
+                lines.append(f"{label}: {detail[key]}")
+        samples = detail.get("real_samples") or detail.get("samples") or detail.get("sample")
+        if samples:
+            lines.append("原始日志样本:")
+            if isinstance(samples, list):
+                lines.extend(f"- {sample}" for sample in samples)
+            else:
+                lines.append(f"- {samples}")
+    return "\n".join(lines)
+
+
+def _threat_mapping_download_text(mappings: object) -> str:
+    """生成威胁映射 TXT 表格。"""
+    lines = ["原始值\t映射值\t映射类型"]
+    for mapping in mappings:
+        lines.append(
+            "\t".join(
+                (
+                    str(mapping.original_value),
+                    str(mapping.mapped_value),
+                    str(mapping.mapping_type),
+                )
+            )
+        )
+    return "\n".join(lines)
+
+
 async def render_execution_report(execution_report: ExecutionReport) -> None:
     """发送一次步骤汇总；七类产物按类型附表格或下载，复合计划全部进同一条汇总。"""
     status_icon = {
@@ -82,6 +186,13 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 for mapping in artifact.mappings
             ]
             elements.extend(create_dataframe_elements(rows))
+            elements.append(
+                cl.File(
+                    name=f"{execution_report.plan_id}_threat_mapping.txt",
+                    content=_threat_mapping_download_text(artifact.mappings).encode("utf-8"),
+                    mime="text/plain",
+                )
+            )
         elif artifact.artifact_type == "enum_values":
             # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
             rows = [{"枚举值": value} for value in artifact.values]
@@ -95,8 +206,15 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             )
         elif artifact.artifact_type == "log_classification":
             # 日志类型提取产物落表展示（日志类型/特征字段/样本数）。
-            rows = [_log_classification_row(type_name, info) for type_name, info in artifact.classification.items()]
+            rows = _classification_detail_rows(artifact.classification)
             elements.extend(create_dataframe_elements(rows))
+            elements.append(
+                cl.File(
+                    name=f"{execution_report.plan_id}_log_classification.txt",
+                    content=_classification_download_text(artifact.classification).encode("utf-8"),
+                    mime="text/plain",
+                )
+            )
     await cl.Message(
         content=f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
         elements=elements,
