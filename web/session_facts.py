@@ -43,6 +43,7 @@ def _collect_available_fields(session: Any) -> tuple[str, ...]:
     # 系统自动生成的元字段（original_log、日志类型）不参与用户字段映射，在汇合点统一排除，
     # 覆盖 decoded_fields 与 mapped_sub_rules 等 3 个来源（含已过滤的日志来源，幂等）。
     from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
+    from web.field_source import extract_log_fields_for_mapping
 
     def append_fields(values: Any) -> None:
         """追加合法字段；重复值不改变首次出现位置；跳过系统元字段。"""
@@ -56,12 +57,15 @@ def _collect_available_fields(session: Any) -> tuple[str, ...]:
                 seen_fields.add(field_name)
                 ordered_fields.append(field_name)
 
-    append_fields(_read_session_value(session, "decoded_fields", []) or [])
-    from web.field_source import extract_log_fields_for_mapping
-
     classification = _read_session_value(session, "log_classification")
     raw_log_lines = _read_session_value(session, "raw_log_lines", []) or []
-    append_fields(extract_log_fields_for_mapping(classification, raw_log_lines))
+    log_fields = extract_log_fields_for_mapping(classification, raw_log_lines)
+    if log_fields:
+        # 有真实日志字段时 Excel 列头不参与映射（回归 #78）；
+        # decoded_fields 仅作为无日志字段时的回退（Base64/TXT 配置上传场景）。
+        append_fields(log_fields)
+    else:
+        append_fields(_read_session_value(session, "decoded_fields", []) or [])
 
     for sub_rule in _read_session_value(session, "mapped_sub_rules", []) or []:
         if not isinstance(sub_rule, Mapping):

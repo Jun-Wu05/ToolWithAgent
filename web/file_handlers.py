@@ -207,6 +207,8 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
     """
     处理 Excel 数据表格（非枚举映射表）
 
+    数据表格必须包含"原始日志"列，否则在写入任何会话状态前拒绝（回归 #78）。
+
     Args:
         excel_path: Excel 文件路径
         file_name: 文件名
@@ -217,6 +219,21 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
         df = pd.read_excel(excel_path)
         if df.empty:
             await cl.Message(content=f"⚠️ Excel 文件 `{file_name}` 为空，无法读取数据。").send()
+            return
+
+        # 先定位"原始日志"列；缺失即拒绝，不得把列头当作字段进入后续映射。
+        raw_log_column = next((col for col in df.columns if "原始日志" in str(col)), None)
+        if raw_log_column is None:
+            logger.warning(
+                f"[FILE_UPLOAD] 数据表格缺少\"原始日志\"列，已拒绝: file={file_name} "
+                f"columns={list(df.columns)}"
+            )
+            await cl.Message(
+                content=(
+                    f"❌ Excel 文件 `{file_name}` 缺少\"原始日志\"列。\n\n"
+                    "上传正确的excel，应包含原始日志一列。"
+                )
+            ).send()
             return
 
         # 将 DataFrame 转为结构化数据，填入 user_session（与 Base64 解码流程对齐）
@@ -242,7 +259,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
         # 注意：数据表格不是枚举映射表，不应覆盖 enum_excel_path
         # （enum_excel_path 仅由真正的枚举映射表上传设置，见 handle_file_upload 枚举表检测段）
 
-        # 检测"原始日志"列并预提取，供 LogParserAgent 精简输入使用
+        # 提取"原始日志"列，供 LogParserAgent 精简输入使用
         # CHANGED: 替换单元格内的换行符为空格，防止单条日志被拆散成多行碎片
         raw_log_lines = None
         for col in df.columns:
