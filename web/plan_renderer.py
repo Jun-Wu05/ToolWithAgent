@@ -2,14 +2,46 @@
 
 from __future__ import annotations
 
+import io
+import json
+
 import chainlit as cl
+import pandas as pd
 
 from agent.shared.logger import get_logger
 from web.parsers import create_dataframe_elements
 from web.planner_models import ExecutionReport, PlanDecision, StepStatus
+from web.utils import render_log_parser_result
 
 
 logger = get_logger("plan_renderer")
+
+
+def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
+    """根据成功产物挂载既有类型化动作，不在渲染器内执行领域逻辑。"""
+    action_specs: list[tuple[str, str, str]] = []
+    for result in execution_report.results:
+        if result.status != StepStatus.SUCCESS or result.artifact is None:
+            continue
+        if result.artifact.artifact_type == "log_classification":
+            action_specs.extend(
+                [
+                    ("apply_field_mapping", "标准字段映射", "基于已识别日志字段执行标准字段映射"),
+                    ("export_rules", "生成入口规则", "生成并下载日志入口解析规则"),
+                    ("export_sub_rules", "生成子规则", "生成并下载日志子解析规则"),
+                ]
+            )
+        elif result.artifact.artifact_type == "field_mapping":
+            action_specs.append(
+                ("export_mapped_sub_rules", "生成映射后子规则", "生成并下载标准字段映射后的子规则")
+            )
+
+    seen: set[str] = set()
+    return [
+        cl.Action(name=name, label=label, description=description, payload={})
+        for name, label, description in action_specs
+        if not (name in seen or seen.add(name))
+    ]
 
 
 async def render_decision(decision: PlanDecision) -> None:
@@ -25,20 +57,6 @@ async def render_decision(decision: PlanDecision) -> None:
     raise ValueError("执行决策不能直接渲染")
 
 
-def _log_classification_row(type_name: str, info: object) -> dict[str, str]:
-    """把日志分类条目归一为表格行，容忍不同分类结构的字段差异。"""
-    feature = ""
-    sample_count = ""
-    if isinstance(info, dict):
-        feature = str(info.get("feature") or info.get("feature_field") or "")
-        samples = info.get("samples") if "samples" in info else info.get("sample")
-        if isinstance(samples, list):
-            sample_count = str(len(samples))
-        elif samples:
-            sample_count = "1"
-    return {"日志类型": str(type_name), "特征字段": feature, "样本数": sample_count}
-
-
 async def render_execution_report(execution_report: ExecutionReport) -> None:
     """发送一次步骤汇总；七类产物按类型附表格或下载，复合计划全部进同一条汇总。"""
     status_icon = {
@@ -48,7 +66,8 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
     }
     lines = []
     elements = []
-    mapped_config_downloads: list[tuple[str, bytes]] = []
+    actions = _build_result_actions(execution_report)
+    field_mapping_downloads: list[tuple[str, str, bytes]] = []
     for result in execution_report.results:
         detail = result.message or result.error_code or result.status.value
         lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
@@ -64,55 +83,86 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             elements.extend(create_dataframe_elements(rows))
-            if artifact.filled_config:
-                mapped_config_downloads.append(
+            if artifact.download_kind and artifact.download_content:
+                field_mapping_downloads.append(
                     (
-                        f"{execution_report.plan_id}_mapped_config.txt",
-                        artifact.filled_config.encode("utf-8"),
+                        artifact.download_kind,
+                        f"{execution_report.plan_id}_{artifact.download_kind}.txt",
+                        artifact.download_content.encode("utf-8"),
                     )
                 )
         elif artifact.artifact_type == "threat_mapping":
-            rows = [
-                {
-                    "原始值": mapping.original_value,
-                    "映射值": mapping.mapped_value,
-                    "类型": mapping.mapping_type,
-                }
-                for mapping in artifact.mappings
-            ]
+            rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             elements.extend(create_dataframe_elements(rows))
+            dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
+            elements.append(
+                cl.File(
+                    name=f"{execution_report.plan_id}_threat_mapping.xlsx",
+                    content=output.getvalue(),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            )
         elif artifact.artifact_type == "enum_values":
+            # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
             rows = [{"枚举值": value} for value in artifact.values]
             elements.extend(create_dataframe_elements(rows))
             elements.append(
                 cl.File(
-                    name=f"{execution_report.plan_id}_enum_values.txt",
-                    content="\n".join(artifact.values).encode("utf-8"),
-                    mime="text/plain",
+                    name=f"{execution_report.plan_id}_enum_values.json",
+                    content=json.dumps(
+                        {
+                            "field": artifact.field,
+                            "regex": artifact.regex,
+                            "original_log": list(artifact.original_log),
+                            "value": list(artifact.values),
+                        },
+                        ensure_ascii=False,
+                        indent=4,
+                    ).encode("utf-8"),
+                    mime="application/json",
                 )
             )
         elif artifact.artifact_type == "log_classification":
-            rows = [
-                _log_classification_row(type_name, info)
-                for type_name, info in artifact.classification.items()
-            ]
-            elements.extend(create_dataframe_elements(rows))
-    await cl.Message(
-        content=f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
-        elements=elements,
-    ).send()
+            lines.append(render_log_parser_result(artifact.classification, None))
+            elements.append(
+                cl.File(
+                    name=f"{execution_report.plan_id}_log_classification.json",
+                    content=json.dumps(
+                        artifact.classification,
+                        ensure_ascii=False,
+                        indent=4,
+                    ).encode("utf-8"),
+                    mime="application/json",
+                )
+            )
+    message_kwargs = {
+        "content": f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
+        "elements": elements,
+    }
+    if actions:
+        message_kwargs["actions"] = actions
+    await cl.Message(**message_kwargs).send()
 
-    for file_name, content in mapped_config_downloads:
+    for download_kind, file_name, content in field_mapping_downloads:
+        title = (
+            "✅ **字段映射已回填到上传配置**"
+            if download_kind == "mapped_config"
+            else "✅ **字段映射已写入解析子规则**"
+        )
         logger.info(
-            "[RENDER_FIELD_MAPPING] 准备发送回填配置下载: "
-            "plan_id=%s file_name=%s content_bytes=%s",
+            "[RENDER_FIELD_MAPPING] 准备发送字段映射下载: "
+            "plan_id=%s download_kind=%s file_name=%s content_bytes=%s",
             execution_report.plan_id,
+            download_kind,
             file_name,
             len(content),
         )
         await cl.Message(
             content=(
-                "✅ **字段映射已回填到上传配置**\n\n"
+                f"{title}\n\n"
                 f"📥 点击下载：`{file_name}`"
             ),
             elements=[
@@ -125,8 +175,9 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             ],
         ).send()
         logger.info(
-            "[RENDER_FIELD_MAPPING] 回填配置下载已发送: "
-            "plan_id=%s file_name=%s",
+            "[RENDER_FIELD_MAPPING] 字段映射下载已发送: "
+            "plan_id=%s download_kind=%s file_name=%s",
             execution_report.plan_id,
+            download_kind,
             file_name,
         )

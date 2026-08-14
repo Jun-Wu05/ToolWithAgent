@@ -500,11 +500,17 @@ class ProfessionalAgentAdapter:
             return _failed(step, "log_parse_failed", "日志类型提取没有生成有效结果")
         classification = fill_sample_logs(classification, logs_text)
         _session_set(context.session, "log_classification", classification)
+        classification_details = classification.get("classification_details")
+        item_count = (
+            len(classification_details)
+            if isinstance(classification_details, list)
+            else len(classification)
+        )
         return _success(
             step,
             LogClassificationArtifact(
                 classification=classification,
-                item_count=len(classification),
+                item_count=item_count,
             ),
         )
 
@@ -556,7 +562,13 @@ class ProfessionalAgentAdapter:
         _session_set(context.session, "last_enum_extract_result", enum_result)
         return _success(
             step,
-            EnumValuesArtifact(values=tuple(str(value) for value in values), item_count=len(values)),
+            EnumValuesArtifact(
+                values=tuple(str(value) for value in values),
+                item_count=len(values),
+                field=str(enum_result.get("field") or step.target_field),
+                regex=str(enum_result.get("regex") or regex),
+                original_log=tuple(str(line) for line in enum_result.get("original_log", [])),
+            ),
         )
 
     async def _backfill_field_mapping_rows(
@@ -1103,9 +1115,13 @@ class ProfessionalAgentAdapter:
             )
 
         staged_decoded_data = None
-        filled_config_payload = None
+        download_kind = None
+        download_content = None
         decoded_data = _session_get(context.session, "decoded_data")
-        if isinstance(decoded_data, (dict, list)) and decoded_data:
+        has_decoded_config = (
+            "session.decoded_config" in context.session_facts.available_config_refs
+        )
+        if has_decoded_config and isinstance(decoded_data, (dict, list)) and decoded_data:
             from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_config
             from agent.tools.standard_mapper import _load_object_mapping
 
@@ -1116,7 +1132,8 @@ class ProfessionalAgentAdapter:
                 mapping_rows,
                 object_entity_map,
             )
-            filled_config_payload = _build_config_artifact(
+            download_kind = "mapped_config"
+            download_content = _build_config_artifact(
                 staged_decoded_data,
                 len(typed_mappings),
             ).content
@@ -1126,7 +1143,21 @@ class ProfessionalAgentAdapter:
                 context.plan_id,
                 step.step_id,
                 type(staged_decoded_data).__name__,
-                len(filled_config_payload.encode("utf-8")),
+                len(download_content.encode("utf-8")),
+            )
+        elif staged_mapped_sub_rules is not None:
+            download_kind = "mapped_sub_rules"
+            download_content = _build_config_artifact(
+                staged_mapped_sub_rules,
+                len(typed_mappings),
+            ).content
+            logger.info(
+                "[FIELD_MAPPING_MAPPED_SUB_RULES] 映射后子规则产物已生成: "
+                "plan_id=%s step_id=%s rule_count=%s content_bytes=%s",
+                context.plan_id,
+                step.step_id,
+                len(staged_mapped_sub_rules),
+                len(download_content.encode("utf-8")),
             )
 
         # 所有模型批次、类型校验和领域写回计算完成后，才进入一次性 session 提交。
@@ -1167,7 +1198,8 @@ class ProfessionalAgentAdapter:
             FieldMappingArtifact(
                 mappings=typed_mappings,
                 item_count=len(typed_mappings),
-                filled_config=filled_config_payload,
+                download_kind=download_kind,
+                download_content=download_content,
             ),
             message=(
                 f"字段映射完成：唯一字段 {len(typed_mappings)} 项，"

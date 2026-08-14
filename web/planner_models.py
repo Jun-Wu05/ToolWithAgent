@@ -213,6 +213,9 @@ class EnumValuesArtifact(ArtifactContract):
 
     artifact_type: Literal["enum_values"] = "enum_values"
     values: tuple[str, ...]
+    field: str = ""
+    regex: str = ""
+    original_log: tuple[str, ...] = ()
 
 
 class ThreatMappingRow(StrictContract):
@@ -247,8 +250,15 @@ class FieldMappingArtifact(ArtifactContract):
 
     artifact_type: Literal["field_mapping"] = "field_mapping"
     mappings: tuple[FieldMappingRow, ...]
-    # 回填后的配置（Base64），存在时渲染器附下载，供用户取回填充后的配置；无回填目标时为 None。
-    filled_config: str | None = None
+    download_kind: Literal["mapped_config", "mapped_sub_rules"] | None = None
+    download_content: str | None = None
+
+    @model_validator(mode="after")
+    def validate_download_contract(self) -> "FieldMappingArtifact":
+        """下载类型与内容必须同时存在，避免渲染器根据载荷结构猜测语义。"""
+        if (self.download_kind is None) != (self.download_content is None):
+            raise ValueError("字段映射下载类型与内容必须同时提供")
+        return self
 
 
 class LogClassificationArtifact(ArtifactContract):
