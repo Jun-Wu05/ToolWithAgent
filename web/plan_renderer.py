@@ -25,8 +25,22 @@ async def render_decision(decision: PlanDecision) -> None:
     raise ValueError("执行决策不能直接渲染")
 
 
+def _log_classification_row(type_name: str, info: object) -> dict[str, str]:
+    """把日志分类条目归一为表格行，容忍不同分类结构的字段差异。"""
+    feature = ""
+    sample_count = ""
+    if isinstance(info, dict):
+        feature = str(info.get("feature") or info.get("feature_field") or "")
+        samples = info.get("samples") if "samples" in info else info.get("sample")
+        if isinstance(samples, list):
+            sample_count = str(len(samples))
+        elif samples:
+            sample_count = "1"
+    return {"日志类型": str(type_name), "特征字段": feature, "样本数": sample_count}
+
+
 async def render_execution_report(execution_report: ExecutionReport) -> None:
-    """发送一次步骤汇总；字段映射附映射表，配置导出附下载文件。"""
+    """发送一次步骤汇总；七类产物按类型附表格或下载，复合计划全部进同一条汇总。"""
     status_icon = {
         StepStatus.SUCCESS: "✅",
         StepStatus.NEEDS_INPUT: "💡",
@@ -57,6 +71,32 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                         artifact.filled_config.encode("utf-8"),
                     )
                 )
+        elif artifact.artifact_type == "threat_mapping":
+            # 威胁映射产物落表展示（原始值/映射值/类型），不再只显示「步骤执行成功」。
+            rows = [
+                {
+                    "原始值": mapping.original_value,
+                    "映射值": mapping.mapped_value,
+                    "类型": mapping.mapping_type,
+                }
+                for mapping in artifact.mappings
+            ]
+            elements.extend(create_dataframe_elements(rows))
+        elif artifact.artifact_type == "enum_values":
+            # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
+            rows = [{"枚举值": value} for value in artifact.values]
+            elements.extend(create_dataframe_elements(rows))
+            elements.append(
+                cl.File(
+                    name=f"{execution_report.plan_id}_enum_values.txt",
+                    content="\n".join(artifact.values).encode("utf-8"),
+                    mime="text/plain",
+                )
+            )
+        elif artifact.artifact_type == "log_classification":
+            # 日志类型提取产物落表展示（日志类型/特征字段/样本数）。
+            rows = [_log_classification_row(type_name, info) for type_name, info in artifact.classification.items()]
+            elements.extend(create_dataframe_elements(rows))
     await cl.Message(
         content=f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
         elements=elements,
