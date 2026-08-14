@@ -88,6 +88,12 @@ CASES = (
         lambda d: _step_types(d) == ("enum_extract", "threat_mapping", "fill"),
     ),
     SemanticCase(
+        "compound_enum_threat",
+        "把alarm_name的枚举值提取出来，并且进行威胁类型映射",
+        SessionFacts(has_logs=True, available_fields=("alarm_name",)),
+        lambda d: _step_types(d) == ("enum_extract", "threat_mapping"),
+    ),
+    SemanticCase(
         "conflict",
         "日志类型提取，但按事件级别字段做枚举提取，只执行一步",
         SessionFacts(has_logs=True, available_fields=("事件级别",)),
