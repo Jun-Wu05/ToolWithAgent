@@ -20,7 +20,7 @@
 
 ## 合法来源与依赖
 
-- `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`。
+- `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`，但仅有 `session.decoded_config` 时也必须允许枚举填充。
 - 配置导出来源：`session.decoded_config`、`session.mapped_sub_rules` 或本计划的 `step:<step_id>`。
 - 日志规则导出来源：`session.log_classification.entry_rules` 或 `session.log_classification.sub_rules`。
 - `step:<step_id>` 必须与 `depends_on` 中的同一前序步骤一致；依赖只能引用此前声明的唯一步骤。
