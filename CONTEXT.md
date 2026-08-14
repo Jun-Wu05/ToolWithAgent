@@ -106,4 +106,10 @@
 - **适配层（StepAdapter）**：接收类型化参数，只负责调用专业 Agent 或领域函数
 - **渲染层（Renderer）**：只消费决策或 ExecutionReport，统一输出一次汇总
 
+**适配层词汇**（2026-08-14 架构拷问固化）：
+- **适配器包（web/adapters/）**：按操作落位的 StepAdapter 集合。`create_default_adapters` 是唯一公共入口，PlanExecutor 按 `step.type` 字符串键注册分派，不感知适配器内部结构。落位分三档：字段映射热点独立成模块，log_parse/enum_extract/threat_mapping 三个小操作共模块，fill/remove/export 简单适配器共模块。
+- **FieldMappingBatchRunner**：字段映射批处理执行器。输入字段列表与执行策略，输出完整映射行结果（含并发分批、超时拆批、重试、漏字段补查）；适配器只做 StepSpec 翻译、进度事件、产物构建与 session 一次性提交。
+- **依赖注入接缝**：适配器构造函数可选注入外部依赖（candidate_retriever / object_map_loader，默认值=现模块函数），与 PlannerService(runner=...) 同构。测试传构造假件，不 monkeypatch 模块私有属性。
+- **工具门面**：web 跨包只允许导入 agent/tools 的公开名，禁止下划线私有名跨包引用。
+
 **反模式（禁止）**把用户原文整句透传给执行层，让 handler 用正则/隐式状态自行抠参。这等同于把理解工作外包给执行器，是 #15 bug 的根因。
