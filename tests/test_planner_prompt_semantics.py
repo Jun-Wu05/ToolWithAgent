@@ -54,3 +54,9 @@ def test提示词明确区分枚举提取威胁映射与枚举填充():
     assert "enum_extract → threat_mapping" in PROMPT
     assert "不得生成 `fill`" in PROMPT
     assert "明确要求“填充回配置”或“写入解析规则”" in PROMPT
+
+
+def test提示词声明威胁映射不依赖枚举映射表():
+    """无枚举映射表时威胁映射必须照常规划，不得据此追问（回归 #76）。"""
+    assert "**不需要枚举映射表**" in PROMPT
+    assert "`enum_mapping_row_count=0` 不是追问理由" in PROMPT

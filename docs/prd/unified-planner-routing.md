@@ -36,4 +36,5 @@
 - “提取 event_type3 的枚举值”→ 一步 Enum Extract；字段不存在时执行前拦截。
 - 已有旧枚举结果 +“把这些值做威胁映射”→ 不使用旧结果，必须追问或依赖本次步骤。
 - 三步复合指令 → 本次账本依次传递 enum_values、threat_mapping、config_export。
+- 两步复合指令“提取 alarm_name 的枚举值，并进行威胁类型映射”（未提填充）→ `enum_extract → threat_mapping` 依赖链，不生成 fill；威胁映射使用内置威胁分类表，会话没有枚举映射表时也必须执行而非追问（回归 #79）。
 - 意图冲突 → Clarification；帮助请求 → Guidance；均不调用业务执行器。
