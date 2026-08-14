@@ -46,3 +46,11 @@ def test提示词允许decoded_config直接执行枚举填充():
     assert "`session.decoded_config` 或 `session.mapped_sub_rules` 均可" in PROMPT
     assert "无需先做字段映射" in PROMPT
     assert "可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）" in PROMPT
+
+
+def test提示词明确区分枚举提取威胁映射与枚举填充():
+    """提取并映射只产生两步，只有明确回写配置才允许追加 fill。"""
+    assert "提取 alarm_name 的枚举值并进行威胁类型映射" in PROMPT
+    assert "enum_extract → threat_mapping" in PROMPT
+    assert "不得生成 `fill`" in PROMPT
+    assert "明确要求“填充回配置”或“写入解析规则”" in PROMPT

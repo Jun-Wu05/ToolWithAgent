@@ -31,9 +31,10 @@
 - “日志类型提取”是 `log_parse`，不是 `enum_extract`；它处理整列原始日志，不存在“选择哪个字段”。
 - 只有明确的“提取 <字段> 的枚举值”才是 `enum_extract`，并且必须携带 `target_field`。
 - “日志分类”指日志类型分类；“提取事件级别的枚举值”指字段枚举提取，两者不可互换。
-- “枚举值处理”：有可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）、枚举映射表和枚举映射目标字段时表示枚举填充；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
+- “枚举值处理”：只有用户明确要求“填充回配置”或“写入解析规则”，并且存在可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）、枚举映射表和枚举映射目标字段时，才表示枚举填充；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
 - 同一句要求互相冲突的操作（如“日志类型提取，但按事件级别做枚举提取，只执行一步”）时 Clarification，不自行选择。
 - “把这些值做威胁映射”仅在当前文本明确给值，或本计划含可依赖的 Enum Extract 步骤时执行。
+- “提取 <字段> 的枚举值并进行威胁类型映射”只生成 `enum_extract → threat_mapping`；不得生成 `fill`，即使 session 存在配置。只有明确要求“填充回配置”或“写入解析规则”时才允许生成 `fill`。
 - 参数缺失、意图冲突或事实不足时必须 Clarification 并停止，不得生成猜测计划。
 
 ## 七类单意图示例
@@ -82,6 +83,10 @@
 - “提取 event_type3 的枚举值，再做威胁映射并填充回 event_type3”（日志与子规则可用）：
 ```json
 {"decision":"execute","plan_id":"plan-compound","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"event_type3","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]},{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_type3"],"source_ref":"step:threat-1","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]}]}
+```
+- “提取 alarm_name 的枚举值并进行威胁类型映射”（即使 session 有配置）：
+```json
+{"decision":"execute","plan_id":"plan-enum-threat","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"alarm_name","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]}]}
 ```
 
 ## 静默自检
