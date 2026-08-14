@@ -46,8 +46,11 @@ def test自然语言恰好调用planner一次且返回前不执行业务():
     assert decision.steps[0].type == "fill"
 
 
-def testplanner超时时明确追问且不做关键词兜底():
+def testplanner超时时明确记录调用阶段且不做关键词兜底(caplog):
     from agent.core.planner import PlannerService
+    import logging
+
+    caplog.set_level(logging.INFO, logger="planner")
 
     async def unavailable_runner(planner_input: str):
         raise TimeoutError("provider timeout")
@@ -62,6 +65,14 @@ def testplanner超时时明确追问且不做关键词兜底():
     assert decision.reason_code == "planner_timeout"
     assert decision.steps == ()
     assert "重试" in decision.question
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "[MODEL_CALL_START]" in messages
+    assert "[MODEL_CALL_TIMEOUT]" in messages
+    assert "provider=" in messages
+    assert "model=" in messages
+    assert "phase=runner_wait" in messages
+    assert "response_received=False" in messages
+    assert "elapsed_seconds=" in messages
 
 
 def testplanner非法输出不会进入执行计划():
@@ -79,6 +90,33 @@ def testplanner非法输出不会进入执行计划():
     assert decision.decision == "clarification"
     assert decision.reason_code == "invalid_plan"
     assert decision.steps == ()
+
+
+def testplanner服务异常记录异常类别而不记录异常原文(caplog):
+    """底层服务异常只记录类型和阶段元数据，避免泄露异常原文或用户输入。"""
+    from agent.core.planner import PlannerService
+    import logging
+
+    caplog.set_level(logging.INFO, logger="planner")
+
+    async def unavailable_runner(_planner_input: str):
+        raise RuntimeError("provider-secret-response")
+
+    decision = asyncio.run(
+        PlannerService(runner=unavailable_runner).plan(
+            user_text="敏感用户指令",
+            conversation_history=[],
+            session_facts=SessionFacts(),
+        )
+    )
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert decision.reason_code == "planner_unavailable"
+    assert "error_type=RuntimeError" in messages
+    assert "provider-secret-response" not in messages
+    assert "敏感用户指令" not in messages
+    assert "phase=runner_wait" in messages
+    assert "response_received=False" in messages
 
 
 def testplanner支持返回协程的同步runner():
