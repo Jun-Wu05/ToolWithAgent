@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### Added
+- 统一 Planner 架构（ADR-0005）：独立 PlannerAgent + 类型化 PlanDecision/StepSpec + PlanExecutor 依赖账本，按钮入口复用同一执行器（#45 #53 #58）
+- 七类产物统一渲染：字段映射表、威胁映射表、枚举列表、日志分类详情与规则动作、配置下载一次汇总展示（#63 #68）
+- 字段映射成功后自动回填配置并产出 Base64 下载（#51）；映射结果落表展示（#49）
+- Planner 超时诊断：结构化 MODEL_CALL_TIMEOUT 日志与失败关闭追问（#71）
+- 复合计划真实链路回归：三步复合依次传递账本并产出唯一导出（#39 #57）
+- 决策互斥、导出来源约束与 guidance 路径回归（#42 #56）；单意图失败关闭与依赖校准回归（#36–#40 #55）；#50/#51 回归测试可追溯性标注（#54）
 - 对话记忆机制：`web/history_store.py` 自定义轻量记忆（append_history/format_history_for_prompt），SessionState 加 conversation_history 字段，build_llm_input 拼 最近5轮对话历史
 - 路由意图消歧：`detect_intent()` 带消歧规则（威胁vs映射冲突、「填充」动作识别优先于枚举提取、ambiguous→RouterAgent）
 - Excel→映射→枚举填充连续操作：`apply_enum_fill_to_sub_rules()` 桥接 sub_rules↔normalize[]，handle_enum_fill_flow 数据源优先级（mapped_sub_rules>raw_base64>提示上传），不再要求重传 Base64
@@ -26,6 +32,8 @@
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- 字段映射下载契约显式化：`filled_config` 单载荷改为 `download_kind/download_content`，Excel 日志映射导出 mapped_sub_rules、真实配置导出 mapped_config、无回填目标不附下载；恢复日志分类历史渲染（详情/样本/完整 JSON）与规则导出动作（#75）
+- 删除死代码 `build_llm_input`（曾把旧枚举结果注入威胁输入）与可读性清理（#44 #59）
 - 可读性清理（-230行）：双重访问清理（getattr or get → .get()，hasattr/else 5行 → [k]=v），提取批处理 helper（batch_mapping_helper.py），提取数据源 helper（_resolve_fill_data_source），魔法字符串集中（EXCLUDED_FIELD_INDICES）
 - 移除 BM25 混合检索，回归纯向量检索（中文同义词接入后纯向量召回充分，BM25 净负面）
 - 删除 ABBR_EXPANSIONS 硬编码（69条），合并进外置 `field_synonyms.json`
@@ -38,6 +46,16 @@
 - Pipeline 分类输出 schema 清理：移除废弃字段
 
 ### Fixed
+- 字段映射来源排除 Excel 列头：有真实日志字段时 `available_fields` 只含日志字段与子规则字段，`decoded_fields` 仅作配置场景回退；数据表 Excel 缺"原始日志"列在上传时拒绝（#78 #81）
+- Planner 两步复合修复："提取枚举值并做威胁类型映射"生成 `enum_extract → threat_mapping` 依赖链，威胁映射使用内置分类表、不依赖枚举映射表（#79 #82）
+- 枚举提取从原始日志行取值，不再依赖已删除的旧结果通道（#70）
+- 上传 Base64 配置可直接枚举填充，不再错误要求先生成子规则（#67 #69）
+- RFC5424 头+KV body 日志误识别为 JSON 时确定性纠正（#22 #61）
+- 多子规则回写正确性锁定，映射/更新计数区分（#23 #62）
+- 映射输入排除系统元字段 original_log/日志类型（#50）
+- 字段映射漏字段补查+兜底未匹配，不再整步作废（#48）
+- 字段映射超时批次一次性拆分重试
+- list 根配置（多规则数组）填充支持
 - 填充动作识别优先于枚举提取：「枚举值填充进子规则」不再被「枚举值」抢到提取
 - enum_excel_path 被数据表格覆盖：_handle_excel_data_table 不再错误覆盖枚举映射表路径
 - refusal 误判：无数据时 LLM 引导上传不再被误判为拒绝响应（加 has_decoded_data 条件）
