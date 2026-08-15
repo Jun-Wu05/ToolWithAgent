@@ -1,6 +1,6 @@
 # ToolWithAgent — 数据映射智能助手
 
-基于 AI Agent 的安全日志字段映射、威胁类型分析和日志解析工具。交付形式为 **Chainlit Web 聊天界面**（桌面 GUI 已归档至 `reference/gui/`）。
+基于 AI Agent 的安全日志字段映射、威胁类型分析和日志解析工具。交付形式为 **Chainlit Web 聊天界面**。
 
 ## 核心功能
 
@@ -17,73 +17,77 @@
 
 ```
 toolswithagent/
-├── main.py                          # 桌面应用入口（Tkinter，已归档）
 ├── requirements.txt                 # Python 依赖
-├── chainlit.md                      # Chainlit 配置
+├── chainlit.md                      # Chainlit 界面说明
 ├── CHANGELOG.md                     # 变更日志
 │
 ├── web/                             # Chainlit Web 界面
-│   ├── chainlit_app.py              # 薄入口（~60行）：生命周期钩子 + 转发
+│   ├── chainlit_app.py              # 薄入口：生命周期钩子 + 转发
 │   ├── start_handler.py             # @cl.on_chat_start 实现
 │   ├── settings_handler.py          # @cl.on_settings_update 实现
 │   ├── message_router.py            # @cl.on_message 路由分发
 │   ├── file_handlers.py             # 文件上传处理（含 Excel 检测，数据表须含"原始日志"列）
-│   ├── user_message_handlers.py     # 用户文本消息处理
-│   ├── log_parser_handler.py        # 日志解析 Pipeline（独立）
-│   ├── action_callbacks.py          # 9个 Action 回调（按钮交互）
-│   ├── utils.py                     # 纯辅助函数（JSON 解析、渲染）
-│   ├── global_state.py              # 全局状态管理
-│   ├── route_config.py              # 路由意图检测（detect_intent 快路径/慢路径分流）
-│   ├── llm_client.py                # LLM 客户端（Team 调用 + CircuitBreaker）
-│   ├── input_builder.py             # LLM 输入构造（对话历史 + embedding 候选）
-│   ├── response_handler.py          # 响应解析（按意图分流 + cl.Dataframe 渲染）
-│   ├── threat_handler.py            # 威胁填充模式分流
-│   ├── enum_handler.py              # 枚举填充/提取分流
-│   ├── file_handler.py              # 底层文件处理（数据层）
-│   ├── parsers.py                   # JSON 解析
-│   ├── session_state.py             # 会话状态管理
-│   └── model_manager.py             # 模型管理
+│   ├── user_message_handlers.py     # 用户文本消息处理（一次 Planner 调用 + Executor + 渲染）
+│   ├── action_callbacks.py          # Action 回调（按钮交互）
+│   ├── planner_models.py            # PlanDecision / StepSpec / Artifact 类型契约
+│   ├── plan_executor.py             # 计划执行器（依赖账本、失败停止）
+│   ├── execution_adapters.py        # StepAdapter 集合（七类操作）
+│   ├── session_state.py             # 会话状态（SessionState）
+│   ├── session_facts.py             # SessionFacts 投影（Planner 输入）
+│   ├── field_source.py              # 字段映射的真实日志字段来源
+│   ├── input_builder.py             # 字段映射批次 LLM 输入构造（embedding 候选）
+│   ├── parsers.py                   # 模型输出 JSON 解析
+│   ├── plan_renderer.py             # 统一渲染器（Clarification/ExecutionReport）
+│   ├── deterministic_plan.py        # 按钮入口的类型化计划
+│   ├── history_store.py             # 受限对话历史
+│   ├── progress.py / chainlit_progress.py  # 进度事件抽象与 Chainlit 展示
+│   ├── llm_client.py / model_manager.py    # LLM 客户端与模型管理
+│   └── utils.py / global_state.py / constants.py  # 辅助函数
 │
 ├── agent/                           # AI Agent 系统
 │   ├── core/                        # 核心层
-│   │   ├── team.py                  # Agno Team 定义（Route Mode）
+│   │   ├── team.py                  # Agno Team 与专业 Agent 构造
+│   │   ├── planner.py               # 独立 PlannerAgent（ADR-0005）
+│   │   ├── agent.py                 # Agent 基础构造
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
 │   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
-│   │   ├── prompts.py               # .md Prompt 加载器
+│   │   ├── prompts.py               # Pipeline Prompt 加载器
 │   │   ├── field_retriever.py       # Embedding 语义检索（中文同义词 + tag 规则 + 精确匹配）
 │   │   └── tracing.py               # OpenTelemetry 请求追踪
 │   ├── tools/                       # Agent 工具集
 │   │   ├── standard_mapper.py       # 字段映射工具
-│   │   ├── enum_field_tool.py       # 枚举填充工具
-│   │   ├── logs_enum_tool.py        # 枚举提取工具
+│   │   ├── enum_field_tool.py       # 枚举映射表读取
 │   │   ├── base64_tool.py           # Base64 编解码
-│   │   ├── log_parser_pipeline.py   # 日志解析管道（4-step）
-│   │   ├── rule_generator/          # 规则生成（模块化包）
+│   │   ├── rule_generator/          # 解析规则生成（入口/子规则、字段映射回写）
+│   │   ├── pipeline/                # 日志解析 Pipeline（格式识别/特征定位/分类）
 │   │   └── log_pattern_store.py     # 日志模式知识库
 │   ├── shared/                      # 共享算法
-│   │   ├── field_mapping.py         # Levenshtein 编辑距离核心
+│   │   ├── field_mapping.py         # 字段映射核心算法
 │   │   ├── threat_fill.py           # 威胁填充逻辑
-│   │   ├── base64_encode_decode.py  # Base64 核心
 │   │   └── logger.py                # 统一日志
 │   └── prompts/                     # LLM Prompt 模板（.md 文件）
-│       ├── log_format_identify.md   # Step 1：日志格式识别
-│       └── log_classify_feature.md  # Step 3：日志特征分类
+│       ├── planner.md               # PlannerAgent 指令
+│       ├── threat_type.md           # ThreatAgent 指令
+│       └── log_*.md / kv_*.md       # 日志解析 Pipeline 各步指令
 │
 ├── config/                          # 共享配置
-│   ├── route_keywords.json          # 路由关键词
 │   ├── threat_type_config.json      # 威胁类型映射配置
 │   ├── field_synonyms.json          # 字段同义词表（en/zh 双字段，缩写展开 + 中文桥接）
-│   ├── tag_rules.json              # 字段标签规则（token 级匹配）
-│   ├── 标准字段.txt                 # 标准字段列表（625条）
+│   ├── tag_rules.json               # 字段标签规则（token 级匹配）
+│   ├── knowledge_base/              # 实体模式与合并报告
+│   ├── 标准字段.txt / 空规则.txt     # 标准字段列表（625条）等
 │   └── 对象.xlsx                    # 系统属性映射表
 │
-├── docs/                            # 项目文档
-│   ├── architecture/                # 架构文档
-│   │   ├── 20260514_架构概览.md     # 系统架构全景图
-│   │   └── 20260514_代码级设计说明.md # 模块依赖/函数签名/算法/数据流
-│   └── 文档维护规范.md              # 文档编写与维护标准
+├── evaluation/                      # 真实模型语义评测
+│   └── planner_semantic_eval.py     # Planner 语义稳定性评测脚本
 │
-└── reference/gui/                   # 桌面 GUI 归档（不再维护）
+├── tests/                           # 离线回归测试（pytest）
+│
+└── docs/                            # 项目文档
+    ├── adr/                         # 架构决策记录（ADR-0001 ~ 0005）
+    ├── architecture/                # 架构概览、代码级设计、统一 Planner 架构、测试场景手册等
+    ├── prd/                         # 产品需求文档
+    └── agents/                      # Agent 工作流说明（issue 跟踪 / triage 标签 / 领域文档）
 ```
 
 ## 快速开始
@@ -107,8 +111,8 @@ chainlit run web/chainlit_app.py
 
 启动后访问 `http://localhost:8000`，在聊天界面：
 1. **上传** Excel 或粘贴日志数据。数据表 Excel 必须包含"**原始日志**"列，否则上传将被拒绝并提示重新上传正确格式（枚举映射表 Excel 不受此限制）
-2. **输入指令**：`字段映射` / `威胁类型` / `枚举提取` / `枚举值填充` / `日志解析`
-3. Agent 识别意图并完成处理（明确意图走快路径直调专家 Agent；模糊意图走 RouterAgent 智能路由）
+2. **输入指令**：`字段映射` / `威胁类型` / `枚举提取` / `枚举值填充` / `日志解析`，单一意图或复合意图均可
+3. 独立 PlannerAgent 识别意图并生成类型化计划，PlanExecutor 按依赖链执行并一次汇总渲染（见 ADR-0005）
 
 ### 环境变量
 
@@ -125,12 +129,17 @@ chainlit run web/chainlit_app.py
 
 | 文档 | 内容 |
 |------|------|
-| [架构概览](docs/architecture/20260514_架构概览.md) | 系统架构图、核心流程、外部依赖、错误处理策略 |
-| [代码级设计说明](docs/architecture/20260514_代码级设计说明.md) | 模块依赖图、函数签名、关键算法、数据流、配置结构 |
+| [CONTEXT.md](CONTEXT.md) | 领域术语表（映射/填充/解析规则等核心概念与角色边界） |
+| [架构概览](docs/architecture/架构概览.md) | 系统架构图、核心流程、外部依赖、错误处理策略 |
+| [统一Planner架构](docs/architecture/统一Planner架构.md) | 独立 PlannerAgent + PlanExecutor 架构说明 |
+| [代码级设计说明](docs/architecture/代码级设计说明.md) | 模块依赖图、函数签名、关键算法、数据流、配置结构 |
 | [chainlit_app模块说明](docs/architecture/chainlit_app模块说明.md) | Web UI 层模块职责、调用关系、数据流 |
+| [测试场景手册](docs/architecture/测试场景手册.md) | 冒烟测试场景与预期 |
+| [ADR](docs/adr/0005-independent-planner-agent.md) | 架构决策记录（最新：ADR-0005 独立 PlannerAgent） |
+| [PRD](docs/prd/unified-planner-routing.md) | 产品需求文档（最新：统一 Planner 路由） |
 | [CHANGELOG](CHANGELOG.md) | 按版本整理的完整变更记录 |
-| [项目概要](docs/20260514_项目概要.md) | 项目背景、目标、功能全景 |
-| [文档维护规范](docs/文档维护规范.md) | 文档编写、命名、更新标准 |
+| [项目概要](docs/architecture/项目概要.md) | 项目背景、目标、功能全景 |
+| [文档维护规范](docs/architecture/文档维护规范.md) | 文档编写、命名、更新标准 |
 
 ## 技术栈
 

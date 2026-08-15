@@ -96,7 +96,6 @@ PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.py
 
 ## 6. 相关文档
 
-- [重构方案](../../chainlit_app重构方案.md)
-- [完成报告](../../chainlit_app重构方案_完成版.md)
-- [架构概览](./20260514_架构概览.md)
-- [代码级设计说明](./20260514_代码级设计说明.md)
+- [架构概览](./架构概览.md)
+- [代码级设计说明](./代码级设计说明.md)
+- [统一Planner架构](./统一Planner架构.md)
