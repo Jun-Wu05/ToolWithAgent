@@ -1,87 +1,17 @@
-"""
-通用辅助函数 - 从 chainlit_app.py 提取
+"""纯辅助函数（无 Chainlit 依赖，可在后台线程安全调用）。
 
-本模块包含纯辅助函数，无 Chainlit 依赖，可以在后台线程中安全调用。
+历史遗留的旧解析/渲染函数（parse_mapping_results、render_mapping_result、
+content_to_str、load_object_entity_map）与 utils 版 is_enum_mapping_excel
+重复副本已删除；存活实现位于 web/parsers.py、web/plan_renderer.py 与
+web/file_handlers.py。
 """
 
 import json
-from typing import Set, Optional, List, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from agent.shared.logger import get_logger
 
 logger = get_logger("web.utils")
-
-
-# === 枚举映射表列头关键词（用于区分枚举映射表 vs 数据表格）===
-_ENUM_HEADER_KEYWORDS: Set[str] = {
-    "mappingtype", "orgvalue", "mappingvalue",
-    "原始值", "映射值", "映射类型",
-    "目标字段", "target_field", "targetfield"
-}
-
-
-def is_enum_mapping_excel(excel_path: str) -> bool:
-    """
-    通过列头判断 Excel 是否为枚举映射表（而非数据表格）。
-
-    Args:
-        excel_path: Excel 文件路径
-
-    Returns:
-        True 如果列头匹配枚举映射表关键词，False 表示是普通数据表格
-
-    Raises:
-        无，异常时返回 False 并记录警告日志
-    """
-    try:
-        from openpyxl import load_workbook
-        wb = load_workbook(excel_path, read_only=True)
-        try:
-            if not wb.sheetnames:
-                return False
-            ws = wb[wb.sheetnames[0]]
-            # 读取第一行列头
-            row1_cells = [cell for cell in ws[1] if cell.value is not None]
-            if not row1_cells:
-                return False
-            row1_headers = {str(cell.value).strip().lower() for cell in row1_cells if str(cell.value).strip()}
-            # 判断是否包含枚举映射表关键词
-            return bool(row1_headers & _ENUM_HEADER_KEYWORDS)
-        finally:
-            wb.close()
-    except Exception as e:
-        logger.warning(f"[ENUM_DETECT] 枚举表头检测异常，回退为数据表格: {e}")
-        return False
-
-
-def content_to_str(result_content: Any) -> str:
-    """
-    将 LLM/Agent 返回的 content 统一序列化为字符串。
-
-    覆盖四种情况：
-    - str：原样返回（避免对纯字符串做 json.dumps 包成带引号的 JSON 字符串）
-    - Pydantic v2 对象（有 model_dump）：model_dump() → json.dumps(ensure_ascii=False)
-    - Pydantic v1 对象（有 dict，无 model_dump）：dict() → json.dumps(ensure_ascii=False)
-    - 其他对象：str() 兜底
-
-    用于替代历史调用链中分散的
-    Pydantic→str 转换，避免 output_schema 返回的 Pydantic 对象在字符串操作
-    （如 'xxx' in content）上抛 TypeError。
-
-    Args:
-        result_content: 已从 RunResponse.content 取出的内容
-            （调用方负责 ``result.content if hasattr(result, 'content') else result``）
-
-    Returns:
-        字符串形式的 content
-    """
-    if isinstance(result_content, str):
-        return result_content
-    if hasattr(result_content, "model_dump"):          # 兼容 Pydantic v2
-        return json.dumps(result_content.model_dump(), ensure_ascii=False)
-    if hasattr(result_content, "dict"):                # 兼容 Pydantic v1
-        return json.dumps(result_content.dict(), ensure_ascii=False)
-    return str(result_content)
 
 
 def parse_json_safe(text: str) -> Optional[Dict[str, Any]]:
@@ -121,136 +51,6 @@ def parse_json_safe(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def parse_mapping_results(llm_output: str) -> Optional[List[Dict[str, Any]]]:
-    """
-    从 LLM 输出中解析映射结果 JSON 数组（健壮解析）。
-
-    尝试顺序：
-    1. 直接 json.loads（LLM 理想输出）
-    2. 去除 markdown 代码块后再解析
-    3. 正则提取 [...] JSON 数组
-
-    Args:
-        llm_output: LLM 返回的文本
-
-    Returns:
-        解析后的字典列表，失败返回 None
-
-    Examples:
-        >>> parse_mapping_results('[{"field": "name"}]')
-        [{"field": "name"}]
-
-        >>> parse_mapping_results('```json\\n[{"field": "name"}]\\n```')
-        [{"field": "name"}]
-    """
-    if not llm_output or not llm_output.strip():
-        return None
-
-    text = llm_output.strip()
-
-    # 尝试 1: 直接解析
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list) and parsed:
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    # 尝试 2: 去除 markdown 代码块
-    import re as _re
-    code_block_match = _re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, _re.DOTALL)
-    if code_block_match:
-        try:
-            parsed = json.loads(code_block_match.group(1).strip())
-            if isinstance(parsed, list) and parsed:
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-    # 尝试 3: 正则提取最外层 [...]
-    bracket_match = _re.search(r"\[.*\]", text, _re.DOTALL)
-    if bracket_match:
-        try:
-            parsed = json.loads(bracket_match.group())
-            if isinstance(parsed, list) and parsed:
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-    return None
-
-
-def load_object_entity_map() -> Dict[str, str]:
-    """
-    从 config/对象.xlsx 加载 系统属性名称→对象 映射。
-
-    Returns:
-        系统属性名称到对象的映射字典
-
-    Raises:
-        无，异常时返回空字典并记录警告日志
-    """
-    try:
-        from agent.tools.standard_mapper import _load_object_mapping
-        import os
-        excel_path = os.path.join(os.getcwd(), "config", "对象.xlsx")
-        return _load_object_mapping(excel_path)
-    except Exception as e:
-        logger.warning(f"[MAP] 加载对象映射失败: {e}，使用默认 '事件'")
-        return {}
-
-
-def render_mapping_result(
-    mapping_results: List[Dict[str, Any]], total_rule_count: int
-) -> str:
-    """
-    渲染标准字段映射结果（Markdown 表格）。
-
-    默认只展示第 1 条子规则，其余折叠提示。
-
-    Args:
-        mapping_results: 映射结果列表
-        total_rule_count: 总子规则数量
-
-    Returns:
-        Markdown 格式的映射结果字符串
-    """
-    lines: List[str] = []
-    lines.append(f"## 📋 子规则字段映射结果（共 {total_rule_count} 条子规则）")
-    lines.append("")
-
-    for idx, mr in enumerate(mapping_results):
-        rule_name = mr.get("rule_name", "未知")
-        mappings = mr.get("mappings", [])
-        is_first = idx == 0
-
-        if is_first:
-            lines.append(f"### 子规则 {idx + 1}：{rule_name}")
-        else:
-            lines.append(f"<details><summary>▶ 子规则 {idx + 1}：{rule_name}（点击展开）</summary>\n")
-
-        lines.append("")
-        lines.append("| 原始字段 | 标准字段 | 匹配状态 |")
-        lines.append("|----------|---------|---------|")
-        for m in mappings:
-            orig = m.get("原始字段名", "")
-            std = m.get("系统属性名称", "")
-            status = m.get("匹配状态", "")
-            status_icon = "✅" if "匹配成功" in status else "❌"
-            lines.append(f"| {orig} | {std} | {status_icon} {status} |")
-
-        # 统计
-        matched = sum(1 for m in mappings if "匹配成功" in m.get("匹配状态", ""))
-        total = len(mappings)
-        lines.append(f"\n> 匹配率：{matched}/{total}")
-
-        if not is_first:
-            lines.append("\n</details>\n")
-
-    lines.append("\n💡 点击上方 **📥 导出映射后子规则** 下载带标准字段映射的子规则文件。")
-    return "\n".join(lines)
-
-
 def render_log_parser_result(
     classification: Optional[Dict[str, Any]], format_info: Optional[Dict[str, Any]]
 ) -> str:
@@ -275,10 +75,7 @@ def render_log_parser_result(
     log_format = classification.get("log_format", "未知")
     feature_field = classification.get("feature_field", "log_type")
     feature_count = classification.get("feature_count", 0)
-    feature_identifier = classification.get("feature_identifier", "")
     overall_summary = classification.get("overall_summary", "")
-    categorical_features = classification.get("categorical_features", "")
-    diversion_method = classification.get("Diversion_method", "")
     details = classification.get("classification_details", [])
 
     lines: List[str] = []
