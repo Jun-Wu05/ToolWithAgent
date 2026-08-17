@@ -216,11 +216,6 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     """验证批处理能力保留，且映射结果真正更新 mapped_sub_rules。"""
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(
-        input_builder,
-        "_pre_query_field_candidates",
-        lambda fields_batch: "",
-    )
     import agent.tools.rule_generator as rule_generator
     import agent.tools.standard_mapper as standard_mapper
     import web.field_source as field_source
@@ -255,7 +250,7 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     )
 
     result = asyncio.run(
-        ProfessionalAgentAdapter(_Team(member)).execute(
+        ProfessionalAgentAdapter(_Team(member), candidate_retriever=lambda fields: "").execute(
             step,
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
             {},
@@ -274,9 +269,7 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
     import agent.tools.rule_generator as rule_generator
     import agent.tools.standard_mapper as standard_mapper
     import web.field_source as field_source
-    import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     monkeypatch.setattr(
         field_source,
         "extract_log_fields_for_mapping",
@@ -308,7 +301,7 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
     assert facts.available_config_refs == ()
 
     result = asyncio.run(
-        ProfessionalAgentAdapter(_Team(_MappingMember())).execute(
+        ProfessionalAgentAdapter(_Team(_MappingMember()), candidate_retriever=lambda fields: "").execute(
             FieldMappingStep(
                 step_id="mapping-excel",
                 type="field_mapping",
@@ -335,15 +328,13 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
 
 def test字段映射无可回填目标时不产出下载(monkeypatch):
     """既无真实配置也无子规则来源时，产物不得携带任何下载契约字段。"""
-    import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     session = {"decoded_fields": ["alpha", "beta"]}
     facts = build_session_facts(session)
     assert facts.available_config_refs == ()
 
     result = asyncio.run(
-        ProfessionalAgentAdapter(_Team(_MappingMember())).execute(
+        ProfessionalAgentAdapter(_Team(_MappingMember()), candidate_retriever=lambda fields: "").execute(
             FieldMappingStep(
                 step_id="mapping-only",
                 type="field_mapping",
@@ -397,9 +388,7 @@ class _AsyncMappingMember:
 
 def test字段映射通过异步事件流并发执行三个批次(monkeypatch):
     """51 个字段应形成三个并发批次，且结果按原字段顺序合并。"""
-    import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     fields = [f"field_{index:02d}" for index in reversed(range(51))]
     session = {"decoded_fields": fields}
     member = _AsyncMappingMember()
@@ -410,6 +399,7 @@ def test字段映射通过异步事件流并发执行三个批次(monkeypatch):
     )
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -459,14 +449,13 @@ class _BackfillMappingMember:
 
 def test字段映射漏字段时补查缺失项后成功(monkeypatch):
     """模型在主批次漏 1 个字段时，补查该字段并合并，整步仍成功（回归 #48）。"""
-    import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     fields = [f"field_{index:02d}" for index in range(26)]
     member = _BackfillMappingMember(drop_field="field_01")
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -521,13 +510,12 @@ class _AlwaysDroppingMappingMember:
 
 def test字段映射补查仍缺时兜底未匹配(monkeypatch):
     """补查 backfill_max_attempts 次仍漏字段时，该字段兜底为「未匹配」，整步仍成功。"""
-    import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     member = _AlwaysDroppingMappingMember(drop_field="lonely")
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -584,12 +572,12 @@ def test字段映射乱序返回不再判为失败(monkeypatch):
     """旧校验对返回顺序敏感会误判失败；现按集合归一、按输入顺序输出。"""
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     fields = ["alpha", "beta", "gamma"]
     member = _ReorderedMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -639,12 +627,12 @@ def test字段映射重复字段去重后不失败(monkeypatch):
     """模型把某字段重复返回时去重，整步成功且数量与输入一致。"""
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     fields = ["alpha", "beta"]
     member = _DuplicateMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -674,9 +662,7 @@ def test字段映射重复字段去重后不失败(monkeypatch):
 def test字段映射回填解码配置并产出下载(monkeypatch):
     """有真实 decoded_config 时，字段映射回填配置并标记为 mapped_config（回归 #51）。"""
     import agent.tools.standard_mapper as standard_mapper
-    import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
     session = {
         "decoded_fields": ["alpha", "beta"],
@@ -689,6 +675,7 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -916,11 +903,11 @@ def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypa
     """任一批次超时应取消剩余任务，并保持 session 原子不变。"""
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     session = {"decoded_fields": [f"field_{index:02d}" for index in range(51)]}
     member = _TimeoutMappingMember()
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -957,12 +944,12 @@ def test字段映射291字段形成12批且最大并发为3(monkeypatch):
     """291 个字段必须按 25 个一批执行，且并发上限固定为三批。"""
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     fields = [f"field_{index:03d}" for index in range(291)]
     session = {"decoded_fields": fields}
     member = _AsyncMappingMember()
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             batch_size=25,
             max_concurrency=3,
@@ -1012,11 +999,11 @@ def test字段映射不可重试错误只调用一次(monkeypatch):
     """非连接、限流、服务端或超时错误不得浪费第二次模型调用。"""
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     session = {"decoded_fields": ["field_a"]}
     member = _PermanentMappingErrorMember()
     adapter = ProfessionalAgentAdapter(
         _Team(member),
+        candidate_retriever=lambda fields: "",
         mapping_policy=FieldMappingExecutionPolicy(
             watchdog_timeout_seconds=1,
             max_retries=1,
@@ -1043,10 +1030,8 @@ def test字段映射不可重试错误只调用一次(monkeypatch):
 
 def test字段映射写回阶段异常时不留下部分状态(monkeypatch):
     """子规则计算失败时不得提前写入 last_mapping_data 或中间映射结果。"""
-    import web.input_builder as input_builder
     import agent.tools.rule_generator.field_mapping as field_mapping_module
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
 
     def fail_writeback(*args, **kwargs):
         """模拟写回前的领域计算异常。"""
@@ -1072,7 +1057,7 @@ def test字段映射写回阶段异常时不留下部分状态(monkeypatch):
 
     try:
         asyncio.run(
-            ProfessionalAgentAdapter(_Team(member)).execute(
+            ProfessionalAgentAdapter(_Team(member), candidate_retriever=lambda fields: "").execute(
                 step,
                 ExecutionContext(session=session, session_facts=build_session_facts(session)),
                 {},

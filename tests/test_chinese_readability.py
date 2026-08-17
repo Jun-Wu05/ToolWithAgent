@@ -28,6 +28,12 @@ CORE_MODULES = (
     Path("web/chainlit_app.py"),
     Path("web/input_builder.py"),
     Path("contracts/__init__.py"),
+    Path("web/adapters/__init__.py"),
+    Path("web/adapters/shared.py"),
+    Path("web/adapters/field_mapping.py"),
+    Path("web/adapters/agent_ops.py"),
+    Path("web/adapters/config_ops.py"),
+    Path("web/execution_adapters.py"),
 )
 
 
