@@ -16,8 +16,8 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from agent.core.planner import PlannerService, create_planner_agent
-from web.planner_models import PlanDecision
-from web.session_facts import SessionFacts
+from contracts.planner_models import PlanDecision
+from contracts.session_facts import SessionFacts
 
 
 @dataclass(frozen=True)

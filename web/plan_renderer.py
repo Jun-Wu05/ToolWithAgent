@@ -10,7 +10,7 @@ import pandas as pd
 
 from agent.shared.logger import get_logger
 from web.parsers import create_dataframe_elements
-from web.planner_models import ExecutionReport, PlanDecision, StepStatus
+from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
 from web.utils import render_log_parser_result
 
 

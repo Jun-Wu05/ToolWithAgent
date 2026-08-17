@@ -7,8 +7,8 @@ import time
 
 from web.execution_adapters import create_default_adapters
 from web.plan_executor import ExecutionContext, PlanExecutor
-from web.planner_models import PlanDecision, StepStatus
-from web.session_facts import build_session_facts
+from contracts.planner_models import PlanDecision, StepStatus
+from contracts.session_facts import build_session_facts
 
 
 class _StaticMember:
@@ -489,7 +489,7 @@ def test执行前拦截日志包含稳定追踪字段(caplog):
 def test成功填充报告输出下载文件(monkeypatch):
     """成功产物必须使用类型契约中的 content 字段生成唯一下载文件。"""
     import web.plan_renderer as renderer
-    from web.planner_models import ConfigExportArtifact, ExecutionReport, StepResult
+    from contracts.planner_models import ConfigExportArtifact, ExecutionReport, StepResult
 
     sent_messages = []
 

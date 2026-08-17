@@ -2,7 +2,7 @@
 
 import asyncio
 
-from web.planner_models import ExecutionReport, PlanDecision, StepResult
+from contracts.planner_models import ExecutionReport, PlanDecision, StepResult
 
 
 class FakePlanner:

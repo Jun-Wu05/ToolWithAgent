@@ -9,7 +9,7 @@ from types import SimpleNamespace
 def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
     """field_mapping 必须附 Dataframe 表格；config_export 仍附 File 下载（回归 #49）。"""
     import web.plan_renderer as renderer
-    from web.planner_models import (
+    from contracts.planner_models import (
         ConfigExportArtifact,
         ExecutionReport,
         FieldMappingArtifact,
@@ -112,7 +112,7 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
 def test日志分类结果恢复规则生成与字段映射动作(monkeypatch):
     """日志分类结果必须提供规则生成和标准字段映射入口。"""
     import web.plan_renderer as renderer
-    from web.planner_models import ExecutionReport, LogClassificationArtifact, StepResult, StepStatus
+    from contracts.planner_models import ExecutionReport, LogClassificationArtifact, StepResult, StepStatus
 
     captured = {"messages": []}
 
@@ -160,7 +160,7 @@ def test日志分类结果恢复规则生成与字段映射动作(monkeypatch):
 def test帮助决策渲染能力说明(monkeypatch):
     """guidance 决策渲染统一的能力说明消息，不进入执行渲染（回归 #42）。"""
     import web.plan_renderer as renderer
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     sent = []
 
@@ -216,7 +216,7 @@ def _mount_chainlit_captures(monkeypatch, renderer):
 def test字段映射后的解析子规则使用明确文件名和说明(monkeypatch):
     """mapped_sub_rules 下载不能再伪装成 mapped_config。"""
     import web.plan_renderer as renderer
-    from web.planner_models import (
+    from contracts.planner_models import (
         ExecutionReport,
         FieldMappingArtifact,
         FieldMappingRow,
@@ -262,7 +262,7 @@ def test字段映射后的解析子规则使用明确文件名和说明(monkeypa
 def test字段映射无可下载产物时不发送下载消息(monkeypatch):
     """download_kind 为空时只渲染映射表和汇总，不产生任何下载文件或下载消息。"""
     import web.plan_renderer as renderer
-    from web.planner_models import (
+    from contracts.planner_models import (
         ExecutionReport,
         FieldMappingArtifact,
         FieldMappingRow,
@@ -304,7 +304,7 @@ def test字段映射无可下载产物时不发送下载消息(monkeypatch):
 def test威胁映射产物渲染为表格(monkeypatch):
     """threat_mapping 产物落表（原始值/映射值/类型），不只剩一行成功文案（回归 #31）。"""
     import web.plan_renderer as renderer
-    from web.planner_models import (
+    from contracts.planner_models import (
         ExecutionReport,
         StepResult,
         StepStatus,
@@ -359,7 +359,7 @@ def test威胁映射产物渲染为表格(monkeypatch):
 def test枚举提取产物渲染为列表并附下载(monkeypatch):
     """enum_values 产物落表并附可下载文件，保留旧的下载行为（回归 #24/#30）。"""
     import web.plan_renderer as renderer
-    from web.planner_models import (
+    from contracts.planner_models import (
         EnumValuesArtifact,
         ExecutionReport,
         StepResult,
@@ -403,7 +403,7 @@ def test枚举提取产物渲染为列表并附下载(monkeypatch):
 def test日志类型提取恢复真实分类详情样本和规则动作(monkeypatch):
     """真实分类结构必须渲染摘要与样本，不能把顶层汇总字段显示成空表。"""
     import web.plan_renderer as renderer
-    from web.planner_models import (
+    from contracts.planner_models import (
         ExecutionReport,
         LogClassificationArtifact,
         StepResult,
@@ -490,7 +490,7 @@ def test日志类型提取恢复真实分类详情样本和规则动作(monkeypa
 def test多产物复合计划渲染为单条汇总(monkeypatch):
     """复合计划多个产物类型全部进入同一条汇总消息的 elements（回归 #32）。"""
     import web.plan_renderer as renderer
-    from web.planner_models import (
+    from contracts.planner_models import (
         ConfigExportArtifact,
         EnumValuesArtifact,
         ExecutionReport,

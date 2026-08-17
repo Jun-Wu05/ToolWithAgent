@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from agent.core.planner import PlannerService
 from web.chainlit_progress import ChainlitProgressSink
-from web.progress import ProgressEvent, ProgressPhase, ProgressStatus
-from web.session_facts import SessionFacts
+from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
+from contracts.session_facts import SessionFacts
 
 
 class _RecordingProgressSink:

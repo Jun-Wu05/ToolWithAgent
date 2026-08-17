@@ -17,15 +17,15 @@ from pydantic import ValidationError
 
 from agent.core.model_config import ModelConfig
 from agent.shared.logger import get_logger
-from web.planner_models import ConversationTurn, PlanDecision
-from web.progress import (
+from contracts.planner_models import ConversationTurn, PlanDecision
+from contracts.progress import (
     NullProgressSink,
     ProgressEvent,
     ProgressPhase,
     ProgressSink,
     ProgressStatus,
 )
-from web.session_facts import SessionFacts
+from contracts.session_facts import SessionFacts
 
 logger = get_logger("planner")
 

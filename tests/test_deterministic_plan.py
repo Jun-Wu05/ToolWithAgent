@@ -2,7 +2,7 @@
 
 import asyncio
 
-from web.planner_models import FillStep, StepStatus
+from contracts.planner_models import FillStep, StepStatus
 
 
 def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch):
