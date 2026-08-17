@@ -2,8 +2,8 @@
 
 import asyncio
 
-from web.planner_models import PlanDecision
-from web.session_facts import SessionFacts
+from contracts.planner_models import PlanDecision
+from contracts.session_facts import SessionFacts
 
 
 def test自然语言恰好调用planner一次且返回前不执行业务():

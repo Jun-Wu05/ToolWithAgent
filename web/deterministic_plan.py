@@ -8,8 +8,8 @@ from web.chainlit_progress import ChainlitProgressSink
 from web.execution_adapters import create_default_adapters
 from web.plan_executor import ExecutionContext, PlanExecutor
 from web.plan_renderer import render_execution_report
-from web.planner_models import PlanDecision, StepSpec
-from web.session_facts import build_session_facts
+from contracts.planner_models import PlanDecision, StepSpec
+from contracts.session_facts import build_session_facts
 
 
 async def execute_deterministic_plan(

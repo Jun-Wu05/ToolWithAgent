@@ -14,8 +14,8 @@ from web.execution_adapters import (
     create_default_adapters,
 )
 from web.plan_executor import ExecutionContext, PlanExecutor
-from web.planner_models import ExportStep, FieldMappingStep, FillStep, PlanDecision, StepStatus
-from web.session_facts import build_session_facts
+from contracts.planner_models import ExportStep, FieldMappingStep, FillStep, PlanDecision, StepStatus
+from contracts.session_facts import build_session_facts
 
 
 def test枚举映射表上下文执行填充而非枚举提取():
@@ -725,7 +725,7 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
 
 def test威胁映射依赖产物不是枚举值时失败():
     """依赖步骤产物不是 EnumValuesArtifact 时返回 dependency_type_mismatch（回归 #38）。"""
-    from web.planner_models import ConfigExportArtifact, StepResult, ThreatMappingStep
+    from contracts.planner_models import ConfigExportArtifact, StepResult, ThreatMappingStep
 
     step = ThreatMappingStep(
         step_id="threat",
@@ -760,7 +760,7 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     import agent.tools.pipeline.llm_client as llm_client
     import web.plan_renderer as renderer
     from web.plan_executor import ExecutionContext, PlanExecutor
-    from web.planner_models import (
+    from contracts.planner_models import (
         ConfigExportArtifact,
         EnumValuesArtifact,
         PlanDecision,

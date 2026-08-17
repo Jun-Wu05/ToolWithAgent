@@ -14,9 +14,9 @@ from web.execution_adapters import create_default_adapters
 from web.history_store import append_history
 from web.plan_executor import ExecutionContext, PlanExecutor
 from web.plan_renderer import render_decision, render_execution_report
-from web.planner_models import ConversationTurn
-from web.progress import ProgressEvent, ProgressPhase, ProgressStatus
-from web.session_facts import build_session_facts
+from contracts.planner_models import ConversationTurn
+from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
+from contracts.session_facts import build_session_facts
 
 logger = get_logger("user_message_handlers")
 

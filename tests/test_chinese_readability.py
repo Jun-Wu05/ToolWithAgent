@@ -9,10 +9,10 @@ from pathlib import Path
 CORE_MODULES = (
     Path("agent/core/planner.py"),
     Path("agent/shared/mapping_utils.py"),
-    Path("web/planner_models.py"),
-    Path("web/session_facts.py"),
+    Path("contracts/planner_models.py"),
+    Path("contracts/session_facts.py"),
     Path("web/plan_executor.py"),
-    Path("web/progress.py"),
+    Path("contracts/progress.py"),
     Path("web/chainlit_progress.py"),
     Path("web/execution_adapters.py"),
     Path("web/plan_renderer.py"),
@@ -27,6 +27,7 @@ CORE_MODULES = (
     Path("agent/prompts/__init__.py"),
     Path("web/chainlit_app.py"),
     Path("web/input_builder.py"),
+    Path("contracts/__init__.py"),
 )
 
 

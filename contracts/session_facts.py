@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from web.planner_models import ConfigRef
+from contracts.planner_models import ConfigRef
 
 
 class SessionFacts(BaseModel):

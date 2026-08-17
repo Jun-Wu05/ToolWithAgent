@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 
 def test_session_facts只暴露规划所需事实():
-    from web.session_facts import build_session_facts
+    from contracts.session_facts import build_session_facts
 
     session = {
         "api_key": "secret-key",
@@ -34,7 +34,7 @@ def test_session_facts只暴露规划所需事实():
 
 def test系统元字段不进入字段映射输入():
     """original_log/日志类型 是系统元字段，必须从 available_fields 排除，不送给映射模型（回归 #50）。"""
-    from web.session_facts import build_session_facts
+    from contracts.session_facts import build_session_facts
 
     facts = build_session_facts(
         {"decoded_fields": ["original_log", "日志类型", "src_ip", "event_type3"]}
@@ -46,7 +46,7 @@ def test系统元字段不进入字段映射输入():
 
 
 def test_fill步骤必须显式声明目标字段和来源():
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate(
@@ -68,7 +68,7 @@ def test_fill步骤必须显式声明目标字段和来源():
 
 def test_fill步骤必须显式声明被修改的配置来源():
     """避免适配器在 decoded config 与 mapped sub-rules 之间隐式选择。"""
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate(
@@ -87,7 +87,7 @@ def test_fill步骤必须显式声明被修改的配置来源():
         )
 
 def test步骤依赖必须引用已出现的步骤():
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate(
@@ -106,7 +106,7 @@ def test步骤依赖必须引用已出现的步骤():
 
 
 def test澄清决策不能同时携带执行步骤():
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate(
@@ -120,7 +120,7 @@ def test澄清决策不能同时携带执行步骤():
 
 def test执行决策不能没有步骤():
     """执行决策至少需要一个步骤（回归 #42）。"""
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate({"decision": "execute", "plan_id": "p", "steps": []})
@@ -128,7 +128,7 @@ def test执行决策不能没有步骤():
 
 def test帮助决策必须含guidance_code且不含步骤():
     """guidance 必须携带 guidance_code 且不能包含步骤（回归 #42）。"""
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate({"decision": "guidance"})
@@ -144,7 +144,7 @@ def test帮助决策必须含guidance_code且不含步骤():
 
 def test导出session来源不能声明步骤依赖():
     """session 导出来源不应声明步骤依赖（回归 #42）。"""
-    from web.planner_models import ExportStep
+    from contracts.planner_models import ExportStep
 
     with pytest.raises(ValidationError):
         ExportStep.model_validate(
@@ -159,7 +159,7 @@ def test导出session来源不能声明步骤依赖():
 
 def test导出步骤引用必须出现在依赖中():
     """step:<id> 导出来源必须声明在 depends_on 中（回归 #42）。"""
-    from web.planner_models import ExportStep
+    from contracts.planner_models import ExportStep
 
     with pytest.raises(ValidationError):
         ExportStep.model_validate(
@@ -169,7 +169,7 @@ def test导出步骤引用必须出现在依赖中():
 
 def test威胁映射来源必须与依赖一致():
     """防止 source_ref 指向未声明步骤，避免绕过本次结果账本。"""
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate(
@@ -193,7 +193,7 @@ def test威胁映射来源必须与依赖一致():
 
 def test威胁映射来源禁止引用session旧结果():
     """source_ref 仅允许 user.values 或本次步骤引用，禁止读 session 旧结果（回归 #38）。"""
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate(
@@ -212,7 +212,7 @@ def test威胁映射来源禁止引用session旧结果():
 
 def test威胁填充不能读取session旧结果():
     """强制威胁 Fill 引用本次步骤，禁止 last_threat_data 隐式兜底。"""
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
         PlanDecision.model_validate(
@@ -233,7 +233,7 @@ def test威胁填充不能读取session旧结果():
 
 def test步骤结果拒绝未知或无约束产物():
     """防止执行接缝重新接受 artifact_type 加任意 payload 的旧协议。"""
-    from web.planner_models import StepResult
+    from contracts.planner_models import StepResult
 
     with pytest.raises(ValidationError):
         StepResult.model_validate(
@@ -252,7 +252,7 @@ def test步骤结果拒绝未知或无约束产物():
 def test_session_facts集中汇总日志分类字段(monkeypatch):
     """证明 Planner 和执行器共享同一字段事实，不在各层重复解释日志状态。"""
     import web.field_source as field_source
-    from web.session_facts import build_session_facts
+    from contracts.session_facts import build_session_facts
 
     monkeypatch.setattr(
         field_source,
@@ -273,7 +273,7 @@ def test_session_facts集中汇总日志分类字段(monkeypatch):
 def test有日志字段时Excel列头不进入字段映射输入(monkeypatch):
     """有真实日志字段时，Excel 列头（decoded_fields）不得混入映射候选（回归 #78）。"""
     import web.field_source as field_source
-    from web.session_facts import build_session_facts
+    from contracts.session_facts import build_session_facts
 
     monkeypatch.setattr(
         field_source,
@@ -294,7 +294,7 @@ def test有日志字段时Excel列头不进入字段映射输入(monkeypatch):
 
 def test无日志字段时回退使用配置字段():
     """Base64/TXT 配置上传场景没有日志字段，decoded_fields 仍参与映射。"""
-    from web.session_facts import build_session_facts
+    from contracts.session_facts import build_session_facts
 
     facts = build_session_facts({"decoded_fields": ["event_type3", "src_ip"]})
 
@@ -303,7 +303,7 @@ def test无日志字段时回退使用配置字段():
 
 def test对话历史必须符合受限类型契约():
     """阻止任意 session 字典或额外敏感字段跨过 Planner 接缝。"""
-    from web.planner_models import ConversationTurn
+    from contracts.planner_models import ConversationTurn
 
     with pytest.raises(ValidationError):
         ConversationTurn.model_validate(
@@ -386,7 +386,7 @@ def test_coerce拒绝不支持类型():
 
 def test_coerce透传已解析的PlanDecision():
     from agent.core.planner import _coerce_plan_decision
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     original = PlanDecision.model_validate(_execute_payload())
     assert _coerce_plan_decision(original) is original

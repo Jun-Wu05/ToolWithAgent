@@ -7,7 +7,7 @@ import time
 
 import chainlit as cl
 
-from web.progress import ProgressEvent, ProgressPhase, ProgressSink, ProgressStatus
+from contracts.progress import ProgressEvent, ProgressPhase, ProgressSink, ProgressStatus
 
 
 _MESSAGE_TEXT = {

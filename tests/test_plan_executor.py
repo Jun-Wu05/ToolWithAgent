@@ -3,14 +3,14 @@
 import asyncio
 
 from web.plan_executor import ExecutionContext, PlanExecutor
-from web.planner_models import (
+from contracts.planner_models import (
     EnumValuesArtifact,
     PlanDecision,
     StepResult,
     StepStatus,
     ThreatMappingArtifact,
 )
-from web.session_facts import SessionFacts
+from contracts.session_facts import SessionFacts
 
 
 class RecordingAdapter:

@@ -22,8 +22,8 @@ from agent.shared.mapping_utils import (
     remove_field_mappings_from_config,
 )
 from web.plan_executor import ExecutionContext, StepAdapter
-from web.progress import ProgressEvent, ProgressPhase, ProgressStatus
-from web.planner_models import (
+from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
+from contracts.planner_models import (
     ConfigExportArtifact,
     EnumExtractStep,
     EnumValuesArtifact,

@@ -76,7 +76,7 @@ def _build_retrieval_candidates_map(mapping_results: list) -> dict[str, str]:
 async def on_fill_threat_with_field(action: cl.Action):
     """把缺少目标字段的威胁填充按钮转换为类型化澄清决策。"""
     from web.plan_renderer import render_decision
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"带字段填充"按钮')
@@ -96,7 +96,7 @@ async def on_fill_threat_with_field(action: cl.Action):
 async def on_confirm_fill(action: cl.Action):
     """拒绝消费旧字段映射结果，并提示用户发起新的显式字段映射计划。"""
     from web.plan_renderer import render_decision
-    from web.planner_models import PlanDecision
+    from contracts.planner_models import PlanDecision
 
     logger.info('[ACTION] 用户点击"确认填充"按钮')
     await render_decision(
@@ -111,8 +111,8 @@ async def on_confirm_fill(action: cl.Action):
 async def on_start_enum_fill(action: cl.Action):
     """把枚举填充按钮转换为显式 FillStep 并复用统一执行器。"""
     from web.deterministic_plan import execute_deterministic_plan
-    from web.planner_models import FillStep
-    from web.session_facts import build_session_facts
+    from contracts.planner_models import FillStep
+    from contracts.session_facts import build_session_facts
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"开始枚举填充"按钮')
@@ -144,7 +144,7 @@ async def on_start_enum_fill(action: cl.Action):
 async def on_export_rules(action: cl.Action):
     """把入口规则导出按钮转换为 ExportStep 并复用统一执行器。"""
     from web.deterministic_plan import execute_deterministic_plan
-    from web.planner_models import ExportStep
+    from contracts.planner_models import ExportStep
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"导出入口规则"按钮')
@@ -164,7 +164,7 @@ async def on_export_rules(action: cl.Action):
 async def on_export_sub_rules(action: cl.Action):
     """把子规则导出按钮转换为 ExportStep 并复用统一执行器。"""
     from web.deterministic_plan import execute_deterministic_plan
-    from web.planner_models import ExportStep
+    from contracts.planner_models import ExportStep
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"导出子规则"按钮')
@@ -184,8 +184,8 @@ async def on_export_sub_rules(action: cl.Action):
 async def on_apply_field_mapping(action: cl.Action):
     """把标准字段映射按钮转换为 FieldMappingStep 并复用统一执行器。"""
     from web.deterministic_plan import execute_deterministic_plan
-    from web.planner_models import FieldMappingStep
-    from web.session_facts import build_session_facts
+    from contracts.planner_models import FieldMappingStep
+    from contracts.session_facts import build_session_facts
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"标准字段映射"按钮')
@@ -209,7 +209,7 @@ async def on_apply_field_mapping(action: cl.Action):
 async def on_export_mapped_sub_rules(action: cl.Action):
     """把配置导出按钮转换为 ExportStep 并复用统一执行器。"""
     from web.deterministic_plan import execute_deterministic_plan
-    from web.planner_models import ExportStep
+    from contracts.planner_models import ExportStep
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"导出映射后子规则"按钮')

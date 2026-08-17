@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 from web.execution_adapters import FieldMappingExecutionPolicy, ProfessionalAgentAdapter
 from web.plan_executor import ExecutionContext
-from web.planner_models import FieldMappingStep, StepStatus
-from web.session_facts import build_session_facts
+from contracts.planner_models import FieldMappingStep, StepStatus
+from contracts.session_facts import build_session_facts
 
 
 class _Team:

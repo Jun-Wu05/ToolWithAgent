@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Protocol
 
 from agent.shared.logger import get_logger
-from web.planner_models import (
+from contracts.planner_models import (
     EnumExtractStep,
     ExecutionReport,
     ExportStep,
@@ -19,14 +19,14 @@ from web.planner_models import (
     StepSpec,
     StepStatus,
 )
-from web.progress import (
+from contracts.progress import (
     NullProgressSink,
     ProgressEvent,
     ProgressPhase,
     ProgressSink,
     ProgressStatus,
 )
-from web.session_facts import SessionFacts
+from contracts.session_facts import SessionFacts
 
 logger = get_logger("plan_executor")
 
