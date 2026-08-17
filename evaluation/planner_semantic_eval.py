@@ -75,6 +75,33 @@ CASES = (
     ),
     SemanticCase("fill", "把枚举映射表填充回事件级别", MAPPED_FACTS, _single_step("fill")),
     SemanticCase(
+        "fill_auto_single_sheet",
+        "枚举值填充",
+        SessionFacts(
+            has_decoded_config=True,
+            available_config_refs=("session.decoded_config",),
+            enum_mapping_target_fields=("alarm_category",),
+            enum_mapping_row_count=81,
+        ),
+        lambda d: _step_types(d) == ("fill",)
+        and getattr(d.steps[0], "fill_kind", None) == "enum"
+        and tuple(getattr(d.steps[0], "target_fields", ())) == ("alarm_category",)
+        and getattr(d.steps[0], "source_ref", None) == "session.enum_mapping_table",
+    ),
+    SemanticCase(
+        "fill_auto_multi_sheet",
+        "把枚举映射表填充回配置",
+        SessionFacts(
+            has_decoded_config=True,
+            available_config_refs=("session.decoded_config",),
+            enum_mapping_target_fields=("alarm_category", "event_level"),
+            enum_mapping_row_count=120,
+        ),
+        lambda d: _step_types(d) == ("fill",)
+        and getattr(d.steps[0], "fill_kind", None) == "enum"
+        and set(getattr(d.steps[0], "target_fields", ())) == {"alarm_category", "event_level"},
+    ),
+    SemanticCase(
         "remove_mapping",
         "取消事件级别的值映射",
         MAPPED_FACTS,

@@ -60,3 +60,10 @@ def test提示词声明威胁映射不依赖枚举映射表():
     """无枚举映射表时威胁映射必须照常规划，不得据此追问（回归 #76）。"""
     assert "**不需要枚举映射表**" in PROMPT
     assert "`enum_mapping_row_count=0` 不是追问理由" in PROMPT
+
+
+def test提示词声明枚举填充免追问并默认全字段填充():
+    """映射表与配置齐备时不得追问目标字段；未点名即填全部目标字段（回归 #91）。"""
+    assert "直接生成填充步骤，不必追问目标字段" in PROMPT
+    assert "未点名就填充 `enum_mapping_target_fields` 的**全部**字段" in PROMPT
+    assert "多 sheet 映射表每个 sheet 的目标字段都填" in PROMPT
