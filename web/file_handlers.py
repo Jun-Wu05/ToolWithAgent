@@ -23,16 +23,12 @@ from agent.tools.enum_field_tool import get_enum_preview
 from web.parsers import create_dataframe_elements
 
 
-# 枚举映射表列头关键词（从 utils 导入）
-try:
-    from web.utils import _ENUM_HEADER_KEYWORDS
-except ImportError:
-    # 向后兼容：如果 utils.py 还没有导出，使用本地定义
-    _ENUM_HEADER_KEYWORDS: Set[str] = {
-        "mappingtype", "orgvalue", "mappingvalue",
-        "原始值", "映射值", "映射类型",
-        "目标字段", "target_field", "targetfield"
-    }
+# 枚举映射表列头关键词（唯一实现；utils 版重复副本已删除）
+_ENUM_HEADER_KEYWORDS: Set[str] = {
+    "mappingtype", "orgvalue", "mappingvalue",
+    "原始值", "映射值", "映射类型",
+    "目标字段", "target_field", "targetfield"
+}
 
 
 async def handle_file_upload(user_session, element):
