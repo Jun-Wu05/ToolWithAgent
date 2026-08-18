@@ -46,6 +46,237 @@ def testPlanner超时可追踪且明确拒绝执行():
     ]
 
 
+def testChainlit进度保留全部业务步骤并按首次出现顺序编号(monkeypatch):
+    """后续步骤必须追加，不能覆盖已完成的前序业务步骤。"""
+    import web.chainlit_progress as progress_module
+
+    task_lists = []
+
+    class _FakeTask:
+        def __init__(self, title, status):
+            self.title = title
+            self.status = status
+
+    class _FakeTaskList:
+        def __init__(self):
+            self.tasks = []
+            self.status = None
+            self.snapshots = []
+            task_lists.append(self)
+
+        async def add_task(self, task):
+            self.tasks.append(task)
+
+        async def send(self):
+            self.snapshots.append([(task.title, task.status) for task in self.tasks])
+
+    monkeypatch.setattr(progress_module.cl, "Task", _FakeTask)
+    monkeypatch.setattr(progress_module.cl, "TaskList", _FakeTaskList)
+    monkeypatch.setattr(
+        progress_module.cl,
+        "TaskStatus",
+        SimpleNamespace(RUNNING="running", DONE="done", FAILED="failed"),
+    )
+
+    async def run_case():
+        sink = ChainlitProgressSink(heartbeat_seconds=60)
+        for step_id, status, message_code in (
+            ("plan", ProgressStatus.RUNNING, "plan_execution_started"),
+            ("extract", ProgressStatus.RUNNING, "enum_extract_started"),
+            ("extract", ProgressStatus.SUCCESS, "enum_extract_completed"),
+            ("threat", ProgressStatus.RUNNING, "threat_mapping_started"),
+            ("threat", ProgressStatus.SUCCESS, "threat_mapping_completed"),
+            ("plan", ProgressStatus.SUCCESS, "plan_success"),
+        ):
+            await sink.publish(
+                ProgressEvent(
+                    plan_id="multi-step",
+                    step_id=step_id,
+                    phase=(
+                        ProgressPhase.COMPLETED
+                        if status == ProgressStatus.SUCCESS
+                        else ProgressPhase.EXECUTION
+                    ),
+                    status=status,
+                    message_code=message_code,
+                )
+            )
+        await sink.close()
+
+    asyncio.run(run_case())
+
+    assert len(task_lists) == 1
+    assert task_lists[0].snapshots[-1] == [
+        ("1、枚举提取完成", "done"),
+        ("2、威胁映射完成", "done"),
+    ]
+    assert task_lists[0].status == "Done"
+
+
+def testChainlit同一步骤原位更新且Planner不占业务编号(monkeypatch):
+    """Planner 与内部阶段事件按 step_id 去重，编号只分配给业务步骤。"""
+    import web.chainlit_progress as progress_module
+
+    task_lists = []
+
+    class _FakeTask:
+        def __init__(self, title, status):
+            self.title = title
+            self.status = status
+
+    class _FakeTaskList:
+        def __init__(self):
+            self.tasks = []
+            self.status = None
+            task_lists.append(self)
+
+        async def add_task(self, task):
+            self.tasks.append(task)
+
+        async def send(self):
+            return None
+
+    monkeypatch.setattr(progress_module.cl, "Task", _FakeTask)
+    monkeypatch.setattr(progress_module.cl, "TaskList", _FakeTaskList)
+    monkeypatch.setattr(
+        progress_module.cl,
+        "TaskStatus",
+        SimpleNamespace(RUNNING="running", DONE="done", FAILED="failed"),
+    )
+
+    async def run_case():
+        sink = ChainlitProgressSink(heartbeat_seconds=60)
+        events = (
+            ("planner", ProgressPhase.PLANNING, ProgressStatus.RUNNING, "planner_understanding"),
+            ("planner", ProgressPhase.PLANNING, ProgressStatus.SUCCESS, "planner_completed"),
+            ("plan", ProgressPhase.EXECUTION, ProgressStatus.RUNNING, "plan_execution_started"),
+            ("mapping", ProgressPhase.EXECUTION, ProgressStatus.RUNNING, "field_mapping_started"),
+            ("mapping", ProgressPhase.RETRIEVAL, ProgressStatus.RUNNING, "field_candidates_retrieving"),
+            ("mapping", ProgressPhase.COMPLETED, ProgressStatus.SUCCESS, "field_mapping_completed"),
+            ("export", ProgressPhase.EXECUTION, ProgressStatus.RUNNING, "export_started"),
+            ("export", ProgressPhase.COMPLETED, ProgressStatus.SUCCESS, "export_completed"),
+        )
+        for step_id, phase, status, message_code in events:
+            await sink.publish(
+                ProgressEvent(
+                    plan_id="deduplicated",
+                    step_id=step_id,
+                    phase=phase,
+                    status=status,
+                    message_code=message_code,
+                )
+            )
+        await sink.close()
+
+    asyncio.run(run_case())
+
+    assert len(task_lists) == 1
+    assert [(task.title, task.status) for task in task_lists[0].tasks] == [
+        ("指令理解完成", "done"),
+        ("1、字段映射完成", "done"),
+        ("2、导出完成", "done"),
+    ]
+
+
+def testPlanExecutor为每个成功业务步骤发布终态事件():
+    """每个 StepResult 成功后都必须结束对应 Task，而不是只结束总计划。"""
+    from web.plan_executor import ExecutionContext, PlanExecutor
+    from contracts.planner_models import PlanDecision, StepResult, StepStatus
+
+    class _SuccessfulExportAdapter:
+        async def execute(self, step, context, dependencies):
+            return StepResult(
+                step_id=step.step_id,
+                operation_type=step.type,
+                status=StepStatus.SUCCESS,
+                message="配置已导出",
+            )
+
+    plan = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "terminal-events",
+            "steps": [
+                {
+                    "step_id": "first",
+                    "type": "export",
+                    "source_ref": "session.decoded_config",
+                },
+                {
+                    "step_id": "second",
+                    "type": "export",
+                    "source_ref": "session.decoded_config",
+                },
+            ],
+        }
+    )
+    sink = _RecordingProgressSink()
+
+    report = asyncio.run(
+        PlanExecutor({"export": _SuccessfulExportAdapter()}).execute(
+            plan,
+            ExecutionContext(
+                session={},
+                session_facts=SessionFacts(
+                    available_config_refs=("session.decoded_config",),
+                ),
+                progress_sink=sink,
+            ),
+        )
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert [(event.step_id, event.status, event.message_code) for event in sink.events] == [
+        ("plan", ProgressStatus.RUNNING, "plan_execution_started"),
+        ("first", ProgressStatus.RUNNING, "export_started"),
+        ("first", ProgressStatus.SUCCESS, "export_completed"),
+        ("second", ProgressStatus.RUNNING, "export_started"),
+        ("second", ProgressStatus.SUCCESS, "export_completed"),
+        ("plan", ProgressStatus.SUCCESS, "plan_success"),
+    ]
+
+
+def testPlanExecutor执行前拦截终结当前步骤且不展示后续步骤():
+    """待输入结果必须终结当前步骤，并在任何后续 started 事件前停止。"""
+    from web.plan_executor import ExecutionContext, PlanExecutor
+    from contracts.planner_models import PlanDecision, StepStatus
+
+    plan = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "preflight-stop",
+            "steps": [
+                {"step_id": "parse", "type": "log_parse"},
+                {
+                    "step_id": "export",
+                    "type": "export",
+                    "source_ref": "session.decoded_config",
+                },
+            ],
+        }
+    )
+    sink = _RecordingProgressSink()
+
+    report = asyncio.run(
+        PlanExecutor({}).execute(
+            plan,
+            ExecutionContext(
+                session={},
+                session_facts=SessionFacts(),
+                progress_sink=sink,
+            ),
+        )
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert [(event.step_id, event.status, event.message_code) for event in sink.events] == [
+        ("plan", ProgressStatus.RUNNING, "plan_execution_started"),
+        ("parse", ProgressStatus.RUNNING, "log_parse_started"),
+        ("parse", ProgressStatus.FAILED, "log_parse_needs_input"),
+        ("plan", ProgressStatus.FAILED, "plan_needs_input"),
+    ]
+
+
 def testChainlit进度只展示安全阶段且持续发送心跳(monkeypatch):
     """TaskList 应立即发送并持续刷新，且不得拼接用户或模型原始内容。"""
     import web.chainlit_progress as progress_module
@@ -100,13 +331,25 @@ def testChainlit进度只展示安全阶段且持续发送心跳(monkeypatch):
                 total_batches=12,
             )
         )
+        await sink.publish(
+            ProgressEvent(
+                plan_id="safe-plan",
+                step_id="mapping",
+                phase=ProgressPhase.RETRIEVAL,
+                status=ProgressStatus.SUCCESS,
+                message_code="field_candidates_ready",
+                current_batch=1,
+                total_batches=12,
+            )
+        )
         await asyncio.sleep(0.025)
         await sink.close()
 
     asyncio.run(run_case())
 
     assert len(task_lists) == 1
-    assert len(task_lists[0].sent_titles) >= 2
-    assert task_lists[0].sent_titles[0] == "正在执行字段映射（第 1/12 批）"
-    assert any("已等待" in title for title in task_lists[0].sent_titles[1:])
+    assert len(task_lists[0].sent_titles) >= 3
+    assert task_lists[0].sent_titles[0] == "1、正在执行字段映射（第 1/12 批）"
+    assert task_lists[0].sent_titles[1] == "1、字段候选检索完成（第 1/12 批）"
+    assert any("已等待" in title for title in task_lists[0].sent_titles[2:])
     assert all("secret-token" not in title for title in task_lists[0].sent_titles)
