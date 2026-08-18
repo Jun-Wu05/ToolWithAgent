@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import datetime
 
 import chainlit as cl
 import pandas as pd
@@ -15,6 +16,27 @@ from web.utils import render_log_parser_result
 
 
 logger = get_logger("plan_renderer")
+
+
+def _download_filename(kind: str, timestamp: str) -> str:
+    """按产物语义生成用户可见下载名。"""
+    names = {
+        "log_classification": f"logclassification_{timestamp}.json",
+        "enum_values": f"enumvalues_{timestamp}.json",
+        "threat_mapping": f"threatmapping_{timestamp}.xlsx",
+        "mapped_config": f"fieldmapped_config_{timestamp}.txt",
+        "mapped_sub_rules": f"fieldmapped_subrules_{timestamp}.txt",
+        "enummapping_config": f"enummapping_config_{timestamp}.txt",
+        "threatmapping_config": f"threatmapping_config_{timestamp}.txt",
+        "cancelmapping_config": f"cancelmapping_config_{timestamp}.txt",
+        "current_config": f"current_config_{timestamp}.txt",
+        "mappedconfig_subrules": f"mappedconfig_subrules_{timestamp}.txt",
+        "mappedconfig_mainrules": f"mappedconfig_mainrules_{timestamp}.txt",
+        "unmappedconfig_subrules": f"unmappedconfig_subrules_{timestamp}.txt",
+    }
+    if kind in names:
+        return names[kind]
+    raise ValueError(f"不支持的下载产物类型: {kind}")
 
 
 def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
@@ -67,6 +89,7 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
     lines = []
     elements = []
     actions = _build_result_actions(execution_report)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     field_mapping_downloads: list[tuple[str, str, bytes]] = []
     for result in execution_report.results:
         detail = result.message or result.error_code or result.status.value
@@ -77,7 +100,11 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
         if artifact.artifact_type == "config_export":
             content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
             elements.append(
-                cl.File(name=f"{execution_report.plan_id}_config.txt", content=content, mime="text/plain")
+                cl.File(
+                    name=_download_filename(artifact.download_kind, timestamp),
+                    content=content,
+                    mime="text/plain",
+                )
             )
         elif artifact.artifact_type == "field_mapping":
             # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
@@ -87,7 +114,7 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 field_mapping_downloads.append(
                     (
                         artifact.download_kind,
-                        f"{execution_report.plan_id}_{artifact.download_kind}.txt",
+                        _download_filename(artifact.download_kind, timestamp),
                         artifact.download_content.encode("utf-8"),
                     )
                 )
@@ -100,7 +127,7 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
             elements.append(
                 cl.File(
-                    name=f"{execution_report.plan_id}_threat_mapping.xlsx",
+                    name=_download_filename("threat_mapping", timestamp),
                     content=output.getvalue(),
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
@@ -111,7 +138,7 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             elements.extend(create_dataframe_elements(rows))
             elements.append(
                 cl.File(
-                    name=f"{execution_report.plan_id}_enum_values.json",
+                    name=_download_filename("enum_values", timestamp),
                     content=json.dumps(
                         {
                             "field": artifact.field,
@@ -129,7 +156,7 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             lines.append(render_log_parser_result(artifact.classification, None))
             elements.append(
                 cl.File(
-                    name=f"{execution_report.plan_id}_log_classification.json",
+                    name=_download_filename("log_classification", timestamp),
                     content=json.dumps(
                         artifact.classification,
                         ensure_ascii=False,

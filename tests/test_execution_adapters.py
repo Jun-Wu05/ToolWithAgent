@@ -4,6 +4,7 @@ import asyncio
 import base64
 import copy
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 from web.execution_adapters import (
@@ -57,6 +58,7 @@ def test枚举映射表上下文执行填充而非枚举提取():
         {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}
     ]
     assert result.artifact.artifact_type == "config_export"
+    assert result.artifact.download_kind == "enummapping_config"
 
 
 def test真实Base64上传状态可直接填充完整解码配置():
@@ -840,6 +842,7 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     assert report.results[0].artifact.original_log
     assert isinstance(report.results[1].artifact, ThreatMappingArtifact)
     assert isinstance(report.results[2].artifact, ConfigExportArtifact)
+    assert report.results[2].artifact.download_kind == "threatmapping_config"
     assert report.results[2].changed_count == 2
     # 威胁填充真实写回目标字段 mappings。
     mappings = session["decoded_data"][0]["normalize"][0]["mappings"]
@@ -868,13 +871,22 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     monkeypatch.setattr(renderer.cl, "File", _File)
     monkeypatch.setattr(renderer.cl, "Message", _Message)
     monkeypatch.setattr(renderer.cl, "Dataframe", _dataframe)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
     asyncio.run(renderer.render_execution_report(report))
 
     # 一条汇总消息；枚举值/威胁映射落表，配置导出附下载文件。
     assert len(sent_messages) == 1
     assert dataframe_count["count"] == 2
     file_names = {element.name for element in sent_messages[0].elements if hasattr(element, "name")}
-    assert "composite_config.txt" in file_names
+    assert file_names == {
+        "enumvalues_20260818_1006.json",
+        "threatmapping_20260818_1006.xlsx",
+        "threatmapping_config_20260818_1006.txt",
+    }
 
 
 class _TimeoutMappingMember:
@@ -1122,7 +1134,45 @@ def test入口规则导出按钮与自然语言共用ExportAdapter(monkeypatch):
     assert result.status == StepStatus.SUCCESS
     assert result.artifact.content == "encoded-entry-rules"
     assert result.artifact.item_count == 1
+    assert result.artifact.download_kind == "mappedconfig_mainrules"
     assert calls == ["entry"]
+
+
+def test未映射子规则导出保留明确下载语义(monkeypatch):
+    """日志分类子规则导出使用未映射子规则文件名语义。"""
+    import agent.tools.rule_generator as rule_generator
+
+    calls = []
+    monkeypatch.setattr(
+        rule_generator,
+        "generate_rules",
+        lambda classification, mode: calls.append(mode)
+        or {"success": True, "rules": [{"name": "sub"}]},
+    )
+    monkeypatch.setattr(
+        rule_generator,
+        "rules_to_base64_text",
+        lambda rules: "encoded-sub-rules",
+    )
+    session = {"log_classification": {"类型A": {}}}
+    step = ExportStep(
+        step_id="export-sub",
+        type="export",
+        source_ref="session.log_classification.sub_rules",
+    )
+
+    result = asyncio.run(
+        ExportAdapter().execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.artifact.content == "encoded-sub-rules"
+    assert result.artifact.download_kind == "unmappedconfig_subrules"
+    assert calls == ["sub"]
 
 
 def test映射后子规则导出消费mapped_sub_rules而不是重新生成配置(monkeypatch):
@@ -1155,3 +1205,4 @@ def test映射后子规则导出消费mapped_sub_rules而不是重新生成配�
     assert result.status == StepStatus.SUCCESS
     decoded = json.loads(base64.b64decode(result.artifact.content).decode("utf-8"))
     assert decoded[0]["normalize"][0]["field"] == "事件名称"
+    assert result.artifact.download_kind == "mappedconfig_subrules"

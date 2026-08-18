@@ -20,6 +20,7 @@ from agent.shared.logger import get_logger
 from web.plan_executor import ExecutionContext
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
 from contracts.planner_models import (
+    ConfigDownloadKind,
     ConfigExportArtifact,
     StepArtifact,
     StepResult,
@@ -161,12 +162,20 @@ def _enum_mapping_table(
     return dict(table)
 
 
-def _build_config_artifact(updated_config: Any, item_count: int) -> ConfigExportArtifact:
+def _build_config_artifact(
+    updated_config: Any,
+    item_count: int,
+    download_kind: ConfigDownloadKind = "current_config",
+) -> ConfigExportArtifact:
     """把完整配置编码为统一下载产物，不改变根对象类型。"""
     encoded_config = base64.b64encode(
         json.dumps(updated_config, ensure_ascii=False).encode("utf-8")
     ).decode("ascii")
-    return ConfigExportArtifact(content=encoded_config, item_count=item_count)
+    return ConfigExportArtifact(
+        content=encoded_config,
+        item_count=item_count,
+        download_kind=download_kind,
+    )
 
 
 def _count_tagged_normalize(config: Any) -> int:

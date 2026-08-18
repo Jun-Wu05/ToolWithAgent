@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 
@@ -47,6 +48,11 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
         renderer.cl,
         "File",
         lambda **kwargs: captured["files"].append(kwargs) or SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
     )
 
     report = ExecutionReport(
@@ -97,12 +103,15 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
     assert "未匹配" in set(table["匹配状态"])
     # 字段映射回填后附 mapped_config 下载，配置导出仍附 config 下载
     file_names = {f["name"] for f in captured["files"]}
-    assert file_names == {"plan-mix_mapped_config.txt", "plan-mix_config.txt"}
+    assert file_names == {
+        "fieldmapped_config_20260818_1006.txt",
+        "current_config_20260818_1006.txt",
+    }
     assert len(captured["messages"]) == 2
     download_message = captured["messages"][1]
     assert "已回填" in download_message["content"]
     assert "点击下载" in download_message["content"]
-    assert "plan-mix_mapped_config.txt" in download_message["content"]
+    assert "fieldmapped_config_20260818_1006.txt" in download_message["content"]
     assert len(download_message["elements"]) == 1
     assert [action.name for action in captured["messages"][0]["actions"]] == [
         "export_mapped_sub_rules",
@@ -213,6 +222,52 @@ def _mount_chainlit_captures(monkeypatch, renderer):
     return captured
 
 
+def test配置产物按七种业务语义生成下载名且内容不变(monkeypatch):
+    """配置下载名由显式产物语义决定，不再使用 plan_id 或步骤文案猜测。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import ConfigExportArtifact, ExecutionReport, StepResult, StepStatus
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
+    cases = (
+        ("enummapping_config", "enummapping_config_20260818_1006.txt"),
+        ("threatmapping_config", "threatmapping_config_20260818_1006.txt"),
+        ("cancelmapping_config", "cancelmapping_config_20260818_1006.txt"),
+        ("current_config", "current_config_20260818_1006.txt"),
+        ("mappedconfig_subrules", "mappedconfig_subrules_20260818_1006.txt"),
+        ("mappedconfig_mainrules", "mappedconfig_mainrules_20260818_1006.txt"),
+        ("unmappedconfig_subrules", "unmappedconfig_subrules_20260818_1006.txt"),
+    )
+    report = ExecutionReport(
+        plan_id="semantic-downloads",
+        results=tuple(
+            StepResult(
+                step_id=f"export-{index}",
+                operation_type="export",
+                status=StepStatus.SUCCESS,
+                artifact=ConfigExportArtifact(
+                    item_count=1,
+                    content=f"content-{index}",
+                    download_kind=kind,
+                ),
+                message="配置已导出",
+            )
+            for index, (kind, _expected_name) in enumerate(cases)
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    files_by_name = {item["name"]: item["content"] for item in captured["files"]}
+    assert set(files_by_name) == {expected_name for _kind, expected_name in cases}
+    for index, (_kind, expected_name) in enumerate(cases):
+        assert files_by_name[expected_name] == f"content-{index}".encode("utf-8")
+
+
 def test字段映射后的解析子规则使用明确文件名和说明(monkeypatch):
     """mapped_sub_rules 下载不能再伪装成 mapped_config。"""
     import web.plan_renderer as renderer
@@ -225,6 +280,11 @@ def test字段映射后的解析子规则使用明确文件名和说明(monkeypa
     )
 
     captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
     report = ExecutionReport(
         plan_id="button-field-mapping",
         results=(
@@ -252,11 +312,11 @@ def test字段映射后的解析子规则使用明确文件名和说明(monkeypa
     asyncio.run(renderer.render_execution_report(report))
 
     file_names = {file["name"] for file in captured["files"]}
-    assert "button-field-mapping_mapped_sub_rules.txt" in file_names
-    assert "button-field-mapping_mapped_config.txt" not in file_names
+    assert "fieldmapped_subrules_20260818_1006.txt" in file_names
+    assert "button-field-mapping_mapped_sub_rules.txt" not in file_names
     assert len(captured["messages"]) == 2
     assert "已写入解析子规则" in captured["messages"][1]["content"]
-    assert "mapped_sub_rules.txt" in captured["messages"][1]["content"]
+    assert "fieldmapped_subrules_20260818_1006.txt" in captured["messages"][1]["content"]
 
 
 def test字段映射无可下载产物时不发送下载消息(monkeypatch):
@@ -313,6 +373,11 @@ def test威胁映射产物渲染为表格(monkeypatch):
     )
 
     captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
     report = ExecutionReport(
         plan_id="plan-threat",
         results=(
@@ -341,10 +406,10 @@ def test威胁映射产物渲染为表格(monkeypatch):
     assert set(table["orgValue"]) == {"attack", "scan"}
     assert set(table["mappingValue"]) == {"恶意活动", "扫描"}
     file_names = {f["name"] for f in captured["files"]}
-    assert "plan-threat_threat_mapping.xlsx" in file_names
-    assert "plan-threat_threat_mapping.txt" not in file_names
+    assert "threatmapping_20260818_1006.xlsx" in file_names
+    assert "plan-threat_threat_mapping.xlsx" not in file_names
     threat_file = next(
-        f for f in captured["files"] if f["name"] == "plan-threat_threat_mapping.xlsx"
+        f for f in captured["files"] if f["name"] == "threatmapping_20260818_1006.xlsx"
     )
     import openpyxl
 
@@ -367,6 +432,11 @@ def test枚举提取产物渲染为列表并附下载(monkeypatch):
     )
 
     captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
     report = ExecutionReport(
         plan_id="plan-enum",
         results=(
@@ -392,9 +462,9 @@ def test枚举提取产物渲染为列表并附下载(monkeypatch):
     assert len(captured["dataframes"]) == 1
     assert set(captured["dataframes"][0]["data"]["枚举值"]) == {"attack", "scan"}
     file_names = {f["name"] for f in captured["files"]}
-    assert "plan-enum_enum_values.json" in file_names
-    assert "plan-enum_enum_values.txt" not in file_names
-    enum_file = next(f for f in captured["files"] if f["name"] == "plan-enum_enum_values.json")
+    assert "enumvalues_20260818_1006.json" in file_names
+    assert "plan-enum_enum_values.json" not in file_names
+    enum_file = next(f for f in captured["files"] if f["name"] == "enumvalues_20260818_1006.json")
     enum_data = json.loads(enum_file["content"].decode("utf-8"))
     assert set(enum_data) == {"field", "regex", "original_log", "value"}
     assert enum_data["value"] == ["attack", "scan"]
@@ -411,6 +481,12 @@ def test日志类型提取恢复真实分类详情样本和规则动作(monkeypa
     )
 
     captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+        raising=False,
+    )
     report = ExecutionReport(
         plan_id="plan-log",
         results=(
@@ -475,10 +551,10 @@ def test日志类型提取恢复真实分类详情样本和规则动作(monkeypa
         "export_sub_rules",
     ]
     file_names = {f["name"] for f in captured["files"]}
-    assert "plan-log_log_classification.json" in file_names
-    assert "plan-log_log_classification.txt" not in file_names
+    assert "logclassification_20260818_1006.json" in file_names
+    assert "plan-log_log_classification.json" not in file_names
     log_file = next(
-        f for f in captured["files"] if f["name"] == "plan-log_log_classification.json"
+        f for f in captured["files"] if f["name"] == "logclassification_20260818_1006.json"
     )
     log_data = json.loads(log_file["content"].decode("utf-8"))
     assert log_data["classification_details"][0]["logtype"] == "AUDIT"
@@ -501,6 +577,11 @@ def test多产物复合计划渲染为单条汇总(monkeypatch):
     )
 
     captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
     report = ExecutionReport(
         plan_id="plan-compound",
         results=(
@@ -526,7 +607,11 @@ def test多产物复合计划渲染为单条汇总(monkeypatch):
                 operation_type="fill",
                 status=StepStatus.SUCCESS,
                 changed_count=1,
-                artifact=ConfigExportArtifact(item_count=1, content="config-text"),
+                artifact=ConfigExportArtifact(
+                    item_count=1,
+                    content="config-text",
+                    download_kind="threatmapping_config",
+                ),
                 message="威胁映射已填充到目标字段",
             ),
         ),
@@ -538,6 +623,8 @@ def test多产物复合计划渲染为单条汇总(monkeypatch):
     assert len(captured["messages"]) == 1
     assert len(captured["dataframes"]) == 2
     file_names = {f["name"] for f in captured["files"]}
-    assert "plan-compound_config.txt" in file_names
-    assert "plan-compound_enum_values.json" in file_names
-    assert "plan-compound_threat_mapping.xlsx" in file_names
+    assert file_names == {
+        "threatmapping_config_20260818_1006.txt",
+        "enumvalues_20260818_1006.json",
+        "threatmapping_20260818_1006.xlsx",
+    }

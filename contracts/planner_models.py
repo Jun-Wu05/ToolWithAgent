@@ -15,6 +15,15 @@ class StrictContract(BaseModel):
 
 
 ConfigRef = Literal["session.decoded_config", "session.mapped_sub_rules"]
+ConfigDownloadKind = Literal[
+    "enummapping_config",
+    "threatmapping_config",
+    "cancelmapping_config",
+    "current_config",
+    "mappedconfig_subrules",
+    "mappedconfig_mainrules",
+    "unmappedconfig_subrules",
+]
 
 
 class ConversationTurn(StrictContract):
@@ -273,6 +282,7 @@ class ConfigExportArtifact(ArtifactContract):
 
     artifact_type: Literal["config_export"] = "config_export"
     content: str
+    download_kind: ConfigDownloadKind = "current_config"
 
 
 StepArtifact = Annotated[
