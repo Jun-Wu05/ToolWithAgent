@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
+from types import SimpleNamespace
 
 from web.execution_adapters import create_default_adapters
 from web.plan_executor import ExecutionContext, PlanExecutor
@@ -401,6 +403,7 @@ def test枚举填充单步可运行():
     assert report.status == StepStatus.SUCCESS
     assert execution_elapsed < 1.0
     assert session["decoded_data"]["normalize"][0]["mappings"][0]["orgValue"] == "attack"
+    assert report.results[0].artifact.download_kind == "enummapping_config"
 
 
 def test取消映射单步可运行():
@@ -431,6 +434,7 @@ def test取消映射单步可运行():
     assert report.status == StepStatus.SUCCESS
     assert session["decoded_data"]["normalize"][0]["mappings"] == []
     assert report.results[0].artifact.content
+    assert report.results[0].artifact.download_kind == "cancelmapping_config"
 
 
 def test导出单步可运行():
@@ -454,6 +458,7 @@ def test导出单步可运行():
     assert report.status == StepStatus.SUCCESS
     assert report.results[0].artifact.item_count == 1
     assert report.results[0].artifact.content
+    assert report.results[0].artifact.download_kind == "current_config"
 
 
 def test执行前拦截日志包含稳定追踪字段(caplog):
@@ -518,6 +523,11 @@ def test成功填充报告输出下载文件(monkeypatch):
 
     monkeypatch.setattr(renderer.cl, "File", _File)
     monkeypatch.setattr(renderer.cl, "Message", _Message)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
     report = ExecutionReport(
         plan_id="render-fill",
         results=(
@@ -526,7 +536,11 @@ def test成功填充报告输出下载文件(monkeypatch):
                 operation_type="fill",
                 status=StepStatus.SUCCESS,
                 changed_count=1,
-                artifact=ConfigExportArtifact(content="encoded-config", item_count=1),
+                artifact=ConfigExportArtifact(
+                    content="encoded-config",
+                    item_count=1,
+                    download_kind="enummapping_config",
+                ),
                 message="枚举映射已填充到目标字段",
             ),
         ),
@@ -537,4 +551,4 @@ def test成功填充报告输出下载文件(monkeypatch):
     assert len(sent_messages) == 1
     assert len(sent_messages[0].elements) == 1
     assert sent_messages[0].elements[0].content == b"encoded-config"
-    assert sent_messages[0].elements[0].name == "render-fill_config.txt"
+    assert sent_messages[0].elements[0].name == "enummapping_config_20260818_1006.txt"

@@ -76,7 +76,11 @@ class EnumFillAdapter:
             operation_type=step.type,
             status=StepStatus.SUCCESS,
             changed_count=max(0, after_count - before_count),
-            artifact=_build_config_artifact(updated_config, after_count),
+            artifact=_build_config_artifact(
+                updated_config,
+                after_count,
+                "enummapping_config",
+            ),
             message="枚举映射已填充到目标字段",
         )
 
@@ -125,7 +129,11 @@ class ThreatFillAdapter:
             operation_type=step.type,
             status=StepStatus.SUCCESS,
             changed_count=max(0, after_count - before_count),
-            artifact=_build_config_artifact(updated_config, after_count),
+            artifact=_build_config_artifact(
+                updated_config,
+                after_count,
+                "threatmapping_config",
+            ),
             message="威胁映射已填充到目标字段",
         )
 
@@ -187,7 +195,11 @@ class RemoveMappingAdapter:
             operation_type=step.type,
             status=StepStatus.SUCCESS,
             changed_count=before_count - after_count,
-            artifact=_build_config_artifact(updated_config, after_count),
+            artifact=_build_config_artifact(
+                updated_config,
+                after_count,
+                "cancelmapping_config",
+            ),
             message="目标字段映射已取消",
         )
 
@@ -212,12 +224,18 @@ class ExportAdapter:
                 return _failed(step, "dependency_type_mismatch", "声明的依赖没有配置产物")
             exported_text = artifact.content
             exported_item_count = artifact.item_count
+            download_kind = artifact.download_kind
         elif step.source_ref in _CONFIG_SESSION_KEYS:
             current_config = _read_config(context.session, step.source_ref)
             if not current_config:
                 return _needs_input(step, "export_source_required", "当前没有可导出的配置")
             exported_item_count = len(current_config) if isinstance(current_config, list) else 1
             exported_text = _build_config_artifact(current_config, exported_item_count).content
+            download_kind = (
+                "mappedconfig_subrules"
+                if step.source_ref == "session.mapped_sub_rules"
+                else "current_config"
+            )
         else:
             from agent.tools.rule_generator import generate_rules, rules_to_base64_text
 
@@ -235,6 +253,11 @@ class ExportAdapter:
             rules = generated_rules.get("rules", [])
             exported_text = rules_to_base64_text(rules)
             exported_item_count = len(rules)
+            download_kind = (
+                "mappedconfig_mainrules"
+                if step.source_ref == "session.log_classification.entry_rules"
+                else "unmappedconfig_subrules"
+            )
 
         return StepResult(
             step_id=step.step_id,
@@ -243,6 +266,7 @@ class ExportAdapter:
             artifact=ConfigExportArtifact(
                 content=exported_text,
                 item_count=exported_item_count,
+                download_kind=download_kind,
             ),
             message="配置已导出",
         )
