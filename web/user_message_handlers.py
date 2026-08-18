@@ -34,6 +34,28 @@ _CLEAR_COMMANDS = {
     "reset",
 }
 
+_DECISION_LABELS = {
+    "execute": "执行计划",
+    "clarification": "需要澄清",
+    "guidance": "使用引导",
+}
+
+_OPERATION_LABELS = {
+    "log_parse": "日志类型提取",
+    "field_mapping": "字段映射",
+    "enum_extract": "枚举提取",
+    "threat_mapping": "威胁类型映射",
+    "remove_mapping": "取消映射",
+    "export": "导出配置",
+}
+
+
+def _operation_label(step: Any) -> str:
+    """返回不含字段值等参数的中文业务操作名。"""
+    if step.type == "fill":
+        return "枚举填充" if step.fill_kind == "enum" else "威胁类型填充"
+    return _OPERATION_LABELS.get(step.type, "未知操作")
+
 
 def _get_planner_service() -> PlannerService:
     """为当前请求创建 Planner 服务，避免跨会话复用模型配置和内部状态。"""
@@ -78,7 +100,12 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
     错误模式：
         规划错误由 Planner 转为安全追问；步骤错误由 ExecutionReport 返回稳定错误码。
     """
-    logger.info("[USER_INPUT] 收到用户指令: character_count=%s", len(user_text))
+    # 用户主动提交的消息是可审计输入，允许明文进入应用日志；上传文件内容不走此入口。
+    logger.info(
+        "[USER_INPUT] 收到用户指令: user_text=%s character_count=%s",
+        user_text,
+        len(user_text),
+    )
     if _is_explicit_clear_command(user_text):
         await _clear_session_data(user_session)
         await reset_session_progress_sink()
@@ -126,6 +153,13 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
             decision.decision,
             len(decision.steps),
             [step.type for step in decision.steps],
+        )
+        logger.info(
+            "[PLANNER_INTENT] 中文意图摘要: plan_id=%s decision_cn=%s "
+            "operations_cn=%s",
+            decision.plan_id,
+            _DECISION_LABELS[decision.decision],
+            [_operation_label(step) for step in decision.steps],
         )
         for step in decision.steps:
             logger.info(

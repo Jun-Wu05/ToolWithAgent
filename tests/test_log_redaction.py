@@ -1,5 +1,6 @@
 """模型与检索边界不得记录敏感原值。"""
 
+import json
 import logging
 
 
@@ -53,3 +54,27 @@ def test字段映射解析日志不记录完整模型输出(caplog):
     assert len(rows) == 1
     assert secret_value not in caplog.text
     assert "content_length=" in caplog.text
+
+
+def test用户明文消息保持结构化jsonl兼容():
+    """含中文和换行的完整用户消息仍由既有 formatter 编码为单条合法 JSON。"""
+    from agent.shared.logger import _StructuredTraceFormatter
+
+    user_text = "第一行中文\n第二行原文"
+    record = logging.LogRecord(
+        name="user_message_handlers",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="[USER_INPUT] 收到用户指令: user_text=%s character_count=%s",
+        args=(user_text, len(user_text)),
+        exc_info=None,
+    )
+
+    encoded = _StructuredTraceFormatter().format(record)
+    decoded = json.loads(encoded)
+
+    assert user_text in decoded["message"]
+    assert "character_count=" in decoded["message"]
+    assert len(encoded.splitlines()) == 1
+    assert "\\n" in encoded
