@@ -38,7 +38,8 @@ def _pre_query_field_candidates(fields_list: list) -> str:
 
 
 def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list,
-                          batch_idx: int, total_batches: int) -> str:
+                          batch_idx: int, total_batches: int,
+                          prequery=None) -> str:
     """
     构建分批字段的 LLM 输入（用于 >50 字段场景，每批独立调用 Team）
 
@@ -48,6 +49,8 @@ def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list
         fields_batch: 当前批次的字段列表
         batch_idx: 当前批次索引（1-based）
         total_batches: 总批次数
+        prequery: 可选候选检索函数（Issue #88 注入接缝）；缺省用模块默认
+            ``_pre_query_field_candidates``，测试可构造注入假件替代 monkeypatch
 
     Returns:
         完整 LLM 输入字符串（字段批次 + 语义候选 + 原始日志样本）
@@ -57,9 +60,10 @@ def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list
 
     fields_json_str = json.dumps(fields_batch, ensure_ascii=False)
 
-    # 对当前批次字段做语义检索
+    # 对当前批次字段做语义检索（注入优先，未注入时回落模块默认实现）
+    retriever = prequery or _pre_query_field_candidates
     try:
-        pre_query_candidates = _pre_query_field_candidates(fields_batch)
+        pre_query_candidates = retriever(fields_batch)
     except RuntimeError as e:
         logger.warning(f"[BATCH] 第 {batch_idx}/{total_batches} 批语义检索失败: {e}")
         pre_query_candidates = ""

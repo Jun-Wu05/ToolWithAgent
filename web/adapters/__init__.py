@@ -1,0 +1,43 @@
+"""按操作落位的 StepAdapter 集合（Issue #88 三档拆分）。
+
+落位：
+- field_mapping.py —— 字段映射热点（适配器 + 执行策略 + 批次错误）
+- agent_ops.py —— log_parse / enum_extract / threat_mapping 三个小操作
+- config_ops.py —— fill / remove_mapping / export 简单适配器
+- shared.py —— 跨操作共享的会话、结果与进度接缝
+
+``create_default_adapters`` 是唯一公共入口，PlanExecutor 按 ``step.type``
+字符串键注册分派，不感知适配器内部结构。
+"""
+
+from typing import Any
+
+from web.plan_executor import StepAdapter
+from web.adapters.agent_ops import ProfessionalAgentAdapter
+from web.adapters.config_ops import (
+    EnumFillAdapter,
+    ExportAdapter,
+    FillAdapter,
+    RemoveMappingAdapter,
+    ThreatFillAdapter,
+)
+from web.adapters.field_mapping import (
+    FieldMappingAdapter,
+    FieldMappingBatchError,
+    FieldMappingExecutionPolicy,
+)
+
+
+def create_default_adapters(team: Any) -> dict[str, StepAdapter]:
+    """创建统一执行器的默认适配器表，操作类型是唯一分派键。"""
+    professional_adapter = ProfessionalAgentAdapter(team)
+    field_mapping_adapter = FieldMappingAdapter(team)
+    return {
+        "log_parse": professional_adapter,
+        "field_mapping": field_mapping_adapter,
+        "enum_extract": professional_adapter,
+        "threat_mapping": professional_adapter,
+        "fill": FillAdapter(),
+        "remove_mapping": RemoveMappingAdapter(),
+        "export": ExportAdapter(),
+    }

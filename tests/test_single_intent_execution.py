@@ -47,10 +47,12 @@ def _execute_single_step(session: dict, step: dict, team=None):
 
 def test日志类型提取单步可运行(monkeypatch):
     """日志分类只替换专业模型输出，状态推进仍经过统一执行核心。"""
-    import agent.tools.log_parser_pipeline as pipeline
+    import agent.tools.pipeline.log_classifier as log_classifier
+    import agent.tools.pipeline.log_format_identifier as log_format_identifier
+    import agent.tools.pipeline.log_sample_filler as log_sample_filler
 
     monkeypatch.setattr(
-        pipeline,
+        log_format_identifier,
         "_do_identify_log_format",
         lambda logs_text: json.dumps(
             {
@@ -63,11 +65,11 @@ def test日志类型提取单步可运行(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        pipeline,
+        log_classifier,
         "_do_classify_log_features",
         lambda *args: json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False),
     )
-    monkeypatch.setattr(pipeline, "fill_sample_logs", lambda classification, logs_text: classification)
+    monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
     session = {"raw_log_lines": ["event_type3=attack src=10.0.0.1"]}
 
     report = _execute_single_step(

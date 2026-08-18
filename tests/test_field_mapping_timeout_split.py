@@ -69,7 +69,7 @@ def _run_mapping(fields, member, policy, session=None):
     """通过真实 Adapter 接缝执行一步字段映射。"""
     session = session or {"decoded_fields": fields}
     return asyncio.run(
-        ProfessionalAgentAdapter(_Team(member), mapping_policy=policy).execute(
+        ProfessionalAgentAdapter(_Team(member), mapping_policy=policy, candidate_retriever=lambda fields: "").execute(
             FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields"),
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
             {},
@@ -82,7 +82,6 @@ def test字段映射25字段watchdog超时后拆成13和12并原子合并(monkey
     import web.execution_adapters as execution_adapters
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     messages = []
     monkeypatch.setattr(
         execution_adapters.logger,
@@ -119,7 +118,6 @@ def test字段映射provider超时来源可观测且不原样重试(monkeypatch)
     import web.execution_adapters as execution_adapters
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     messages = []
     monkeypatch.setattr(
         execution_adapters.logger,
@@ -149,7 +147,6 @@ def test字段映射子批失败时session保持原子不变(monkeypatch):
     """任一子批失败都不得提交其他子批的成功结果。"""
     import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     fields = [f"child_{index:02d}" for index in range(25)]
     session = {
         "decoded_fields": fields,
@@ -181,9 +178,7 @@ def test字段映射子批失败时session保持原子不变(monkeypatch):
 
 def test字段映射429仍按RetryAfter有限原样重试(monkeypatch):
     """非超时瞬时错误保留一次有限重试，不触发拆批。"""
-    import web.input_builder as input_builder
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     fields = [f"rate_{index:02d}" for index in range(25)]
     member = _MappingMember("rate_limit")
     result = _run_mapping(

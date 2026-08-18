@@ -29,20 +29,24 @@ toolswithagent/
 │   ├── file_handlers.py             # 文件上传处理（含 Excel 检测，数据表须含"原始日志"列）
 │   ├── user_message_handlers.py     # 用户文本消息处理（一次 Planner 调用 + Executor + 渲染）
 │   ├── action_callbacks.py          # Action 回调（按钮交互）
-│   ├── planner_models.py            # PlanDecision / StepSpec / Artifact 类型契约
 │   ├── plan_executor.py             # 计划执行器（依赖账本、失败停止）
-│   ├── execution_adapters.py        # StepAdapter 集合（七类操作）
+│   ├── adapters/                    # StepAdapter 三档落位（field_mapping 热点 / agent_ops / config_ops / shared）
+│   ├── execution_adapters.py        # 兼容垫片：从 web.adapters 重导出公共入口
 │   ├── session_state.py             # 会话状态（SessionState）
-│   ├── session_facts.py             # SessionFacts 投影（Planner 输入）
 │   ├── field_source.py              # 字段映射的真实日志字段来源
 │   ├── input_builder.py             # 字段映射批次 LLM 输入构造（embedding 候选）
 │   ├── parsers.py                   # 模型输出 JSON 解析
 │   ├── plan_renderer.py             # 统一渲染器（Clarification/ExecutionReport）
 │   ├── deterministic_plan.py        # 按钮入口的类型化计划
 │   ├── history_store.py             # 受限对话历史
-│   ├── progress.py / chainlit_progress.py  # 进度事件抽象与 Chainlit 展示
+│   ├── chainlit_progress.py         # 进度事件的 Chainlit 展示
 │   ├── llm_client.py / model_manager.py    # LLM 客户端与模型管理
 │   └── utils.py / global_state.py / constants.py  # 辅助函数
+│
+├── contracts/                       # 框架无关类型契约（web → contracts ← agent）
+│   ├── planner_models.py            # PlanDecision / StepSpec / Artifact 类型契约
+│   ├── session_facts.py             # SessionFacts 投影（Planner 输入）
+│   └── progress.py                  # 进度事件抽象（不依赖 Chainlit）
 │
 ├── agent/                           # AI Agent 系统
 │   ├── core/                        # 核心层
