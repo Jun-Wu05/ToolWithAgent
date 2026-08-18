@@ -117,6 +117,12 @@ class PlanExecutor:
             preflight_error = self._validate_step(step, context.session_facts, ledger)
             if preflight_error is not None:
                 ordered_results.append(preflight_error)
+                await self._publish_step_terminal(
+                    plan.plan_id,
+                    step,
+                    preflight_error,
+                    context.progress_sink,
+                )
                 logger.info(
                     "[EXECUTOR] 执行前拦截: plan_id=%s step_id=%s operation=%s status=%s "
                     "error_category=%s required_config_ref=%s observed_config_refs=%s "
@@ -153,6 +159,12 @@ class PlanExecutor:
 
             ledger[step.step_id] = result
             ordered_results.append(result)
+            await self._publish_step_terminal(
+                plan.plan_id,
+                step,
+                result,
+                context.progress_sink,
+            )
             logger.info(
                 "[EXECUTOR] 步骤结束: plan_id=%s step_id=%s operation=%s status=%s "
                 "error_category=%s changed_count=%s artifact_type=%s artifact_item_count=%s",
@@ -191,6 +203,33 @@ class PlanExecutor:
             len(plan.steps),
         )
         return execution_report
+
+    @staticmethod
+    async def _publish_step_terminal(
+        plan_id: str,
+        step: StepSpec,
+        result: StepResult,
+        progress_sink: ProgressSink,
+    ) -> None:
+        """为每个业务步骤发布终态，使界面保留完整步骤账本。"""
+        is_success = result.status == StepStatus.SUCCESS
+        await progress_sink.publish(
+            ProgressEvent(
+                plan_id=plan_id,
+                step_id=step.step_id,
+                phase=ProgressPhase.COMPLETED,
+                status=(
+                    ProgressStatus.SUCCESS
+                    if is_success
+                    else ProgressStatus.FAILED
+                ),
+                message_code=(
+                    f"{step.type}_completed"
+                    if is_success
+                    else f"{step.type}_{result.status.value}"
+                ),
+            )
+        )
 
     def _validate_step(
         self,

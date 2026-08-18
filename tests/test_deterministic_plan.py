@@ -12,20 +12,34 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
 
     captured = {}
 
-    class _NoOpSink:
+    lifecycle = []
+
+    class _NoOpRequestSink:
         """离线测试不访问 Chainlit TaskList。"""
 
         async def publish(self, event):
             """忽略进度事件。"""
 
-        async def close(self):
-            """忽略关闭。"""
+    request_sink = _NoOpRequestSink()
+
+    class _FakeLedger:
+        def begin_request(self):
+            lifecycle.append("begin")
+            return request_sink
+
+        async def finish_request(self, finished_sink):
+            assert finished_sink is request_sink
+            lifecycle.append("finish")
 
     async def capture_render(report):
         """记录交给渲染器的执行报告。"""
         captured["report"] = report
 
-    monkeypatch.setattr(deterministic_plan, "ChainlitProgressSink", _NoOpSink)
+    monkeypatch.setattr(
+        deterministic_plan,
+        "get_session_progress_sink",
+        lambda: _FakeLedger(),
+    )
     monkeypatch.setattr(deterministic_plan, "render_execution_report", capture_render)
 
     session = {
@@ -58,6 +72,7 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
     assert report.status == StepStatus.SUCCESS
     assert report.results[0].operation_type == "fill"
     assert report.results[0].changed_count == 1
+    assert lifecycle == ["begin", "finish"]
     # 真实领域结果：按钮入口同样把枚举映射写回 normalize。
     mappings = session["mapped_sub_rules"][0]["normalize"][0]["mappings"]
     assert mappings == [{"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}]

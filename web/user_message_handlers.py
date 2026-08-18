@@ -9,7 +9,7 @@ import chainlit as cl
 
 from agent.core.planner import PlannerService
 from agent.shared.logger import get_logger
-from web.chainlit_progress import ChainlitProgressSink
+from web.chainlit_progress import get_session_progress_sink, reset_session_progress_sink
 from web.execution_adapters import create_default_adapters
 from web.history_store import append_history
 from web.plan_executor import ExecutionContext, PlanExecutor
@@ -19,11 +19,6 @@ from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
 from contracts.session_facts import build_session_facts
 
 logger = get_logger("user_message_handlers")
-
-
-def _create_progress_sink() -> ChainlitProgressSink:
-    """为当前 Chainlit 请求创建独立进度渲染器。"""
-    return ChainlitProgressSink()
 
 
 # 只有完整匹配的明确命令才可绕过 Planner，避免普通句子包含“新建”等词时误清空。
@@ -86,21 +81,23 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
     logger.info("[USER_INPUT] 收到用户指令: character_count=%s", len(user_text))
     if _is_explicit_clear_command(user_text):
         await _clear_session_data(user_session)
+        await reset_session_progress_sink()
         return
 
     progress_plan_id = f"request-{uuid.uuid4().hex[:12]}"
-    progress_sink = _create_progress_sink()
-    await progress_sink.publish(
-        ProgressEvent(
-            plan_id=progress_plan_id,
-            step_id="planner",
-            phase=ProgressPhase.PLANNING,
-            status=ProgressStatus.RUNNING,
-            message_code="planner_understanding",
-        )
-    )
+    progress_ledger = get_session_progress_sink()
+    progress_sink = progress_ledger.begin_request()
 
     try:
+        await progress_sink.publish(
+            ProgressEvent(
+                plan_id=progress_plan_id,
+                step_id="planner",
+                phase=ProgressPhase.PLANNING,
+                status=ProgressStatus.RUNNING,
+                message_code="planner_understanding",
+            )
+        )
         history_before_request = _conversation_history(user_session)
         append_history(user_session, "user", user_text)
         session_facts = build_session_facts(user_session)
@@ -161,7 +158,7 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
         await render_execution_report(execution_report)
     finally:
         # UI 或执行器异常都必须停止心跳，避免请求结束后仍更新旧任务。
-        await progress_sink.close()
+        await progress_ledger.finish_request(progress_sink)
 
 async def _clear_session_data(user_session: Any) -> None:
     """执行确定性清空事件，并只保留统一的完成提示。"""

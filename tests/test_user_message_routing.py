@@ -54,16 +54,31 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
     monkeypatch.setattr(handlers, "PlanExecutor", FakeExecutor)
     monkeypatch.setattr(handlers, "create_default_adapters", lambda team: {})
 
-    class _NoOpProgressSink:
+    lifecycle = []
+
+    class _NoOpRequestSink:
         """在离线入口测试中记录生命周期，不访问 Chainlit 会话。"""
 
         async def publish(self, event):
             """忽略安全进度事件。"""
 
-        async def close(self):
-            """记录请求结束时的关闭动作。"""
+    request_sink = _NoOpRequestSink()
 
-    monkeypatch.setattr(handlers, "_create_progress_sink", _NoOpProgressSink)
+    class _FakeLedger:
+        def begin_request(self):
+            lifecycle.append("begin")
+            return request_sink
+
+        async def finish_request(self, finished_sink):
+            assert finished_sink is request_sink
+            lifecycle.append("finish")
+
+    monkeypatch.setattr(
+        handlers,
+        "get_session_progress_sink",
+        lambda: _FakeLedger(),
+    )
+    planner.progress_lifecycle = lifecycle
 
     async def render_decision(decision):
         rendered.append(decision.decision)
@@ -74,9 +89,13 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
     async def clear_session(user_session):
         events.append("clear")
 
+    async def reset_progress():
+        events.append("progress_reset")
+
     monkeypatch.setattr(handlers, "render_decision", render_decision)
     monkeypatch.setattr(handlers, "render_execution_report", render_report)
     monkeypatch.setattr(handlers, "_clear_session_data", clear_session)
+    monkeypatch.setattr(handlers, "reset_session_progress_sink", reset_progress)
 
     asyncio.run(handlers.handle_user_message(session or {}, object(), user_text))
     return planner, events, rendered
@@ -97,6 +116,7 @@ def test每条自然语言恰好调用planner一次且返回前不执行(monkeyp
     assert events == ["planner", "executor"]
     assert FakeExecutor.calls == 1
     assert rendered == ["report"]
+    assert planner.progress_lifecycle == ["begin", "finish"]
 
 
 def test意图冲突返回澄清且不调用执行器(monkeypatch):
@@ -160,7 +180,7 @@ def test明确清空事件不调用planner(monkeypatch):
     planner, events, rendered = _run(monkeypatch, decision, user_text="清空数据")
 
     assert planner.calls == 0
-    assert events == ["clear"]
+    assert events == ["clear", "progress_reset"]
     assert rendered == []
 
 
