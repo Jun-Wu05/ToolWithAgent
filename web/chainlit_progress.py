@@ -47,25 +47,67 @@ _OPERATION_STATE_SUFFIX = {
     "failed": "失败",
 }
 
+_SESSION_PROGRESS_SINK_KEY = "chainlit_progress_sink"
+
+
+def get_session_progress_sink() -> "ChainlitProgressSink":
+    """从 Chainlit 用户会话获取唯一进度账本，首次使用时延迟创建。"""
+    progress_sink = cl.user_session.get(_SESSION_PROGRESS_SINK_KEY)
+    if progress_sink is None:
+        progress_sink = ChainlitProgressSink()
+        cl.user_session.set(_SESSION_PROGRESS_SINK_KEY, progress_sink)
+    return progress_sink
+
+
+async def reset_session_progress_sink() -> None:
+    """如果当前 Chainlit 会话已创建进度账本，则将其重置。"""
+    progress_sink = cl.user_session.get(_SESSION_PROGRESS_SINK_KEY)
+    if progress_sink is not None:
+        await progress_sink.reset()
+
+
+class _RequestProgressSink(ProgressSink):
+    """把一次用户请求的进度事件写入会话级账本。"""
+
+    def __init__(self, ledger: "ChainlitProgressSink", request_id: int) -> None:
+        """保存所属会话账本和唯一请求序号。"""
+        self._ledger = ledger
+        self.request_id = request_id
+
+    async def publish(self, event: ProgressEvent) -> None:
+        """保留请求边界后委托会话账本渲染事件。"""
+        await self._ledger._publish(self.request_id, event)
+
 
 class ChainlitProgressSink(ProgressSink):
-    """用单个 TaskList 按步骤保留安全阶段进度和等待心跳。"""
+    """用单个 TaskList 跨请求保留当前会话的安全进度账本。"""
 
     def __init__(self, heartbeat_seconds: float = 10.0) -> None:
         """初始化任务列表；首次事件到达时才创建 Chainlit 对象。"""
         self._heartbeat_seconds = heartbeat_seconds
         self._task_list = None
         self._tasks_by_step = {}
-        self._business_step_numbers = {}
         self._lock = asyncio.Lock()
         self._heartbeat_task: asyncio.Task | None = None
         self._last_event_at = time.monotonic()
         self._last_titles = {}
-        self._active_step_id: str | None = None
+        self._active_task_key: tuple[int, str] | None = None
+        self._request_sequence = 0
         self._closed = False
 
+    def begin_request(self) -> _RequestProgressSink:
+        """为新请求分配独立作用域，避免重复 step_id 覆盖旧记录。"""
+        if self._closed:
+            raise RuntimeError("进度账本已关闭")
+        self._request_sequence += 1
+        return _RequestProgressSink(self, self._request_sequence)
+
     async def publish(self, event: ProgressEvent) -> None:
-        """更新当前业务阶段；事件只使用消息码，不显示模型原始输出。"""
+        """兼容直接作为 ProgressSink 使用的单请求场景。"""
+        await self._publish(0, event)
+
+    async def _publish(self, request_id: int, event: ProgressEvent) -> None:
+        """按请求和步骤更新安全进度，不显示模型原始输出。"""
         if self._closed:
             return
         async with self._lock:
@@ -76,33 +118,52 @@ class ChainlitProgressSink(ProgressSink):
 
             if event.step_id != "plan":
                 title = self._build_title(event)
-                if event.step_id != "planner":
-                    step_number = self._business_step_numbers.setdefault(
-                        event.step_id,
-                        len(self._business_step_numbers) + 1,
-                    )
-                    title = f"{step_number}、{title}"
-                self._last_titles[event.step_id] = title
+                task_key = (request_id, event.step_id)
+                self._last_titles[task_key] = title
                 is_terminal = self._is_terminal_task_event(event)
                 task_status = self._task_status(event, is_terminal)
-                task = self._tasks_by_step.get(event.step_id)
+                task = self._tasks_by_step.get(task_key)
                 if task is None:
                     task = cl.Task(title=title, status=task_status)
-                    self._tasks_by_step[event.step_id] = task
+                    self._tasks_by_step[task_key] = task
                     await self._task_list.add_task(task)
                 else:
                     task.title = title
                     task.status = task_status
-                self._active_step_id = None if is_terminal else event.step_id
+                self._active_task_key = None if is_terminal else task_key
             self._task_list.status = self._list_status(event)
             await self._task_list.send()
             if event.step_id != "plan" and not is_terminal:
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
+    async def finish_request(self, request_sink: _RequestProgressSink) -> None:
+        """停止已结束请求的心跳，保留会话中已发送的任务。"""
+        async with self._lock:
+            active_task_key = self._active_task_key
+            if active_task_key is None or active_task_key[0] != request_sink.request_id:
+                return
+            self._active_task_key = None
+            await self._stop_heartbeat()
+
+    async def reset(self) -> None:
+        """移除当前 TaskList 并清空会话账本，供明确切换数据时使用。"""
+        async with self._lock:
+            self._active_task_key = None
+            await self._stop_heartbeat()
+            task_list = self._task_list
+            if task_list is not None:
+                await task_list.remove()
+            self._task_list = None
+            self._tasks_by_step.clear()
+            self._last_titles.clear()
+            self._request_sequence = 0
+            self._last_event_at = time.monotonic()
+
     async def close(self) -> None:
         """停止心跳；已发送的最终任务状态保留在界面中。"""
         self._closed = True
         async with self._lock:
+            self._active_task_key = None
             await self._stop_heartbeat()
 
     def _build_title(self, event: ProgressEvent) -> str:
@@ -160,14 +221,14 @@ class ChainlitProgressSink(ProgressSink):
             while not self._closed:
                 await asyncio.sleep(self._heartbeat_seconds)
                 async with self._lock:
-                    active_step_id = self._active_step_id
-                    if self._closed or active_step_id is None or self._task_list is None:
+                    active_task_key = self._active_task_key
+                    if self._closed or active_task_key is None or self._task_list is None:
                         return
-                    task = self._tasks_by_step.get(active_step_id)
+                    task = self._tasks_by_step.get(active_task_key)
                     if task is None:
                         return
                     elapsed = time.monotonic() - self._last_event_at
-                    task.title = f"{self._last_titles[active_step_id]}，已等待 {elapsed:.0f} 秒"
+                    task.title = f"{self._last_titles[active_task_key]}，已等待 {elapsed:.0f} 秒"
                     task.status = cl.TaskStatus.RUNNING
                     self._task_list.status = "Running..."
                     await self._task_list.send()
