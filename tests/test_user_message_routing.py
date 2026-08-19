@@ -1,6 +1,7 @@
 """自然语言统一 Planner 入口的离线回归测试。"""
 
 import asyncio
+import logging
 
 from contracts.planner_models import ExecutionReport, PlanDecision, StepResult
 
@@ -195,3 +196,123 @@ def test包含清空词的普通句子仍交给planner(monkeypatch):
 
     assert planner.calls == 1
     assert events == ["planner"]
+
+
+def test用户原话与中文结构化意图进入日志且保留诊断字段(monkeypatch, caplog):
+    """用户主动提交的原文可审计，Planner 摘要只翻译业务操作而不展开参数值。"""
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-observable",
+            "steps": [
+                {"step_id": "parse", "type": "log_parse"},
+                {
+                    "step_id": "enum",
+                    "type": "enum_extract",
+                    "target_field": "内部字段值不应进入摘要",
+                },
+            ],
+        }
+    )
+    user_text = "请先提取日志类型，\n再提取事件类型的枚举值"
+    caplog.set_level(logging.INFO, logger="user_message_handlers")
+
+    _run(monkeypatch, decision, user_text=user_text)
+
+    log_text = caplog.text
+    assert user_text in log_text
+    assert "decision_cn=执行计划" in log_text
+    assert "operations_cn=['日志类型提取', '枚举提取']" in log_text
+    assert "operations=['log_parse', 'enum_extract']" in log_text
+    assert "内部字段值不应进入摘要" not in log_text
+
+
+def test全部业务操作使用稳定中文名称记录(monkeypatch, caplog):
+    """中文摘要覆盖 Planner 契约中的全部操作，填充按业务类型区分。"""
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-all-operations",
+            "steps": [
+                {"step_id": "parse", "type": "log_parse"},
+                {
+                    "step_id": "mapping",
+                    "type": "field_mapping",
+                    "source_ref": "session.fields",
+                },
+                {
+                    "step_id": "enum",
+                    "type": "enum_extract",
+                    "target_field": "敏感参数不展示",
+                },
+                {
+                    "step_id": "threat",
+                    "type": "threat_mapping",
+                    "source_ref": "step:enum",
+                    "depends_on": ["enum"],
+                },
+                {
+                    "step_id": "threat-fill",
+                    "type": "fill",
+                    "fill_kind": "threat",
+                    "target_fields": ["敏感参数不展示"],
+                    "source_ref": "step:threat",
+                    "config_ref": "session.decoded_config",
+                    "depends_on": ["threat"],
+                },
+                {
+                    "step_id": "enum-fill",
+                    "type": "fill",
+                    "fill_kind": "enum",
+                    "target_fields": ["敏感参数不展示"],
+                    "source_ref": "session.enum_mapping_table",
+                    "config_ref": "session.decoded_config",
+                },
+                {
+                    "step_id": "remove",
+                    "type": "remove_mapping",
+                    "target_fields": ["敏感参数不展示"],
+                    "config_ref": "session.decoded_config",
+                },
+                {
+                    "step_id": "export",
+                    "type": "export",
+                    "source_ref": "session.decoded_config",
+                },
+            ],
+        }
+    )
+    caplog.set_level(logging.INFO, logger="user_message_handlers")
+
+    _run(monkeypatch, decision, user_text="执行完整处理流程")
+
+    log_text = caplog.text
+    for label in (
+        "日志类型提取",
+        "字段映射",
+        "枚举提取",
+        "威胁类型映射",
+        "威胁类型填充",
+        "枚举填充",
+        "取消映射",
+        "导出配置",
+    ):
+        assert label in log_text
+    assert "敏感参数不展示" not in log_text
+
+
+def test非执行决策也记录中文决策摘要(monkeypatch, caplog):
+    """澄清和帮助保持可观察，但不伪造不存在的业务步骤。"""
+    caplog.set_level(logging.INFO, logger="user_message_handlers")
+    clarification = PlanDecision(
+        decision="clarification",
+        reason_code="needs_context",
+        question="请补充信息",
+    )
+    guidance = PlanDecision(decision="guidance", guidance_code="capabilities")
+
+    _run(monkeypatch, clarification, user_text="请求一")
+    _run(monkeypatch, guidance, user_text="请求二")
+
+    assert "decision_cn=需要澄清 operations_cn=[]" in caplog.text
+    assert "decision_cn=使用引导 operations_cn=[]" in caplog.text
