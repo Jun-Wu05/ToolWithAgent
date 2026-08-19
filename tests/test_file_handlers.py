@@ -413,10 +413,10 @@ def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_p
 def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch, tmp_path):
     """同名 Sheet 的修改、删除和新增生效，主数据原有 mappings 不受影响。"""
     import web.file_handlers as file_handlers
-    from contracts.planner_models import ExportStep, FillStep, StepStatus
+    from contracts.planner_models import ExportStep, FillStep, PlanDecision, StepStatus
     from contracts.session_facts import build_session_facts
-    from web.execution_adapters import EnumFillAdapter, ExportAdapter
-    from web.plan_executor import ExecutionContext
+    from web.execution_adapters import EnumFillAdapter, ExportAdapter, create_default_adapters
+    from web.plan_executor import ExecutionContext, PlanExecutor
     from web.session_state import SessionState
 
     captured = []
@@ -497,15 +497,15 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
     )
     assert blocked_export.status == StepStatus.NEEDS_INPUT
     assert blocked_export.error_code == "enum_refill_required"
-    second_result = asyncio.run(
-        EnumFillAdapter().execute(
-            step,
+    replacement_report = asyncio.run(
+        PlanExecutor(create_default_adapters(team=None)).execute(
+            PlanDecision(decision="execute", plan_id="replace-enum-sheet", steps=(step,)),
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
-            {},
         )
     )
 
-    assert second_result.status == StepStatus.SUCCESS
+    assert replacement_report.status == StepStatus.SUCCESS
+    assert replacement_report.results[0].changed_count == 3
     mappings = session.decoded_data["normalize"][0]["mappings"]
     assert mappings == [
         base_mapping,
@@ -514,6 +514,15 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
     ]
     assert session.stale_enum_config_refs == set()
     assert session.enum_pending_refills == {}
+
+    repeated_report = asyncio.run(
+        PlanExecutor(create_default_adapters(team=None)).execute(
+            PlanDecision(decision="execute", plan_id="repeat-enum-sheet", steps=(step,)),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+    assert repeated_report.status == StepStatus.FAILED
+    assert repeated_report.results[0].error_code == "no_effect"
 
 
 def test多Sheet工作簿任一Sheet无有效规则时整份拒绝(monkeypatch, tmp_path):

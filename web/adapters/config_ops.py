@@ -9,6 +9,7 @@ from agent.shared.logger import get_logger
 from agent.shared.mapping_utils import (
     apply_enum_fill_with_contributions,
     apply_fill_to_config,
+    count_field_mapping_changes,
     count_field_mappings,
     remove_enum_fill_contributions,
     remove_field_mappings_from_config,
@@ -75,6 +76,11 @@ class EnumFillAdapter:
             mapping_table,
         )
         after_count = count_field_mappings(updated_config, step.target_fields)
+        changed_count = count_field_mapping_changes(
+            current_config,
+            updated_config,
+            step.target_fields,
+        )
         _write_config(context.session, step.config_ref, updated_config)
         for field_name in step.target_fields:
             if new_contributions.get(field_name):
@@ -114,13 +120,13 @@ class EnumFillAdapter:
             sum(len(items) for items in mapping_table.values()),
             before_count,
             after_count,
-            max(0, after_count - before_count),
+            changed_count,
         )
         return StepResult(
             step_id=step.step_id,
             operation_type=step.type,
             status=StepStatus.SUCCESS,
-            changed_count=max(0, after_count - before_count),
+            changed_count=changed_count,
             artifact=_build_config_artifact(
                 updated_config,
                 after_count,
