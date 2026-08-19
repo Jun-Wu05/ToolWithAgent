@@ -9,6 +9,21 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, List, Dict
 
 
+@dataclass(frozen=True)
+class PrimaryDatasetSnapshot:
+    """已完整解析并校验、可原子提交到会话的主数据快照。"""
+
+    decoded_data: Any
+    decoded_fields: List[str]
+    original_log: Any
+    simplified_data: Dict[str, Any]
+    decoded_text: str
+    uploaded_file_name: str
+    uploaded_file_time: str
+    raw_log_lines: Optional[List[str]] = None
+    raw_base64: Optional[str] = None
+
+
 @dataclass
 class SessionState:
     """Chainlit 用户会话状态，完全替代零散的 dict session key 读写。
@@ -121,7 +136,7 @@ class SessionState:
         return self.decoded_data is not None or self.decoded_fields is not None
 
     def clear_decoded_data(self) -> None:
-        """清除解码后的数据及上传文件元信息，同步清空对话历史"""
+        """清除当前主数据及其全部附件和派生结果。"""
         self.decoded_data = None
         self.decoded_fields = None
         self.decoded_text = None
@@ -130,8 +145,34 @@ class SessionState:
         self.simplified_data = None
         self.uploaded_file_name = None
         self.uploaded_file_time = None
-        # 数据清空时对话历史也应清空（旧文件上下文不再有效）
+        self.raw_base64 = None
+        self.enum_excel_path = None
+        self.enum_preview = None
+        self.last_mapping_data = None
+        self.excel_data = None
+        self.excel_filename = None
+        self.last_threat_data = None
+        self.last_enum_extract_result = None
+        self.log_classification = None
+        self.mapped_sub_rules = None
+        self.sub_rule_mapping_results = None
+        self.batch_mapping_results = None
+        # 主数据失效时 Planner 历史也必须失效，避免旧文件语义污染新请求。
         self.conversation_history = []
+
+    def replace_primary_dataset(self, snapshot: PrimaryDatasetSnapshot) -> None:
+        """原子替换当前主数据；调用前必须完成全部解析和校验。"""
+        decoded_fields = list(snapshot.decoded_fields)
+        self.clear_decoded_data()
+        self.decoded_data = snapshot.decoded_data
+        self.decoded_fields = decoded_fields
+        self.original_log = snapshot.original_log
+        self.simplified_data = snapshot.simplified_data
+        self.decoded_text = snapshot.decoded_text
+        self.raw_log_lines = snapshot.raw_log_lines
+        self.raw_base64 = snapshot.raw_base64
+        self.uploaded_file_name = snapshot.uploaded_file_name
+        self.uploaded_file_time = snapshot.uploaded_file_time
 
     def get_session_summary(self) -> str:
         """
