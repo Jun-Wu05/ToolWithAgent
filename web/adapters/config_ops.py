@@ -7,8 +7,11 @@ from typing import Any
 
 from agent.shared.logger import get_logger
 from agent.shared.mapping_utils import (
+    apply_enum_fill_with_contributions,
     apply_fill_to_config,
+    count_field_mapping_changes,
     count_field_mappings,
+    remove_enum_fill_contributions,
     remove_field_mappings_from_config,
 )
 
@@ -28,9 +31,11 @@ from web.adapters.shared import (
     _build_config_artifact,
     _enum_mapping_table,
     _failed,
+    _is_enum_config_stale,
     _needs_input,
     _read_config,
     _session_get,
+    _session_set,
     _write_config,
 )
 
@@ -56,10 +61,56 @@ class EnumFillAdapter:
         if not mapping_table:
             return _needs_input(step, "enum_mapping_required", "当前枚举映射表没有可用于目标字段的规则")
 
+        all_contributions = dict(
+            _session_get(context.session, "enum_fill_contributions", {}) or {}
+        )
+        config_contributions = dict(all_contributions.get(step.config_ref, {}) or {})
         before_count = count_field_mappings(current_config, step.target_fields)
-        updated_config = apply_fill_to_config(current_config, mapping_table)
+        without_old_contributions = remove_enum_fill_contributions(
+            current_config,
+            config_contributions,
+            step.target_fields,
+        )
+        updated_config, new_contributions = apply_enum_fill_with_contributions(
+            without_old_contributions,
+            mapping_table,
+        )
         after_count = count_field_mappings(updated_config, step.target_fields)
+        changed_count = count_field_mapping_changes(
+            current_config,
+            updated_config,
+            step.target_fields,
+        )
         _write_config(context.session, step.config_ref, updated_config)
+        for field_name in step.target_fields:
+            if new_contributions.get(field_name):
+                config_contributions[field_name] = new_contributions[field_name]
+            else:
+                config_contributions.pop(field_name, None)
+        if config_contributions:
+            all_contributions[step.config_ref] = config_contributions
+        else:
+            all_contributions.pop(step.config_ref, None)
+        _session_set(context.session, "enum_fill_contributions", all_contributions)
+        pending_refills = {
+            config_ref: set(sheet_names)
+            for config_ref, sheet_names in (
+                _session_get(context.session, "enum_pending_refills", {}) or {}
+            ).items()
+        }
+        pending_for_config = pending_refills.get(step.config_ref, set())
+        pending_for_config.difference_update(step.target_fields)
+        if pending_for_config:
+            pending_refills[step.config_ref] = pending_for_config
+        else:
+            pending_refills.pop(step.config_ref, None)
+        _session_set(context.session, "enum_pending_refills", pending_refills)
+        stale_refs = set(
+            _session_get(context.session, "stale_enum_config_refs", set()) or set()
+        )
+        if step.config_ref not in pending_refills:
+            stale_refs.discard(step.config_ref)
+        _session_set(context.session, "stale_enum_config_refs", stale_refs)
         logger.info(
             "[ENUM_FILL] 填充完成: step_id=%s config_ref=%s target_field_count=%s "
             "mapping_rule_count=%s before_count=%s after_count=%s changed_count=%s",
@@ -69,13 +120,13 @@ class EnumFillAdapter:
             sum(len(items) for items in mapping_table.values()),
             before_count,
             after_count,
-            max(0, after_count - before_count),
+            changed_count,
         )
         return StepResult(
             step_id=step.step_id,
             operation_type=step.type,
             status=StepStatus.SUCCESS,
-            changed_count=max(0, after_count - before_count),
+            changed_count=changed_count,
             artifact=_build_config_artifact(
                 updated_config,
                 after_count,
@@ -96,6 +147,12 @@ class ThreatFillAdapter:
         """执行威胁填充；依赖或配置来源不匹配时快速失败。"""
         if not isinstance(step, FillStep) or step.fill_kind != "threat":
             raise TypeError("ThreatFillAdapter 只接受 threat FillStep")
+        if _is_enum_config_stale(context.session, step.config_ref):
+            return _needs_input(
+                step,
+                "enum_refill_required",
+                "枚举映射附件已更新，请先重新执行枚举填充",
+            )
         dependency_id = step.source_ref.removeprefix("step:")
         dependency = dependencies.get(dependency_id)
         if dependency is None or dependency.artifact is None:
@@ -171,6 +228,12 @@ class RemoveMappingAdapter:
         """执行取消映射；没有实际清除时返回待输入，禁止静默成功。"""
         if not isinstance(step, RemoveMappingStep):
             raise TypeError("RemoveMappingAdapter 只接受 RemoveMappingStep")
+        if _is_enum_config_stale(context.session, step.config_ref):
+            return _needs_input(
+                step,
+                "enum_refill_required",
+                "枚举映射附件已更新，请先重新执行枚举填充",
+            )
         current_config = _read_config(context.session, step.config_ref)
         before_count = count_field_mappings(current_config, step.target_fields)
         updated_config = current_config
@@ -226,6 +289,12 @@ class ExportAdapter:
             exported_item_count = artifact.item_count
             download_kind = artifact.download_kind
         elif step.source_ref in _CONFIG_SESSION_KEYS:
+            if _is_enum_config_stale(context.session, step.source_ref):
+                return _needs_input(
+                    step,
+                    "enum_refill_required",
+                    "枚举映射附件已更新，请先重新执行枚举填充",
+                )
             current_config = _read_config(context.session, step.source_ref)
             if not current_config:
                 return _needs_input(step, "export_source_required", "当前没有可导出的配置")

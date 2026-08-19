@@ -5,7 +5,11 @@
 """
 
 from agent.tools.standard_mapper import field_mapping_tool
-from agent.tools.enum_field_tool import enum_field_tool
+from agent.tools.enum_field_tool import (
+    enum_field_tool,
+    flatten_enum_mappings,
+    read_enum_mappings_from_excel,
+)
 from agent.tools.logs_enum_tool import (
     extract_enum_from_logs,
     extract_enum_with_regex,
@@ -59,6 +63,8 @@ def load_object_mapping(excel_path: str) -> dict:
 __all__ = [
     'field_mapping_tool',
     'enum_field_tool',
+    'flatten_enum_mappings',
+    'read_enum_mappings_from_excel',
     'extract_enum_from_logs',
     'extract_enum_with_regex',
     'identify_log_format',

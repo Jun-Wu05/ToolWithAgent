@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pandas as pd
+from openpyxl import Workbook
 
 
 def _mount_message_capture(monkeypatch, captured):
@@ -20,6 +21,21 @@ def _mount_message_capture(monkeypatch, captured):
             captured.append(self.content)
 
     monkeypatch.setattr(file_handlers.cl, "Message", _FakeMessage)
+
+
+def _write_enum_workbook(path, sheets):
+    """写入真实多 Sheet 枚举工作簿，供上传全链路测试使用。"""
+    workbook = Workbook()
+    first = True
+    for sheet_name, rows in sheets.items():
+        worksheet = workbook.active if first else workbook.create_sheet()
+        first = False
+        worksheet.title = sheet_name
+        worksheet.append(["mappingType", "orgValue", "mappingValue"])
+        for row in rows:
+            worksheet.append(row)
+    workbook.save(path)
+    workbook.close()
 
 
 def test数据表格缺少原始日志列时拒绝并不写入会话(monkeypatch):
@@ -118,6 +134,12 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
         excel_filename="old.xlsx",
         enum_excel_path="old-enum.xlsx",
         enum_preview=[{"目标字段": "old_field"}],
+        enum_mapping_sheets={"old_field": [{"orgValue": "old"}]},
+        enum_fill_contributions={
+            "session.decoded_config": {"old_field": [{"mapping": {"orgValue": "old"}}]}
+        },
+        stale_enum_config_refs={"session.decoded_config"},
+        enum_pending_refills={"session.decoded_config": {"old_field"}},
         conversation_history=[{"role": "user", "content": "处理旧文件"}],
     )
 
@@ -146,6 +168,10 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     assert session.excel_filename is None
     assert session.enum_excel_path is None
     assert session.enum_preview is None
+    assert session.enum_mapping_sheets == {}
+    assert session.enum_fill_contributions == {}
+    assert session.stale_enum_config_refs == set()
+    assert session.enum_pending_refills == {}
     assert session.conversation_history == []
     assert session.team is not None
     assert session.current_provider == "deepseek"
@@ -183,6 +209,12 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
         log_classification={"types": ["AUDIT"]},
         enum_excel_path="old-enum.xlsx",
         enum_preview=[{"目标字段": "old_field"}],
+        enum_mapping_sheets={"old_field": [{"orgValue": "old"}]},
+        enum_fill_contributions={
+            "session.decoded_config": {"old_field": [{"mapping": {"orgValue": "old"}}]}
+        },
+        stale_enum_config_refs={"session.decoded_config"},
+        enum_pending_refills={"session.decoded_config": {"old_field"}},
         conversation_history=[{"role": "assistant", "content": "旧配置"}],
     )
 
@@ -202,6 +234,10 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
     assert session.log_classification is None
     assert session.enum_excel_path is None
     assert session.enum_preview is None
+    assert session.enum_mapping_sheets == {}
+    assert session.enum_fill_contributions == {}
+    assert session.stale_enum_config_refs == set()
+    assert session.enum_pending_refills == {}
     assert session.conversation_history == []
 
 
@@ -269,3 +305,280 @@ def test无效日志表上传保持当前有效会话(monkeypatch):
     assert session.conversation_history == [{"role": "assistant", "content": "当前结果"}]
     assert len(captured) == 1
     assert "上传正确的excel，应包含原始日志一列" in captured[0]
+
+
+def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_path):
+    """枚举附件以 Sheet 为身份键，上传新 Sheet 不得覆盖已有 Sheet。"""
+    import web.file_handlers as file_handlers
+    from contracts.planner_models import FillStep, StepStatus
+    from contracts.session_facts import build_session_facts
+    from web.execution_adapters import EnumFillAdapter
+    from web.plan_executor import ExecutionContext
+    from web.session_state import SessionState
+
+    captured = []
+    _mount_message_capture(monkeypatch, captured)
+    monkeypatch.setattr(file_handlers, "read_element_content", lambda element: "")
+    monkeypatch.setattr(file_handlers, "create_dataframe_elements", lambda rows: [])
+    first_path = tmp_path / "first.xlsx"
+    second_path = tmp_path / "second.xlsx"
+    _write_enum_workbook(first_path, {"event_type3": [("EQUAL", "attack", "攻击")]})
+    _write_enum_workbook(second_path, {"action": [("EQUAL", "allow", "允许")]})
+    session = SessionState(
+        decoded_data={
+            "name": "current",
+            "normalize": [
+                {"index": "event_type3", "mappings": []},
+                {"index": "action", "mappings": []},
+            ],
+        },
+        decoded_fields=["event_type3", "action"],
+    )
+
+    asyncio.run(
+        file_handlers.handle_file_upload(
+            session,
+            SimpleNamespace(name="first.xlsx", path=str(first_path)),
+        )
+    )
+    first_step = FillStep(
+        step_id="fill-first",
+        type="fill",
+        fill_kind="enum",
+        target_fields=("event_type3",),
+        source_ref="session.enum_mapping_table",
+        config_ref="session.decoded_config",
+    )
+    first_result = asyncio.run(
+        EnumFillAdapter().execute(
+            first_step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+    assert first_result.status == StepStatus.SUCCESS
+    asyncio.run(
+        file_handlers.handle_file_upload(
+            session,
+            SimpleNamespace(name="second.xlsx", path=str(second_path)),
+        )
+    )
+
+    assert set(session.enum_mapping_sheets) == {"event_type3", "action"}
+    assert {row["目标字段"] for row in session.enum_preview} == {"event_type3", "action"}
+    assert session.stale_enum_config_refs == {"session.decoded_config"}
+
+    partial_result = asyncio.run(
+        EnumFillAdapter().execute(
+            first_step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+    assert partial_result.status == StepStatus.SUCCESS
+    assert session.stale_enum_config_refs == {"session.decoded_config"}
+
+    refill_step = FillStep(
+        step_id="refill-all",
+        type="fill",
+        fill_kind="enum",
+        target_fields=("event_type3", "action"),
+        source_ref="session.enum_mapping_table",
+        config_ref="session.decoded_config",
+    )
+    refill_result = asyncio.run(
+        EnumFillAdapter().execute(
+            refill_step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert refill_result.status == StepStatus.SUCCESS
+    mappings_by_field = {
+        item["index"]: item["mappings"] for item in session.decoded_data["normalize"]
+    }
+    assert mappings_by_field == {
+        "event_type3": [
+            {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}
+        ],
+        "action": [
+            {"mappingType": "EQUAL", "orgValue": "allow", "mappingValue": "允许"}
+        ],
+    }
+    assert session.stale_enum_config_refs == set()
+    assert session.enum_pending_refills == {}
+
+
+def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch, tmp_path):
+    """同名 Sheet 的修改、删除和新增生效，主数据原有 mappings 不受影响。"""
+    import web.file_handlers as file_handlers
+    from contracts.planner_models import ExportStep, FillStep, PlanDecision, StepStatus
+    from contracts.session_facts import build_session_facts
+    from web.execution_adapters import EnumFillAdapter, ExportAdapter, create_default_adapters
+    from web.plan_executor import ExecutionContext, PlanExecutor
+    from web.session_state import SessionState
+
+    captured = []
+    _mount_message_capture(monkeypatch, captured)
+    monkeypatch.setattr(file_handlers, "read_element_content", lambda element: "")
+    monkeypatch.setattr(file_handlers, "create_dataframe_elements", lambda rows: [])
+    first_path = tmp_path / "enum-v1.xlsx"
+    second_path = tmp_path / "enum-v2.xlsx"
+    _write_enum_workbook(
+        first_path,
+        {
+            "event_type3": [
+                ("EQUAL", "attack", "攻击"),
+                ("EQUAL", "obsolete", "旧规则"),
+            ]
+        },
+    )
+    _write_enum_workbook(
+        second_path,
+        {
+            "event_type3": [
+                ("EQUAL", "attack", "恶意活动"),
+                ("EQUAL", "scan", "扫描"),
+            ]
+        },
+    )
+    base_mapping = {"mappingType": "EQUAL", "orgValue": "base", "mappingValue": "基础"}
+    session = SessionState(
+        decoded_data={
+            "name": "current",
+            "normalize": [
+                {"index": "event_type3", "mappings": [base_mapping.copy()]},
+            ],
+        },
+        decoded_fields=["event_type3"],
+    )
+    step = FillStep(
+        step_id="enum-fill",
+        type="fill",
+        fill_kind="enum",
+        target_fields=("event_type3",),
+        source_ref="session.enum_mapping_table",
+        config_ref="session.decoded_config",
+    )
+
+    asyncio.run(
+        file_handlers.handle_file_upload(
+            session,
+            SimpleNamespace(name="enum-v1.xlsx", path=str(first_path)),
+        )
+    )
+    first_result = asyncio.run(
+        EnumFillAdapter().execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+    assert first_result.status == StepStatus.SUCCESS
+
+    asyncio.run(
+        file_handlers.handle_file_upload(
+            session,
+            SimpleNamespace(name="enum-v2.xlsx", path=str(second_path)),
+        )
+    )
+    assert session.stale_enum_config_refs == {"session.decoded_config"}
+    blocked_export = asyncio.run(
+        ExportAdapter().execute(
+            ExportStep(
+                step_id="export",
+                type="export",
+                source_ref="session.decoded_config",
+            ),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+    assert blocked_export.status == StepStatus.NEEDS_INPUT
+    assert blocked_export.error_code == "enum_refill_required"
+    replacement_report = asyncio.run(
+        PlanExecutor(create_default_adapters(team=None)).execute(
+            PlanDecision(decision="execute", plan_id="replace-enum-sheet", steps=(step,)),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+
+    assert replacement_report.status == StepStatus.SUCCESS
+    assert replacement_report.results[0].changed_count == 3
+    mappings = session.decoded_data["normalize"][0]["mappings"]
+    assert mappings == [
+        base_mapping,
+        {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "恶意活动"},
+        {"mappingType": "EQUAL", "orgValue": "scan", "mappingValue": "扫描"},
+    ]
+    assert session.stale_enum_config_refs == set()
+    assert session.enum_pending_refills == {}
+
+    repeated_report = asyncio.run(
+        PlanExecutor(create_default_adapters(team=None)).execute(
+            PlanDecision(decision="execute", plan_id="repeat-enum-sheet", steps=(step,)),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+    assert repeated_report.status == StepStatus.FAILED
+    assert repeated_report.results[0].error_code == "no_effect"
+
+
+def test多Sheet工作簿任一Sheet无有效规则时整份拒绝(monkeypatch, tmp_path):
+    """多 Sheet 上传必须先完整校验，失败时原附件和输出有效性均不变。"""
+    import web.file_handlers as file_handlers
+    from web.session_state import SessionState
+
+    captured = []
+    _mount_message_capture(monkeypatch, captured)
+    monkeypatch.setattr(file_handlers, "read_element_content", lambda element: "")
+    workbook_path = tmp_path / "partially-invalid.xlsx"
+    _write_enum_workbook(
+        workbook_path,
+        {
+            "event_type3": [("EQUAL", "attack", "攻击")],
+            "action": [],
+        },
+    )
+    original_sheets = {
+        "severity": [
+            {
+                "mappingType": "EQUAL",
+                "orgValue": "high",
+                "mappingValue": "高",
+            }
+        ]
+    }
+    original_preview = [
+        {
+            "目标字段": "severity",
+            "mappingType": "EQUAL",
+            "orgValue": "high",
+            "mappingValue": "高",
+        }
+    ]
+    session = SessionState(
+        decoded_data={"name": "current"},
+        enum_excel_path="original.xlsx",
+        enum_preview=original_preview.copy(),
+        enum_mapping_sheets=original_sheets.copy(),
+        enum_fill_contributions={"session.decoded_config": {"severity": []}},
+    )
+
+    asyncio.run(
+        file_handlers.handle_file_upload(
+            session,
+            SimpleNamespace(name="partially-invalid.xlsx", path=str(workbook_path)),
+        )
+    )
+
+    assert session.enum_excel_path == "original.xlsx"
+    assert session.enum_preview == original_preview
+    assert session.enum_mapping_sheets == original_sheets
+    assert session.enum_fill_contributions == {
+        "session.decoded_config": {"severity": []}
+    }
+    assert session.stale_enum_config_refs == set()
+    assert len(captured) == 1
+    assert "没有有效规则" in captured[0]

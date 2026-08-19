@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import copy
+import json
+from collections import Counter
 from typing import Any
 
 
@@ -95,6 +97,90 @@ def apply_fill_to_config(
     return updated_config
 
 
+def apply_enum_fill_with_contributions(
+    config: Any,
+    mapping_table: dict[str, list[dict]],
+) -> tuple[Any, dict[str, list[dict[str, Any]]]]:
+    """填充枚举映射，并记录每个 Sheet 实际新增规则的精确位置。"""
+    updated_config = copy.deepcopy(config)
+    contributions: dict[str, list[dict[str, Any]]] = {
+        field_name: [] for field_name in mapping_table
+    }
+
+    def apply_to_node(node: Any, path: list[str | int]) -> None:
+        """递归查找 normalize 条目，并以根配置路径记录实际新增项。"""
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for item_index, normalize_item in enumerate(normalize):
+                    if not isinstance(normalize_item, dict):
+                        continue
+                    index_value = str(normalize_item.get("index", "")).strip()
+                    field_value = str(normalize_item.get("field", "")).strip()
+                    for field_name, mappings in mapping_table.items():
+                        if index_value != field_name and field_value != field_name:
+                            continue
+                        existing_org = {
+                            str(mapping.get("orgValue", ""))
+                            for mapping in normalize_item.get("mappings", [])
+                            if isinstance(mapping, dict)
+                        }
+                        for mapping in mappings:
+                            org_value = str(mapping.get("orgValue", ""))
+                            if org_value in existing_org:
+                                continue
+                            added_mapping = {
+                                "mappingType": mapping.get("mappingType", "EQUAL"),
+                                "orgValue": org_value,
+                                "mappingValue": mapping.get("mappingValue", org_value),
+                            }
+                            normalize_item.setdefault("mappings", []).append(added_mapping)
+                            existing_org.add(org_value)
+                            contributions[field_name].append(
+                                {
+                                    "normalize_path": [*path, "normalize", item_index],
+                                    "mapping": copy.deepcopy(added_mapping),
+                                }
+                            )
+            for key, child in node.items():
+                apply_to_node(child, [*path, key])
+            return
+        if isinstance(node, list):
+            for item_index, child in enumerate(node):
+                apply_to_node(child, [*path, item_index])
+
+    apply_to_node(updated_config, [])
+    return updated_config, contributions
+
+
+def remove_enum_fill_contributions(
+    config: Any,
+    contributions: dict[str, list[dict[str, Any]]],
+    target_fields: tuple[str, ...],
+) -> Any:
+    """仅撤销账本记录的枚举贡献，保留同字段的其他来源规则。"""
+    updated_config = copy.deepcopy(config)
+    for field_name in target_fields:
+        for contribution in contributions.get(field_name, []):
+            node = updated_config
+            try:
+                for segment in contribution.get("normalize_path", []):
+                    node = node[segment]
+            except (KeyError, IndexError, TypeError):
+                continue
+            if not isinstance(node, dict):
+                continue
+            mappings = node.get("mappings")
+            expected = contribution.get("mapping")
+            if not isinstance(mappings, list) or not isinstance(expected, dict):
+                continue
+            for mapping_index, mapping in enumerate(mappings):
+                if mapping == expected:
+                    del mappings[mapping_index]
+                    break
+    return updated_config
+
+
 def count_field_mappings(config: Any, target_fields: tuple[str, ...]) -> int:
     """递归统计目标字段 mappings 数量，供执行前后变更验证使用。"""
     targets = set(target_fields)
@@ -122,6 +208,75 @@ def count_field_mappings(config: Any, target_fields: tuple[str, ...]) -> int:
 
     count_node(config)
     return count
+
+
+def count_field_mapping_changes(
+    before_config: Any,
+    after_config: Any,
+    target_fields: tuple[str, ...],
+) -> int:
+    """按映射内容统计目标字段的新增、删除和修改数量。
+
+    同一 normalize 位置内以 ``orgValue`` 作为规则身份；内容变化算一次修改，
+    仅列表顺序变化不算业务变化。重复规则使用多重集合比较，避免数量相同掩盖替换。
+    """
+    targets = set(target_fields)
+
+    def collect(config: Any) -> dict[tuple[str | int, ...], dict[str, Counter[str]]]:
+        """按 normalize 路径与 orgValue 收集可忽略顺序的映射内容。"""
+        collected: dict[tuple[str | int, ...], dict[str, Counter[str]]] = {}
+
+        def visit(node: Any, path: tuple[str | int, ...]) -> None:
+            """递归访问配置树，只收集明确命中目标字段的 normalize 项。"""
+            if isinstance(node, dict):
+                normalize = node.get("normalize")
+                if isinstance(normalize, list):
+                    for item_index, normalize_item in enumerate(normalize):
+                        if not isinstance(normalize_item, dict):
+                            continue
+                        index_value = str(normalize_item.get("index", "")).strip()
+                        field_value = str(normalize_item.get("field", "")).strip()
+                        if index_value not in targets and field_value not in targets:
+                            continue
+                        by_org_value: dict[str, Counter[str]] = {}
+                        for mapping in normalize_item.get("mappings", []) or []:
+                            if not isinstance(mapping, dict):
+                                continue
+                            org_value = str(mapping.get("orgValue", ""))
+                            canonical = json.dumps(
+                                mapping,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                default=str,
+                            )
+                            by_org_value.setdefault(org_value, Counter())[canonical] += 1
+                        collected[(*path, "normalize", item_index)] = by_org_value
+                for key, child in node.items():
+                    visit(child, (*path, key))
+                return
+            if isinstance(node, list):
+                for item_index, child in enumerate(node):
+                    visit(child, (*path, item_index))
+
+        visit(config, ())
+        return collected
+
+    before = collect(before_config)
+    after = collect(after_config)
+    changed_count = 0
+    for normalize_path in before.keys() | after.keys():
+        before_by_org = before.get(normalize_path, {})
+        after_by_org = after.get(normalize_path, {})
+        for org_value in before_by_org.keys() | after_by_org.keys():
+            removed = before_by_org.get(org_value, Counter()) - after_by_org.get(
+                org_value, Counter()
+            )
+            added = after_by_org.get(org_value, Counter()) - before_by_org.get(
+                org_value, Counter()
+            )
+            changed_count += max(sum(removed.values()), sum(added.values()))
+    return changed_count
 
 
 def remove_field_mappings_from_config(config: Any, target_field: str) -> Any:

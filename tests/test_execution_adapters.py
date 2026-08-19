@@ -179,6 +179,73 @@ def test同一枚举映射重复填充返回零变更供执行器拦截():
     assert result.status == StepStatus.SUCCESS
     assert result.changed_count == 0
 
+
+def test真实PlanExecutor将枚举删除计为变化():
+    """新版规则删除多于新增时仍成功，避免总数减少被误判为零变化。"""
+    session = {
+        "decoded_data": {
+            "name": "uploaded-rule",
+            "normalize": [{"index": "event_type3", "mappings": []}],
+        },
+        "decoded_fields": ["event_type3"],
+        "raw_base64": "present",
+        "enum_preview": [
+            {
+                "目标字段": "event_type3",
+                "mappingType": "EQUAL",
+                "orgValue": "attack",
+                "mappingValue": "攻击",
+            },
+            {
+                "目标字段": "event_type3",
+                "mappingType": "EQUAL",
+                "orgValue": "obsolete",
+                "mappingValue": "旧规则",
+            },
+        ],
+    }
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "delete-enum-mapping",
+            "steps": [
+                {
+                    "step_id": "fill",
+                    "type": "fill",
+                    "fill_kind": "enum",
+                    "target_fields": ["event_type3"],
+                    "source_ref": "session.enum_mapping_table",
+                    "config_ref": "session.decoded_config",
+                }
+            ],
+        }
+    )
+    executor = PlanExecutor(create_default_adapters(team=None))
+    first_report = asyncio.run(
+        executor.execute(
+            decision,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+    assert first_report.status == StepStatus.SUCCESS
+
+    session["enum_preview"] = [session["enum_preview"][0]]
+    session["enum_pending_refills"] = {"session.decoded_config": {"event_type3"}}
+    session["stale_enum_config_refs"] = {"session.decoded_config"}
+    replacement_report = asyncio.run(
+        executor.execute(
+            decision,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+
+    assert replacement_report.status == StepStatus.SUCCESS
+    assert replacement_report.results[0].changed_count == 1
+    assert session["decoded_data"]["normalize"][0]["mappings"] == [
+        {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}
+    ]
+
+
 class _MappingMember:
     """返回与当前批次字段一一对应的结构化映射结果。"""
 

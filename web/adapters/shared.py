@@ -117,6 +117,12 @@ def _session_set(session: Any, key: str, value: Any) -> None:
     setattr(session, key, value)
 
 
+def _is_enum_config_stale(session: Any, config_ref: str) -> bool:
+    """判断配置是否因枚举附件变化而需要重新填充。"""
+    stale_refs = _session_get(session, "stale_enum_config_refs", set()) or set()
+    return config_ref in stale_refs
+
+
 _CONFIG_SESSION_KEYS = {
     "session.decoded_config": "decoded_data",
     "session.mapped_sub_rules": "mapped_sub_rules",

@@ -6,7 +6,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, Set
 
 
 @dataclass(frozen=True)
@@ -88,6 +88,20 @@ class SessionState:
     enum_preview: Optional[List[Dict[str, Any]]] = None
     """枚举映射预览数据"""
 
+    enum_mapping_sheets: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    """当前主数据下按 Sheet 名管理的枚举映射集合"""
+
+    enum_fill_contributions: Dict[str, Dict[str, List[Dict[str, Any]]]] = field(
+        default_factory=dict
+    )
+    """按配置来源和 Sheet 记录实际写入的枚举贡献"""
+
+    stale_enum_config_refs: Set[str] = field(default_factory=set)
+    """枚举附件已变化、必须重新填充后才能继续使用的配置来源"""
+
+    enum_pending_refills: Dict[str, Set[str]] = field(default_factory=dict)
+    """每个配置来源尚未应用的 Sheet 集合；全部成功后才恢复有效"""
+
     # ---- 枚举提取结果 ----
     last_enum_extract_result: Optional[Dict[str, Any]] = None
     """最后一次枚举提取的结果"""
@@ -148,6 +162,10 @@ class SessionState:
         self.raw_base64 = None
         self.enum_excel_path = None
         self.enum_preview = None
+        self.enum_mapping_sheets = {}
+        self.enum_fill_contributions = {}
+        self.stale_enum_config_refs = set()
+        self.enum_pending_refills = {}
         self.last_mapping_data = None
         self.excel_data = None
         self.excel_filename = None
