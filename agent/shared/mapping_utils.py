@@ -95,6 +95,90 @@ def apply_fill_to_config(
     return updated_config
 
 
+def apply_enum_fill_with_contributions(
+    config: Any,
+    mapping_table: dict[str, list[dict]],
+) -> tuple[Any, dict[str, list[dict[str, Any]]]]:
+    """填充枚举映射，并记录每个 Sheet 实际新增规则的精确位置。"""
+    updated_config = copy.deepcopy(config)
+    contributions: dict[str, list[dict[str, Any]]] = {
+        field_name: [] for field_name in mapping_table
+    }
+
+    def apply_to_node(node: Any, path: list[str | int]) -> None:
+        """递归查找 normalize 条目，并以根配置路径记录实际新增项。"""
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for item_index, normalize_item in enumerate(normalize):
+                    if not isinstance(normalize_item, dict):
+                        continue
+                    index_value = str(normalize_item.get("index", "")).strip()
+                    field_value = str(normalize_item.get("field", "")).strip()
+                    for field_name, mappings in mapping_table.items():
+                        if index_value != field_name and field_value != field_name:
+                            continue
+                        existing_org = {
+                            str(mapping.get("orgValue", ""))
+                            for mapping in normalize_item.get("mappings", [])
+                            if isinstance(mapping, dict)
+                        }
+                        for mapping in mappings:
+                            org_value = str(mapping.get("orgValue", ""))
+                            if org_value in existing_org:
+                                continue
+                            added_mapping = {
+                                "mappingType": mapping.get("mappingType", "EQUAL"),
+                                "orgValue": org_value,
+                                "mappingValue": mapping.get("mappingValue", org_value),
+                            }
+                            normalize_item.setdefault("mappings", []).append(added_mapping)
+                            existing_org.add(org_value)
+                            contributions[field_name].append(
+                                {
+                                    "normalize_path": [*path, "normalize", item_index],
+                                    "mapping": copy.deepcopy(added_mapping),
+                                }
+                            )
+            for key, child in node.items():
+                apply_to_node(child, [*path, key])
+            return
+        if isinstance(node, list):
+            for item_index, child in enumerate(node):
+                apply_to_node(child, [*path, item_index])
+
+    apply_to_node(updated_config, [])
+    return updated_config, contributions
+
+
+def remove_enum_fill_contributions(
+    config: Any,
+    contributions: dict[str, list[dict[str, Any]]],
+    target_fields: tuple[str, ...],
+) -> Any:
+    """仅撤销账本记录的枚举贡献，保留同字段的其他来源规则。"""
+    updated_config = copy.deepcopy(config)
+    for field_name in target_fields:
+        for contribution in contributions.get(field_name, []):
+            node = updated_config
+            try:
+                for segment in contribution.get("normalize_path", []):
+                    node = node[segment]
+            except (KeyError, IndexError, TypeError):
+                continue
+            if not isinstance(node, dict):
+                continue
+            mappings = node.get("mappings")
+            expected = contribution.get("mapping")
+            if not isinstance(mappings, list) or not isinstance(expected, dict):
+                continue
+            for mapping_index, mapping in enumerate(mappings):
+                if mapping == expected:
+                    del mappings[mapping_index]
+                    break
+    return updated_config
+
+
 def count_field_mappings(config: Any, target_fields: tuple[str, ...]) -> int:
     """递归统计目标字段 mappings 数量，供执行前后变更验证使用。"""
     targets = set(target_fields)

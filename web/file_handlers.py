@@ -19,7 +19,7 @@ from web.file_handler import (
     build_simplified_data,
     get_element_file_name,
 )
-from agent.tools.enum_field_tool import get_enum_preview
+from agent.tools import flatten_enum_mappings, read_enum_mappings_from_excel
 from web.parsers import create_dataframe_elements
 from web.session_state import PrimaryDatasetSnapshot
 
@@ -44,6 +44,10 @@ _PRIMARY_DATASET_STATE_KEYS = (
     "raw_base64",
     "enum_excel_path",
     "enum_preview",
+    "enum_mapping_sheets",
+    "enum_fill_contributions",
+    "stale_enum_config_refs",
+    "enum_pending_refills",
     "last_mapping_data",
     "excel_data",
     "excel_filename",
@@ -80,6 +84,39 @@ def _commit_primary_dataset(user_session, snapshot: PrimaryDatasetSnapshot) -> N
     user_session.update(staged_values)
 
 
+def _commit_enum_workbook(user_session, excel_path: str, uploaded_sheets: dict) -> list:
+    """按 Sheet 原子合并枚举附件，并返回完整集合的兼容预览。"""
+    existing_sheets = user_session.get("enum_mapping_sheets", {}) or {}
+    merged_sheets = {
+        name: [dict(row) for row in rows]
+        for name, rows in existing_sheets.items()
+    }
+    merged_sheets.update(
+        {
+            name: [dict(row) for row in rows]
+            for name, rows in uploaded_sheets.items()
+        }
+    )
+    preview = flatten_enum_mappings(merged_sheets)
+    contributions = user_session.get("enum_fill_contributions", {}) or {}
+    stale_refs = set(user_session.get("stale_enum_config_refs", set()) or set())
+    stale_refs.update(contributions)
+    pending_refills = {
+        config_ref: set(sheet_names)
+        for config_ref, sheet_names in (
+            user_session.get("enum_pending_refills", {}) or {}
+        ).items()
+    }
+    for config_ref in contributions:
+        pending_refills.setdefault(config_ref, set()).update(uploaded_sheets)
+    user_session["enum_mapping_sheets"] = merged_sheets
+    user_session["enum_preview"] = preview
+    user_session["enum_excel_path"] = excel_path
+    user_session["stale_enum_config_refs"] = stale_refs
+    user_session["enum_pending_refills"] = pending_refills
+    return preview
+
+
 async def handle_file_upload(user_session, element):
     """解析上传文件并更新会话事实，不直接触发业务执行。"""
     try:
@@ -108,17 +145,18 @@ async def handle_file_upload(user_session, element):
                     await _handle_excel_data_table(excel_path, file_name, user_session)
                     return
 
-                # 是枚举映射表 → 读取枚举映射预览
-                enum_preview = get_enum_preview(excel_path)
+                # 是枚举映射表 → 全工作簿解析成功后再原子合并到当前附件集合
+                uploaded_sheets = read_enum_mappings_from_excel(excel_path)
+                enum_preview = _commit_enum_workbook(
+                    user_session,
+                    excel_path,
+                    uploaded_sheets,
+                )
                 logger.info(f"[FILE_UPLOAD] 枚举映射表确认，预览条数: {len(enum_preview) if enum_preview else 0}")
 
                 if not enum_preview:
                     await cl.Message(content=f"⚠️ 枚举映射表 `{file_name}` 未读取到有效映射规则").send()
                     return
-
-                # 保存到会话
-                user_session["enum_excel_path"] = excel_path
-                user_session["enum_preview"] = enum_preview
 
                 # 获取目标字段列表
                 target_fields = list(set(item["目标字段"] for item in enum_preview))

@@ -180,10 +180,31 @@ def read_enum_mappings_from_excel(excel_path: str) -> Dict[str, List[Dict]]:
             
             if sheet_mappings:
                 all_mappings[sheet_name] = sheet_mappings
+            else:
+                raise ValueError(f"枚举映射 Sheet `{sheet_name}` 没有有效规则")
     finally:
         wb.close()
     
     return dict(all_mappings)
+
+
+def flatten_enum_mappings(mappings: Dict[str, List[Dict]]) -> List[Dict]:
+    """把按 Sheet 管理的枚举映射展平为兼容现有事实层的预览行。"""
+    preview = []
+    for field_name, field_mappings in mappings.items():
+        for mapping in field_mappings:
+            display_org = mapping["orgValue"]
+            if display_org.startswith(".*") and display_org.endswith(".*"):
+                display_org = display_org[2:-2]
+            preview.append(
+                {
+                    "目标字段": field_name,
+                    "mappingType": mapping["mappingType"],
+                    "原始值": display_org,
+                    "映射值": mapping["mappingValue"],
+                }
+            )
+    return preview
 
 
 def get_enum_preview(excel_path: str) -> List[Dict]:
@@ -200,23 +221,7 @@ def get_enum_preview(excel_path: str) -> List[Dict]:
         格式: [{"目标字段": "threat_type", "mappingType": "REGULAR", "orgValue": "sql注入", "mappingValue": "SQL注入"}, ...]
     """
     mappings = read_enum_mappings_from_excel(excel_path)
-    
-    preview = []
-    for field_name, field_mappings in mappings.items():
-        for mapping in field_mappings:
-            # 去掉通配符显示
-            display_org = mapping["orgValue"]
-            if display_org.startswith(".*") and display_org.endswith(".*"):
-                display_org = display_org[2:-2]
-            
-            preview.append({
-                "目标字段": field_name,
-                "mappingType": mapping["mappingType"],
-                "原始值": display_org,
-                "映射值": mapping["mappingValue"]
-            })
-    
-    return preview
+    return flatten_enum_mappings(mappings)
 
 
 def apply_enum_fill(
