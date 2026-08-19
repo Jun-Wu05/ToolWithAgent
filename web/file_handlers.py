@@ -21,6 +21,7 @@ from web.file_handler import (
 )
 from agent.tools.enum_field_tool import get_enum_preview
 from web.parsers import create_dataframe_elements
+from web.session_state import PrimaryDatasetSnapshot
 
 
 # 枚举映射表列头关键词（唯一实现；utils 版重复副本已删除）
@@ -29,6 +30,54 @@ _ENUM_HEADER_KEYWORDS: Set[str] = {
     "原始值", "映射值", "映射类型",
     "目标字段", "target_field", "targetfield"
 }
+
+
+_PRIMARY_DATASET_STATE_KEYS = (
+    "decoded_data",
+    "decoded_fields",
+    "original_log",
+    "simplified_data",
+    "decoded_text",
+    "raw_log_lines",
+    "uploaded_file_name",
+    "uploaded_file_time",
+    "raw_base64",
+    "enum_excel_path",
+    "enum_preview",
+    "last_mapping_data",
+    "excel_data",
+    "excel_filename",
+    "last_threat_data",
+    "last_enum_extract_result",
+    "log_classification",
+    "mapped_sub_rules",
+    "sub_rule_mapping_results",
+    "batch_mapping_results",
+    "conversation_history",
+)
+
+
+def _commit_primary_dataset(user_session, snapshot: PrimaryDatasetSnapshot) -> None:
+    """兼容 SessionState 与旧字典测试替身，集中提交主数据快照。"""
+    replace = getattr(user_session, "replace_primary_dataset", None)
+    if callable(replace):
+        replace(snapshot)
+        return
+    staged_values = {
+        "decoded_data": snapshot.decoded_data,
+        "decoded_fields": list(snapshot.decoded_fields),
+        "original_log": snapshot.original_log,
+        "simplified_data": snapshot.simplified_data,
+        "decoded_text": snapshot.decoded_text,
+        "raw_log_lines": snapshot.raw_log_lines,
+        "raw_base64": snapshot.raw_base64,
+        "uploaded_file_name": snapshot.uploaded_file_name,
+        "uploaded_file_time": snapshot.uploaded_file_time,
+        "conversation_history": [],
+    }
+    for key in _PRIMARY_DATASET_STATE_KEYS:
+        user_session.pop(key, None)
+    user_session.update(staged_values)
 
 
 async def handle_file_upload(user_session, element):
@@ -117,24 +166,20 @@ async def handle_file_upload(user_session, element):
         result = decode_file_content(file_content)
 
         if result["status"] == "success":
-            # 保存解码数据（SessionState dict 兼容层支持 [] 赋值）
-            user_session["decoded_data"] = result["decoded_json"]
-            user_session["decoded_fields"] = result["fields"]
-            user_session["original_log"] = result["original_log"]
-            user_session["decoded_text"] = result.get("decoded_text", "")
-
-            # 记录上传文件元信息
             file_name_val = get_element_file_name(element)
             file_time = datetime.now().strftime("%H:%M:%S")
-            user_session["uploaded_file_name"] = file_name_val
-            user_session["uploaded_file_time"] = file_time
+            snapshot = PrimaryDatasetSnapshot(
+                decoded_data=result["decoded_json"],
+                decoded_fields=result["fields"],
+                original_log=result["original_log"],
+                simplified_data=build_simplified_data(result),
+                decoded_text=result.get("decoded_text", ""),
+                raw_base64=file_content,
+                uploaded_file_name=file_name_val,
+                uploaded_file_time=file_time,
+            )
+            _commit_primary_dataset(user_session, snapshot)
             logger.info(f"[FILE_UPLOAD] 记录上传文件元信息: name={file_name_val}, time={file_time}")
-
-            # 构建 simplified_data（委托 file_handler）
-            user_session["simplified_data"] = build_simplified_data(result)
-
-            # 缓存原始 Base64 内容，供枚举填充等后续操作使用
-            user_session["raw_base64"] = file_content
 
             # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
             enum_excel_path = user_session.get("enum_excel_path")
@@ -239,21 +284,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
         original_log = [json.dumps(r, ensure_ascii=False) for r in records]
         decoded_text = df.to_string(index=False)
 
-        # 保存到会话（SessionState dict 兼容层支持 [] 赋值）
-        user_session["original_log"] = original_log
-        user_session["decoded_data"] = records
-        user_session["decoded_fields"] = fields
-        user_session["decoded_text"] = decoded_text
-        user_session["simplified_data"] = {
-            "fields": fields,
-            "original_log_sample": decoded_text[:2000]
-        }
         file_time = datetime.now().strftime("%H:%M:%S")
-        user_session["uploaded_file_name"] = file_name
-        user_session["uploaded_file_time"] = file_time
-
-        # 注意：数据表格不是枚举映射表，不应覆盖 enum_excel_path
-        # （enum_excel_path 仅由真正的枚举映射表上传设置，见 handle_file_upload 枚举表检测段）
 
         # 提取"原始日志"列，供 LogParserAgent 精简输入使用
         # CHANGED: 替换单元格内的换行符为空格，防止单条日志被拆散成多行碎片
@@ -278,9 +309,23 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
                     raw_log_lines = raw_series.tolist()
                     logger.debug("[FILE_UPLOAD] 单元格内无换行符，无需预处理")
 
-                user_session["raw_log_lines"] = raw_log_lines
                 logger.info(f"[FILE_UPLOAD] 提取\"原始日志\"列({col})：{len(raw_log_lines)} 行")
                 break
+
+        snapshot = PrimaryDatasetSnapshot(
+            decoded_data=records,
+            decoded_fields=fields,
+            original_log=original_log,
+            simplified_data={
+                "fields": fields,
+                "original_log_sample": decoded_text[:2000],
+            },
+            decoded_text=decoded_text,
+            raw_log_lines=raw_log_lines,
+            uploaded_file_name=file_name,
+            uploaded_file_time=file_time,
+        )
+        _commit_primary_dataset(user_session, snapshot)
 
         await cl.Message(
             content=f"📊 已读取 Excel 文件 `{file_name}`\n\n"
