@@ -53,6 +53,8 @@ _PRIMARY_DATASET_STATE_KEYS = (
     "excel_filename",
     "last_threat_data",
     "last_enum_extract_result",
+    "latest_threat_artifact",
+    "latest_enum_artifact",
     "log_classification",
     "mapped_sub_rules",
     "sub_rule_mapping_results",

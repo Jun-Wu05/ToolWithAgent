@@ -822,6 +822,7 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
         PlanDecision,
         ThreatMappingArtifact,
     )
+    from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 
     monkeypatch.setattr(
         llm_client,
@@ -908,6 +909,10 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     assert report.results[0].artifact.regex
     assert report.results[0].artifact.original_log
     assert isinstance(report.results[1].artifact, ThreatMappingArtifact)
+    assert isinstance(session["latest_enum_artifact"], EnumArtifactSlot)
+    assert session["latest_enum_artifact"].source_field == "event_type3"
+    assert isinstance(session["latest_threat_artifact"], ThreatArtifactSlot)
+    assert session["latest_threat_artifact"].source_field == "event_type3"
     assert isinstance(report.results[2].artifact, ConfigExportArtifact)
     assert report.results[2].artifact.download_kind == "threatmapping_config"
     assert report.results[2].changed_count == 2

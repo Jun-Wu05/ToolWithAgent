@@ -67,3 +67,20 @@ def test提示词声明枚举填充免追问并默认全字段填充():
     assert "直接生成填充步骤，不必追问目标字段" in PROMPT
     assert "未点名就填充 `enum_mapping_target_fields` 的**全部**字段" in PROMPT
     assert "多 sheet 映射表每个 sheet 的目标字段都填" in PROMPT
+
+
+def test提示词只允许白名单会话产物并声明选择优先级():
+    """跨轮来源必须显式、类型化，且不能压过本轮用户值或步骤结果。"""
+    assert "`session.artifacts.enum_values`" in PROMPT
+    assert "`session.artifacts.threat_mapping`" in PROMPT
+    assert "优先使用当前文本的显式值" in PROMPT
+    assert "其次使用本计划可依赖的 Enum Extract 步骤" in PROMPT
+    assert "自然续接" in PROMPT
+    assert "旧 `last_*` 不是合法来源" in PROMPT
+
+
+def test提示词约束威胁产物字段绑定与无字段产物澄清():
+    """有字段产物不得改投其他字段，无字段产物必须由用户明确目标。"""
+    assert "只能使用同一目录项 `target_bindings`" in PROMPT
+    assert "没有 `source_field`" in PROMPT
+    assert "只有用户在当前文本明确指定目标字段" in PROMPT

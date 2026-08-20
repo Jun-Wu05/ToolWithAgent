@@ -131,13 +131,14 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
         logger.info(
             "[SESSION_FACTS] 指令执行前状态: has_logs=%s has_log_classification=%s "
             "available_field_count=%s enum_mapping_row_count=%s "
-            "enum_target_field_count=%s available_config_refs=%s",
+            "enum_target_field_count=%s available_config_refs=%s referenceable_artifacts=%s",
             session_facts.has_logs,
             session_facts.has_log_classification,
             len(session_facts.available_fields),
             session_facts.enum_mapping_row_count,
             len(session_facts.enum_mapping_target_fields),
             list(session_facts.available_config_refs),
+            [item.source_ref for item in session_facts.referenceable_artifacts],
         )
 
         decision = await _get_planner_service().plan(
@@ -213,6 +214,8 @@ async def _clear_session_data(user_session: Any) -> None:
             "last_mapping_data",
             "last_threat_data",
             "last_enum_extract_result",
+            "latest_threat_artifact",
+            "latest_enum_artifact",
             "mapped_sub_rules",
             "enum_preview",
             "enum_excel_path",

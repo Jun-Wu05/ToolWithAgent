@@ -15,6 +15,9 @@ class StrictContract(BaseModel):
 
 
 ConfigRef = Literal["session.decoded_config", "session.mapped_sub_rules"]
+SessionEnumArtifactRef = Literal["session.artifacts.enum_values"]
+SessionThreatArtifactRef = Literal["session.artifacts.threat_mapping"]
+SessionArtifactRef = Union[SessionEnumArtifactRef, SessionThreatArtifactRef]
 ConfigDownloadKind = Literal[
     "enummapping_config",
     "threatmapping_config",
@@ -60,7 +63,7 @@ class EnumExtractStep(StrictContract):
 
 
 class ThreatMappingStep(StrictContract):
-    """描述威胁映射步骤，输入必须为显式值或本次计划的步骤引用。"""
+    """描述威胁映射步骤，输入必须为显式值、当前步骤或白名单会话产物。"""
 
     step_id: str = Field(min_length=1)
     type: Literal["threat_mapping"]
@@ -70,12 +73,16 @@ class ThreatMappingStep(StrictContract):
 
     @model_validator(mode="after")
     def validate_direct_values(self) -> "ThreatMappingStep":
-        """保证直接输入来源携带值，避免读取旧 session 结果兜底。"""
+        """保证三类来源互斥，避免读取未声明的旧 session 结果兜底。"""
         if self.source_ref == "user.values" and not self.values:
             raise ValueError("直接威胁映射必须提供 values")
+        if self.source_ref == "session.artifacts.enum_values":
+            if self.values or self.depends_on:
+                raise ValueError("会话枚举产物来源不能携带 values 或步骤依赖")
+            return self
         if self.source_ref != "user.values":
             if not self.source_ref.startswith("step:"):
-                raise ValueError("威胁映射来源必须是 user.values 或本次步骤引用")
+                raise ValueError("威胁映射来源必须是 user.values、本次步骤或会话枚举产物")
             dependency_id = self.source_ref.removeprefix("step:")
             if dependency_id not in self.depends_on:
                 raise ValueError("威胁映射的 source_ref 必须出现在 depends_on 中")
@@ -97,13 +104,19 @@ class FillStep(StrictContract):
 
     @model_validator(mode="after")
     def validate_fill_source(self) -> "FillStep":
-        """保证枚举填充使用表内结构，威胁填充只消费本次声明依赖。"""
+        """保证枚举填充使用表内结构，威胁填充只消费显式类型化来源。"""
         if self.fill_kind == "enum":
             if self.source_ref != "session.enum_mapping_table" or self.depends_on:
                 raise ValueError("枚举填充必须使用 session.enum_mapping_table 且不声明步骤依赖")
             return self
+        if self.source_ref == "session.artifacts.threat_mapping":
+            if self.depends_on:
+                raise ValueError("会话威胁产物来源不能声明步骤依赖")
+            if len(self.target_fields) != 1:
+                raise ValueError("跨轮威胁填充必须声明唯一目标字段")
+            return self
         if not self.source_ref.startswith("step:"):
-            raise ValueError("威胁填充必须引用本次威胁映射步骤")
+            raise ValueError("威胁填充必须引用本次威胁步骤或会话威胁产物")
         dependency_id = self.source_ref.removeprefix("step:")
         if dependency_id not in self.depends_on:
             raise ValueError("威胁填充的 source_ref 必须出现在 depends_on 中")
@@ -238,10 +251,11 @@ class ThreatMappingRow(StrictContract):
 
 
 class ThreatMappingArtifact(ArtifactContract):
-    """保存本次威胁映射结果，不允许后续步骤读取旧 session 结果。"""
+    """保存威胁映射及其字段血缘；直接值来源允许没有来源字段。"""
 
     artifact_type: Literal["threat_mapping"] = "threat_mapping"
     mappings: tuple[ThreatMappingRow, ...]
+    source_field: str | None = None
 
 
 class FieldMappingRow(StrictContract):
