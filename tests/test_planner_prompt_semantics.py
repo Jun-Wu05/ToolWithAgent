@@ -84,3 +84,5 @@ def test提示词约束威胁产物字段绑定与无字段产物澄清():
     assert "只能使用同一目录项 `target_bindings`" in PROMPT
     assert "没有 `source_field`" in PROMPT
     assert "只有用户在当前文本明确指定目标字段" in PROMPT
+    assert '"reason_code":"artifact_target_mismatch"' in PROMPT
+    assert "不得把目标静默改成" in PROMPT

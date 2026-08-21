@@ -101,6 +101,10 @@
 ```json
 {"decision":"execute","plan_id":"plan-reuse-threat","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_name"],"source_ref":"session.artifacts.threat_mapping","config_ref":"session.mapped_sub_rules"}]}
 ```
+- 同一产物和绑定下，本轮明确说“填入 other_standard”：不得把目标静默改成 event_name，必须澄清：
+```json
+{"decision":"clarification","plan_id":"plan-threat-target-conflict","reason_code":"artifact_target_mismatch","question":"最近威胁映射只能填回 event_name，不能填入 other_standard。请确认是否填回 event_name，或先为 other_standard 重新生成威胁映射。"}
+```
 
 ## 静默自检
 
