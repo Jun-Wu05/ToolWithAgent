@@ -18,6 +18,7 @@ from contracts.planner_models import (
     StepResult,
     StepSpec,
     StepStatus,
+    ThreatMappingStep,
 )
 from contracts.progress import (
     NullProgressSink,
@@ -278,6 +279,24 @@ class PlanExecutor:
         if isinstance(step, EnumExtractStep):
             if not session_facts.has_logs:
                 return self._needs_input_result(step, "logs_required", "请先上传包含日志的数据")
+        if (
+            isinstance(step, ThreatMappingStep)
+            and step.source_ref == "session.artifacts.enum_values"
+        ):
+            enum_fact = next(
+                (
+                    item
+                    for item in session_facts.referenceable_artifacts
+                    if item.source_ref == step.source_ref and item.artifact_type == "enum_values"
+                ),
+                None,
+            )
+            if enum_fact is None:
+                return self._needs_input_result(
+                    step,
+                    "artifact_source_unavailable",
+                    "最近枚举值产物不可用，请重新提取枚举值",
+                )
         if isinstance(step, FillStep):
             if step.config_ref not in session_facts.available_config_refs:
                 return self._needs_input_result(
@@ -293,6 +312,43 @@ class PlanExecutor:
                         "mapping_target_unavailable",
                         f"枚举映射表不包含目标字段: {sorted(unavailable)}",
                     )
+            if step.source_ref == "session.artifacts.threat_mapping":
+                threat_fact = next(
+                    (
+                        item
+                        for item in session_facts.referenceable_artifacts
+                        if item.source_ref == step.source_ref
+                        and item.artifact_type == "threat_mapping"
+                    ),
+                    None,
+                )
+                if threat_fact is None:
+                    return self._needs_input_result(
+                        step,
+                        "artifact_source_unavailable",
+                        "最近威胁映射产物不可用，请重新执行威胁映射",
+                    )
+                if threat_fact.source_field:
+                    binding = next(
+                        (
+                            item
+                            for item in threat_fact.target_bindings
+                            if item.config_ref == step.config_ref
+                        ),
+                        None,
+                    )
+                    if binding is None:
+                        return self._needs_input_result(
+                            step,
+                            "artifact_target_unavailable",
+                            "最近威胁映射的来源字段没有唯一可填充标准字段",
+                        )
+                    if step.target_fields != (binding.target_field,):
+                        return self._needs_input_result(
+                            step,
+                            "artifact_target_mismatch",
+                            f"最近威胁映射只能填回标准字段: {binding.target_field}",
+                        )
         return None
 
     def _validate_result(self, step: StepSpec, result: StepResult) -> StepResult:

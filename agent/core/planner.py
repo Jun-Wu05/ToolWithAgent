@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from agent.core.model_config import ModelConfig
 from agent.shared.logger import get_logger
-from contracts.planner_models import ConversationTurn, PlanDecision
+from contracts.planner_models import ConversationTurn, FillStep, PlanDecision
 from contracts.progress import (
     NullProgressSink,
     ProgressEvent,
@@ -72,6 +72,41 @@ def build_planner_input(
 
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_FILL_TARGET_VERBS = (
+    "填充到",
+    "填充至",
+    "填入",
+    "填到",
+    "写入",
+    "写到",
+    "回填到",
+    "回填至",
+    "填回到",
+    "填回至",
+)
+_GENERIC_FILL_TARGET_RE = re.compile(
+    r"(?:填充到|填充至|填入|填到|写入|写到|回填到|回填至|填回到|填回至|填回(?!去))"
+    r"\s*(?:字段\s*)?[`'\"“”‘’「」『』]*"
+    r"(?P<target>[A-Za-z_][A-Za-z0-9_.-]*|"
+    r"[\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9_.-]*?)"
+    r"(?=[`'\"“”‘’「」『』，。！？；,\s]|并|然后|$)"
+)
+_NON_FIELD_FILL_TARGETS = frozenset(
+    {
+        "配置",
+        "当前配置",
+        "解析规则",
+        "规则",
+        "目标字段",
+        "对应字段",
+        "绑定字段",
+        "标准字段",
+        "原字段",
+        "原来的字段",
+        "回去",
+        "进去",
+    }
+)
 
 # PlanDecision 顶层合法字段。模型常自添 explanation/rationale 等多余键，剥离这些键
 # 仅作兜底；步骤级 extra=forbid 与判别联合校验不受影响，结构安全性不降级。
@@ -131,6 +166,94 @@ def _coerce_plan_decision(content: Any) -> PlanDecision:
             return PlanDecision.model_validate(cleaned)
 
     raise TypeError(f"不支持的 Planner 输出类型: {type(content).__name__}")
+
+
+def _explicit_fill_target_mentions(
+    user_text: str,
+    available_fields: Sequence[str],
+) -> tuple[str, ...]:
+    """识别当前文本在填充动词后明确点名的已知字段，不把“填充回去”当作显式目标。"""
+    verb_pattern = "|".join(re.escape(item) for item in _FILL_TARGET_VERBS)
+    mentions: list[str] = []
+    for field in sorted(set(available_fields), key=len, reverse=True):
+        if not field:
+            continue
+        pattern = re.compile(
+            rf"(?:{verb_pattern})\s*(?:字段\s*)?[`'\"“”‘’「」『』]*{re.escape(field)}"
+        )
+        if pattern.search(user_text):
+            mentions.append(field)
+    if mentions:
+        return tuple(mentions)
+    generic_mentions = [
+        match.group("target")
+        for match in _GENERIC_FILL_TARGET_RE.finditer(user_text)
+        if match.group("target") not in _NON_FIELD_FILL_TARGETS
+    ]
+    return tuple(dict.fromkeys(generic_mentions))
+
+
+def _guard_cross_turn_threat_target(
+    user_text: str,
+    decision: PlanDecision,
+    session_facts: SessionFacts,
+) -> PlanDecision:
+    """阻止 Planner 把用户点名的冲突字段静默改写为产物绑定字段。"""
+    if decision.decision != "execute":
+        return decision
+    threat_fact = next(
+        (
+            item
+            for item in session_facts.referenceable_artifacts
+            if item.source_ref == "session.artifacts.threat_mapping"
+            and item.artifact_type == "threat_mapping"
+        ),
+        None,
+    )
+    if threat_fact is None or not threat_fact.source_field:
+        return decision
+    explicit_targets = _explicit_fill_target_mentions(
+        user_text,
+        session_facts.available_fields,
+    )
+    if not explicit_targets:
+        return decision
+
+    for step in decision.steps:
+        if not (
+            isinstance(step, FillStep)
+            and step.fill_kind == "threat"
+            and step.source_ref == "session.artifacts.threat_mapping"
+        ):
+            continue
+        binding = next(
+            (
+                item
+                for item in threat_fact.target_bindings
+                if item.config_ref == step.config_ref
+            ),
+            None,
+        )
+        if binding is None:
+            continue
+        allowed_names = {threat_fact.source_field, binding.target_field}
+        conflict = next(
+            (item for item in explicit_targets if item not in allowed_names),
+            None,
+        )
+        if conflict is None:
+            continue
+        return PlanDecision(
+            decision="clarification",
+            plan_id=decision.plan_id,
+            reason_code="artifact_target_mismatch",
+            question=(
+                f"最近威胁映射来自 {threat_fact.source_field}，只能填回标准字段"
+                f"“{binding.target_field}”，不能填入“{conflict}”。"
+                f"如需处理“{conflict}”，请先为该字段重新生成威胁映射。"
+            ),
+        )
+    return decision
 
 
 class PlannerService:
@@ -229,6 +352,11 @@ class PlannerService:
             decision = _coerce_plan_decision(content)
             if decision.plan_id == "pending":
                 decision = decision.model_copy(update={"plan_id": f"plan-{uuid.uuid4().hex[:12]}"})
+            decision = _guard_cross_turn_threat_target(
+                user_text,
+                decision,
+                session_facts,
+            )
             elapsed_seconds = time.monotonic() - started_at
             logger.info(
                 "[MODEL_CALL_END] Planner 模型调用完成: plan_id=%s provider=%s model=%s "

@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 日期：2026-08-12
-- 关联：覆盖 ADR-0002 的自然语言快路径，细化 ADR-0004
+- 关联：覆盖 ADR-0002 的自然语言快路径，细化 ADR-0004；可引用会话产物由 ADR-0006 补充
 
 ## 背景
 
@@ -36,6 +36,6 @@
 
 ## 实现说明（#44 清理后）
 
-- **遗留 `last_*` session 键的定位**：`last_enum_extract_result`、`last_mapping_data`、`last_threat_data` 仅作为**确定性入口的展示/导出/计数事实**保留——按钮回调（生成 Excel 展示）、`SessionFacts` 的计数字段（`existing_enum_value_count` 等）和会话摘要读取它们；它们**绝不作为规划或步骤输入**（由 `test威胁填充不能读取session旧结果` 等契约测试固化）。曾把 `last_enum_extract_result` 当作威胁提示输入的 `build_llm_input` 已在 #44 删除，关键词路由体系最后残留随之消失。
+- **遗留 `last_*` session 键的定位**：`last_enum_extract_result`、`last_mapping_data`、`last_threat_data` 仅作为**确定性入口的展示/导出/计数事实**保留——按钮回调（生成 Excel 展示）、`SessionFacts` 的计数字段（`existing_enum_value_count` 等）和会话摘要读取它们；它们**绝不作为规划或步骤输入**（由 `test威胁填充不能读取session旧结果` 等契约测试固化）。ADR-0006 新增的白名单 `session.artifacts.*` 引用来自独立类型化槽位，不会把这些遗留键重新开放为执行输入。
 - **Renderer 的“一次汇总 + 一个文件”**：每个 `ExecutionReport` 恰好渲染一次步骤汇总；每个 `config_export` 产物附一个下载文件（契约由 `test成功填充报告输出下载文件` 与 `test三步复合真实链路依次传递账本并产出唯一导出` 固化）。字段映射回填产出的 `_mapped_config.txt` 额外发一条高亮下载消息，是**单步字段映射的 UX 选择**，不违反复合计划不变量（复合计划若无字段映射则天然只有一条汇总）。
 - **悬空导入门禁**：`tests/test_chinese_readability.py` 已强制中文 docstring/注释；悬空导入检查待引入 ruff/pyflakes 后补齐（本仓库当前未安装该工具，#44 未收口）。

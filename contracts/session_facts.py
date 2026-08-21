@@ -7,7 +7,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from contracts.artifact_targets import resolve_standard_target
 from contracts.planner_models import ConfigRef
+from contracts.session_artifacts import (
+    ArtifactTargetBinding,
+    EnumArtifactSlot,
+    ReferenceableArtifactFact,
+    ThreatArtifactSlot,
+)
 
 
 class SessionFacts(BaseModel):
@@ -26,6 +33,7 @@ class SessionFacts(BaseModel):
     existing_enum_value_count: int = Field(default=0, ge=0)
     existing_threat_mapping_count: int = Field(default=0, ge=0)
     mapped_sub_rule_count: int = Field(default=0, ge=0)
+    referenceable_artifacts: tuple[ReferenceableArtifactFact, ...] = ()
 
 
 def _read_session_value(session: Any, key: str, default: Any = None) -> Any:
@@ -92,7 +100,7 @@ def _count_enum_values(enum_result: Any) -> int:
     """仅提取旧结果的数量事实，不把旧值暴露为本次步骤输入。"""
     if not isinstance(enum_result, Mapping):
         return 0
-    for key in ("values", "enum_values", "data"):
+    for key in ("value", "values", "enum_values", "data"):
         values = enum_result.get(key)
         if isinstance(values, (list, tuple, set)):
             return len(values)
@@ -108,6 +116,90 @@ def _count_normalize_entries(value: Any) -> int:
     if isinstance(value, (list, tuple)):
         return sum(_count_normalize_entries(item) for item in value)
     return 0
+
+
+def _read_config(session: Any, config_ref: ConfigRef) -> Any:
+    """按公共配置引用读取真实结构，不在事实层引入适配器依赖。"""
+    key = "decoded_data" if config_ref == "session.decoded_config" else "mapped_sub_rules"
+    return _read_session_value(session, key)
+
+
+def _target_bindings(
+    session: Any,
+    source_field: str | None,
+    available_config_refs: tuple[ConfigRef, ...],
+) -> tuple[ArtifactTargetBinding, ...]:
+    """为来源字段计算逐配置绑定；无法唯一确定时不向 Planner 暴露猜测。"""
+    if not source_field:
+        return ()
+    bindings: list[ArtifactTargetBinding] = []
+    for config_ref in available_config_refs:
+        target_field = resolve_standard_target(_read_config(session, config_ref), source_field)
+        if target_field:
+            bindings.append(
+                ArtifactTargetBinding(config_ref=config_ref, target_field=target_field)
+            )
+    return tuple(bindings)
+
+
+def _referenceable_artifacts(
+    session: Any,
+    available_config_refs: tuple[ConfigRef, ...],
+) -> tuple[ReferenceableArtifactFact, ...]:
+    """只投影通过类型校验的新产物槽；旧 last_* 绝不自动升级。"""
+    facts: list[ReferenceableArtifactFact] = []
+    raw_enum = _read_session_value(session, "latest_enum_artifact")
+    try:
+        enum_slot = (
+            raw_enum
+            if isinstance(raw_enum, EnumArtifactSlot)
+            else EnumArtifactSlot.model_validate(raw_enum)
+            if raw_enum is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        enum_slot = None
+    if enum_slot is not None:
+        facts.append(
+            ReferenceableArtifactFact(
+                source_ref="session.artifacts.enum_values",
+                artifact_type="enum_values",
+                source_field=enum_slot.source_field,
+                item_count=enum_slot.artifact.item_count,
+                target_bindings=_target_bindings(
+                    session,
+                    enum_slot.source_field,
+                    available_config_refs,
+                ),
+            )
+        )
+
+    raw_threat = _read_session_value(session, "latest_threat_artifact")
+    try:
+        threat_slot = (
+            raw_threat
+            if isinstance(raw_threat, ThreatArtifactSlot)
+            else ThreatArtifactSlot.model_validate(raw_threat)
+            if raw_threat is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        threat_slot = None
+    if threat_slot is not None:
+        facts.append(
+            ReferenceableArtifactFact(
+                source_ref="session.artifacts.threat_mapping",
+                artifact_type="threat_mapping",
+                source_field=threat_slot.source_field,
+                item_count=threat_slot.artifact.item_count,
+                target_bindings=_target_bindings(
+                    session,
+                    threat_slot.source_field,
+                    available_config_refs,
+                ),
+            )
+        )
+    return tuple(facts)
 
 def build_session_facts(session: Any) -> SessionFacts:
     """把会话状态投影为不可变安全快照；缺失状态按“不可用”处理。"""
@@ -125,12 +217,13 @@ def build_session_facts(session: Any) -> SessionFacts:
     if mapped_normalize_count:
         available_config_refs.append("session.mapped_sub_rules")
 
+    config_refs = tuple(available_config_refs)
     return SessionFacts(
         has_decoded_config=bool(decoded_data),
         has_logs=bool(original_logs or raw_log_lines),
         has_log_classification=bool(_read_session_value(session, "log_classification")),
         has_mapped_sub_rules=bool(mapped_sub_rules),
-        available_config_refs=tuple(available_config_refs),
+        available_config_refs=config_refs,
         available_fields=_collect_available_fields(session),
         enum_mapping_target_fields=_collect_enum_target_fields(enum_preview),
         enum_mapping_row_count=len(enum_preview),
@@ -139,4 +232,5 @@ def build_session_facts(session: Any) -> SessionFacts:
         ),
         existing_threat_mapping_count=len(threat_data),
         mapped_sub_rule_count=len(mapped_sub_rules),
+        referenceable_artifacts=_referenceable_artifacts(session, config_refs),
     )

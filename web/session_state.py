@@ -8,6 +8,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Optional, List, Dict, Set
 
+from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+
 
 @dataclass(frozen=True)
 class PrimaryDatasetSnapshot:
@@ -78,6 +80,9 @@ class SessionState:
     last_threat_data: Optional[List[Dict[str, Any]]] = None
     """最后一次威胁类型映射的结果列表"""
 
+    latest_threat_artifact: Optional[ThreatArtifactSlot] = None
+    """最近一次成功、可由后续类型化计划显式引用的威胁映射产物"""
+
     # ---- 枚举映射输入 ----
     raw_base64: Optional[str] = None
     """原始 Base64 内容缓存，供确定性文件事件和类型化执行步骤使用"""
@@ -105,6 +110,9 @@ class SessionState:
     # ---- 枚举提取结果 ----
     last_enum_extract_result: Optional[Dict[str, Any]] = None
     """最后一次枚举提取的结果"""
+
+    latest_enum_artifact: Optional[EnumArtifactSlot] = None
+    """最近一次成功、可由后续类型化计划显式引用的枚举值产物"""
 
     # ---- 日志解析结果 ----
     log_classification: Optional[Dict[str, Any]] = None
@@ -170,7 +178,9 @@ class SessionState:
         self.excel_data = None
         self.excel_filename = None
         self.last_threat_data = None
+        self.latest_threat_artifact = None
         self.last_enum_extract_result = None
+        self.latest_enum_artifact = None
         self.log_classification = None
         self.mapped_sub_rules = None
         self.sub_rule_mapping_results = None

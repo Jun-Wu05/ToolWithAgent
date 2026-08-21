@@ -6,6 +6,40 @@ from types import SimpleNamespace
 import pandas as pd
 from openpyxl import Workbook
 
+from contracts.planner_models import (
+    EnumValuesArtifact,
+    ThreatMappingArtifact,
+    ThreatMappingRow,
+)
+from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+
+
+def _referenceable_artifact_slots():
+    """构造用于文件生命周期断言的两类成功产物。"""
+    enum_slot = EnumArtifactSlot(
+        artifact=EnumValuesArtifact(
+            values=("attack",), item_count=1, field="current_field"
+        ),
+        source_field="current_field",
+    )
+    threat_slot = ThreatArtifactSlot(
+        artifact=ThreatMappingArtifact(
+            mappings=(
+                ThreatMappingRow.model_validate(
+                    {
+                        "mappingType": "EQUAL",
+                        "orgValue": "attack",
+                        "mappingValue": "恶意活动",
+                    }
+                ),
+            ),
+            item_count=1,
+            source_field="current_field",
+        ),
+        source_field="current_field",
+    )
+    return enum_slot, threat_slot
+
 
 def _mount_message_capture(monkeypatch, captured):
     """拦截 file_handlers 内的 Chainlit 消息发送。"""
@@ -254,12 +288,15 @@ def test无效配置上传保持当前有效会话(monkeypatch):
         "decode_file_content",
         lambda content: {"status": "error", "error_message": "invalid base64"},
     )
+    enum_slot, threat_slot = _referenceable_artifact_slots()
     session = SessionState(
         decoded_data={"name": "current"},
         decoded_fields=["current_field"],
         mapped_sub_rules=[{"normalize": [{"index": "current_field"}]}],
         enum_excel_path="current-enum.xlsx",
         enum_preview=[{"目标字段": "current_field"}],
+        latest_enum_artifact=enum_slot,
+        latest_threat_artifact=threat_slot,
         conversation_history=[{"role": "user", "content": "当前文件"}],
     )
 
@@ -270,6 +307,8 @@ def test无效配置上传保持当前有效会话(monkeypatch):
     assert session.mapped_sub_rules == [{"normalize": [{"index": "current_field"}]}]
     assert session.enum_excel_path == "current-enum.xlsx"
     assert session.enum_preview == [{"目标字段": "current_field"}]
+    assert session.latest_enum_artifact == enum_slot
+    assert session.latest_threat_artifact == threat_slot
     assert session.conversation_history == [{"role": "user", "content": "当前文件"}]
     assert captured == ["❌ 解码失败：invalid base64"]
 
@@ -286,12 +325,15 @@ def test无效日志表上传保持当前有效会话(monkeypatch):
         "read_excel",
         lambda path: pd.DataFrame({"发生时间": ["2026-08-19"], "设备": ["ips"]}),
     )
+    enum_slot, threat_slot = _referenceable_artifact_slots()
     session = SessionState(
         decoded_data={"name": "current"},
         decoded_fields=["current_field"],
         log_classification={"types": ["IPS"]},
         enum_excel_path="current-enum.xlsx",
         enum_preview=[{"目标字段": "current_field"}],
+        latest_enum_artifact=enum_slot,
+        latest_threat_artifact=threat_slot,
         conversation_history=[{"role": "assistant", "content": "当前结果"}],
     )
 
@@ -302,6 +344,8 @@ def test无效日志表上传保持当前有效会话(monkeypatch):
     assert session.log_classification == {"types": ["IPS"]}
     assert session.enum_excel_path == "current-enum.xlsx"
     assert session.enum_preview == [{"目标字段": "current_field"}]
+    assert session.latest_enum_artifact == enum_slot
+    assert session.latest_threat_artifact == threat_slot
     assert session.conversation_history == [{"role": "assistant", "content": "当前结果"}]
     assert len(captured) == 1
     assert "上传正确的excel，应包含原始日志一列" in captured[0]

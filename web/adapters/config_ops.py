@@ -14,6 +14,7 @@ from agent.shared.mapping_utils import (
     remove_enum_fill_contributions,
     remove_field_mappings_from_config,
 )
+from contracts.artifact_targets import collect_standard_fields, resolve_standard_target
 
 from web.plan_executor import ExecutionContext
 from contracts.planner_models import (
@@ -26,6 +27,7 @@ from contracts.planner_models import (
     StepStatus,
     ThreatMappingArtifact,
 )
+from contracts.session_artifacts import ThreatArtifactSlot
 from web.adapters.shared import (
     _CONFIG_SESSION_KEYS,
     _build_config_artifact,
@@ -153,17 +155,59 @@ class ThreatFillAdapter:
                 "enum_refill_required",
                 "枚举映射附件已更新，请先重新执行枚举填充",
             )
-        dependency_id = step.source_ref.removeprefix("step:")
-        dependency = dependencies.get(dependency_id)
-        if dependency is None or dependency.artifact is None:
-            return _failed(step, "dependency_missing", "威胁填充缺少声明的映射产物")
-        if not isinstance(dependency.artifact, ThreatMappingArtifact):
-            return _failed(step, "dependency_type_mismatch", "依赖产物不是威胁映射")
-        mapping_rows = [row.model_dump(by_alias=True) for row in dependency.artifact.mappings]
+        if step.source_ref == "session.artifacts.threat_mapping":
+            raw_slot = _session_get(context.session, "latest_threat_artifact")
+            try:
+                slot = (
+                    raw_slot
+                    if isinstance(raw_slot, ThreatArtifactSlot)
+                    else ThreatArtifactSlot.model_validate(raw_slot)
+                )
+            except (TypeError, ValueError):
+                return _needs_input(
+                    step,
+                    "artifact_source_unavailable",
+                    "最近威胁映射产物已不可用，请重新执行威胁映射",
+                )
+            artifact = slot.artifact
+            current_config = _read_config(context.session, step.config_ref)
+            if artifact.source_field:
+                expected_target = resolve_standard_target(current_config, artifact.source_field)
+                if expected_target is None:
+                    return _needs_input(
+                        step,
+                        "artifact_target_unavailable",
+                        "最近威胁映射的来源字段没有唯一可填充标准字段",
+                    )
+                if step.target_fields != (expected_target,):
+                    return _needs_input(
+                        step,
+                        "artifact_target_mismatch",
+                        f"最近威胁映射只能填回标准字段: {expected_target}",
+                    )
+            else:
+                available_targets = set(collect_standard_fields(current_config))
+                if step.target_fields[0] not in available_targets:
+                    return _needs_input(
+                        step,
+                        "artifact_target_unavailable",
+                        "指定字段不是当前配置中的可填充标准字段",
+                    )
+        else:
+            dependency_id = step.source_ref.removeprefix("step:")
+            dependency = dependencies.get(dependency_id)
+            if dependency is None or dependency.artifact is None:
+                return _failed(step, "dependency_missing", "威胁填充缺少声明的映射产物")
+            if not isinstance(dependency.artifact, ThreatMappingArtifact):
+                return _failed(step, "dependency_type_mismatch", "依赖产物不是威胁映射")
+            artifact = dependency.artifact
+
+        current_config = _read_config(context.session, step.config_ref)
+
+        mapping_rows = [row.model_dump(by_alias=True) for row in artifact.mappings]
         if not mapping_rows:
             return _failed(step, "threat_mapping_empty", "威胁映射产物为空")
 
-        current_config = _read_config(context.session, step.config_ref)
         before_count = count_field_mappings(current_config, step.target_fields)
         updated_config = current_config
         for target_field in step.target_fields:

@@ -3,7 +3,57 @@
 import asyncio
 
 from contracts.planner_models import PlanDecision
+from contracts.session_artifacts import ArtifactTargetBinding, ReferenceableArtifactFact
 from contracts.session_facts import SessionFacts
+
+
+async def _bound_threat_fill_runner(_planner_input: str):
+    """模拟模型把跨轮威胁填充解析到唯一合法标准字段。"""
+    return PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-fill-threat",
+            "steps": [
+                {
+                    "step_id": "fill-1",
+                    "type": "fill",
+                    "fill_kind": "threat",
+                    "target_fields": ["威胁等级"],
+                    "source_ref": "session.artifacts.threat_mapping",
+                    "config_ref": "session.mapped_sub_rules",
+                }
+            ],
+        }
+    )
+
+
+def _cross_turn_threat_facts(
+    available_fields: tuple[str, ...] = (
+        "threat_level",
+        "威胁等级",
+        "protocol",
+        "协议",
+    ),
+) -> SessionFacts:
+    """构造 threat_level→威胁等级 的安全产物目录。"""
+    return SessionFacts(
+        available_config_refs=("session.mapped_sub_rules",),
+        available_fields=available_fields,
+        referenceable_artifacts=(
+            ReferenceableArtifactFact(
+                source_ref="session.artifacts.threat_mapping",
+                artifact_type="threat_mapping",
+                source_field="threat_level",
+                item_count=2,
+                target_bindings=(
+                    ArtifactTargetBinding(
+                        config_ref="session.mapped_sub_rules",
+                        target_field="威胁等级",
+                    ),
+                ),
+            ),
+        ),
+    )
 
 
 def test自然语言恰好调用planner一次且返回前不执行业务():
@@ -44,6 +94,65 @@ def test自然语言恰好调用planner一次且返回前不执行业务():
     assert len(calls) == 1
     assert decision.decision == "execute"
     assert decision.steps[0].type == "fill"
+
+
+def test跨轮威胁填充不能静默改写用户明确指定的冲突目标():
+    """用户指定协议时，即使 Planner 改成合法绑定也必须澄清而非执行。"""
+    from agent.core.planner import PlannerService
+
+    decision = asyncio.run(
+        PlannerService(runner=_bound_threat_fill_runner).plan(
+            user_text="把刚才的威胁映射填入协议",
+            conversation_history=[],
+            session_facts=_cross_turn_threat_facts(),
+        )
+    )
+
+    assert decision.decision == "clarification"
+    assert decision.reason_code == "artifact_target_mismatch"
+    assert decision.steps == ()
+    assert "threat_level" in decision.question
+    assert "威胁等级" in decision.question
+    assert "协议" in decision.question
+
+
+def test跨轮威胁填充允许自然续接和来源字段对应目标():
+    """未点名目标、点名来源字段或唯一标准字段时均保留合法执行计划。"""
+    from agent.core.planner import PlannerService
+
+    for user_text in (
+        "把刚才的威胁映射填充回去",
+        "把刚才的威胁映射填充到对应字段",
+        "把刚才的威胁映射写入解析规则",
+        "把刚才的威胁映射填入威胁等级",
+        "把刚才的威胁映射填入 threat_level",
+    ):
+        decision = asyncio.run(
+            PlannerService(runner=_bound_threat_fill_runner).plan(
+                user_text=user_text,
+                conversation_history=[],
+                session_facts=_cross_turn_threat_facts(),
+            )
+        )
+        assert decision.decision == "execute"
+        assert decision.steps[0].target_fields == ("威胁等级",)
+
+
+def test跨轮威胁填充对配置外显式目标也不能静默改写():
+    """用户点名未知字段时应澄清，不能因目录有唯一绑定就替用户改目标。"""
+    from agent.core.planner import PlannerService
+
+    decision = asyncio.run(
+        PlannerService(runner=_bound_threat_fill_runner).plan(
+            user_text="把刚才的威胁映射填入不存在字段",
+            conversation_history=[],
+            session_facts=_cross_turn_threat_facts(("threat_level", "威胁等级")),
+        )
+    )
+
+    assert decision.decision == "clarification"
+    assert decision.reason_code == "artifact_target_mismatch"
+    assert "不存在字段" in decision.question
 
 
 def testplanner超时时明确记录调用阶段且不做关键词兜底(caplog):
