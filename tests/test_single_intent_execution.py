@@ -69,7 +69,7 @@ def test日志类型提取单步可运行(monkeypatch):
     monkeypatch.setattr(
         log_classifier,
         "_do_classify_log_features",
-        lambda *args: json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False),
+        lambda *args, **kwargs: json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False),
     )
     monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
     session = {"raw_log_lines": ["event_type3=attack src=10.0.0.1"]}
@@ -80,6 +80,147 @@ def test日志类型提取单步可运行(monkeypatch):
     )
 
     assert report.status == StepStatus.SUCCESS
+    assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
+
+
+def test日志类型提取显式分类特征字段优先于自动探测(monkeypatch):
+    """「把A字段作为日志类型」：步骤显式 feature_field 覆盖 Step1 自动探测值，分类结果照常写入会话。"""
+    import agent.tools.pipeline.log_classifier as log_classifier
+    import agent.tools.pipeline.log_format_identifier as log_format_identifier
+    import agent.tools.pipeline.log_sample_filler as log_sample_filler
+
+    identify_inputs = []
+    classify_args = []
+
+    def _fake_identify(logs_text):
+        identify_inputs.append(logs_text)
+        return json.dumps(
+            {
+                "format": "key_value",
+                "format_detail": "键值日志",
+                "feature_field": "log_type",
+                "header_end_marker": "",
+            },
+            ensure_ascii=False,
+        )
+
+    def _fake_classify(*args, **kwargs):
+        classify_args.append(args)
+        return json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False)
+
+    monkeypatch.setattr(log_format_identifier, "_do_identify_log_format", _fake_identify)
+    monkeypatch.setattr(log_classifier, "_do_classify_log_features", _fake_classify)
+    monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
+    session = {"raw_log_lines": ["category=attack src=10.0.0.1", "category=scan src=10.0.0.2"]}
+
+    report = _execute_single_step(
+        session,
+        {"step_id": "log", "type": "log_parse", "feature_field": "category"},
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
+    # 格式识别仍然自动执行，消费原始日志行。
+    assert identify_inputs and "category=attack" in identify_inputs[0]
+    # 显式分类特征字段传给分类阶段，优先于 Step1 自动探测到的 log_type。
+    assert classify_args[0][3] == "category"
+
+
+def test日志类型提取不带显式字段时沿用自动探测值(monkeypatch):
+    """不带 feature_field 的 log_parse 行为不变：分类使用 Step1 自动探测值（回归 US-7）。"""
+    import agent.tools.pipeline.log_classifier as log_classifier
+    import agent.tools.pipeline.log_format_identifier as log_format_identifier
+    import agent.tools.pipeline.log_sample_filler as log_sample_filler
+
+    classify_args = []
+    monkeypatch.setattr(
+        log_format_identifier,
+        "_do_identify_log_format",
+        lambda logs_text: json.dumps(
+            {
+                "format": "key_value",
+                "format_detail": "键值日志",
+                "feature_field": "event_type3",
+                "header_end_marker": "",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    monkeypatch.setattr(
+        log_classifier,
+        "_do_classify_log_features",
+        lambda *args, **kwargs: (classify_args.append(args), json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False))[1],
+    )
+    monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
+    session = {"raw_log_lines": ["event_type3=attack src=10.0.0.1"]}
+
+    report = _execute_single_step(
+        session,
+        {"step_id": "log", "type": "log_parse"},
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert classify_args[0][3] == "event_type3"
+    assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
+
+
+def test枚举提取与显式字段日志类型提取复合计划两步各留产物(monkeypatch):
+    """「提取A的枚举值，然后按A做日志类型分类」两步互补：枚举产物与分类产物互不覆盖。"""
+    import agent.tools.pipeline.llm_client as llm_client
+    import agent.tools.pipeline.log_classifier as log_classifier
+    import agent.tools.pipeline.log_format_identifier as log_format_identifier
+    import agent.tools.pipeline.log_sample_filler as log_sample_filler
+
+    monkeypatch.setattr(
+        llm_client,
+        "_call_llm_direct",
+        lambda *a, **kw: json.dumps({"field": "category", "regex": r"category=(\w+)"}, ensure_ascii=False),
+    )
+    monkeypatch.setattr(
+        log_format_identifier,
+        "_do_identify_log_format",
+        lambda logs_text: json.dumps(
+            {
+                "format": "key_value",
+                "format_detail": "键值日志",
+                "feature_field": "log_type",
+                "header_end_marker": "",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    monkeypatch.setattr(
+        log_classifier,
+        "_do_classify_log_features",
+        lambda *args, **kwargs: json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False),
+    )
+    monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
+    session = {
+        "raw_log_lines": ["category=attack src=10.0.0.1", "category=scan src=10.0.0.2"],
+        "decoded_fields": ["category"],
+    }
+
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-enum-logparse",
+            "steps": [
+                {"step_id": "enum-1", "type": "enum_extract", "target_field": "category", "source_ref": "session.logs"},
+                {"step_id": "log-1", "type": "log_parse", "feature_field": "category"},
+            ],
+        }
+    )
+    report = asyncio.run(
+        PlanExecutor(create_default_adapters(None)).execute(
+            decision,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    # 第一步产物：枚举值列表，保留可引用产物身份供后续值映射链路使用。
+    assert set(report.results[0].artifact.values) == {"attack", "scan"}
+    # 第二步产物：按显式分类特征字段生成的日志分类照常写入会话。
     assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
 
 

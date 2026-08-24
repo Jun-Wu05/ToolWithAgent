@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from agent.core.model_config import ModelConfig
 from agent.shared.logger import get_logger
-from contracts.planner_models import ConversationTurn, FillStep, PlanDecision
+from contracts.planner_models import ConversationTurn, FillStep, LogParseStep, PlanDecision
 from contracts.progress import (
     NullProgressSink,
     ProgressEvent,
@@ -193,6 +193,44 @@ def _explicit_fill_target_mentions(
     return tuple(dict.fromkeys(generic_mentions))
 
 
+# 用户显式指定分类特征字段的规范短语族（与 CONTEXT.md「分类特征字段」消歧边界同步）。
+# 结构 = 介词（把/将/拿/按/用/对）+ 字段片段 + 连接词+日志类型：既能命中
+# 「把A字段作为日志类型」「按A做日志类型分类」「用A区分日志类型」，又不会
+# 误伤不含字段点名的纯操作指令（如「日志类型提取」「帮我做日志类型分类」）。
+_EXPLICIT_FEATURE_FIELD_PHRASE_RE = re.compile(
+    r"(?:把|将|拿|按|用|对)[^，。;；]{0,40}?"
+    r"(?:(?:作为|当作|设为|当成|当|做)日志类型|区分日志类型|给日志分类)"
+)
+
+
+def _guard_explicit_feature_field(user_text: str, decision: PlanDecision) -> PlanDecision:
+    """用户显式要求把某字段作为日志类型而计划缺该参数时，追问而非静默自动探测。
+
+    只判短语族存在与参数缺席的矛盾组合，不从中文文本抽取字段名；
+    字段识别始终是 Planner 模型的职责（PRD #110「显式意图确定性守卫」）。
+    """
+    if decision.decision != "execute":
+        return decision
+    if not _EXPLICIT_FEATURE_FIELD_PHRASE_RE.search(user_text):
+        return decision
+    has_explicit_log_parse = any(
+        isinstance(step, LogParseStep) and step.feature_field
+        for step in decision.steps
+    )
+    if has_explicit_log_parse:
+        return decision
+    return PlanDecision(
+        decision="clarification",
+        plan_id=decision.plan_id,
+        reason_code="explicit_feature_field_ignored",
+        question=(
+            "您要求把指定字段作为日志类型，但计划中没有携带该字段。"
+            "请确认要作为日志类型的字段名（日志体键，如 category），"
+            "或直接说“日志类型提取”由系统自动探测。"
+        ),
+    )
+
+
 def _guard_cross_turn_threat_target(
     user_text: str,
     decision: PlanDecision,
@@ -357,6 +395,7 @@ class PlannerService:
                 decision,
                 session_facts,
             )
+            decision = _guard_explicit_feature_field(user_text, decision)
             elapsed_seconds = time.monotonic() - started_at
             logger.info(
                 "[MODEL_CALL_END] Planner 模型调用完成: plan_id=%s provider=%s model=%s "

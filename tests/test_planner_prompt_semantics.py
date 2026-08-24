@@ -20,7 +20,8 @@ def test提示词定义七类操作及各自必需参数():
         "export",
     ):
         assert f"`{operation}`" in PROMPT
-    assert "没有 `target_field`，不要求选择字段" in PROMPT
+    # log_parse 默认自动探测分类特征字段，仅显式点名时携带可选 feature_field（PRD #110）。
+    assert "默认不选字段、由系统自动探测分类特征字段" in PROMPT
     assert "必须有 `target_field`" in PROMPT
 
 
@@ -30,6 +31,29 @@ def test提示词包含日志类型与枚举提取的正反例():
     assert '{"step_id":"log-1","type":"log_parse"}' in PROMPT
     assert '"type":"enum_extract","target_field":"事件级别"' in PROMPT
     assert "不得生成 `enum_extract` 或询问字段" in PROMPT
+
+
+def test提示词定义显式分类特征字段语义():
+    """「把X字段作为日志类型」必须映射为携带 feature_field 的 log_parse（PRD #110）。"""
+    assert "作为/当作/设为/当日志类型" in PROMPT
+    assert "默认不选字段、由系统自动探测分类特征字段" in PROMPT
+    assert "可选 `feature_field=X`" in PROMPT
+    assert "允许点分路径" in PROMPT
+
+
+def test提示词消歧枚举字样与作为日志类型短语():
+    """带「枚举」字样但含「作为日志类型」短语的表达仍属 log_parse，不误入枚举提取。"""
+    assert "“把A的枚举值作为日志类型”即使句中出现“枚举”" in PROMPT
+    assert "携带 feature_field=A 的 `log_parse`，不是 `enum_extract`" in PROMPT
+    assert "用 X 区分日志类型" in PROMPT
+
+
+def test提示词含显式字段单例与复合句拆两步示例():
+    """显式分类特征字段示例固定步骤形态；复合句分解为枚举提取 + 日志类型提取两步。"""
+    assert "把 category 字段作为日志类型" in PROMPT
+    assert '{"step_id":"log-1","type":"log_parse","feature_field":"category"}' in PROMPT
+    assert "提取 category 的枚举值，然后按 category 做日志类型分类" in PROMPT
+    assert '"type":"log_parse","feature_field":"category"' in PROMPT
 
 
 def test提示词包含三步复合计划与冲突澄清():

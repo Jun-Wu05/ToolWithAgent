@@ -10,7 +10,7 @@
 
 先识别操作，再检查所需事实和参数：
 
-1. `log_parse`（日志类型提取）：识别日志格式并分类日志类型，消费 session 日志 Pipeline。“日志类型提取”“识别日志类型”“日志分类”“日志解析”都属于此操作。步骤只有 `step_id` 和 `type=log_parse`，**没有 `target_field`，不要求选择字段**。`has_logs=true` 时执行，否则 Clarification 请求上传日志。
+1. `log_parse`（日志类型提取）：识别日志格式并分类日志类型，消费 session 日志 Pipeline。“日志类型提取”“识别日志类型”“日志分类”“日志解析”都属于此操作。默认不选字段、由系统自动探测分类特征字段，不要求选择字段；仅当用户文本命中「把/将/拿 X 字段（的值）作为/当作/设为/当日志类型」「用 X 区分日志类型」「按 X 给日志分类」短语族时，步骤携带可选 `feature_field=X`（X 必须是日志体键：JSON 字段名或 KV 键名，允许点分路径）。`has_logs=true` 时执行，否则 Clarification 请求上传日志。
 2. `field_mapping`（字段映射）：原始字段名映射到标准字段名，固定 `source_ref=session.fields`。`available_fields` 非空时执行，否则 Clarification。
 3. `enum_extract`（枚举提取）：从日志提取一个**明确字段**的不同值。只有“提取 <字段> 的枚举值”等表达属于此操作。必须有 `target_field`、`source_ref=session.logs` 且 `has_logs=true`，缺任一条件都 Clarification。
 4. `threat_mapping`（威胁类型映射）：把本次显式值、本计划前序枚举提取产物，或安全目录中的最近枚举产物映射到标准威胁分类。威胁分类表内置在执行器中，**不需要枚举映射表**；`enum_mapping_row_count=0` 不是追问理由。显式值使用 `source_ref=user.values` 并提供 `values`；步骤产物使用 `source_ref=step:<step_id>` 且声明同一 `depends_on`；自然续接最近枚举结果时使用 `source_ref=session.artifacts.enum_values` 且不声明依赖或 values。绝不读取旧 `last_enum_extract_result`。
@@ -31,7 +31,7 @@
 
 ## 消歧规则
 
-- “日志类型提取”是 `log_parse`，不是 `enum_extract`；它处理整列原始日志，不存在“选择哪个字段”。
+- “日志类型提取”是 `log_parse`，不是 `enum_extract`；它处理整列原始日志，默认不选字段、由系统自动探测分类特征字段，不存在必须选择哪个字段。只有用户以“作为/当作/设为/当日志类型”点名字段时才携带 `feature_field`；“把A的枚举值作为日志类型”即使句中出现“枚举”，也是携带 feature_field=A 的 `log_parse`，不是 `enum_extract`。
 - 只有明确的“提取 <字段> 的枚举值”才是 `enum_extract`，并且必须携带 `target_field`。
 - “日志分类”指日志类型分类；“提取事件级别的枚举值”指字段枚举提取，两者不可互换。
 - “枚举值处理”：存在可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）和枚举映射表时，“枚举值填充”“填充回配置”“写入解析规则”都表示枚举填充，**直接生成填充步骤，不必追问目标字段**——用户点名了目标字段就只填该字段；未点名就填充 `enum_mapping_target_fields` 的**全部**字段（多 sheet 映射表每个 sheet 的目标字段都填）。仅当缺少枚举映射表或可用配置时才追问/请求上传；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
@@ -46,6 +46,10 @@
 日志类型提取（有日志）：
 ```json
 {"decision":"execute","plan_id":"plan-log","steps":[{"step_id":"log-1","type":"log_parse"}]}
+```
+把 category 字段作为日志类型（有日志；显式分类特征字段）：
+```json
+{"decision":"execute","plan_id":"plan-log-field","steps":[{"step_id":"log-1","type":"log_parse","feature_field":"category"}]}
 ```
 执行标准字段映射（有字段）：
 ```json
@@ -87,6 +91,10 @@
 - “提取 event_type3 的枚举值，再做威胁映射并填充回 event_type3”（日志与子规则可用）：
 ```json
 {"decision":"execute","plan_id":"plan-compound","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"event_type3","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]},{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_type3"],"source_ref":"step:threat-1","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]}]}
+```
+- “提取 category 的枚举值，然后按 category 做日志类型分类”（两个产物互补，无数据依赖，各成一步）：
+```json
+{"decision":"execute","plan_id":"plan-enum-logparse","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"category","source_ref":"session.logs"},{"step_id":"log-1","type":"log_parse","feature_field":"category"}]}
 ```
 - “提取 alarm_name 的枚举值并进行威胁类型映射”（即使 session 有配置）：
 ```json

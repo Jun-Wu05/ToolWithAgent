@@ -32,8 +32,13 @@ def classify_log_features_headless(
     feature_field: str,
     format_info_json: str,
     header_end_marker: str,
+    feature_field_explicit: bool = False,
 ) -> str:
-    """日志特征分类纯函数入口（无 @tool 装饰，供 web 执行适配器调用）。"""
+    """日志特征分类纯函数入口（无 @tool 装饰，供 web 执行适配器调用）。
+
+    ``feature_field_explicit=True`` 表示字段来自用户显式指定，
+    分类必须按日志体路径使用该字段，Step 2a 定位器不得改写或改道。
+    """
     from agent.tools.pipeline.log_classifier import _do_classify_log_features
 
     return _do_classify_log_features(
@@ -43,6 +48,7 @@ def classify_log_features_headless(
         feature_field,
         format_info_json,
         header_end_marker,
+        feature_field_explicit=feature_field_explicit,
     )
 
 

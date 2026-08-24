@@ -36,6 +36,124 @@ def _execute(decision, adapters, facts=None):
     )
 
 
+KV_SESSION = {
+    "raw_log_lines": ["category=attack src=10.0.0.1", "category=scan src=10.0.0.2"]
+}
+JSON_SESSION = {
+    "raw_log_lines": [
+        '{"detail":{"event_type":"attack"},"src":"10.0.0.1"}',
+        '{"detail":{"event_type":"scan"},"src":"10.0.0.2"}',
+    ]
+}
+
+
+def _log_parse_decision(feature_field=None):
+    """构造带或不带显式分类特征字段的 log_parse 决策。"""
+    step = {"step_id": "log-1", "type": "log_parse"}
+    if feature_field is not None:
+        step["feature_field"] = feature_field
+    return PlanDecision.model_validate(
+        {"decision": "execute", "plan_id": "plan-log", "steps": [step]}
+    )
+
+
+def _success_log_result():
+    return StepResult(
+        step_id="log-1",
+        operation_type="log_parse",
+        status=StepStatus.SUCCESS,
+    )
+
+
+def _execute_with_session(decision, adapters, session):
+    return asyncio.run(
+        PlanExecutor(adapters).execute(
+            decision,
+            ExecutionContext(session=session, session_facts=SessionFacts(has_logs=True)),
+        )
+    )
+
+
+def test显式分类特征字段不存在时执行前拦截():
+    """键不在日志体键集合时 NEEDS_INPUT，文案列出可用键，不进入适配器。"""
+    adapter = RecordingAdapter([_success_log_result()])
+
+    report = _execute_with_session(
+        _log_parse_decision("ghost_field"), {"log_parse": adapter}, KV_SESSION
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "feature_field_not_found"
+    assert adapter.calls == []
+    message = report.results[0].message or ""
+    assert "ghost_field" in message
+    assert "可用的字段" in message
+    assert "category" in message
+    assert "src" in message
+
+
+def test显式分类特征字段不存在时保留旧分类结果():
+    """NEEDS_INPUT 不改变会话中已有分类结果。"""
+    session = dict(KV_SESSION)
+    session["log_classification"] = {"旧类型": {"feature": "old"}}
+    adapter = RecordingAdapter([_success_log_result()])
+
+    report = _execute_with_session(
+        _log_parse_decision("ghost_field"), {"log_parse": adapter}, session
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert session["log_classification"] == {"旧类型": {"feature": "old"}}
+
+
+def test显式分类特征字段大小写不一致时提示最接近键():
+    """执行用精确匹配；大小写差异只在追问文案中提示，不自动纠正。"""
+    adapter = RecordingAdapter([_success_log_result()])
+
+    report = _execute_with_session(
+        _log_parse_decision("Category"), {"log_parse": adapter}, KV_SESSION
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    message = report.results[0].message or ""
+    assert "category" in message
+    assert "最接近" in message
+
+
+def test显式分类特征字段存在时放行执行():
+    """键精确命中（KV 键名）时校验通过并调用适配器。"""
+    adapter = RecordingAdapter([_success_log_result()])
+
+    report = _execute_with_session(
+        _log_parse_decision("category"), {"log_parse": adapter}, KV_SESSION
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert len(adapter.calls) == 1
+
+
+def test键校验支持JSON点分路径():
+    """JSON 嵌套字段以点分路径进入键集合，显式路径键可精确命中。"""
+    adapter = RecordingAdapter([_success_log_result()])
+
+    report = _execute_with_session(
+        _log_parse_decision("detail.event_type"), {"log_parse": adapter}, JSON_SESSION
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert len(adapter.calls) == 1
+
+
+def test不带feature_field时不做键校验():
+    """裸 log_parse 只受日志存在校验约束，不因键集合而拦截。"""
+    adapter = RecordingAdapter([_success_log_result()])
+
+    report = _execute_with_session(_log_parse_decision(), {"log_parse": adapter}, KV_SESSION)
+
+    assert report.status == StepStatus.SUCCESS
+    assert len(adapter.calls) == 1
+
+
 def test步骤失败后立即停止且不调用后续适配器():
     decision = PlanDecision.model_validate(
         {

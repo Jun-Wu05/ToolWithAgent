@@ -40,6 +40,8 @@ class LogParseStep(StrictContract):
 
     step_id: str = Field(min_length=1)
     type: Literal["log_parse"]
+    # 显式分类特征字段：用户点名「作为日志类型」的日志体键；缺省时由 Step1 自动探测。
+    feature_field: str | None = Field(default=None, min_length=1)
     depends_on: tuple[str, ...] = ()
 
 

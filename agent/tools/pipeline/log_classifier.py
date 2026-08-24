@@ -191,6 +191,7 @@ def _classify_json_features(
         "feature_count": parsed.get("feature_count", len(parsed.get("classification_details", []))),
         "total_valid_lines": total_lines,
         "covered_lines": matched_lines,
+        "coverage": _build_coverage_block(aggregation),
         "classification_details": parsed.get("classification_details", []),
         # CHANGED: 添加 JSON 格式的 analysis 字段
         "analysis": {
@@ -409,6 +410,7 @@ def _classify_kv_features(
         "feature_count": parsed.get("feature_count", len(parsed.get("classification_details", []))),
         "total_valid_lines": total_lines,
         "covered_lines": matched_lines,
+        "coverage": _build_coverage_block(aggregation),
         "classification_details": parsed.get("classification_details", []),
         # CHANGED: 添加 analysis 字段（纯 KV 格式），语义：delimit=字段分隔符，tab=键值分隔符
         "analysis": {
@@ -473,6 +475,27 @@ def _classify_kv_features(
 # 纯函数入口（chainlit_app 直接调用）
 # ---------------------------------------------------------------------------
 
+def _parse_format_info_dict(format_info: str) -> dict | None:
+    """把 Step1 产出的 format_info JSON 串解析为字典，解析失败时返回 None 由调用方回退默认值。"""
+    try:
+        return json.loads(format_info) if format_info else None
+    except Exception:
+        logger.warning("[log_classifier] 解析 format_info 失败，使用默认值")
+        return None
+
+
+def _build_coverage_block(aggregation: dict) -> dict:
+    """从聚合结果构建未匹配行覆盖信息；未匹配行不参与分类与规则生成，仅单独展示。"""
+    total = aggregation.get("total_lines", 0)
+    matched = aggregation.get("matched_lines", 0)
+    return {
+        "total_lines": total,
+        "matched_lines": matched,
+        "unmatched_lines": aggregation.get("unmatched_lines", total - matched),
+        "unmatched_samples": aggregation.get("unmatched_samples", []),
+    }
+
+
 def _do_classify_log_features(
     logs_str: str,
     format_type: str = "unknown",
@@ -480,6 +503,7 @@ def _do_classify_log_features(
     feature_field: str = "log_type",
     format_info: str = "",
     header_end_marker: str = "",
+    feature_field_explicit: bool = False,
 ) -> str:
     """日志特征分类 —— 纯函数，无需 agno 上下文即可调用。
 
@@ -517,20 +541,39 @@ def _do_classify_log_features(
             ensure_ascii=False,
         )
 
+    # ---- 用户显式指定的分类特征字段：跳过 Step 2a，强制按日志体路径使用该字段 ----
+    if feature_field_explicit and feature_field and feature_field.strip():
+        logger.info(
+            f"[_do_classify_log_features] 显式分类特征字段 '{feature_field}'，"
+            f"跳过 Step 2a 直接按日志体提取"
+        )
+        explicit_info = _parse_format_info_dict(format_info)
+        if is_kv:
+            return _classify_kv_features(
+                logs_str=logs_str,
+                format_type=format_type,
+                format_detail=format_detail,
+                feature_field=feature_field,
+                format_info=explicit_info,
+                header_end_marker=header_end_marker,
+            )
+        return _classify_json_features(
+            logs_str=logs_str,
+            format_type=format_type,
+            format_detail=format_detail,
+            feature_field=feature_field,
+            format_info=None,
+            header_end_marker=header_end_marker,
+        )
+
     # ---- 日志头+KV：执行 Step 2a 特征定位 ----
     if is_kv and has_header:
         from agent.tools.pipeline.log_feature_locator import locate_feature
 
         # CHANGED: 修复 delimit/tab 默认值写反的问题（delimit=字段分隔符, tab=键值分隔符）
-        delimit = ";"   # 字段分隔符默认值
-        tab = "="       # 键值分隔符默认值
-        try:
-            if format_info:
-                info_dict = json.loads(format_info)
-                delimit = info_dict.get("delimit", ";") or ";"
-                tab = info_dict.get("tab", "=") or "="
-        except Exception:
-            logger.warning(f"[_do_classify_log_features] 解析 format_info 失败，使用默认值")
+        info_dict = _parse_format_info_dict(format_info) or {}
+        delimit = info_dict.get("delimit", ";") or ";"   # 字段分隔符默认值
+        tab = info_dict.get("tab", "=") or "="           # 键值分隔符默认值
 
         logger.info("[_do_classify_log_features] 日志头+KV → Step 2a 特征定位")
         locate_result = locate_feature(
@@ -617,12 +660,7 @@ def _do_classify_log_features(
     # ---- 纯 KV：直接走 Path KV ----
     if is_kv:
         # 从 format_info 解析 delimit/tab
-        info_dict = None
-        try:
-            if format_info:
-                info_dict = json.loads(format_info)
-        except Exception:
-            logger.warning(f"[_do_classify_log_features] 解析 format_info 失败，使用默认值")
+        info_dict = _parse_format_info_dict(format_info)
 
         logger.info("[_do_classify_log_features] → Path KV (纯KV)")
         return _classify_kv_features(

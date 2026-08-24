@@ -126,6 +126,28 @@ CASES = (
         SessionFacts(has_logs=True, available_fields=("事件级别",)),
         lambda d: d.decision == "clarification" and not d.steps,
     ),
+    SemanticCase(
+        "log_parse_explicit_feature_field",
+        "把 category 字段作为日志类型",
+        SessionFacts(has_logs=True),
+        lambda d: _step_types(d) == ("log_parse",)
+        and getattr(d.steps[0], "feature_field", None) == "category",
+    ),
+    SemanticCase(
+        "log_parse_explicit_with_enum_wording",
+        "把 category 的枚举值作为日志类型",
+        SessionFacts(has_logs=True),
+        lambda d: _step_types(d) == ("log_parse",)
+        and getattr(d.steps[0], "feature_field", None) == "category",
+    ),
+    SemanticCase(
+        "compound_enum_logparse",
+        "提取 category 的枚举值，然后按 category 做日志类型分类",
+        SessionFacts(has_logs=True, available_fields=("category",)),
+        lambda d: _step_types(d) == ("enum_extract", "log_parse")
+        and getattr(d.steps[0], "target_field", None) == "category"
+        and getattr(d.steps[1], "feature_field", None) == "category",
+    ),
 )
 
 
