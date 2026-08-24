@@ -105,6 +105,65 @@ def test连接测试无密钥返回静态表成功():
     assert result["models"]
 
 
+# ---------- 模型列表按厂家分组展示 ----------
+
+def test模型列表按厂家分组展示():
+    """带厂家前缀的模型 ID 分组渲染：label 为【厂家】模型，提交值仍是完整 ID。"""
+    widgets = settings_handler.build_settings_widgets(
+        provider="openrouter",
+        models=[
+            "openai/gpt-4o-mini",
+            "anthropic/claude-sonnet-4",
+            "deepseek/deepseek-chat",
+            "openai/gpt-4o",
+        ],
+    )
+    model_select = widgets[1]
+    items = model_select.items
+    assert items["【openai】gpt-4o-mini"] == "openai/gpt-4o-mini"
+    assert items["【deepseek】deepseek-chat"] == "deepseek/deepseek-chat"
+    assert items["【anthropic】claude-sonnet-4"] == "anthropic/claude-sonnet-4"
+    # 同厂家模型相邻（分组视觉）
+    labels = list(items)
+    assert abs(labels.index("【openai】gpt-4o-mini") - labels.index("【openai】gpt-4o")) == 1
+
+
+def test无斜杠模型保持原样展示():
+    """无厂家前缀的模型 ID（如智谱）不加分组头，label 与提交值一致。"""
+    widgets = settings_handler.build_settings_widgets(
+        provider="zhipu", models=["glm-4.6", "glm-4-flash"]
+    )
+    items = widgets[1].items
+    assert items["glm-4.6"] == "glm-4.6"
+    assert items["glm-4-flash"] == "glm-4-flash"
+
+
+def test超长模型列表按厂家精选封顶():
+    """超过总量上限时按厂家精选：每家保留代表模型，优先保留规格默认表。"""
+    models = []
+    for vendor_index in range(10):
+        vendor = f"vendor{vendor_index}"
+        for model_index in range(10):
+            models.append(f"{vendor}/model-{model_index}")
+    priority = ("vendor0/model-9", "vendor9/model-0")
+
+    curated = settings_handler._curate_models(models, priority=priority)
+
+    assert len(curated) <= 60
+    by_vendor = {}
+    for model_id in curated:
+        by_vendor.setdefault(model_id.split("/")[0], []).append(model_id)
+    assert all(len(entries) <= 3 for entries in by_vendor.values())
+    # 规格默认模型在精选中不被裁掉
+    assert "vendor0/model-9" in curated and "vendor9/model-0" in curated
+
+
+def test未超上限的列表不做精选():
+    """短列表原样返回，不触发封顶逻辑。"""
+    models = ["deepseek-chat", "deepseek-reasoner"]
+    assert settings_handler._curate_models(models) == models
+
+
 # ---------- 设置保存的密钥校验口径 ----------
 
 def _install_chainlit_fakes(monkeypatch, session):

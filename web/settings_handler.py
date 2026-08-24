@@ -41,9 +41,82 @@ def _provider_initial_index(provider: str) -> int:
     return 0
 
 
-def build_settings_widgets(provider=None, models=None, api_key=""):
-    """构建设置界面三控件；供应商清单由注册表生成，模型列表由调用方提供。"""
-    model_values = models or ["请先配置 API Key 后获取模型列表"]
+def _curate_models(models: List[str], priority=(), per_vendor: int = 3, total: int = 60) -> List[str]:
+    """超长模型列表按厂家精选封顶：优先保留规格默认模型，每家留代表、总量封顶。
+
+    未超过总量上限时原样返回（去重保序），不改变短列表的展示。
+    """
+    models = list(dict.fromkeys(models))
+    priority = [item for item in priority if item in models]
+    if len(models) <= total:
+        return models
+
+    kept = list(dict.fromkeys(priority))
+    per_vendor_count: Dict[str, int] = {}
+    for item in kept:
+        vendor = item.partition("/")[0]
+        per_vendor_count[vendor] = per_vendor_count.get(vendor, 0) + 1
+
+    for model_id in models:
+        if len(kept) >= total:
+            break
+        if model_id in kept:
+            continue
+        vendor = model_id.partition("/")[0]
+        if per_vendor_count.get(vendor, 0) >= per_vendor:
+            continue
+        kept.append(model_id)
+        per_vendor_count[vendor] = per_vendor_count.get(vendor, 0) + 1
+    return kept
+
+
+def _grouped_model_items(models: List[str]) -> Dict[str, str]:
+    """模型 ID 列表转分组展示 items：label=【厂家】模型，value=完整模型 ID。
+
+    带厂家前缀的 ID（如 openrouter 的 vendor/model、硅基流动的 Qwen/...）
+    按厂家排序聚合形成分组视觉；无前缀的模型保持原样。
+    """
+    grouped: Dict[str, List[str]] = {}
+    for model_id in models:
+        vendor, _, name = model_id.partition("/")
+        grouped.setdefault(vendor if name else "", []).append(model_id)
+
+    items: Dict[str, str] = {}
+    for vendor in sorted(grouped, key=str.lower):
+        for model_id in grouped[vendor]:
+            short_name = model_id.partition("/")[2]
+            label = f"【{vendor}】{short_name}" if vendor else model_id
+            items[label] = model_id
+    return items
+
+
+def build_settings_widgets(provider=None, models=None, api_key="", selected_model=None):
+    """构建设置界面三控件；供应商清单由注册表生成，模型列表按厂家分组渲染。"""
+    if models:
+        priority = ()
+        if provider:
+            try:
+                priority = model_config.get_provider_spec(provider).default_models
+            except ValueError:
+                priority = ()
+        items = _grouped_model_items(_curate_models(models, priority=priority))
+        initial = None
+        if items:
+            values = list(items.values())
+            initial = selected_model if selected_model in values else values[0]
+        model_select = Select(
+            id="model_name",
+            label="模型名称",
+            items=items,
+            initial_value=initial,
+        )
+    else:
+        model_select = Select(
+            id="model_name",
+            label="模型名称",
+            values=["请先配置 API Key 后获取模型列表"],
+            initial_index=0,
+        )
     return [
         Select(
             id="provider",
@@ -51,12 +124,7 @@ def build_settings_widgets(provider=None, models=None, api_key=""):
             values=_provider_values(),
             initial_index=_provider_initial_index(provider or ""),
         ),
-        Select(
-            id="model_name",
-            label="模型名称",
-            values=model_values,
-            initial_index=0,
-        ),
+        model_select,
         TextInput(
             id="api_key",
             label="API Key（可选，未填时使用环境变量）",
@@ -316,15 +384,13 @@ async def on_settings_update(settings: dict):
 
         logger.info("[SETTINGS] Team 已重新初始化")
 
-        # 获取最新的模型列表并重发设置界面
+        # 获取最新的模型列表并重发设置界面（按厂家分组渲染）
         models = result.get("models", [])
-        model_initial_index = 0
-        if model and model in models:
-            model_initial_index = models.index(model)
-
-        widgets = build_settings_widgets(provider=provider, models=models, api_key=api_key)
-        widgets[1].initial_index = model_initial_index
-        await cl.ChatSettings(widgets).send()
+        await cl.ChatSettings(
+            build_settings_widgets(
+                provider=provider, models=models, api_key=api_key, selected_model=model
+            )
+        ).send()
 
         await cl.Message(
             content=f"""✅ **配置更新成功！**
