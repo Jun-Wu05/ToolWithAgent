@@ -95,3 +95,79 @@ def test团队构造在密钥缺失时统一抛出带变量名的错误(monkeypa
         assert "SILICONFLOW_API_KEY" in str(excinfo.value)
     finally:
         ModelConfig.clear_runtime_config()
+
+
+def test注册表新增智谱OpenAI与OpenRouter三家规格():
+    """三家新提供商以纯声明接入：字段齐备、JSON 能力声明为支持。"""
+    from agent.core.model_config import get_provider_spec, list_provider_names
+
+    for name in ("zhipu", "openai", "openrouter"):
+        assert name in list_provider_names()
+
+    zhipu = get_provider_spec("zhipu")
+    assert zhipu.api_key_env == "ZHIPU_API_KEY"
+    assert zhipu.chat_completions_url == "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    assert zhipu.supports_json_response_format is True
+    assert zhipu.default_models  # 只收录支持结构化输出的模型
+
+    openai = get_provider_spec("openai")
+    assert openai.api_key_env == "OPENAI_API_KEY"
+    assert openai.chat_completions_url == "https://api.openai.com/v1/chat/completions"
+    assert openai.supports_json_response_format is True
+
+    openrouter = get_provider_spec("openrouter")
+    assert openrouter.api_key_env == "OPENROUTER_API_KEY"
+    assert openrouter.chat_completions_url == "https://openrouter.ai/api/v1/chat/completions"
+    assert openrouter.supports_json_response_format is True
+
+
+def test三家按规格构造正确的agno模型类():
+    """智谱构造 OpenAILike（OpenAI 兼容端点），OpenAI/OpenRouter 用各自原生类。"""
+    from agno.models.openai import OpenAIChat, OpenAILike
+    from agno.models.openrouter import OpenRouter
+
+    zhipu_model = ModelConfig._build_model(
+        "glm-4.6", api_key="k", provider="zhipu"
+    )
+    assert isinstance(zhipu_model, OpenAILike)
+    assert zhipu_model.base_url == "https://open.bigmodel.cn/api/paas/v4"
+
+    openai_model = ModelConfig._build_model(
+        "gpt-4o", api_key="k", provider="openai"
+    )
+    assert isinstance(openai_model, OpenAIChat)
+
+    openrouter_model = ModelConfig._build_model(
+        "openai/gpt-4o-mini", api_key="k", provider="openrouter"
+    )
+    assert isinstance(openrouter_model, OpenRouter)
+
+
+def test三家密钥缺失时报错含各自变量名(monkeypatch):
+    """各家缺失口径一致：报错文案含本家环境变量名。"""
+    for var in (
+        "ZHIPU_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "FALLBACK_API_KEY",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    ModelConfig.clear_runtime_config()
+
+    for provider, env_name in (
+        ("zhipu", "ZHIPU_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("openrouter", "OPENROUTER_API_KEY"),
+    ):
+        with pytest.raises(ValueError) as excinfo:
+            ModelConfig._build_model("any-model", provider=provider)
+        assert env_name in str(excinfo.value)
+
+
+def test三家自动出现在设置界面供应商下拉框():
+    """注册表声明即出现在下拉框——「新增一家只加一条声明」的端到端验证。"""
+    from web.settings_handler import build_settings_widgets
+
+    values = build_settings_widgets()[0].values
+    for name in ("zhipu", "openai", "openrouter"):
+        assert name in values

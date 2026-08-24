@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from agno.models.deepseek import DeepSeek
+from agno.models.openai import OpenAIChat, OpenAILike
+from agno.models.openrouter import OpenRouter
 from agno.models.siliconflow import Siliconflow
 
 # 自动加载.env文件
@@ -70,6 +72,37 @@ def _build_siliconflow_model(model_id: str, api_key: str, **options):
     )
 
 
+def _build_zhipu_model(model_id: str, api_key: str, **options):
+    return OpenAILike(
+        id=model_id,
+        api_key=api_key,
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        timeout=90.0,
+        max_retries=0,
+        **options,
+    )
+
+
+def _build_openai_model(model_id: str, api_key: str, **options):
+    return OpenAIChat(
+        id=model_id,
+        api_key=api_key,
+        timeout=90.0,
+        max_retries=0,
+        **options,
+    )
+
+
+def _build_openrouter_model(model_id: str, api_key: str, **options):
+    return OpenRouter(
+        id=model_id,
+        api_key=api_key,
+        timeout=90.0,
+        max_retries=0,
+        **options,
+    )
+
+
 _PROVIDER_SPECS: dict[str, ProviderSpec] = {
     "deepseek": ProviderSpec(
         name="deepseek",
@@ -111,6 +144,59 @@ _PROVIDER_SPECS: dict[str, ProviderSpec] = {
             "THUDM/glm-4-9b-chat",
         ),
         build_model=_build_siliconflow_model,
+    ),
+    "zhipu": ProviderSpec(
+        name="zhipu",
+        display_name="智谱 GLM",
+        api_key_env="ZHIPU_API_KEY",
+        model_id_env="ZHIPU_MODEL",
+        default_model_id="glm-4.6",
+        chat_completions_url="https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        models_list_url="https://open.bigmodel.cn/api/paas/v4/models",
+        supports_json_response_format=True,
+        # 只收录官方确认支持结构化输出的模型
+        default_models=(
+            "glm-4.6",
+            "glm-4.5",
+            "glm-4-plus",
+            "glm-4-flash",
+        ),
+        build_model=_build_zhipu_model,
+    ),
+    "openai": ProviderSpec(
+        name="openai",
+        display_name="OpenAI",
+        api_key_env="OPENAI_API_KEY",
+        model_id_env="OPENAI_MODEL",
+        default_model_id="gpt-4o",
+        chat_completions_url="https://api.openai.com/v1/chat/completions",
+        models_list_url="https://api.openai.com/v1/models",
+        supports_json_response_format=True,
+        default_models=(
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+        ),
+        build_model=_build_openai_model,
+    ),
+    "openrouter": ProviderSpec(
+        name="openrouter",
+        display_name="OpenRouter",
+        api_key_env="OPENROUTER_API_KEY",
+        model_id_env="OPENROUTER_MODEL",
+        default_model_id="openai/gpt-4o-mini",
+        chat_completions_url="https://openrouter.ai/api/v1/chat/completions",
+        models_list_url="https://openrouter.ai/api/v1/models",
+        supports_json_response_format=True,
+        default_models=(
+            "openai/gpt-4o-mini",
+            "openai/gpt-4o",
+            "anthropic/claude-sonnet-4",
+            "deepseek/deepseek-chat",
+            "qwen/qwen-2.5-72b-instruct",
+        ),
+        build_model=_build_openrouter_model,
     ),
 }
 
@@ -199,7 +285,7 @@ class ModelConfig:
     ):
         """按提供商规格动态构建模型实例；密钥缺失时抛出带具体变量名的错误。"""
         spec = get_provider_spec(provider or ModelConfig.get_provider())
-        key = api_key or ModelConfig.get_api_key()
+        key = api_key or ModelConfig.get_api_key(spec.name)
         if not key:
             raise ValueError(
                 f"请设置环境变量 {spec.api_key_env}（或在设置界面填写 {spec.display_name} API Key）"
