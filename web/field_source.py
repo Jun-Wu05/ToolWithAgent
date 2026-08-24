@@ -14,6 +14,7 @@ CHANGED (2026-07-29):
   新增从原始日志直接提取字段的兜底——用户未做日志解析时，也能从
   raw_log_lines 用 KvExtractor 提取 KV 字段，不再强制先做日志解析。
 """
+import json
 import re
 from typing import List, Optional
 
@@ -25,6 +26,53 @@ logger = get_logger("field_source")
 
 # 直接从 KV 日志行提取字段名的正则（兼容 | 和空格分隔）
 _KV_KEY_RE = re.compile(r"(?:^|[\s|])([a-zA-Z_][a-zA-Z0-9_]*)=")
+
+# 日志体键提取用：兼容 = 和 : 两种键值连接符（pipeline 分类阶段会自动重试两种分隔符）
+_LOG_BODY_KEY_RE = re.compile(r"(?:^|[\s|,;])([a-zA-Z_][a-zA-Z0-9_]*)\s*[=:]")
+
+
+def _try_parse_json_object(line: str) -> Optional[dict]:
+    """尝试从单行（可能带日志头）提取首个 JSON 对象，失败返回 None。"""
+    start = line.find("{")
+    if start == -1:
+        return None
+    end = line.rfind("}")
+    if end <= start:
+        return None
+    try:
+        parsed = json.loads(line[start : end + 1])
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _collect_json_leaf_keys(obj: dict, prefix: str, keys: set) -> None:
+    """递归收集 JSON 叶子字段的点分路径键，供显式分类特征字段精确匹配。"""
+    for key, value in obj.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            _collect_json_leaf_keys(value, path, keys)
+        else:
+            keys.add(path)
+
+
+def extract_log_body_keys(raw_log_lines: list, max_lines: int = 20) -> List[str]:
+    """提取日志体键集合：JSON 字段名（含嵌套点分路径）与 KV 键名（= 或 : 连接）。
+
+    供执行前校验判断用户显式指定的分类特征字段是否真实存在（PRD #110）。
+    采样前 max_lines 行，去重排序。
+    """
+    keys: set = set()
+    for line in raw_log_lines[:max_lines]:
+        if not isinstance(line, str) or not line.strip():
+            continue
+        json_obj = _try_parse_json_object(line)
+        if json_obj is not None:
+            _collect_json_leaf_keys(json_obj, prefix="", keys=keys)
+            continue
+        for match in _LOG_BODY_KEY_RE.finditer(line):
+            keys.add(match.group(1))
+    return sorted(key for key in keys if len(key) >= 2)
 
 
 def extract_log_fields_for_mapping(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Optional, Protocol
 
 from agent.shared.logger import get_logger
 from contracts.planner_models import (
@@ -115,7 +115,7 @@ class PlanExecutor:
                 + int(bool(getattr(step, "target_field", None))),
                 len(step.depends_on),
             )
-            preflight_error = self._validate_step(step, context.session_facts, ledger)
+            preflight_error = self._validate_step(step, context.session_facts, ledger, context.session)
             if preflight_error is not None:
                 ordered_results.append(preflight_error)
                 await self._publish_step_terminal(
@@ -232,11 +232,46 @@ class PlanExecutor:
             )
         )
 
+    def _validate_feature_field_key(
+        self,
+        step: LogParseStep,
+        session: dict,
+    ) -> StepResult | None:
+        """显式分类特征字段必须精确存在于日志体键集合，否则停下追问可用键。
+
+        不代用户改参、不做大小写自动纠正；纠偏信息只出现在追问文案中
+        （PRD #110「执行前键存在校验」）。
+        """
+        from web.field_source import extract_log_body_keys
+
+        log_lines = session.get("raw_log_lines") or session.get("original_log") or []
+        if not log_lines:
+            return None
+        available_keys = extract_log_body_keys(log_lines)
+        if step.feature_field in available_keys:
+            return None
+
+        nearest = next(
+            (key for key in available_keys if key.lower() == step.feature_field.lower()),
+            None,
+        )
+        hint = f"（与「{step.feature_field}」最接近：{nearest}）" if nearest else ""
+        return self._needs_input_result(
+            step,
+            "feature_field_not_found",
+            (
+                f"日志类型提取未执行：日志中不存在字段「{step.feature_field}」{hint}。"
+                f"日志中可用的字段：{'、'.join(available_keys)}。"
+                "请回复要作为日志类型的字段名，或直接说“日志类型提取”由系统自动探测。"
+            ),
+        )
+
     def _validate_step(
         self,
         step: StepSpec,
         session_facts: SessionFacts,
         ledger: Mapping[str, StepResult],
+        session: Optional[dict] = None,
     ) -> StepResult | None:
         """集中执行 session 语义和依赖校验，避免各适配器重复解释状态。"""
         for dependency_id in step.depends_on:
@@ -248,6 +283,10 @@ class PlanExecutor:
 
         if isinstance(step, LogParseStep) and not session_facts.has_logs:
             return self._needs_input_result(step, "logs_required", "请先上传包含日志的数据")
+        if isinstance(step, LogParseStep) and step.feature_field:
+            preflight_error = self._validate_feature_field_key(step, session or {})
+            if preflight_error is not None:
+                return preflight_error
         if isinstance(step, FieldMappingStep) and not session_facts.available_fields:
             return self._needs_input_result(step, "fields_required", "请先上传包含可映射字段的数据")
         if (
