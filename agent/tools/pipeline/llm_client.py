@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from agent.core import model_config
 from agent.core.model_config import THINKING_DISABLED_MODELS as _THINKING_DISABLED_MODELS
 from agent.core.model_config import ModelConfig
 from agent.shared.logger import get_logger
@@ -22,22 +23,6 @@ logger = get_logger("log_parser_pipeline")
 # ============================================================================
 # 内部工具：直接调 LLM API（零 Agno 开销）
 # ============================================================================
-
-_LLM_API_URL: str = ""
-_LLM_API_KEY: str = ""
-
-
-def _init_llm_config() -> None:
-    """懒加载 LLM API 配置"""
-    global _LLM_API_URL, _LLM_API_KEY
-    if _LLM_API_URL:
-        return
-    _LLM_API_KEY = ModelConfig.get_api_key()
-    if ModelConfig.get_provider() == "siliconflow":
-        _LLM_API_URL = "https://api.siliconflow.cn/v1/chat/completions"
-    else:
-        base = "https://api.deepseek.com"
-        _LLM_API_URL = f"{base}/v1/chat/completions"
 
 
 def _call_llm_direct(
@@ -51,6 +36,9 @@ def _call_llm_direct(
 ) -> str:
     """
     直接调 LLM API（httpx），跳过 Agno，零 Agent 路由开销。
+
+    端点、密钥与 JSON 能力按当前提供商规格每次解析（ADR-0007），
+    运行时切换提供商后随切换刷新，不做懒加载缓存。
 
     Args:
         prompt: 用户 prompt
@@ -66,7 +54,9 @@ def _call_llm_direct(
     Raises:
         httpx.HTTPStatusError: API 返回非 2xx
     """
-    _init_llm_config()
+    spec = model_config.get_provider_spec(ModelConfig.get_provider())
+    api_url = model_config.get_chat_completions_url(spec.name)
+    api_key = ModelConfig.get_api_key()
     if model_id is None:
         model_id = ModelConfig.get_model_id()
 
@@ -77,30 +67,27 @@ def _call_llm_direct(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    
+
     # 🔧 修复：对 Thinking Model 禁用思考模式
     # Thinking Model（deepseek-v4-flash, deepseek-v4-pro）默认启用思考模式
     # 会导致 JSON 输出时 content 为空（所有 token 被思考内容占用）
     if model_id in _THINKING_DISABLED_MODELS:
         payload["thinking"] = {"type": "disabled"}
         logger.debug(f"[_call_llm_direct] 已禁用思考模式：{model_id}")
-    
+
     # CHANGED: 条件性添加 response_format，强制 JSON 输出
-    # 支持的 API：DeepSeek、OpenAI 兼容接口（如硅基流动）
-    # 不支持的 API：智谱 GLM 系列（需要在 prompt 中明确要求）
-    if force_json:
-        supports_json_format = ModelConfig.get_provider() in ("deepseek", "siliconflow")
-        if supports_json_format:
-            payload["response_format"] = {"type": "json_object"}
-            logger.debug(f"[_call_llm_direct] 使用 response_format 强制 JSON 输出")
+    # 能力按提供商规格声明；不支持的提供商靠提示词约束与健壮解析兜底
+    if force_json and spec.supports_json_response_format:
+        payload["response_format"] = {"type": "json_object"}
+        logger.debug(f"[_call_llm_direct] 使用 response_format 强制 JSON 输出")
 
     logger.info(
-        f"[LLM_DIRECT] 调用 {_LLM_API_URL}, model={model_id}, prompt_len={len(prompt)}"
+        f"[LLM_DIRECT] 调用 {api_url}, model={model_id}, prompt_len={len(prompt)}"
     )
     resp = httpx.post(
-        _LLM_API_URL,
+        api_url,
         json=payload,
-        headers={"Authorization": f"Bearer {_LLM_API_KEY}"},
+        headers={"Authorization": f"Bearer {api_key}"},
         timeout=timeout,
     )
     resp.raise_for_status()
