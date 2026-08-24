@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from agent.core.model_config import THINKING_DISABLED_MODELS as _THINKING_DISABLED_MODELS
 from agent.core.model_config import ModelConfig
 from agent.shared.logger import get_logger
 
@@ -24,10 +25,6 @@ logger = get_logger("log_parser_pipeline")
 
 _LLM_API_URL: str = ""
 _LLM_API_KEY: str = ""
-
-# 🔧 修复：需要禁用思考模式的 Thinking Model 列表
-# 这些模型默认启用思考模式，会导致 JSON 输出时 content 为空
-_THINKING_DISABLED_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
 
 
 def _init_llm_config() -> None:
@@ -92,7 +89,7 @@ def _call_llm_direct(
     # 支持的 API：DeepSeek、OpenAI 兼容接口（如硅基流动）
     # 不支持的 API：智谱 GLM 系列（需要在 prompt 中明确要求）
     if force_json:
-        supports_json_format = ModelConfig.MODEL_PROVIDER in ("deepseek", "siliconflow")
+        supports_json_format = ModelConfig.get_provider() in ("deepseek", "siliconflow")
         if supports_json_format:
             payload["response_format"] = {"type": "json_object"}
             logger.debug(f"[_call_llm_direct] 使用 response_format 强制 JSON 输出")
