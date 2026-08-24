@@ -94,9 +94,12 @@ class ProfessionalAgentAdapter:
             logs_text,
             format_info.get("format", "unknown"),
             format_info.get("format_detail", ""),
-            format_info.get("feature_field", "log_type"),
+            # 用户显式指定的分类特征字段优先于 Step1 自动探测值。
+            step.feature_field or format_info.get("feature_field", "log_type"),
             json.dumps(format_info, ensure_ascii=False),
             format_info.get("header_end_marker", ""),
+            # 显式字段同时压制 Step 2a 定位器对特征字段的改写或改道。
+            feature_field_explicit=step.feature_field is not None,
         )
         classification = parse_json_safe(classification_text)
         if not isinstance(classification, dict) or not classification:
