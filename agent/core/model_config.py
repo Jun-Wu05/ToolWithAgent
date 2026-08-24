@@ -177,11 +177,15 @@ class ModelConfig:
         return os.getenv("AGNO_MODEL_PROVIDER", "siliconflow").lower().strip()
 
     @staticmethod
-    def get_api_key() -> str:
-        """获取聊天 API Key：运行时配置 > 当前家环境变量 > FALLBACK_API_KEY。"""
+    def get_api_key(provider: Optional[str] = None) -> str:
+        """获取聊天 API Key：运行时配置 > 指定（或当前）家环境变量 > FALLBACK_API_KEY。
+
+        provider 参数供设置保存等已知目标家的场景按表单所选家解析；
+        缺省按当前供应商解析。
+        """
         if ModelConfig._runtime_api_key:
             return ModelConfig._runtime_api_key
-        spec = get_provider_spec(ModelConfig.get_provider())
+        spec = get_provider_spec(provider or ModelConfig.get_provider())
         primary = os.getenv(spec.api_key_env, "")
         if primary:
             return primary

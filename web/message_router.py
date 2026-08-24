@@ -64,8 +64,15 @@ async def on_message(message: cl.Message):
     team = user_session.team if user_session else None
 
     if team is None:
-        await cl.Message(content="⚠️ Team未初始化，请刷新页面重新开始").send()
-        return
+        # .env 优先：配置可解析即懒初始化 Team；密钥缺失时提示应设置的变量名。
+        from agent.core.team import get_team_instance
+
+        try:
+            team = get_team_instance()
+            user_session.team = team
+        except ValueError as config_error:
+            await cl.Message(content=f"⚠️ {config_error}").send()
+            return
 
     # per-session 加锁：同一会话的并发请求串行化，避免状态竞态
     lock = _get_session_lock(user_session)
