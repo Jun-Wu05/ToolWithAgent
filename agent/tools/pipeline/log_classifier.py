@@ -191,6 +191,7 @@ def _classify_json_features(
         "feature_count": parsed.get("feature_count", len(parsed.get("classification_details", []))),
         "total_valid_lines": total_lines,
         "covered_lines": matched_lines,
+        "coverage": _build_coverage_block(aggregation),
         "classification_details": parsed.get("classification_details", []),
         # CHANGED: 添加 JSON 格式的 analysis 字段
         "analysis": {
@@ -409,6 +410,7 @@ def _classify_kv_features(
         "feature_count": parsed.get("feature_count", len(parsed.get("classification_details", []))),
         "total_valid_lines": total_lines,
         "covered_lines": matched_lines,
+        "coverage": _build_coverage_block(aggregation),
         "classification_details": parsed.get("classification_details", []),
         # CHANGED: 添加 analysis 字段（纯 KV 格式），语义：delimit=字段分隔符，tab=键值分隔符
         "analysis": {
@@ -480,6 +482,18 @@ def _parse_format_info_dict(format_info: str) -> dict | None:
     except Exception:
         logger.warning("[log_classifier] 解析 format_info 失败，使用默认值")
         return None
+
+
+def _build_coverage_block(aggregation: dict) -> dict:
+    """从聚合结果构建未匹配行覆盖信息；未匹配行不参与分类与规则生成，仅单独展示。"""
+    total = aggregation.get("total_lines", 0)
+    matched = aggregation.get("matched_lines", 0)
+    return {
+        "total_lines": total,
+        "matched_lines": matched,
+        "unmatched_lines": aggregation.get("unmatched_lines", total - matched),
+        "unmatched_samples": aggregation.get("unmatched_samples", []),
+    }
 
 
 def _do_classify_log_features(

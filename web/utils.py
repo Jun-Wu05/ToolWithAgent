@@ -105,6 +105,26 @@ def render_log_parser_result(
         lines.append(f"| 字段分隔符 | {delimit or '判断失败'} |")
         lines.append(f"| 键值分隔符 | {tab or '判断失败'} |")
 
+    # 未匹配行覆盖信息：不含分类特征字段的行不归入任何类型，单独提示而非进入分类。
+    coverage = classification.get("coverage") or {}
+    unmatched_lines = int(coverage.get("unmatched_lines", 0) or 0)
+    if unmatched_lines > 0:
+        total_lines = int(coverage.get("total_lines", 0) or 0)
+        lines.append("")
+        lines.append(f"### ⚠️ 未归入任何类型：{unmatched_lines}/{total_lines} 行")
+        unmatched_samples = coverage.get("unmatched_samples") or []
+        if unmatched_samples:
+            lines.append("")
+            lines.append("```")
+            for sample in unmatched_samples:
+                lines.append(str(sample))
+            lines.append("```")
+        lines.append("")
+        lines.append(
+            "这些行不含分类特征字段，可能属于其他日志类型字段；"
+            "可指定其他字段作为日志类型，或改用自动探测重新提取。"
+        )
+
     if overall_summary:
         lines.append("")
         lines.append(f"### 📝 综合描述")

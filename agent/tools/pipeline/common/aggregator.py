@@ -78,6 +78,7 @@ def aggregate_by_field(
 
     value_counter: Counter[str] = Counter()
     value_samples: dict[str, list[str]] = {}
+    unmatched_samples: list[str] = []
 
     # CHANGED: 添加日志，显示是否剥离了日志头
     if header_end_marker:
@@ -88,6 +89,11 @@ def aggregate_by_field(
     for line in lines:
         feature_value = extractor(line, feature_field)
         if feature_value is None:
+            # 未匹配行不归入任何类型；保留少量样本供覆盖信息展示。
+            if len(unmatched_samples) < sample_limit:
+                sample = line[:sample_max_chars].strip()
+                if sample not in unmatched_samples:
+                    unmatched_samples.append(sample)
             continue
 
         matched_lines += 1
@@ -122,6 +128,8 @@ def aggregate_by_field(
     return {
         "total_lines": total_lines,
         "matched_lines": matched_lines,
+        "unmatched_lines": total_lines - matched_lines,
+        "unmatched_samples": unmatched_samples,
         "feature_field": feature_field,
         "values": values_dict,
         "value_count": len(value_counter),
