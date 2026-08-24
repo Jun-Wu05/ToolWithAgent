@@ -266,3 +266,100 @@ def test真实Planner使用零温度且仍不挂载业务工具(monkeypatch):
     agent = planner_module.create_planner_agent()
 
     assert agent.model.temperature == 0
+
+
+async def _bare_log_parse_runner(_planner_input: str):
+    """模拟模型漏掉显式字段参数：返回不带 feature_field 的裸 log_parse。"""
+    return PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-log-bare",
+            "steps": [{"step_id": "log-1", "type": "log_parse"}],
+        }
+    )
+
+
+def test显式日志类型短语但计划缺字段时确定性澄清():
+    """用户说“把 category 作为日志类型”而计划缺 feature_field 时必须追问，不得静默自动探测。"""
+    from agent.core.planner import PlannerService
+
+    planner = PlannerService(runner=_bare_log_parse_runner)
+    decision = asyncio.run(planner.plan(
+        user_text="把 category 字段作为日志类型",
+        conversation_history=[],
+        session_facts=SessionFacts(has_logs=True),
+    ))
+
+    assert decision.decision == "clarification"
+    assert decision.reason_code == "explicit_feature_field_ignored"
+    assert not decision.steps
+
+
+def test复合句缺日志类型提取步骤时确定性澄清():
+    """复合句被模型砍掉后半步骤时同样拦截，宁可追问不静默丢意图。"""
+    from agent.core.planner import PlannerService
+
+    async def enum_only_runner(_planner_input: str):
+        return PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "plan_id": "plan-enum-only",
+                "steps": [
+                    {
+                        "step_id": "enum-1",
+                        "type": "enum_extract",
+                        "target_field": "category",
+                        "source_ref": "session.logs",
+                    }
+                ],
+            }
+        )
+
+    planner = PlannerService(runner=enum_only_runner)
+    decision = asyncio.run(planner.plan(
+        user_text="提取 category 的枚举值，然后按 category 做日志类型分类",
+        conversation_history=[],
+        session_facts=SessionFacts(has_logs=True, available_fields=("category",)),
+    ))
+
+    assert decision.decision == "clarification"
+    assert decision.reason_code == "explicit_feature_field_ignored"
+
+
+def test无显式短语时守卫不干预裸log_parse():
+    """用户没点名字段时裸 log_parse 合法，守卫不得改写。"""
+    from agent.core.planner import PlannerService
+
+    planner = PlannerService(runner=_bare_log_parse_runner)
+    decision = asyncio.run(planner.plan(
+        user_text="日志类型提取",
+        conversation_history=[],
+        session_facts=SessionFacts(has_logs=True),
+    ))
+
+    assert decision.decision == "execute"
+    assert decision.steps[0].type == "log_parse"
+
+
+def test计划已携带feature_field时守卫不干预():
+    """计划已带 feature_field 时不构成矛盾，原决策保留。"""
+    from agent.core.planner import PlannerService
+
+    async def explicit_runner(_planner_input: str):
+        return PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "plan_id": "plan-log-field",
+                "steps": [{"step_id": "log-1", "type": "log_parse", "feature_field": "category"}],
+            }
+        )
+
+    planner = PlannerService(runner=explicit_runner)
+    decision = asyncio.run(planner.plan(
+        user_text="把 category 字段作为日志类型",
+        conversation_history=[],
+        session_facts=SessionFacts(has_logs=True),
+    ))
+
+    assert decision.decision == "execute"
+    assert decision.steps[0].feature_field == "category"
