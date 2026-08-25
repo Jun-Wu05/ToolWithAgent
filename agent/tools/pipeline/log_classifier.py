@@ -16,6 +16,7 @@ Step 2 — 日志特征分类器。
 from __future__ import annotations
 
 import json
+import re as _re_mod
 
 import httpx
 from agno.tools import tool
@@ -290,6 +291,24 @@ def _classify_kv_features(
                         f"[_classify_kv_features] 日志体为空，保留原始行: {line[:100]}"
                     )
             body_logs = '\n'.join(body_lines)
+
+            # 确定性回退（PR #121 修复）：剥离使特征键行存在率大幅下降 → marker 无效。
+            # 典型：幻觉 marker 等于字段分隔符，把行首第一个字段（常为特征字段）剥掉。
+            probe = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
+            before_hits = sum(
+                1 for line in lines if probe.extract_value(line, feature_field) is not None
+            )
+            after_hits = sum(
+                1 for line in body_lines if probe.extract_value(line, feature_field) is not None
+            )
+            if before_hits > 0 and after_hits < before_hits * 0.5:
+                logger.warning(
+                    f"[_classify_kv_features] header_end_marker='{header_end_marker}' 剥离使特征键 "
+                    f"'{feature_field}' 行存在率 {before_hits}->{after_hits}，判定 marker 无效，回退不剥离"
+                )
+                body_lines = lines
+                body_logs = logs_str
+
             logger.info(
                 f"[_classify_kv_features] 使用 header_end_marker='{header_end_marker}' 提取日志体: "
                 f"成功={extracted_count}/{len(lines)}, "
@@ -496,6 +515,60 @@ def _build_coverage_block(aggregation: dict) -> dict:
     }
 
 
+# 行首「标签: 」前缀（如 "Alarm: "），仅在去掉后能解锁特征键提取时才剥离
+_LABEL_PREFIX_RE = _re_mod.compile(r"^(\S{1,32}):\s+")
+
+
+def _kv_key_line_coverage(
+    logs_str: str, feature_field: str, delimit: str, tab: str, max_lines: int = 50
+) -> float:
+    """全行扫描特征键的行覆盖率（0~1），供确定性路由判定。"""
+    from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
+
+    probe = KvExtractor(field_delimit=delimit, kv_delimit=tab)
+    lines = [l for l in logs_str.strip().split("\n") if l.strip()][:max_lines]
+    if not lines:
+        return 0.0
+    hit = sum(1 for line in lines if probe.extract_value(line, feature_field) is not None)
+    return hit / len(lines)
+
+
+def _json_key_line_coverage(logs_str: str, feature_field: str, max_lines: int = 50) -> float:
+    """JSON 特征键（含点分路径）的行覆盖率（0~1）。"""
+    from agent.tools.pipeline.extractors.json_extractor import JsonExtractor
+
+    probe = JsonExtractor()
+    lines = [l for l in logs_str.strip().split("\n") if l.strip()][:max_lines]
+    if not lines:
+        return 0.0
+    hit = sum(1 for line in lines if probe.extract_value(line, feature_field) is not None)
+    return hit / len(lines)
+
+
+def _normalize_body_key_lines(
+    logs_str: str, feature_field: str, delimit: str, tab: str
+) -> str:
+    """行级规范化：仅当该行提取不到特征键、且去掉行首『标签: 』前缀后能提取时才去前缀。
+
+    混合形态日志（部分行 `Type=...` 直开头、部分行 `Alarm: Type=...` 带标签前缀）
+    由此在同一次聚合里全部可提取；无前缀行与其他键不受影响。
+    """
+    from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
+
+    probe = KvExtractor(field_delimit=delimit, kv_delimit=tab)
+    normalized = []
+    for line in logs_str.split("\n"):
+        if line.strip() and probe.extract_value(line, feature_field) is None:
+            prefix = _LABEL_PREFIX_RE.match(line)
+            if prefix:
+                stripped = line[prefix.end() :]
+                if probe.extract_value(stripped, feature_field) is not None:
+                    normalized.append(stripped)
+                    continue
+        normalized.append(line)
+    return "\n".join(normalized)
+
+
 def _do_classify_log_features(
     logs_str: str,
     format_type: str = "unknown",
@@ -542,6 +615,8 @@ def _do_classify_log_features(
         )
 
     # ---- 用户显式指定的分类特征字段：跳过 Step 2a，强制按日志体路径使用该字段 ----
+    # 不做任何头部剥离（Step 1 幻觉的 header_end_marker 可能等于字段分隔符，
+    # 会把行首第一个字段——常为用户点名的特征字段——当日志头剥掉）。
     if feature_field_explicit and feature_field and feature_field.strip():
         logger.info(
             f"[_do_classify_log_features] 显式分类特征字段 '{feature_field}'，"
@@ -549,13 +624,20 @@ def _do_classify_log_features(
         )
         explicit_info = _parse_format_info_dict(format_info)
         if is_kv:
+            info = explicit_info or {}
+            normalized = _normalize_body_key_lines(
+                logs_str,
+                feature_field,
+                info.get("delimit", ";") or ";",
+                info.get("tab", "=") or "=",
+            )
             return _classify_kv_features(
-                logs_str=logs_str,
+                logs_str=normalized,
                 format_type=format_type,
                 format_detail=format_detail,
                 feature_field=feature_field,
                 format_info=explicit_info,
-                header_end_marker=header_end_marker,
+                header_end_marker="",
             )
         return _classify_json_features(
             logs_str=logs_str,
@@ -565,6 +647,49 @@ def _do_classify_log_features(
             format_info=None,
             header_end_marker=header_end_marker,
         )
+
+    # ---- 确定性路由：特征键作为日志体键覆盖绝大多数行时，跳过头部路由与剥离 ----
+    # 特征键明明是日志体键时不走 Step 2a 头部聚类采样（避免采样覆盖丢失），
+    # 也不应用任何 header_end_marker 剥离；真头部特征（键不在行内）保持原路由。
+    if feature_field and feature_field.strip() and feature_field != "__header__":
+        routing_info = _parse_format_info_dict(format_info) or {}
+        if is_kv:
+            routing_delimit = routing_info.get("delimit", ";") or ";"
+            routing_tab = routing_info.get("tab", "=") or "="
+            normalized = _normalize_body_key_lines(
+                logs_str, feature_field, routing_delimit, routing_tab
+            )
+            coverage = _kv_key_line_coverage(
+                normalized, feature_field, routing_delimit, routing_tab
+            )
+            if coverage >= 0.8:
+                logger.info(
+                    f"[_do_classify_log_features] 特征键 '{feature_field}' 行覆盖率 "
+                    f"{coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
+                )
+                return _classify_kv_features(
+                    logs_str=normalized,
+                    format_type=format_type,
+                    format_detail=format_detail,
+                    feature_field=feature_field,
+                    format_info=routing_info,
+                    header_end_marker="",
+                )
+        else:
+            coverage = _json_key_line_coverage(logs_str, feature_field)
+            if coverage >= 0.8:
+                logger.info(
+                    f"[_do_classify_log_features] JSON 特征键 '{feature_field}' 行覆盖率 "
+                    f"{coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
+                )
+                return _classify_json_features(
+                    logs_str=logs_str,
+                    format_type=format_type,
+                    format_detail=format_detail,
+                    feature_field=feature_field,
+                    format_info=None,
+                    header_end_marker="",
+                )
 
     # ---- 日志头+KV：执行 Step 2a 特征定位 ----
     if is_kv and has_header:

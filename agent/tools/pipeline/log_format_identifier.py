@@ -184,6 +184,18 @@ def _do_identify_log_format(logs_str: str) -> str:
         # 确定性一致性校验：纠正 LLM 误报 JSON（body 实为 KV）的情况
         _enforce_format_consistency(parsed, sampled)
 
+        # 确定性防护（PR #121 修复）：header_end_marker 等于字段分隔符时必为幻觉——
+        # 它会把每行第一个字段（常为分类特征字段）当日志头剥掉。真实日志头标记
+        # （如 " - "、": "）不会等于分隔符，不受影响。
+        marker_value = str(parsed.get("header_end_marker", "") or "").strip()
+        delimit_value = str(parsed.get("delimit", "") or "").strip()
+        if marker_value and delimit_value and marker_value == delimit_value:
+            logger.warning(
+                f"[identify_log_format] header_end_marker='{marker_value}' 与字段分隔符相同，"
+                f"判定为幻觉，已清空"
+            )
+            parsed["header_end_marker"] = ""
+
         # 非 JSON 格式标记为不支持
         if parsed["format"] == "unknown":
             logger.info(
