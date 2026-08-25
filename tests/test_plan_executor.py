@@ -106,18 +106,36 @@ def test显式分类特征字段不存在时保留旧分类结果():
     assert session["log_classification"] == {"旧类型": {"feature": "old"}}
 
 
-def test显式分类特征字段大小写不一致时提示最接近键():
-    """执行用精确匹配；大小写差异只在追问文案中提示，不自动纠正。"""
+def test显式分类特征字段大小写不敏感唯一匹配时规范化执行():
+    """追问后单字回复「Category」不再被拦截：唯一大小写匹配规范化为 category（#122）。"""
     adapter = RecordingAdapter([_success_log_result()])
 
     report = _execute_with_session(
         _log_parse_decision("Category"), {"log_parse": adapter}, KV_SESSION
     )
 
+    assert report.status == StepStatus.SUCCESS
+    assert len(adapter.calls) == 1
+    # 传给适配器的是规范化后的真实键名
+    assert adapter.calls[0][0].feature_field == "category"
+
+
+def test显式分类特征字段大小写歧义时仍拦截():
+    """存在多个仅大小写不同的键时不得代用户选择，停下追问并列明歧义。"""
+    session = {
+        "raw_log_lines": ["Category=a src=1.1.1.1", "CATEGORY=b src=2.2.2.2"]
+    }
+    adapter = RecordingAdapter([_success_log_result()])
+
+    report = _execute_with_session(
+        _log_parse_decision("category"), {"log_parse": adapter}, session
+    )
+
     assert report.status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "feature_field_not_found"
     message = report.results[0].message or ""
-    assert "category" in message
-    assert "最接近" in message
+    assert "仅大小写不同" in message
+    assert adapter.calls == []
 
 
 def test显式分类特征字段存在时放行执行():

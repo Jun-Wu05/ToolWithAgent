@@ -237,10 +237,12 @@ class PlanExecutor:
         step: LogParseStep,
         session: dict,
     ) -> StepResult | None:
-        """显式分类特征字段必须精确存在于日志体键集合，否则停下追问可用键。
+        """显式分类特征字段必须存在于日志体键集合，否则停下追问可用键。
 
-        不代用户改参、不做大小写自动纠正；纠偏信息只出现在追问文案中
-        （PRD #110「执行前键存在校验」）。
+        精确命中直接放行；未精确命中但**大小写不敏感匹配唯一**时，
+        确定性规范化为该键后放行（issue #122：追问后单字回复「Type」
+        不应再被拦截一次）。匹配多个或零个时才停下追问；纠偏信息
+        只出现在追问文案中，不代用户在歧义场景改参（PRD #110）。
         """
         from web.field_source import extract_log_body_keys
 
@@ -251,16 +253,32 @@ class PlanExecutor:
         if step.feature_field in available_keys:
             return None
 
-        nearest = next(
-            (key for key in available_keys if key.lower() == step.feature_field.lower()),
-            None,
+        case_matches = [
+            key for key in available_keys if key.lower() == step.feature_field.lower()
+        ]
+        if len(case_matches) == 1:
+            canonical = case_matches[0]
+            logger.info(
+                "[FEATURE_FIELD] 大小写不敏感唯一匹配，规范化执行: "
+                "step_id=%s feature_field=%s -> %s",
+                step.step_id,
+                step.feature_field,
+                canonical,
+            )
+            step.feature_field = canonical
+            return None
+
+        nearest = case_matches[0] if case_matches else None
+        ambiguity = (
+            f"（存在多个仅大小写不同的键：{'、'.join(case_matches)}）" if case_matches else ""
         )
         hint = f"（与「{step.feature_field}」最接近：{nearest}）" if nearest else ""
         return self._needs_input_result(
             step,
             "feature_field_not_found",
             (
-                f"日志类型提取未执行：日志中不存在字段「{step.feature_field}」{hint}。"
+                f"日志类型提取未执行：日志中不存在字段「{step.feature_field}」"
+                f"{hint}{ambiguity}。"
                 f"日志中可用的字段：{'、'.join(available_keys)}。"
                 "请回复要作为日志类型的字段名，或直接说“日志类型提取”由系统自动探测。"
             ),
