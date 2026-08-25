@@ -51,17 +51,36 @@ def _validate_and_correct_mapping(mapping: dict) -> dict:
     校验单条映射的「系统属性名称」是否在标准字段表中。
 
     - 若"未匹配"则跳过校验（合法状态）
+    - 若匹配成功但名称在映射目标黑名单（系统固定字段）中 → 强制改为"未匹配"并记录警告
     - 若匹配成功但名称不在白名单中 → 强制改为"未匹配"并记录警告
 
     Returns:
         校验/修正后的映射 dict（可能是原始引用或新 dict）
     """
+    from agent.tools.rule_generator.field_mapping import MAPPING_EXCLUDED_STANDARD_FIELDS
+
     system_property = mapping.get("系统属性名称", "")
     match_status = mapping.get("匹配状态", "")
 
     # "未匹配" 是合法终态，无需校验
     if system_property == "未匹配":
         return mapping
+
+    # 系统固定字段（事件名称/事件级别/日志类型等）由固定机制独占，不允许映射占用（issue #125）
+    if system_property in MAPPING_EXCLUDED_STANDARD_FIELDS:
+        logger.warning(
+            f"[VALIDATOR] 系统固定字段 → 强制降级为未匹配: "
+            f"原始字段={mapping.get('原始字段名', '?')}, 目标='{system_property}'"
+        )
+        return {
+            "原始字段名": mapping.get("原始字段名", ""),
+            "系统属性名称": "未匹配",
+            "匹配状态": "未匹配",
+            "_校正原因": (
+                f"'{system_property}' 是系统固定字段（由事件名称标注等机制独占），"
+                f"不允许字段映射占用"
+            ),
+        }
 
     valid_names = _get_valid_field_names()
     if not valid_names:

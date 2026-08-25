@@ -7,12 +7,20 @@
 import copy
 from typing import Any
 
+from agent.shared.event_classify import EVENT_LEVEL_FIELD, EVENT_NAME_FIELD
 
 # normalize entries 的 index 排除集合：系统自动生成的元字段，不参与用户字段映射
 # web/action_callbacks.py 也引用此常量（原散落 4 处 literal）
 # 事件名称/事件级别：事件名称标注链路写入的固定字段（PRD #124），与日志类型同为元字段
 EXCLUDED_FIELD_INDICES = frozenset(
     {"original_log", "日志类型", "事件名称", "事件级别"}
+)
+
+# 映射目标黑名单：被系统固定字段机制独占的标准字段，禁止用户字段映射占用
+# （issue #125）。与 EXCLUDED_FIELD_INDICES 对称：前者管映射输入侧（index 排除），
+# 本常量管映射目标侧（候选过滤 + 白名单降级）。后续新增固定枚举字段只加一个名字。
+MAPPING_EXCLUDED_STANDARD_FIELDS = frozenset(
+    {EVENT_NAME_FIELD, EVENT_LEVEL_FIELD, "日志类型"}
 )
 
 

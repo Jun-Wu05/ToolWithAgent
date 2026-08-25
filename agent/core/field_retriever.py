@@ -757,6 +757,36 @@ def _log_retrieve_trace(
         stage3,
     )
 
+def _apply_mapping_exclusions(
+    embeddings: Optional[np.ndarray], records: list[dict]
+) -> tuple[Optional[np.ndarray], list[dict]]:
+    """按映射目标黑名单同步剔除记录行与嵌入行（issue #125）。
+
+    系统固定字段（事件名称/事件级别/日志类型）不允许被字段映射占用，
+    在结构化阶段统一剔除，使精确匹配、去前缀变体与语义检索三层候选
+    都不再出现这些字段。嵌入矩阵与记录按行对齐同步删除，不触碰磁盘缓存。
+    """
+    from agent.tools.rule_generator.field_mapping import MAPPING_EXCLUDED_STANDARD_FIELDS
+
+    if not records or embeddings is None:
+        return embeddings, records
+    keep_indices = [
+        i for i, rec in enumerate(records)
+        if rec.get("系统属性名称", "") not in MAPPING_EXCLUDED_STANDARD_FIELDS
+    ]
+    if len(keep_indices) == len(records):
+        return embeddings, records
+    dropped = len(records) - len(keep_indices)
+    filtered_records = [records[i] for i in keep_indices]
+    filtered_embeddings = embeddings[np.array(keep_indices, dtype=int)]
+    logger.info(
+        "[RETRIEVE] 映射目标黑名单生效：剔除 %s 条固定字段记录，剩余 %s 条",
+        dropped,
+        len(filtered_records),
+    )
+    return filtered_embeddings, filtered_records
+
+
 def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str:
     """
     对一批原始字段名执行语义检索，返回紧凑格式的候选列表。
@@ -777,7 +807,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
     if not raw_field_names:
         return ""
 
-    # 加载缓存，不存在则自动初始化
+    # 加载缓存，不存在则自动初始化；随后按映射目标黑名单剔除固定字段行
     embeddings, records = _load_cache()
     if embeddings is None or records is None:
         logger.info("[RETRIEVE] 缓存不存在，尝试自动初始化")
@@ -787,6 +817,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         embeddings, records = _load_cache()
         if embeddings is None or records is None:
             return ""
+    embeddings, records = _apply_mapping_exclusions(embeddings, records)
 
     # 批量嵌入用户字段名 — 按 EMBEDDING_BATCH_SIZE 分批，防止 413 Request Entity Too Large
     all_vectors: list[np.ndarray] = []

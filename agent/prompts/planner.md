@@ -38,6 +38,8 @@
 - “删除字段 X”“移除字段 X”“去掉字段 X”是 `delete_fields`（移除整个字段及其条目）；“取消/删除 X 的映射”“清空 X 的值映射”是 `remove_mapping`（只清 mappings，字段保留）。两者不可互换：没提“映射”二字、只针对字段本身的删除是 `delete_fields`。
 - “添加字段 X，值为 Y”“新增字段 X 引用 Z”是 `add_fields`；“把 X 的枚举值填充回配置”是 `fill`。“合并字段 A 和 B 成 C”是 `merge_fields`。
 - 字段调整步骤的目标数据由 `config_ref` 显式指定；用户未点名时取 `available_config_refs` 优先级（同时存在优先 `session.mapped_sub_rules`），不得生成无 config_ref 的字段步骤。
+- 【事件名称】【事件级别】【日志类型】是系统固定字段，由事件名称标注等机制独占；用户要求把某原始字段映射成这三个字段时 Clarification 说明这一约束，不得生成 `field_mapping` 步骤硬填。
+- 用户要求“填充/修改事件级别”时，正确路径是修改【事件名称】（`delete_fields` 删除事件名称和事件级别后 `add_fields` 新事件名称，级别自动联动）；不得对这两个字段生成 `fill` 或单独的 add_fields(事件级别) 步骤。
 - 只有明确的“提取 <字段> 的枚举值”才是 `enum_extract`，并且必须携带 `target_field`。
 - “日志分类”指日志类型分类；“提取事件级别的枚举值”指字段枚举提取，两者不可互换。
 - “枚举值处理”：存在可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）和枚举映射表时，“枚举值填充”“填充回配置”“写入解析规则”都表示枚举填充，**直接生成填充步骤，不必追问目标字段**——用户点名了目标字段就只填该字段；未点名就填充 `enum_mapping_target_fields` 的**全部**字段（多 sheet 映射表每个 sheet 的目标字段都填）。仅当缺少枚举映射表或可用配置时才追问/请求上传；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
@@ -69,13 +71,13 @@
 ```json
 {"decision":"execute","plan_id":"plan-threat","steps":[{"step_id":"threat-1","type":"threat_mapping","source_ref":"user.values","values":["SQL注入","暴力破解"]}]}
 ```
-把枚举映射表填充回事件级别（映射表与可用配置；`config_ref` 用 `decoded_config` 或 `mapped_sub_rules` 均可）：
+把枚举映射表填充回设备类型（映射表与可用配置；`config_ref` 用 `decoded_config` 或 `mapped_sub_rules` 均可）：
 ```json
-{"decision":"execute","plan_id":"plan-fill","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"enum","target_fields":["事件级别"],"source_ref":"session.enum_mapping_table","config_ref":"session.decoded_config"}]}
+{"decision":"execute","plan_id":"plan-fill","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"enum","target_fields":["设备类型"],"source_ref":"session.enum_mapping_table","config_ref":"session.decoded_config"}]}
 ```
-取消事件级别的值映射（子规则可用）：
+取消设备类型的值映射（子规则可用）：
 ```json
-{"decision":"execute","plan_id":"plan-remove","steps":[{"step_id":"remove-1","type":"remove_mapping","target_fields":["事件级别"],"config_ref":"session.mapped_sub_rules"}]}
+{"decision":"execute","plan_id":"plan-remove","steps":[{"step_id":"remove-1","type":"remove_mapping","target_fields":["设备类型"],"config_ref":"session.mapped_sub_rules"}]}
 ```
 导出映射后的配置（子规则可用）：
 ```json
