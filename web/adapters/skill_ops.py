@@ -22,8 +22,10 @@ from agent.shared.logger import get_logger
 from web.plan_executor import ExecutionContext
 from contracts.planner_models import (
     AddFieldsStep,
+    DecodeFieldsStep,
     DeleteFieldsStep,
     MergeFieldsStep,
+    RegexExtractStep,
     StepResult,
     StepSpec,
 )
@@ -47,6 +49,14 @@ FIELD_SKILL_REGISTRY: dict[str, tuple[str, str]] = {
     "add_fields": (r"skills\add-fields\scripts\add_fields.py", "add_field"),
     "delete_fields": (r"skills\delete-fields\scripts\delete_fields.py", "delete_field"),
     "merge_fields": (r"skills\merge-fields\scripts\merge_fields.py", "merge_fields"),
+    "decode_fields": (
+        r"skills\base64-decode-fields\scripts\decode_fields.py",
+        "decode_fields",
+    ),
+    "regex_extract": (
+        r"skills\regex-extract-field\scripts\extract_field.py",
+        "extract_field",
+    ),
 }
 
 _skill_function_cache: dict[str, Any] = {}
@@ -82,6 +92,10 @@ def _map_skill_error(message: str) -> str:
         return "reserved_field_rejected"
     if "已存在" in message:
         return "field_conflict"
+    if "无法全匹配" in message:
+        return "pattern_mismatch"
+    if "不合法" in message and "正则" in message:
+        return "invalid_pattern"
     if "不存在" in message:
         return "field_not_found"
     if "至少需要" in message:
@@ -111,12 +125,60 @@ def _field_exists_in_config(config: Any, field_name: str) -> bool:
     return _walk(config)
 
 
+def _first_field_sample(config: Any, field_name: str) -> str | None:
+    """递归查找字段的第一条样本值（normalize result[0]），供正则生成。"""
+
+    def _walk(node: Any) -> str | None:
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for entry in normalize:
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("index") == field_name
+                        and isinstance(entry.get("result"), list)
+                        and entry["result"]
+                        and str(entry["result"][0]).strip()
+                    ):
+                        return str(entry["result"][0])
+            for value in node.values():
+                found = _walk(value)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for item in node:
+                found = _walk(item)
+                if found is not None:
+                    return found
+        return None
+
+    return _walk(config)
+
+
+def _description_keyword(description: str) -> str:
+    """从提取目标描述提取关键词，供缺省字段命名。
+
+    「请求头里的 Referer」→ Referer；「client」→ client。
+    取最后一个按空白与常见连接词切分的片段，保留字母数字下划线连字符。
+    """
+    import re
+
+    tokens = re.split(r"[\s里中的:：,，/、]+", description.strip())
+    for token in reversed(tokens):
+        cleaned = re.sub(r"[^0-9A-Za-z_-]", "", token)
+        if cleaned:
+            return cleaned
+    return ""
+
+
 class FieldSkillAdapter:
     """字段调整适配器：读配置 → 调 skill 函数 → 写回 session → 产出下载产物。"""
 
-    def __init__(self, skill_runner: Any = None):
-        """skill_runner 注入接缝：默认走注册表加载，测试传构造假件。"""
+    def __init__(self, skill_runner: Any = None, regex_llm: Any = None):
+        """skill_runner / regex_llm 注入接缝：默认走注册表加载与真实
+        正则生成，测试传构造假件。"""
         self._skill_runner = skill_runner or _load_skill_function
+        self._regex_llm = regex_llm
 
     async def execute(
         self,
@@ -124,14 +186,18 @@ class FieldSkillAdapter:
         context: ExecutionContext,
         dependencies: Mapping[str, StepResult],
     ) -> StepResult:
-        """执行一个字段调整步骤；三类步骤共用本适配器，按类型取参。"""
+        """执行一个字段调整步骤；各步骤类型共用本适配器，按类型取参。"""
         if isinstance(step, AddFieldsStep):
             return self._execute_add(step, context)
         if isinstance(step, DeleteFieldsStep):
             return self._execute_delete(step, context)
         if isinstance(step, MergeFieldsStep):
             return self._execute_merge(step, context)
-        raise TypeError("FieldSkillAdapter 只接受 add/delete/merge 字段步骤")
+        if isinstance(step, DecodeFieldsStep):
+            return self._execute_decode(step, context)
+        if isinstance(step, RegexExtractStep):
+            return await self._execute_regex_extract(step, context)
+        raise TypeError("FieldSkillAdapter 只接受字段调整类步骤")
 
     # ---- 三类步骤的参数翻译与后处理 ----
 
@@ -192,6 +258,64 @@ class FieldSkillAdapter:
             return self._skill_error(step, result)
 
         return self._finish(step, context, result["data"], str(result.get("message", "")))
+
+    def _execute_decode(self, step: DecodeFieldsStep, context: ExecutionContext) -> StepResult:
+        """base64 解码：filter 写入运行时 OGNL 原地覆盖，不双写 normalize。"""
+        config = _read_config(context.session, step.config_ref)
+        if not config:
+            return _failed(step, "config_required", "当前没有可调整的解析规则")
+
+        result = self._skill_runner("decode_fields")(config, list(step.fields))
+        if result.get("status") != "success":
+            return self._skill_error(step, result)
+
+        return self._finish(step, context, result["data"], str(result.get("message", "")))
+
+    async def _execute_regex_extract(
+        self, step: RegexExtractStep, context: ExecutionContext
+    ) -> StepResult:
+        """正则提取：用户未提供正则时按样本生成并校验，再执行双写。"""
+        from agent.shared.regex_extract import generate_extraction_pattern
+
+        config = _read_config(context.session, step.config_ref)
+        if not config:
+            return _failed(step, "config_required", "当前没有可调整的解析规则")
+
+        pattern = step.pattern
+        if not pattern:
+            sample = _first_field_sample(config, step.source_field)
+            if sample is None:
+                return _failed(
+                    step,
+                    "sample_required",
+                    f"被提取字段「{step.source_field}」没有样本值，无法生成正则；"
+                    "请直接提供正则表达式或换一个有样本的字段",
+                )
+            try:
+                pattern = await generate_extraction_pattern(
+                    sample,
+                    step.source_field,
+                    step.description,
+                    llm_client=self._regex_llm,
+                )
+            except Exception as error:  # noqa: BLE001 - 生成失败统一转为稳定错误码
+                logger.warning(
+                    "[REGEX_EXTRACT] 生成失败: step_id=%s error=%s", step.step_id, error
+                )
+                return _failed(step, "regex_generation_failed", f"正则生成失败：{error}")
+
+        result = self._skill_runner("regex_extract")(
+            config,
+            step.new_field or None,
+            step.source_field,
+            pattern,
+            keyword=_description_keyword(step.description),
+        )
+        if result.get("status") != "success":
+            return self._skill_error(step, result)
+
+        message = str(result.get("message", "")) + f"；正则: {pattern}"
+        return self._finish(step, context, result["data"], message)
 
     # ---- 守卫与收尾 ----
 

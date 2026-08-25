@@ -38,7 +38,7 @@
 
 ### 字段调整（Field Adjust）
 
-对解析规则（用户上传的 Base64 配置或映射生成的子规则）执行的字段级操作：**添加**（固定值或 `%{index}` 引用，双写 filter 的 addFields + normalize 条目）、**删除**（removeFields + normalize 移除，保留字段 original_log / rule_name_list / 日志类型 拦截）、**合并**（merger filter + normalize 预览条目）。经 `add_fields` / `delete_fields` / `merge_fields` 类型化步骤由 Field Skill Adapter 调用 skills/ 目录脚本（单一事实源）执行，结果写回原配置来源（config_ref），两类配置并存时优先 mapped_sub_rules。
+对解析规则（用户上传的 Base64 配置或映射生成的子规则）执行的字段级操作：**添加**（固定值或 `%{index}` 引用，双写 filter 的 addFields + normalize 条目）、**删除**（removeFields + normalize 移除，保留字段 original_log / rule_name_list / 日志类型 拦截）、**合并**（merger filter + normalize 预览条目）、**base64 解码**（解码 addFields 写运行时 OGNL，原地覆盖已有字段值，不新增字段）、**正则提取**（customFunction 过滤器 + normalize 双写；正则由执行器按样本 LLM 生成并强制 re.fullmatch 全匹配校验，Planner 不编造正则；「原始日志里的 X」指 original_log、「请求头里的 X」指 req_header）。全部经类型化步骤由 Field Skill Adapter 调用 skills/ 目录脚本（单一事实源）执行，结果写回原配置来源（config_ref），两类配置并存时优先 mapped_sub_rules。
 
 - 消歧边界：「删除字段 X」是字段调整（移除整个字段）；「取消/删除 X 的映射」是取消映射（只清 mappings，字段保留）。两者不可互换。
 - 手动添加【事件名称】时受绑定守卫约束：值必须在 21 个合法分类名内，事件级别自动联动写入。

@@ -50,6 +50,8 @@ _OPERATION_LABELS = {
     "add_fields": "添加字段",
     "delete_fields": "删除字段",
     "merge_fields": "合并字段",
+    "decode_fields": "base64 解码字段",
+    "regex_extract": "正则提取字段",
 }
 
 

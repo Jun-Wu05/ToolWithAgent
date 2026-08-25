@@ -183,6 +183,33 @@ class MergeFieldsStep(StrictContract):
     depends_on: tuple[str, ...] = ()
 
 
+class DecodeFieldsStep(StrictContract):
+    """描述对解析规则指定字段启用 base64 运行时解码的步骤。"""
+
+    step_id: str = Field(min_length=1)
+    type: Literal["decode_fields"]
+    fields: tuple[str, ...] = Field(min_length=1)
+    config_ref: ConfigRef
+    depends_on: tuple[str, ...] = ()
+
+
+class RegexExtractStep(StrictContract):
+    """描述用正则从已有字段提取新字段的步骤。
+
+    正则由执行器按样本生成并做全匹配校验，Planner 不生成正则；
+    ``pattern`` 仅当用户直接提供正则表达式时携带。
+    """
+
+    step_id: str = Field(min_length=1)
+    type: Literal["regex_extract"]
+    source_field: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    new_field: str = ""
+    pattern: str = ""
+    config_ref: ConfigRef
+    depends_on: tuple[str, ...] = ()
+
+
 class ExportStep(StrictContract):
     """描述导出步骤，来源必须指向 session 或本次计划产物。"""
 
@@ -223,6 +250,8 @@ StepSpec = Annotated[
         AddFieldsStep,
         DeleteFieldsStep,
         MergeFieldsStep,
+        DecodeFieldsStep,
+        RegexExtractStep,
         ExportStep,
     ],
     Field(discriminator="type"),
