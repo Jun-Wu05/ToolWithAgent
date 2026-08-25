@@ -200,8 +200,14 @@ class ModelManager:
         _models_cache.clear()
 
     @staticmethod
-    async def test_connection(provider: str, api_key: str = None) -> Dict:
-        """测试指定供应商 API 连通性；无密钥按静态默认表返回成功。"""
+    async def test_connection(provider: str, api_key: str = None, model: str = None) -> Dict:
+        """测试指定供应商 API 连通性；无密钥按静态默认表返回成功。
+
+        有密钥时两段验证（#123）：模型列表 GET + 1-token 最小对话 POST。
+        对话探测暴露仅靠列表发现不了的问题——余额/配额不足（402）、
+        模型不可用（404）等；成功文案同时注明可用模型数与下拉精选数，
+        消除「可用 417 个」与下拉 60 个的口径落差。
+        """
         provider = (provider or "").lower().strip()
         if provider not in model_config.list_provider_names():
             return {
@@ -215,7 +221,10 @@ class ModelManager:
             models = list(spec.default_models)
             return {
                 "success": True,
-                "message": "✅ 使用静态模型列表（密钥来自环境变量）",
+                "message": (
+                    "✅ 使用静态模型列表（密钥来自环境变量）："
+                    f"可用 {len(models)} 个，下拉精选 {len(_curate_models(models))} 个"
+                ),
                 "models_count": len(models),
                 "models": models,
             }
@@ -226,15 +235,6 @@ class ModelManager:
                     headers={"Authorization": f"Bearer {api_key}"},
                     timeout=10.0,
                 )
-                if response.status_code == 200:
-                    data = response.json()
-                    models = [m["id"] for m in data.get("data", []) if m.get("id")]
-                    return {
-                        "success": True,
-                        "message": "✅ 连接成功",
-                        "models_count": len(models),
-                        "models": models,
-                    }
                 if response.status_code == 401:
                     return {
                         "success": False,
@@ -242,11 +242,76 @@ class ModelManager:
                         "models_count": 0,
                         "models": [],
                     }
+                if response.status_code != 200:
+                    return {
+                        "success": False,
+                        "message": f"❌ 请求失败 (HTTP {response.status_code})",
+                        "models_count": 0,
+                        "models": [],
+                    }
+                data = response.json()
+                models = [m["id"] for m in data.get("data", []) if m.get("id")]
+
+                # 第二段：1-token 最小对话请求，验证聊天链路与余额/配额（#123）
+                probe_model = (model or "").strip()
+                if not probe_model and spec.default_models:
+                    probe_model = spec.default_models[0]
+                if not probe_model and models:
+                    probe_model = models[0]
+                if not probe_model:
+                    return {
+                        "success": True,
+                        "message": "✅ 连接成功（无可用模型名，未验证对话链路）",
+                        "models_count": len(models),
+                        "models": models,
+                    }
+                chat_url = model_config.get_chat_completions_url(spec.name)
+                chat_response = await client.post(
+                    chat_url,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": probe_model,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 1,
+                    },
+                    timeout=20.0,
+                )
+                if chat_response.status_code == 402:
+                    return {
+                        "success": False,
+                        "message": (
+                            "❌ 余额/配额不足（HTTP 402）：模型列表可访问，"
+                            "但对话请求被拒，请充值后重试"
+                        ),
+                        "models_count": 0,
+                        "models": [],
+                    }
+                if chat_response.status_code == 404:
+                    return {
+                        "success": False,
+                        "message": f"❌ 模型不可用（HTTP 404）: {probe_model}",
+                        "models_count": 0,
+                        "models": [],
+                    }
+                if chat_response.status_code != 200:
+                    return {
+                        "success": False,
+                        "message": (
+                            f"❌ 对话请求失败 (HTTP {chat_response.status_code})，"
+                            "模型列表可访问但聊天链路异常"
+                        ),
+                        "models_count": 0,
+                        "models": [],
+                    }
                 return {
-                    "success": False,
-                    "message": f"❌ 请求失败 (HTTP {response.status_code})",
-                    "models_count": 0,
-                    "models": [],
+                    "success": True,
+                    "message": (
+                        f"✅ 连接成功（对话链路已验证，模型 {probe_model}）："
+                        f"可用模型 {len(models)} 个，"
+                        f"下拉精选 {len(_curate_models(models))} 个"
+                    ),
+                    "models_count": len(models),
+                    "models": models,
                 }
         except httpx.TimeoutException:
             return {
@@ -359,8 +424,8 @@ async def on_settings_update(settings: dict):
     loading_msg = cl.Message(content="🔌 **正在测试连接...**")
     await loading_msg.send()
 
-    # 测试连接
-    result = await ModelManager.test_connection(provider, test_key)
+    # 测试连接（携带用户所选模型做对话探测；#123）
+    result = await ModelManager.test_connection(provider, test_key, model=model)
 
     # 移除加载消息
     await loading_msg.remove()

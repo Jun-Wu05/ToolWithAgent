@@ -158,6 +158,115 @@ def test超长模型列表按厂家精选封顶():
     assert "vendor0/model-9" in curated and "vendor9/model-0" in curated
 
 
+# ---------- 连接测试的对话探测（#123） ----------
+
+
+class _ProbeAsyncClient:
+    """GET 模型列表 + POST 对话探测的 httpx.AsyncClient 替身。
+
+    chat_status 控制对话探测响应码；post_calls 记录探测请求供断言。
+    """
+
+    post_calls = []
+    chat_status = 200
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def get(self, url, headers=None, params=None, timeout=None):
+        return SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {"data": [{"id": "m-alpha"}, {"id": "m-beta"}]},
+        )
+
+    async def post(self, url, headers=None, json=None, timeout=None):
+        type(self).post_calls.append({"url": url, "headers": headers, "json": json})
+        return SimpleNamespace(status_code=type(self).chat_status)
+
+
+def test连接测试发对话探测并注明精选数(monkeypatch):
+    """列表成功后追加 1-token 对话探测；成功文案含可用数与精选数（#123）。"""
+    _ProbeAsyncClient.post_calls = []
+    _ProbeAsyncClient.chat_status = 200
+    monkeypatch.setattr(settings_handler.httpx, "AsyncClient", _ProbeAsyncClient)
+
+    result = asyncio.run(
+        settings_handler.ModelManager.test_connection(
+            "siliconflow", "sf-key", model="m-alpha"
+        )
+    )
+
+    assert result["success"] is True
+    assert "对话链路已验证" in result["message"]
+    assert "可用模型 2 个" in result["message"]
+    assert "下拉精选" in result["message"]
+    # 探测请求：规格聊天端点 + 鉴权头 + 所选模型 + max_tokens=1
+    spec = model_config.get_provider_spec("siliconflow")
+    assert len(_ProbeAsyncClient.post_calls) == 1
+    probe = _ProbeAsyncClient.post_calls[0]
+    assert probe["url"] == model_config.get_chat_completions_url(spec.name)
+    assert probe["headers"]["Authorization"] == "Bearer sf-key"
+    assert probe["json"]["model"] == "m-alpha"
+    assert probe["json"]["max_tokens"] == 1
+
+
+def test连接测试未选模型时用规格默认表首个探测(monkeypatch):
+    """用户未选模型时用规格默认表的第一个模型做对话探测。"""
+    _ProbeAsyncClient.post_calls = []
+    _ProbeAsyncClient.chat_status = 200
+    monkeypatch.setattr(settings_handler.httpx, "AsyncClient", _ProbeAsyncClient)
+
+    result = asyncio.run(
+        settings_handler.ModelManager.test_connection("siliconflow", "sf-key", model="")
+    )
+
+    assert result["success"] is True
+    spec = model_config.get_provider_spec("siliconflow")
+    assert _ProbeAsyncClient.post_calls[0]["json"]["model"] == spec.default_models[0]
+
+
+def test连接测试余额不足返回四十二(monkeypatch):
+    """对话探测 402 → 明确的余额/配额文案（模型列表可访问的假阳性被揭穿）。"""
+    _ProbeAsyncClient.post_calls = []
+    _ProbeAsyncClient.chat_status = 402
+    monkeypatch.setattr(settings_handler.httpx, "AsyncClient", _ProbeAsyncClient)
+
+    result = asyncio.run(
+        settings_handler.ModelManager.test_connection("openrouter", "or-key")
+    )
+
+    assert result["success"] is False
+    assert "余额/配额不足" in result["message"]
+    assert "402" in result["message"]
+
+
+def test连接测试模型不可用返回四零四(monkeypatch):
+    """对话探测 404 → 模型不可用文案并列出模型名。"""
+    _ProbeAsyncClient.chat_status = 404
+    monkeypatch.setattr(settings_handler.httpx, "AsyncClient", _ProbeAsyncClient)
+
+    result = asyncio.run(
+        settings_handler.ModelManager.test_connection("siliconflow", "sf-key", model="m-alpha")
+    )
+
+    assert result["success"] is False
+    assert "模型不可用" in result["message"]
+    assert "m-alpha" in result["message"]
+
+
+def test连接测试无密钥静态分支文案含精选数():
+    """无密钥静态表成功文案同步注明可用数与精选数。"""
+    result = asyncio.run(
+        settings_handler.ModelManager.test_connection("siliconflow", None)
+    )
+    assert result["success"] is True
+    assert "下拉精选" in result["message"]
+
+
 def test未超上限的列表不做精选():
     """短列表原样返回，不触发封顶逻辑。"""
     models = ["deepseek-chat", "deepseek-reasoner"]
@@ -206,7 +315,7 @@ def test设置保存按最终解析结果校验并放行环境变量密钥(monke
     sent = _install_chainlit_fakes(monkeypatch, session)
     tested = []
 
-    async def _fake_test(provider, key):
+    async def _fake_test(provider, key, model=None):
         tested.append(key)
         return {
             "success": True,
@@ -245,7 +354,7 @@ def test设置保存密钥解析为空时拦截并提示变量名(monkeypatch):
     sent = _install_chainlit_fakes(monkeypatch, session)
     called = []
 
-    async def _fake_test(provider, key):
+    async def _fake_test(provider, key, model=None):
         called.append(provider)
         return {"success": True, "message": "ok", "models_count": 0, "models": []}
 
