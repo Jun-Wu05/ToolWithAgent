@@ -74,12 +74,18 @@ def test显式分类特征字段压制定位器修正(monkeypatch):
 
 
 def test未显式指定时定位器修正仍然生效(monkeypatch):
-    """自动探测模式保持现状：定位器修正为 other_field 后按 other_field 聚合失败。"""
+    """自动探测模式保持现状：特征键不在行内时定位器修正后按修正字段聚合失败。
+
+    注意：特征键作为日志体键覆盖绝大多数行的场景现在走确定性路由
+    （见 test_log_parser_marker_fix），定位器修正只发生在键不在行内时。
+    """
     monkeypatch.setattr(log_feature_locator, "locate_feature", _locate_tries_other_field)
 
     result = json.loads(
         classify_log_features_headless(
-            HEADER_KV_LOGS,
+            # 行内不含 category 键（真头部特征/未知键场景），触发 Step 2a 路由
+            "<134>Aug 24 10:00:00 host app: event=attack src=10.0.0.1\n"
+            "<134>Aug 24 10:00:01 host app: event=scan src=10.0.0.2",
             "kv",
             "日志头+KV",
             "category",

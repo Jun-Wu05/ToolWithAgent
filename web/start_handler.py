@@ -7,7 +7,6 @@ Chainlit 聊天启动处理器 - 从 chainlit_app.py 提取
 import chainlit as cl
 import threading
 
-from chainlit.input_widget import Select, TextInput
 from agent.shared.logger import get_logger
 from web.session_state import SessionState
 from web.llm_client import setup_agno_logging_bridge
@@ -58,33 +57,12 @@ async def on_chat_start():
     # ===== 初始化模型设置界面（启动时不获取模型列表） =====
     # 安全提示：不读取环境变量，不自动保存，每次需要手动输入
     try:
-        # 启动时显示空模型列表（等待用户配置）
-        # 供应商默认指向重置选项
-        await cl.ChatSettings(
-            [
-                Select(
-                    id="provider",
-                    label="供应商",
-                    values=["--- 重置设置 ---", "deepseek", "siliconflow"],  # 重置永远第一位
-                    initial_index=0,  # 默认指向重置
-                ),
-                Select(
-                    id="model_name",
-                    label="模型名称",
-                    values=["请先配置 API Key 后获取模型列表"],
-                    initial_index=0,
-                ),
-                TextInput(
-                    id="api_key",
-                    label="API Key（可选）",
-                    placeholder="DeepSeek 必需，SiliconFlow 可选",
-                    initial="",  # 不读取环境变量，永远为空
-                ),
-            ]
-        ).send()
-        
+        from web.settings_handler import build_settings_widgets
+
+        await cl.ChatSettings(build_settings_widgets()).send()
+
         logger.info("[START] 模型设置界面已初始化（等待用户配置）")
-        
+
     except Exception as e:
         logger.error(f"[START] 初始化模型设置失败: {e}")
         await cl.Message(

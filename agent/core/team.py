@@ -225,7 +225,7 @@ class ProfessionalAgentRegistry:
 
 
 def create_data_mapping_team() -> ProfessionalAgentRegistry:
-    """创建专业 Agent 注册表；缺少必需模型配置时立即失败。
+    """创建专业 Agent 注册表；缺少密钥时由模型构造层抛出带变量名的错误。
 
     返回值：
         仅含专业 Agent 成员的不可变注册表。
@@ -233,19 +233,6 @@ def create_data_mapping_team() -> ProfessionalAgentRegistry:
     不变量：
         注册表不提供 run 或路由指令，用户意图只能由 PlannerAgent 理解。
     """
-    api_key = ModelConfig.get_api_key()
-    provider = ModelConfig.get_provider()
-
-    if provider == "deepseek" and not api_key:
-        raise ValueError(
-            "DeepSeek 需要 API Key，请设置环境变量 DEEPSEEK_API_KEY 或在侧边栏配置"
-        )
-
-    if provider == "siliconflow" and not api_key:
-        import logging
-
-        logging.warning("[TEAM] SiliconFlow 未配置 API Key，将使用静态模型列表")
-
     return ProfessionalAgentRegistry(
         members=(
             create_field_mapping_agent(),
