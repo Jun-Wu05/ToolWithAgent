@@ -47,6 +47,7 @@ class ProfessionalAgentAdapter:
         mapping_policy: FieldMappingExecutionPolicy | None = None,
         candidate_retriever: Any | None = None,
         object_map_loader: Any | None = None,
+        event_classifier: Any | None = None,
     ) -> None:
         """保存专业 Agent 注册表、字段映射执行策略与可注入依赖（Issue #88 接缝）。"""
         self._team = team
@@ -56,6 +57,7 @@ class ProfessionalAgentAdapter:
             mapping_policy,
             candidate_retriever=candidate_retriever,
             object_map_loader=object_map_loader,
+            event_classifier=event_classifier,
         )
 
     async def execute(

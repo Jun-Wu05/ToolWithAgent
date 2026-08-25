@@ -26,6 +26,7 @@ ConfigDownloadKind = Literal[
     "mappedconfig_subrules",
     "mappedconfig_mainrules",
     "unmappedconfig_subrules",
+    "field_adjusted_config",
 ]
 
 
@@ -135,6 +136,53 @@ class RemoveMappingStep(StrictContract):
     depends_on: tuple[str, ...] = ()
 
 
+class AddFieldsStep(StrictContract):
+    """描述在解析规则上添加一个字段的步骤。
+
+    值来源两种：固定值或 ``%{index}`` 引用；添加【事件名称】时值必须是
+    合法事件分类名，且事件级别由绑定表联动（执行器保证，契约不承载）。
+    """
+
+    step_id: str = Field(min_length=1)
+    type: Literal["add_fields"]
+    field_name: str = Field(min_length=1)
+    field_value: str = ""
+    value_type: Literal["fixed", "reference"] = "fixed"
+    config_ref: ConfigRef
+    depends_on: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_value_type(self) -> "AddFieldsStep":
+        """引用型值必须是 %{index} 占位格式。"""
+        if self.value_type == "reference" and not (
+            self.field_value.startswith("%{") and self.field_value.endswith("}")
+        ):
+            raise ValueError("引用型字段值必须是 %{index} 占位格式")
+        return self
+
+
+class DeleteFieldsStep(StrictContract):
+    """描述从解析规则删除一个或多个字段的步骤。"""
+
+    step_id: str = Field(min_length=1)
+    type: Literal["delete_fields"]
+    fields: tuple[str, ...] = Field(min_length=1)
+    config_ref: ConfigRef
+    depends_on: tuple[str, ...] = ()
+
+
+class MergeFieldsStep(StrictContract):
+    """描述把多个源字段合并为一个目标字段的步骤。"""
+
+    step_id: str = Field(min_length=1)
+    type: Literal["merge_fields"]
+    source_fields: tuple[str, ...] = Field(min_length=2)
+    target_field: str = Field(min_length=1)
+    sep: str = ""
+    config_ref: ConfigRef
+    depends_on: tuple[str, ...] = ()
+
+
 class ExportStep(StrictContract):
     """描述导出步骤，来源必须指向 session 或本次计划产物。"""
 
@@ -172,6 +220,9 @@ StepSpec = Annotated[
         ThreatMappingStep,
         FillStep,
         RemoveMappingStep,
+        AddFieldsStep,
+        DeleteFieldsStep,
+        MergeFieldsStep,
         ExportStep,
     ],
     Field(discriminator="type"),

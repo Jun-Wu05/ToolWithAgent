@@ -21,8 +21,10 @@ import copy
 from typing import List
 
 
-# 系统保留字段，不允许删除
-RESERVED_FIELDS = {"original_log", "rule_name_list"}
+# 系统保留字段，不允许删除：
+# - original_log / rule_name_list：脚本原有保留字段
+# - 日志类型：子规则分流依赖的核心字段，删除会破坏规则结构
+RESERVED_FIELDS = {"original_log", "rule_name_list", "日志类型"}
 
 
 def delete_field(
@@ -49,12 +51,16 @@ def delete_field(
         return {"status": "error", "message": "未指定要删除的字段"}
     
     results = []
+    applied = 0
+    skipped = 0
     for entity in data:
         entity = copy.deepcopy(entity)
-        
+
         # 获取 normalize 列表
-        normalize = entity.get("normalize", [])
+        normalize = entity.get("normalize") or []
         if not normalize:
+            # 无 normalize 的 entity 无字段可删，如实跳过
+            skipped += 1
             results.append(entity)
             continue
         
@@ -72,8 +78,9 @@ def delete_field(
             }
         
         # 1. 添加 removeFields filter
-        parser = entity.get("parser", {})
-        filters = parser.get("filter", [])
+        parser = entity.get("parser") or {}
+        # 入口规则模板的 filter 可能为 null，初始化为空数组再追加
+        filters = parser.get("filter") or []
         
         # 检查是否已存在 removeFields filter，有则合并
         existing_remove = None
@@ -106,14 +113,18 @@ def delete_field(
             item for item in normalize
             if item.get("index") not in deletable
         ]
-        
+
+        applied += 1
         results.append(entity)
-    
+
     deleted_count = len([f for f in fields_to_delete if f not in missing])
+    message = f"成功从 {applied} 个 entity 删除 {deleted_count} 个字段"
+    if skipped:
+        message += f"（跳过 {skipped} 个无 normalize 的 entity）"
     return {
         "status": "success",
         "data": results,
-        "message": f"成功从 {len(results)} 个 entity 删除 {deleted_count} 个字段",
+        "message": message,
         "not_found": missing if missing else None,
     }
 

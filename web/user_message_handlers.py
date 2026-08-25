@@ -47,6 +47,9 @@ _OPERATION_LABELS = {
     "threat_mapping": "威胁类型映射",
     "remove_mapping": "取消映射",
     "export": "导出配置",
+    "add_fields": "添加字段",
+    "delete_fields": "删除字段",
+    "merge_fields": "合并字段",
 }
 
 

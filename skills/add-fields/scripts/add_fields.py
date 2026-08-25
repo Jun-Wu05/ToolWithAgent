@@ -47,12 +47,16 @@ def add_field(
         return {"status": "error", "message": "字段名不能为空"}
     
     results = []
+    applied = 0
+    skipped = 0
     for entity in data:
         entity = copy.deepcopy(entity)
-        
+
         # 获取 normalize 列表
-        normalize = entity.get("normalize", [])
+        normalize = entity.get("normalize") or []
         if not normalize:
+            # 无 normalize 的 entity 无法承载新字段，如实跳过
+            skipped += 1
             results.append(entity)
             continue
         
@@ -70,8 +74,9 @@ def add_field(
         result_value = field_value if field_value is not None else ""
         
         # 1. 添加 addFields filter
-        parser = entity.get("parser", {})
-        filters = parser.get("filter", [])
+        parser = entity.get("parser") or {}
+        # 入口规则模板的 filter 可能为 null，初始化为空数组再追加
+        filters = parser.get("filter") or []
         
         addfields_entry = {
             "name": "addFields",
@@ -100,10 +105,14 @@ def add_field(
         }
         normalize.append(normalize_entry)
         entity["normalize"] = normalize
-        
+
+        applied += 1
         results.append(entity)
-    
-    return {"status": "success", "data": results, "message": f"成功为 {len(results)} 个 entity 添加字段 '{field_name}'"}
+
+    message = f"成功为 {applied} 个 entity 添加字段 '{field_name}'"
+    if skipped:
+        message += f"（跳过 {skipped} 个无 normalize 的 entity）"
+    return {"status": "success", "data": results, "message": message}
 
 
 def main():

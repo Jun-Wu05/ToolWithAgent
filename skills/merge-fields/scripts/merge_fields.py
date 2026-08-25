@@ -47,12 +47,16 @@ def merge_fields(
         return {"status": "error", "message": "至少需要 2 个源字段"}
     
     results = []
+    applied = 0
+    skipped = 0
     for entity in data:
         entity = copy.deepcopy(entity)
-        
+
         # 获取 normalize 列表
-        normalize = entity.get("normalize", [])
+        normalize = entity.get("normalize") or []
         if not normalize:
+            # 无 normalize 的 entity 无源字段可合并，如实跳过
+            skipped += 1
             results.append(entity)
             continue
         
@@ -81,8 +85,9 @@ def merge_fields(
         )
         
         # 1. 添加 merger filter
-        parser = entity.get("parser", {})
-        filters = parser.get("filter", [])
+        parser = entity.get("parser") or {}
+        # 入口规则模板的 filter 可能为 null，初始化为空数组再追加
+        filters = parser.get("filter") or []
         
         # 检查是否已存在相同目标字段的 merger，有则更新
         existing_idx = None
@@ -122,10 +127,14 @@ def merge_fields(
         }
         normalize.append(normalize_entry)
         entity["normalize"] = normalize
-        
+
+        applied += 1
         results.append(entity)
-    
-    return {"status": "success", "data": results, "message": f"成功合并 {len(results)} 个 entity 的字段"}
+
+    message = f"成功合并 {applied} 个 entity 的字段为 '{target_field}'"
+    if skipped:
+        message += f"（跳过 {skipped} 个无 normalize 的 entity）"
+    return {"status": "success", "data": results, "message": message}
 
 
 def main():

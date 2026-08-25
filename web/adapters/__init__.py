@@ -4,6 +4,7 @@
 - field_mapping.py —— 字段映射热点（适配器 + 执行策略 + 批次错误）
 - agent_ops.py —— log_parse / enum_extract / threat_mapping 三个小操作
 - config_ops.py —— fill / remove_mapping / export 简单适配器
+- skill_ops.py —— add_fields / delete_fields / merge_fields 字段调整（PRD #124）
 - shared.py —— 跨操作共享的会话、结果与进度接缝
 
 ``create_default_adapters`` 是唯一公共入口，PlanExecutor 按 ``step.type``
@@ -26,12 +27,14 @@ from web.adapters.field_mapping import (
     FieldMappingBatchError,
     FieldMappingExecutionPolicy,
 )
+from web.adapters.skill_ops import FieldSkillAdapter, FIELD_SKILL_REGISTRY
 
 
 def create_default_adapters(team: Any) -> dict[str, StepAdapter]:
     """创建统一执行器的默认适配器表，操作类型是唯一分派键。"""
     professional_adapter = ProfessionalAgentAdapter(team)
     field_mapping_adapter = FieldMappingAdapter(team)
+    field_skill_adapter = FieldSkillAdapter()
     return {
         "log_parse": professional_adapter,
         "field_mapping": field_mapping_adapter,
@@ -40,4 +43,5 @@ def create_default_adapters(team: Any) -> dict[str, StepAdapter]:
         "fill": FillAdapter(),
         "remove_mapping": RemoveMappingAdapter(),
         "export": ExportAdapter(),
+        **{step_type: field_skill_adapter for step_type in FIELD_SKILL_REGISTRY},
     }

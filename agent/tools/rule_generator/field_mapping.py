@@ -10,7 +10,10 @@ from typing import Any
 
 # normalize entries 的 index 排除集合：系统自动生成的元字段，不参与用户字段映射
 # web/action_callbacks.py 也引用此常量（原散落 4 处 literal）
-EXCLUDED_FIELD_INDICES = frozenset({"original_log", "日志类型"})
+# 事件名称/事件级别：事件名称标注链路写入的固定字段（PRD #124），与日志类型同为元字段
+EXCLUDED_FIELD_INDICES = frozenset(
+    {"original_log", "日志类型", "事件名称", "事件级别"}
+)
 
 
 def extract_sub_rule_mapping_info(sub_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:

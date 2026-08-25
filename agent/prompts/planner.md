@@ -17,6 +17,9 @@
 5. `fill`（填充）：把值映射写入解析规则的 `normalize[].mappings`。必须显式提供 `fill_kind`、`target_fields`、映射 `source_ref` 和被修改配置 `config_ref`。枚举填充使用 `source_ref=session.enum_mapping_table`，目标字段只能取自 `enum_mapping_target_fields`，`config_ref` 取自 `available_config_refs`（`session.decoded_config` 或 `session.mapped_sub_rules` 均可）；本轮威胁填充引用前序 Threat Mapping 步骤；自然续接最近威胁结果时使用 `source_ref=session.artifacts.threat_mapping` 且不声明依赖。
 6. `remove_mapping`（取消映射）：清空指定字段的值映射，必须有 `target_fields` 和可用 `config_ref`。
 7. `export`（导出）：导出当前配置、入口规则或子规则，必须有合法 `source_ref`；本计划产物还要声明对应 `depends_on`。
+8. `add_fields`（添加字段）：在解析规则的每个 entity 上新增一个字段。必须显式提供 `field_name`（字段名）、`field_value`（值：固定值或 `%{index}` 引用，引用时 `value_type="reference"`）和 `config_ref`（取自 `available_config_refs`）。添加【事件名称】时：`value_type` 必须是 `fixed`，值必须是 21 个合法分类名之一（威胁组：网络攻击/病毒检测/邮件告警/终端告警/蜜罐告警/其他告警；非威胁组：登录事件/审计事件/会话操作/进程操作/用户操作/资源监控/邮件操作/dns查询/dns响应/数据库操作/ssh连接/认证事件/telnet连接/网络连接/web访问），【事件级别】由系统按绑定关系自动联动写入，**不要单独生成添加事件级别的步骤**。
+9. `delete_fields`（删除字段）：从解析规则移除一个或多个字段。必须提供 `fields`（至少一个字段名）和 `config_ref`。系统保留字段（original_log、rule_name_list、日志类型）会被执行器拒绝；修改事件名称的正确姿势是先 `delete_fields`（事件名称和事件级别一起删）再 `add_fields` 新值。
+10. `merge_fields`（合并字段）：把多个源字段合并为一个新字段。必须提供 `source_fields`（至少 2 个）、`target_field`、`sep`（分隔符，可为空字符串）和 `config_ref`。
 
 ## 合法来源与依赖
 
@@ -32,6 +35,9 @@
 ## 消歧规则
 
 - “日志类型提取”是 `log_parse`，不是 `enum_extract`；它处理整列原始日志，默认不选字段、由系统自动探测分类特征字段，不存在必须选择哪个字段。只有用户以“作为/当作/设为/当日志类型”点名字段时才携带 `feature_field`；“把A的枚举值作为日志类型”即使句中出现“枚举”，也是携带 feature_field=A 的 `log_parse`，不是 `enum_extract`。
+- “删除字段 X”“移除字段 X”“去掉字段 X”是 `delete_fields`（移除整个字段及其条目）；“取消/删除 X 的映射”“清空 X 的值映射”是 `remove_mapping`（只清 mappings，字段保留）。两者不可互换：没提“映射”二字、只针对字段本身的删除是 `delete_fields`。
+- “添加字段 X，值为 Y”“新增字段 X 引用 Z”是 `add_fields`；“把 X 的枚举值填充回配置”是 `fill`。“合并字段 A 和 B 成 C”是 `merge_fields`。
+- 字段调整步骤的目标数据由 `config_ref` 显式指定；用户未点名时取 `available_config_refs` 优先级（同时存在优先 `session.mapped_sub_rules`），不得生成无 config_ref 的字段步骤。
 - 只有明确的“提取 <字段> 的枚举值”才是 `enum_extract`，并且必须携带 `target_field`。
 - “日志分类”指日志类型分类；“提取事件级别的枚举值”指字段枚举提取，两者不可互换。
 - “枚举值处理”：存在可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）和枚举映射表时，“枚举值填充”“填充回配置”“写入解析规则”都表示枚举填充，**直接生成填充步骤，不必追问目标字段**——用户点名了目标字段就只填该字段；未点名就填充 `enum_mapping_target_fields` 的**全部**字段（多 sheet 映射表每个 sheet 的目标字段都填）。仅当缺少枚举映射表或可用配置时才追问/请求上传；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
@@ -74,6 +80,26 @@
 导出映射后的配置（子规则可用）：
 ```json
 {"decision":"execute","plan_id":"plan-export","steps":[{"step_id":"export-1","type":"export","source_ref":"session.mapped_sub_rules"}]}
+```
+添加固定值字段（可用配置）：
+```json
+{"decision":"execute","plan_id":"plan-add","steps":[{"step_id":"add-1","type":"add_fields","field_name":"主机ip","field_value":"1.1.1.1","config_ref":"session.decoded_config"}]}
+```
+添加引用型字段（引用已有字段的值）：
+```json
+{"decision":"execute","plan_id":"plan-addref","steps":[{"step_id":"add-1","type":"add_fields","field_name":"请求头","field_value":"%{reqheader}","value_type":"reference","config_ref":"session.mapped_sub_rules"}]}
+```
+删除多个字段（子规则可用）：
+```json
+{"decision":"execute","plan_id":"plan-del","steps":[{"step_id":"del-1","type":"delete_fields","fields":["a","b"],"config_ref":"session.mapped_sub_rules"}]}
+```
+合并字段（带分隔符）：
+```json
+{"decision":"execute","plan_id":"plan-merge","steps":[{"step_id":"merge-1","type":"merge_fields","source_fields":["a","b"],"target_field":"d","sep":"-","config_ref":"session.decoded_config"}]}
+```
+把某子规则的事件名称改为终端告警（先删绑定对再添加新值；级别自动联动）：
+```json
+{"decision":"execute","plan_id":"plan-event","steps":[{"step_id":"del-1","type":"delete_fields","fields":["事件名称","事件级别"],"config_ref":"session.mapped_sub_rules"},{"step_id":"add-1","type":"add_fields","field_name":"事件名称","field_value":"终端告警","config_ref":"session.mapped_sub_rules","depends_on":["del-1"]}]}
 ```
 
 ## 正反例与复合计划
@@ -123,5 +149,5 @@
 - 只返回一个 JSON 对象，不输出 Markdown、解释、思考过程或前后缀。
 - 顶层只允许 `decision`、`plan_id`、`steps`、`reason_code`、`question`、`choices`、`guidance_code`、`parameters`。
 - `execute` 必须有非空步骤；`clarification` 必须有原因和问题且无步骤；能力说明使用 `guidance_code=capabilities`。
-- 步骤类型只允许 `log_parse`、`field_mapping`、`enum_extract`、`threat_mapping`、`fill`、`remove_mapping`、`export`。
+- 步骤类型只允许 `log_parse`、`field_mapping`、`enum_extract`、`threat_mapping`、`fill`、`remove_mapping`、`add_fields`、`delete_fields`、`merge_fields`、`export`。
 - 不得输出 `[PLAN:...]` 或未定义字段。

@@ -1,120 +1,64 @@
 ---
 name: delete-fields
-description: 删除字段技能 - 当用户需要从配置数据中移除一个或多个字段时使用。触发词：删除字段、移除字段、去掉字段、删掉字段、delete field、remove field、清除字段。用户在 Base64 配置数据上执行字段删除操作时必须调用此技能。
+description: 删除字段技能 - 从解析规则（Base64 配置或映射生成的子规则）中移除一个或多个字段。当用户说"删除字段、移除字段、去掉字段、删掉字段、清除字段、delete field、remove field"并指明字段名时使用；注意"取消/删除某字段的映射"是取消映射操作，不属于本技能。
 license: MIT
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
   tags: ["delete", "fields", "parser"]
 ---
 
 # 删除字段技能
 
 ## 何时使用
-- 用户说"删除字段"、"移除字段"、"去掉字段"、"删掉字段"时
-- 用户需要从配置数据中移除一个或多个字段时
-- 用户指定了要删除的字段名时
+- 用户说"删除字段"、"移除字段"、"去掉字段"、"删掉字段"并指明字段名时
+- 用户要求修改【事件名称】时的第一步（事件名称与事件级别需一起删除再重新添加）
+
+## 消歧边界
+- "删除字段 X"（移除整个字段及其 normalize 条目）→ 本技能
+- "取消/删除 X 的映射"、"清空 X 的值映射"（只清 mappings，字段保留）→ remove_mapping 操作，不是本技能
 
 ## 前置条件
-- 用户已提供 Base64 编码的配置数据（或 session 中已有解码后的数据）
+- 会话中存在可调整的解析规则（session.decoded_config 或 session.mapped_sub_rules）
 - 用户指定了要删除的字段名列表
 
-## 操作步骤
+## 调用链路（ADR-0008 类型化接线）
 
-### Step 1: 获取 Base64 数据
-从用户输入或 session 中获取 Base64 编码的配置数据。使用 `base64_decode_tool` 解码，得到 JSON 数组。
+```
+用户指令 → PlannerAgent 生成 delete_fields 类型化步骤（fields / config_ref）
+→ FieldSkillAdapter（web/adapters/skill_ops.py）
+→ scripts/delete_fields.py 的 delete_field() 纯函数（单一事实源）
+→ 结果写回 session，产出 field_adjusted_config 下载产物
+```
 
-### Step 2: 解析用户删除指令
-从用户输入中提取：
-- `fields_to_delete`: 要删除的字段名列表（如 `["a"]` 或 `["a", "b"]`）
+## 数据操作（scripts/delete_fields.py）
 
-### Step 3: 执行删除
-调用 `scripts/delete_fields.py` 中的 `delete_field()` 函数，对每个 entity 执行：
+对每个 entity 执行：
 
-1. **验证字段存在**：检查 normalize 中是否包含要删除的字段的 index
-2. **添加 removeFields filter**：在 parser.filter 中新增：
+1. **验证保留字段**：要删除字段命中保留字段集合时整体拒绝
+2. **添加 removeFields filter**：已有 removeFields 则合并字段名，否则在 parser.filter 追加（filter 为 null 的入口规则先初始化为空数组）：
    ```json
    {"name": "removeFields", "id": "", "fields": ["<field1>", "<field2>"]}
    ```
 3. **移除 normalize 条目**：从 normalize 数组中移除 index 匹配的条目
 
-### Step 4: 编码输出
-使用 `base64_encode_tool` 将修改后的 JSON 数组重新编码为 Base64。
+操作应用到每一个 entity；无 normalize 的 entity 被跳过且计数如实报告；不存在的字段在结果消息中列明。
 
-### Step 5: 返回结果
-- 输出 Base64 编码的完整配置数据
-- 简要告知用户删除了哪些字段
+## 系统保留字段（不可删除）
 
-## 输出格式示例
+| 字段 | 原因 |
+|---|---|
+| `original_log` | 原始日志载体，字段引用与回溯依赖 |
+| `rule_name_list` | 规则名列表系统字段 |
+| `日志类型` | 子规则分流核心字段，删除破坏规则结构 |
 
-删除后的 normalize（字段 "a" 的条目被移除）：
-```json
-[
-  {"index": "b", "result": ["2"], ...},
-  {"index": "c", "result": ["3"], ...},
-  {"index": "original_log", ...}
-]
-```
-
-filter 新增：
-```json
-{
-  "name": "removeFields",
-  "id": "",
-  "fields": ["a"]
-}
-```
-
-删除多个字段的 filter：
-```json
-{
-  "name": "removeFields",
-  "id": "",
-  "fields": ["a", "b"]
-}
-```
-
-## 约束与边界
-- 字段不存在时：告知用户哪些字段不存在，列出 normalize 中可用的字段 index
-- 多字段删除：所有要删除的字段放在同一个 removeFields filter 的 fields 数组中
-- 不删除系统保留字段（如 original_log、rule_name_list），如遇用户要求删除需提醒
-- 所有 entity 共享同一份 normalize 结构，删除操作应用到每一个 entity
+命中保留字段返回 `reserved_field_rejected`。【事件名称】【事件级别】可删（用于重新标注流程）。
 
 ## 完整示例
 
-### 输入
-用户指令："删除字段 a"
-Base64 解码后第一部分的 normalize：
-```json
-[
-  {"index": "a", "result": ["1"], ...},
-  {"index": "b", "result": ["2"], ...},
-  {"index": "c", "result": ["3"], ...},
-  {"index": "original_log", "result": ["{\"a\":1,\"b\":\"2\",\"c\":\"3\"}"], ...}
-]
-```
+用户指令："删除字段 a 和 b"（config_ref=session.mapped_sub_rules）
 
-### 处理
-- fields_to_delete = ["a"]
-
-### 输出
-normalize 移除了 index="a" 的条目：
-```json
-[
-  {"index": "b", "result": ["2"], ...},
-  {"index": "c", "result": ["3"], ...},
-  {"index": "original_log", ...}
-]
-```
 filter 新增：
-```json
-{"name": "removeFields", "id": "", "fields": ["a"]}
-```
-
-## 多字段删除示例
-
-用户指令："删除字段 a 和 b"
-
-输出 filter：
 ```json
 {"name": "removeFields", "id": "", "fields": ["a", "b"]}
 ```
+normalize 中 index 为 a、b 的条目被移除，其余条目（含 original_log、日志类型）保持不变。

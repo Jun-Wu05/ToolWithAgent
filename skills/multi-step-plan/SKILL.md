@@ -1,13 +1,20 @@
 ---
 name: multi-step-plan
-description: 复合意图分解技能 - 当用户一句话包含 2 个及以上不同操作意图时使用（如"提取枚举值然后做威胁映射"、"威胁映射然后填充到子规则"、"提取枚举值再下载Excel填表再填充"）。触发判断：用户的请求里同时出现多个动作动词（映射/提取/填充/威胁/枚举/下载/导出等）且它们是先后依赖关系而非二选一冲突。将复合请求分解成有序步骤计划，输出带参数的 [PLAN] JSON 标记，系统自动按序执行，用户无需重复输入。
+description: 已废弃（存档）- 本技能的职责已被 ADR-0005「独立 PlannerAgent 与类型化计划」架构取代：复合意图现由 PlannerAgent 生成类型化 PlanDecision（StepSpec 步骤联合），经 PlanExecutor + StepAdapter 执行，[PLAN:] 文本标记机制已移除。不再被任何代码加载或调用，仅作历史设计存档。
 license: MIT
 metadata:
   version: "2.0.0"
-  tags: ["intent", "plan", "multi-step", "orchestration"]
+  tags: ["intent", "plan", "multi-step", "orchestration", "deprecated"]
 ---
 
-# 复合意图分解技能
+# 复合意图分解技能【已废弃，仅存档】
+
+> **状态：已被取代。** 复合意图分解现由 PlannerAgent（agent/core/planner.py，提示词
+> agent/prompts/planner.md）+ PlanExecutor + web/adapters/ 的类型化计划架构实现
+> （ADR-0005）。本文档描述的 `[PLAN:...]` 标记机制已从代码中移除，本技能不被加载。
+> 保留本文档仅作为设计演进的历史记录；新增编排能力请扩展 StepSpec 步骤类型，
+> 参见 ADR-0008（字段调整技能的类型化接线）。
+
 
 ## 何时使用
 当用户的**一条消息**里包含 **2 个及以上不同操作意图**，且这些操作之间存在**先后依赖关系**（A 的结果是 B 的输入）。典型场景：

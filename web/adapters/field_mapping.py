@@ -69,17 +69,20 @@ class FieldMappingAdapter:
         mapping_policy: FieldMappingExecutionPolicy | None = None,
         candidate_retriever: Any | None = None,
         object_map_loader: Any | None = None,
+        event_classifier: Any | None = None,
     ) -> None:
         """保存专业 Agent 注册表、执行策略与可注入依赖。
 
         candidate_retriever / object_map_loader 缺省时回落模块默认实现
         （Issue #88 依赖注入接缝，与 PlannerService(runner=...) 同构）；
         测试传构造假件，不 monkeypatch 模块私有属性。
+        event_classifier 是事件名称判定的 LLM 假件接缝（PRD #124）。
         """
         self._team = team
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
         self._candidate_retriever = candidate_retriever
         self._object_map_loader = object_map_loader
+        self._event_classifier = event_classifier
 
     async def execute(
         self,
@@ -617,6 +620,7 @@ class FieldMappingAdapter:
         typed_mappings = tuple(FieldMappingRow.model_validate(row) for row in mapping_rows)
         staged_sub_rule_results = None
         staged_mapped_sub_rules = None
+        event_annotation_summary: str | None = None
         # 子规则计算可能抛错或原地修改输入，因此必须在 session 副本上完成后再提交。
         sub_rules = copy.deepcopy(_session_get(context.session, "mapped_sub_rules") or [])
         if not sub_rules:
@@ -656,6 +660,15 @@ class FieldMappingAdapter:
                 staged_sub_rule_results,
                 object_entity_map,
             )
+            # 事件名称标注（PRD #124）：映射成功后、原子写回前，对每条子规则
+            # 判定【事件名称】并按绑定写入【事件级别】。LLM 失败重试一次，
+            # 仍失败整步失败——不静默跳过，保持一次性 session 提交的原子性。
+            annotation_outcome = await self._annotate_event_names(
+                step, context, staged_mapped_sub_rules
+            )
+            if isinstance(annotation_outcome, StepResult):
+                return annotation_outcome
+            staged_mapped_sub_rules, event_annotation_summary = annotation_outcome
 
         staged_decoded_data = None
         download_kind = None
@@ -737,6 +750,12 @@ class FieldMappingAdapter:
             len(typed_mappings),
             updated_normalize_count,
         )
+        message = (
+            f"字段映射完成：唯一字段 {len(typed_mappings)} 项，"
+            f"实际更新 {updated_normalize_count} 个 normalize 项"
+        )
+        if event_annotation_summary:
+            message = f"{message}；{event_annotation_summary}"
         return _success(
             step,
             FieldMappingArtifact(
@@ -745,8 +764,64 @@ class FieldMappingAdapter:
                 download_kind=download_kind,
                 download_content=download_content,
             ),
-            message=(
-                f"字段映射完成：唯一字段 {len(typed_mappings)} 项，"
-                f"实际更新 {updated_normalize_count} 个 normalize 项"
-            ),
+            message=message,
         )
+
+    async def _annotate_event_names(
+        self,
+        step: FieldMappingStep,
+        context: ExecutionContext,
+        mapped_sub_rules: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], str] | StepResult:
+        """判定并写入每条子规则的【事件名称】+ 绑定【事件级别】。
+
+        成功返回 (标注后的子规则, 摘要)；LLM 可重试错误重试一次，
+        仍失败返回 failed StepResult（调用方立即返回，session 不提交）。
+        待人工确认的子规则保持不变，仅计入摘要。
+        """
+        from agent.shared import event_classify
+
+        judgments: dict[str, str] = {}
+        uncertain: list[str] = []
+        for attempt in range(2):
+            try:
+                judgments, uncertain = await event_classify.classify_sub_rule_events(
+                    mapped_sub_rules,
+                    llm_client=self._event_classifier,
+                )
+                break
+            except Exception as error:  # noqa: BLE001 - 适配层统一判定可重试性
+                if attempt == 0 and _is_retriable_model_error(error):
+                    await asyncio.sleep(
+                        _retry_delay_seconds(error, self._mapping_policy.retry_delay_seconds)
+                    )
+                    continue
+                logger.warning(
+                    "[EVENT_NAME_ANNOTATE] 判定失败: plan_id=%s step_id=%s error=%s",
+                    context.plan_id,
+                    step.step_id,
+                    error,
+                )
+                return _failed(step, "event_classify_failed", "事件名称判定失败，请重试")
+
+        annotated = event_classify.apply_event_fields_to_sub_rules(mapped_sub_rules, judgments)
+        if not judgments and not uncertain:
+            # 无可判定子规则时不改数据、不向消息追加噪音
+            return mapped_sub_rules, ""
+        threat_count = sum(
+            1 for value in judgments.values() if value in event_classify.THREAT_EVENT_NAMES
+        )
+        summary = (
+            f"事件名称已标注 {len(judgments)} 条（威胁 {threat_count}、"
+            f"非威胁 {len(judgments) - threat_count}）"
+        )
+        if uncertain:
+            summary += f"；待人工确认 {len(uncertain)} 条（{'、'.join(uncertain)}）"
+        logger.info(
+            "[EVENT_NAME_ANNOTATE] plan_id=%s step_id=%s judged=%s uncertain=%s",
+            context.plan_id,
+            step.step_id,
+            len(judgments),
+            len(uncertain),
+        )
+        return annotated, summary or None
