@@ -49,6 +49,7 @@ def _download_filename(kind: str, timestamp: str) -> str:
         "mappedconfig_subrules": f"mappedconfig_subrules_{timestamp}.txt",
         "mappedconfig_mainrules": f"mappedconfig_mainrules_{timestamp}.txt",
         "unmappedconfig_subrules": f"unmappedconfig_subrules_{timestamp}.txt",
+        "field_adjusted_config": f"fieldadjusted_config_{timestamp}.txt",
     }
     if kind in names:
         return names[kind]
