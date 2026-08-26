@@ -281,7 +281,7 @@ def test非法判定值不写入():
 
 
 def _annotate(adapter, rules):
-    """直接调用标注方法（绕过完整映射流程）。"""
+    """直接调用标注方法（绕过完整映射流程），兼容三元组返回。"""
     step = FieldMappingStep(
         step_id="mapping", type="field_mapping", source_ref="session.fields"
     )
@@ -310,11 +310,12 @@ def test挂接注入假件成功标注并返回摘要():
     )
     adapter = FieldMappingAdapter(team=None, event_classifier=fake)
     step, outcome = _annotate(adapter, _sub_rules())
-    annotated, summary = outcome
+    annotated, summary, rows = outcome
     assert isinstance(annotated, list)
     assert "事件名称已标注 2 条" in summary
     assert "威胁 1" in summary and "非威胁 1" in summary
     assert annotated[0]["parser"]["filter"][0]["fields"]["事件名称"] == "网络攻击"
+    assert len(rows) == 2
 
 
 def test挂接空判定短路不改数据():
@@ -322,7 +323,7 @@ def test挂接空判定短路不改数据():
     adapter = FieldMappingAdapter(team=None)
     rules = _sub_rules()
     step, outcome = _annotate(adapter, rules)
-    annotated, summary = outcome
+    annotated, summary, rows = outcome
     assert annotated is rules
     assert not summary
 
@@ -367,9 +368,12 @@ def test挂接待人工确认计入摘要():
 
     adapter = FieldMappingAdapter(team=None, event_classifier=fake)
     step, outcome = _annotate(adapter, _sub_rules())
-    annotated, summary = outcome
+    annotated, summary, rows = outcome
     assert "待人工确认 1 条" in summary
     assert "暴力破解_kv_子规则" in summary
     # 待确认子规则未被写入事件字段
     brute = next(r for r in annotated if r["name"] == "暴力破解_kv_子规则")
     assert brute["parser"]["filter"] == []
+    uncertain_rows = [row for row in rows if row.status == "uncertain"]
+    assert len(uncertain_rows) == 1
+    assert uncertain_rows[0].rule_name == "暴力破解_kv_子规则"

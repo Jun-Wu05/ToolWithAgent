@@ -62,6 +62,7 @@ metadata:
 - 值为空时：result 为空数组 `[]`，filter 中 value 为空字符串 `""`
 - 引用格式 `%{index}` 中的 index 指向已有字段的 normalize index
 - 无可用配置时返回 `config_required`
+- **子规则寻址（#126）**：`target_names` 按 entity name 精确过滤（None=全部），名单外原样透传；`skip_existing=True` 时已有同名字段的 entity 跳过并计数（消息如实报告「目标 N 个/已存在跳过」）
 
 ## 完整示例
 

@@ -53,6 +53,8 @@ metadata:
 
 命中保留字段返回 `reserved_field_rejected`。【事件名称】【事件级别】可删（用于重新标注流程）。
 
+**子规则寻址（#126）**：`target_names` 按 entity name 精确过滤（None=全部）；适配器另有悬空引用守卫——被删字段被 merger 源字段或 `%{字段}` 占位引用时返回 `field_reference_conflict`，需先解除引用。
+
 ## 完整示例
 
 用户指令："删除字段 a 和 b"（config_ref=session.mapped_sub_rules）

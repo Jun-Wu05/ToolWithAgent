@@ -17,40 +17,51 @@ import 用法:
 import json
 import sys
 import copy
-from typing import Optional
+from typing import List, Optional
 
 
 def add_field(
     data: list,
     field_name: str,
     field_value: Optional[str] = None,
+    target_names: Optional[List[str]] = None,
+    skip_existing: bool = False,
 ) -> dict:
     """
     对 mapping entity 列表执行字段添加
-    
+
     每个 entity 的 normalize 中添加新字段条目，
     parser.filter 中添加 addFields 过滤器。
-    
+
     Args:
         data: 解码后的 JSON 数组（mapping entities）
         field_name: 新字段名，如 "主机ip"
         field_value: 字段值，如 "1.1.1.1" 或 "%{reqheader}"。
                      为 None 时表示用户未提供值。
-    
+        target_names: 目标 entity 名单（按 name 精确匹配，#126）；
+                      None 表示全部 entity。名单外的 entity 原样透传。
+        skip_existing: 已有同名字段的 entity 跳过而不是整体失败（#126）。
+
     Returns:
         {"status": "success"|"error", "data": [...], "message": "..."}
     """
     if not data:
         return {"status": "error", "message": "输入数据为空"}
-    
+
     if not field_name:
         return {"status": "error", "message": "字段名不能为空"}
-    
+
+    targets = set(target_names) if target_names else None
     results = []
     applied = 0
     skipped = 0
+    skipped_existing = 0
     for entity in data:
         entity = copy.deepcopy(entity)
+
+        if targets is not None and entity.get("name") not in targets:
+            results.append(entity)
+            continue
 
         # 获取 normalize 列表
         normalize = entity.get("normalize") or []
@@ -59,25 +70,29 @@ def add_field(
             skipped += 1
             results.append(entity)
             continue
-        
+
         # 构建 index → normalize item 映射
         norm_map = {item.get("index"): item for item in normalize if item.get("index")}
-        
+
         # 检查字段是否已存在
         if field_name in norm_map:
+            if skip_existing:
+                skipped_existing += 1
+                results.append(entity)
+                continue
             return {
                 "status": "error",
                 "message": f"字段 '{field_name}' 已存在，请先删除或更换名称"
             }
-        
+
         # 处理值
         result_value = field_value if field_value is not None else ""
-        
+
         # 1. 添加 addFields filter
         parser = entity.get("parser") or {}
         # 入口规则模板的 filter 可能为 null，初始化为空数组再追加
         filters = parser.get("filter") or []
-        
+
         addfields_entry = {
             "name": "addFields",
             "id": "",
@@ -86,10 +101,10 @@ def add_field(
             },
         }
         filters.append(addfields_entry)
-        
+
         parser["filter"] = filters
         entity["parser"] = parser
-        
+
         # 2. 添加 normalize 条目
         normalize_entry = {
             "mappings": [],
@@ -110,6 +125,10 @@ def add_field(
         results.append(entity)
 
     message = f"成功为 {applied} 个 entity 添加字段 '{field_name}'"
+    if targets is not None:
+        message += f"（目标 {len(targets)} 个）"
+    if skipped_existing:
+        message += f"（{skipped_existing} 个已存在该字段，跳过）"
     if skipped:
         message += f"（跳过 {skipped} 个无 normalize 的 entity）"
     return {"status": "success", "data": results, "message": message}

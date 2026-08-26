@@ -16,7 +16,7 @@ import 用法:
 import json
 import sys
 import copy
-from typing import List
+from typing import List, Optional
 
 
 def merge_fields(
@@ -24,33 +24,41 @@ def merge_fields(
     source_fields: List[str],
     target_field: str,
     sep: str = "",
+    target_names: Optional[List[str]] = None,
 ) -> dict:
     """
     对 mapping entity 列表执行字段合并
-    
+
     每个 entity 的 normalize 中添加合并后的字段条目，
     parser.filter 中添加 merger 过滤器。
-    
+
     Args:
         data: 解码后的 JSON 数组（mapping entities）
         source_fields: 源字段名列表，如 ["a", "b"]
         target_field: 目标字段名，如 "d"
         sep: 分隔符，如 "" 或 "-"
-    
+        target_names: 目标 entity 名单（按 name 精确匹配，#126）；
+                      None 表示全部 entity。名单外的 entity 原样透传。
+
     Returns:
         {"status": "success"|"error", "data": [...], "message": "..."}
     """
     if not data:
         return {"status": "error", "message": "输入数据为空"}
-    
+
     if len(source_fields) < 2:
         return {"status": "error", "message": "至少需要 2 个源字段"}
-    
+
+    targets = set(target_names) if target_names else None
     results = []
     applied = 0
     skipped = 0
     for entity in data:
         entity = copy.deepcopy(entity)
+
+        if targets is not None and entity.get("name") not in targets:
+            results.append(entity)
+            continue
 
         # 获取 normalize 列表
         normalize = entity.get("normalize") or []
@@ -132,6 +140,8 @@ def merge_fields(
         results.append(entity)
 
     message = f"成功合并 {applied} 个 entity 的字段为 '{target_field}'"
+    if targets is not None:
+        message += f"（目标 {len(targets)} 个）"
     if skipped:
         message += f"（跳过 {skipped} 个无 normalize 的 entity）"
     return {"status": "success", "data": results, "message": message}

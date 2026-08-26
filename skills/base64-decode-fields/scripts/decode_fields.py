@@ -12,7 +12,7 @@ import 用法:
 import json
 import sys
 import copy
-from typing import List
+from typing import List, Optional
 
 # 运行时 OGNL 解码语句模板：值原地覆盖原字段（key=字段名）
 _OGNL_TEMPLATE = "<%@com.hansight.dataviewer.utils.Base64@Base64Decode({field})%>"
@@ -34,6 +34,7 @@ def _is_decode_filter(filter_item: dict) -> bool:
 def decode_fields(
     data: list,
     field_names: List[str],
+    target_names: Optional[List[str]] = None,
 ) -> dict:
     """
     对 mapping entity 列表的指定字段启用 base64 解码。
@@ -45,6 +46,8 @@ def decode_fields(
     Args:
         data: 解码后的 JSON 数组（mapping entities）
         field_names: 需要 base64 解码的字段名列表
+        target_names: 目标 entity 名单（按 name 精确匹配，#126）；
+                      None 表示全部 entity。名单外的 entity 原样透传。
 
     Returns:
         {"status": "success"|"error", "data": [...], "message": "..."}
@@ -55,11 +58,16 @@ def decode_fields(
     if not field_names:
         return {"status": "error", "message": "未指定要解码的字段"}
 
+    targets = set(target_names) if target_names else None
     results = []
     applied = 0
     skipped = 0
     for entity in data:
         entity = copy.deepcopy(entity)
+
+        if targets is not None and entity.get("name") not in targets:
+            results.append(entity)
+            continue
 
         normalize = entity.get("normalize") or []
         if not normalize:
@@ -94,6 +102,8 @@ def decode_fields(
         results.append(entity)
 
     message = f"成功为 {applied} 个 entity 启用 base64 解码: {', '.join(field_names)}"
+    if targets is not None:
+        message += f"（目标 {len(targets)} 个）"
     if skipped:
         message += f"（跳过 {skipped} 个无 normalize 的 entity）"
     return {"status": "success", "data": results, "message": message}

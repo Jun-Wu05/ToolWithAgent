@@ -16,7 +16,7 @@ import json
 import re
 import sys
 import copy
-from typing import Optional
+from typing import List, Optional
 
 # 运行时 OGNL 提取语句（固定；arg2=被提取字段，arg3=正则）
 _OGNL_TEMPLATE = (
@@ -79,6 +79,7 @@ def extract_field(
     source_field: str,
     pattern: str,
     keyword: Optional[str] = None,
+    target_names: Optional[List[str]] = None,
 ) -> dict:
     """
     对 mapping entity 列表新增正则提取字段。
@@ -96,6 +97,8 @@ def extract_field(
         source_field: 被提取字段（必须为 normalize 里的 index）
         pattern: 正则表达式（必须可全匹配样本整条）
         keyword: 提取目标关键词（如 "client"、"Referer"），缺省命名用
+        target_names: 目标 entity 名单（按 name 精确匹配，#126）；
+            None 表示全部 entity。名单外的 entity 原样透传。
 
     Returns:
         {"status": "success"|"error", "data": [...], "message": "..."}
@@ -114,12 +117,17 @@ def extract_field(
     except re.error as error:
         return {"status": "error", "message": f"正则表达式不合法: {error}"}
 
+    targets = set(target_names) if target_names else None
     results = []
     applied = 0
     skipped = 0
     resolved_name = new_field
     for entity in data:
         entity = copy.deepcopy(entity)
+
+        if targets is not None and entity.get("name") not in targets:
+            results.append(entity)
+            continue
 
         normalize = entity.get("normalize") or []
         if not normalize:
@@ -212,6 +220,8 @@ def extract_field(
         f"成功为 {applied} 个 entity 添加正则提取字段 '{resolved_name}'"
         f"（来源: {source_field}）"
     )
+    if targets is not None:
+        message += f"（目标 {len(targets)} 个）"
     if skipped:
         message += f"（跳过 {skipped} 个无 normalize 的 entity）"
     return {"status": "success", "data": results, "message": message}

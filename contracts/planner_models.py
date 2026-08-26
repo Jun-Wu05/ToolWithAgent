@@ -141,6 +141,8 @@ class AddFieldsStep(StrictContract):
 
     值来源两种：固定值或 ``%{index}`` 引用；添加【事件名称】时值必须是
     合法事件分类名，且事件级别由绑定表联动（执行器保证，契约不承载）。
+    ``target_rule_names`` 为空表示全部 entity；``skip_existing`` 为真时
+    已有同名字段的子规则跳过而不是整体失败（#126）。
     """
 
     step_id: str = Field(min_length=1)
@@ -148,16 +150,21 @@ class AddFieldsStep(StrictContract):
     field_name: str = Field(min_length=1)
     field_value: str = ""
     value_type: Literal["fixed", "reference"] = "fixed"
+    skip_existing: bool = False
+    target_rule_names: tuple[str, ...] = ()
+    rule_group: Literal["all", "threat", "non_threat"] = "all"
     config_ref: ConfigRef
     depends_on: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_value_type(self) -> "AddFieldsStep":
-        """引用型值必须是 %{index} 占位格式。"""
+        """引用型值必须是 %{index} 占位格式；寻址参数互斥。"""
         if self.value_type == "reference" and not (
             self.field_value.startswith("%{") and self.field_value.endswith("}")
         ):
             raise ValueError("引用型字段值必须是 %{index} 占位格式")
+        if self.target_rule_names and self.rule_group != "all":
+            raise ValueError("target_rule_names 与 rule_group 互斥，不能同时指定")
         return self
 
 
@@ -167,8 +174,17 @@ class DeleteFieldsStep(StrictContract):
     step_id: str = Field(min_length=1)
     type: Literal["delete_fields"]
     fields: tuple[str, ...] = Field(min_length=1)
+    target_rule_names: tuple[str, ...] = ()
+    rule_group: Literal["all", "threat", "non_threat"] = "all"
     config_ref: ConfigRef
     depends_on: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "DeleteFieldsStep":
+        """寻址参数互斥。"""
+        if self.target_rule_names and self.rule_group != "all":
+            raise ValueError("target_rule_names 与 rule_group 互斥，不能同时指定")
+        return self
 
 
 class MergeFieldsStep(StrictContract):
@@ -179,8 +195,17 @@ class MergeFieldsStep(StrictContract):
     source_fields: tuple[str, ...] = Field(min_length=2)
     target_field: str = Field(min_length=1)
     sep: str = ""
+    target_rule_names: tuple[str, ...] = ()
+    rule_group: Literal["all", "threat", "non_threat"] = "all"
     config_ref: ConfigRef
     depends_on: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "MergeFieldsStep":
+        """寻址参数互斥。"""
+        if self.target_rule_names and self.rule_group != "all":
+            raise ValueError("target_rule_names 与 rule_group 互斥，不能同时指定")
+        return self
 
 
 class DecodeFieldsStep(StrictContract):
@@ -189,8 +214,17 @@ class DecodeFieldsStep(StrictContract):
     step_id: str = Field(min_length=1)
     type: Literal["decode_fields"]
     fields: tuple[str, ...] = Field(min_length=1)
+    target_rule_names: tuple[str, ...] = ()
+    rule_group: Literal["all", "threat", "non_threat"] = "all"
     config_ref: ConfigRef
     depends_on: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "DecodeFieldsStep":
+        """寻址参数互斥。"""
+        if self.target_rule_names and self.rule_group != "all":
+            raise ValueError("target_rule_names 与 rule_group 互斥，不能同时指定")
+        return self
 
 
 class RegexExtractStep(StrictContract):
@@ -206,8 +240,17 @@ class RegexExtractStep(StrictContract):
     description: str = Field(min_length=1)
     new_field: str = ""
     pattern: str = ""
+    target_rule_names: tuple[str, ...] = ()
+    rule_group: Literal["all", "threat", "non_threat"] = "all"
     config_ref: ConfigRef
     depends_on: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "RegexExtractStep":
+        """寻址参数互斥。"""
+        if self.target_rule_names and self.rule_group != "all":
+            raise ValueError("target_rule_names 与 rule_group 互斥，不能同时指定")
+        return self
 
 
 class ExportStep(StrictContract):
@@ -350,11 +393,21 @@ class FieldMappingRow(StrictContract):
     match_status: str = Field(alias="匹配状态", min_length=1)
 
 
+class EventAnnotationRow(StrictContract):
+    """一条子规则的事件名称标注明细（待人工确认行 event_name 为空）。"""
+
+    rule_name: str = Field(min_length=1)
+    event_name: str = ""
+    event_level: str = ""
+    status: Literal["judged", "uncertain"] = "judged"
+
+
 class FieldMappingArtifact(ArtifactContract):
     """保存已校验的字段映射行，避免跨模块传递任意字典列表。"""
 
     artifact_type: Literal["field_mapping"] = "field_mapping"
     mappings: tuple[FieldMappingRow, ...]
+    event_annotations: tuple[EventAnnotationRow, ...] = ()
     download_kind: Literal["mapped_config", "mapped_sub_rules"] | None = None
     download_content: str | None = None
 

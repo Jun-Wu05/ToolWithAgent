@@ -18,7 +18,7 @@ import 用法:
 import json
 import sys
 import copy
-from typing import List
+from typing import List, Optional
 
 
 # 系统保留字段，不允许删除：
@@ -30,31 +30,39 @@ RESERVED_FIELDS = {"original_log", "rule_name_list", "日志类型"}
 def delete_field(
     data: list,
     fields_to_delete: List[str],
+    target_names: Optional[List[str]] = None,
 ) -> dict:
     """
     对 mapping entity 列表执行字段删除
-    
+
     每个 entity 的 normalize 中移除匹配的条目，
     parser.filter 中添加 removeFields 过滤器。
-    
+
     Args:
         data: 解码后的 JSON 数组（mapping entities）
         fields_to_delete: 要删除的字段名列表，如 ["a"] 或 ["a", "b"]
-    
+        target_names: 目标 entity 名单（按 name 精确匹配，#126）；
+                      None 表示全部 entity。名单外的 entity 原样透传。
+
     Returns:
         {"status": "success"|"error", "data": [...], "message": "..."}
     """
     if not data:
         return {"status": "error", "message": "输入数据为空"}
-    
+
     if not fields_to_delete:
         return {"status": "error", "message": "未指定要删除的字段"}
-    
+
+    targets = set(target_names) if target_names else None
     results = []
     applied = 0
     skipped = 0
     for entity in data:
         entity = copy.deepcopy(entity)
+
+        if targets is not None and entity.get("name") not in targets:
+            results.append(entity)
+            continue
 
         # 获取 normalize 列表
         normalize = entity.get("normalize") or []
@@ -119,6 +127,8 @@ def delete_field(
 
     deleted_count = len([f for f in fields_to_delete if f not in missing])
     message = f"成功从 {applied} 个 entity 删除 {deleted_count} 个字段"
+    if targets is not None:
+        message += f"（目标 {len(targets)} 个）"
     if skipped:
         message += f"（跳过 {skipped} 个无 normalize 的 entity）"
     return {

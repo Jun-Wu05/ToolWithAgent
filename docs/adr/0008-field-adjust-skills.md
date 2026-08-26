@@ -30,3 +30,10 @@ skills/ 目录下已设计三个字段操作技能（add-fields / delete-fields 
 ## 附带决策：事件名称标注挂接
 
 标准字段映射链路在映射成功后、原子写回前，对每条子规则 LLM 判定【事件名称】（两段式：先威胁/非威胁分组、再组内选 21 分类名之一），事件级别按绑定查表写入（威胁组→提醒、非威胁组→信息）。判定输出过白名单与分组一致性校验，非法带反馈重试一次、跨轮合并已接受条目；仍失败宁缺勿错——威胁倾向由 LLM 选「其他告警」兜底，代码不写入任何猜测值，未判定子规则在报告列「待人工确认」。LLM 整体失败重试一次后整步失败（event_classify_failed），保持原子写回。测试经 conftest 守卫隔离真实 LLM：默认空判定（存量行为不变），显式注入 llm_client 时透传真实判定逻辑。
+
+## 附录：子规则寻址与填充即解绑（#126 定案，2026-08-26）
+
+- **寻址**：五个字段调整步骤可选 `target_rule_names`（SessionFacts 暴露子规则名单，Planner 不得编造）或 `rule_group`（threat/non_threat 按已标注事件名称确定性分组），互斥、缺省全部。脚本层以 `target_names` 过滤实现（单一事实源）；适配器负责名单校验（rule_name_not_found）、组解析（event_annotation_required）与 delete 悬空引用守卫（field_reference_conflict：merger 源字段与 `%{字段}` 占位）。入口规则暂不参与寻址（#129）。
+- **填充即解绑**：固定字段的 addFields 绑定值运行时优先于 normalize 值映射，用户显式枚举填充固定字段时由 fill 适配器先解绑（unbind_fixed_fields 删绑定键、保留 normalize）再写 mappings——显式填充即显式放弃绑定，恢复绑定靠重新映射。与「映射目标黑名单」（防映射占用）构成固定字段的两面保护：默认绑定独占，显式填充可解绑。
+- **skip_existing**：批量加字段遇部分子规则已有同名字段时跳过并如实报告，取代整体失败；事件名称联动守卫在此模式下关闭级别冲突检查（跳过语义接管）。
+- **展示分离**：标注明细（EventAnnotationRow：judged/uncertain）进入 FieldMappingArtifact，渲染为独立表格块置于字段映射表格上方；重映射在消息中明示「手动调整已被覆盖」。

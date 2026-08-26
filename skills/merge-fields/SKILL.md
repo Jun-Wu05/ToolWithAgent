@@ -45,6 +45,7 @@ metadata:
 - normalize 的 `result` 只是预览值：源字段为 `%{index}` 引用型时预览为 `%{a}%{b}` 形式的占位拼接，实际拼接由运行时 merger filter 在值替换后执行
 - 源字段数量少于 2 个返回 `insufficient_source_fields`
 - 已存在相同目标字段的 merger 时更新（不重复追加）
+- **子规则寻址（#126）**：`target_names` 按 entity name 精确过滤（None=全部），名单外原样透传
 
 ## 完整示例
 

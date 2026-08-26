@@ -5,6 +5,7 @@
 - append_mappings_to_normalize(normalize_item, mappings) → int   核心：去重追加
 - apply_fill_to_sub_rules(sub_rules, mapping_table, target_field) → list  统一 sub_rules 填充
 - remove_field_mappings(sub_rules, target_field) → list  取消字段映射
+- unbind_fixed_fields(config, field_names) → tuple[Any, list[str]]  填充即解绑（#126）
 """
 from __future__ import annotations
 
@@ -12,6 +13,64 @@ import copy
 import json
 from collections import Counter
 from typing import Any
+
+
+def unbind_fixed_fields(
+    config: Any,
+    field_names: list[str] | tuple[str, ...],
+) -> tuple[Any, list[str]]:
+    """删除 addFields 固定值绑定中命中目标字段的键（填充即解绑，#126）。
+
+    固定字段（事件名称/事件级别/日志类型）由标注机制以 addFields 固定值
+    写入，运行时优先于 normalize 值映射生效；用户显式枚举填充这些字段时，
+    必须先解除绑定，值映射才能真正生效。normalize 条目保留（填充目标）。
+
+    Returns:
+        (更新后的配置深拷贝, 解除绑定的 entity 名单)；无命中时原样深拷贝。
+    """
+    targets = set(field_names)
+    updated = copy.deepcopy(config)
+    unbound: list[str] = []
+
+    def _walk(node: Any) -> None:
+        """递归遍历配置，移除各 entity 绑定过滤器中命中目标字段的键。"""
+        if isinstance(node, dict):
+            parser = node.get("parser")
+            if isinstance(parser, dict) and isinstance(parser.get("filter"), list):
+                touched = False
+                for filter_item in parser["filter"]:
+                    if (
+                        isinstance(filter_item, dict)
+                        and filter_item.get("name") == "addFields"
+                        and filter_item.get("id") == ""
+                        and isinstance(filter_item.get("fields"), dict)
+                    ):
+                        hit = targets & set(filter_item["fields"])
+                        if hit:
+                            for key in hit:
+                                filter_item["fields"].pop(key)
+                            touched = True
+                if touched:
+                    name = node.get("name")
+                    unbound.append(name if isinstance(name, str) else "<未命名>")
+                    # fields 清空的绑定过滤器整体移除，避免留下空 addFields
+                    parser["filter"] = [
+                        f for f in parser["filter"]
+                        if not (
+                            isinstance(f, dict)
+                            and f.get("name") == "addFields"
+                            and f.get("id") == ""
+                            and f.get("fields") == {}
+                        )
+                    ]
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(updated)
+    return updated, unbound
 
 
 def append_mappings_to_normalize(normalize_item: dict, mappings: list[dict]) -> int:

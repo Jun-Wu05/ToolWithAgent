@@ -13,7 +13,9 @@ from agent.shared.mapping_utils import (
     count_field_mappings,
     remove_enum_fill_contributions,
     remove_field_mappings_from_config,
+    unbind_fixed_fields,
 )
+from agent.tools.rule_generator.field_mapping import MAPPING_EXCLUDED_STANDARD_FIELDS
 from contracts.artifact_targets import collect_standard_fields, resolve_standard_target
 
 from web.plan_executor import ExecutionContext
@@ -45,6 +47,28 @@ from web.adapters.shared import (
 logger = get_logger("execution_adapters")
 
 
+def _unbind_fixed_field_bindings(
+    config: Any, target_fields: tuple[str, ...]
+) -> tuple[Any, str]:
+    """填充即解绑（#126）：固定字段的绑定固定值会让值映射失效，先解除。"""
+    fixed_hit = set(target_fields) & MAPPING_EXCLUDED_STANDARD_FIELDS
+    if not fixed_hit:
+        return config, ""
+    updated, unbound = unbind_fixed_fields(config, target_fields)
+    if not unbound:
+        return config, ""
+    note = (
+        f"；已解除 {len(unbound)} 条规则的固定值绑定"
+        f"（{'、'.join(sorted(fixed_hit))} 改由值映射控制）"
+    )
+    logger.info(
+        "[FILL_UNBIND] 填充即解绑: target_fields=%s unbound_rules=%s",
+        sorted(fixed_hit),
+        len(unbound),
+    )
+    return updated, note
+
+
 class EnumFillAdapter:
     """以显式目标字段和配置来源执行枚举填充。"""
 
@@ -58,6 +82,9 @@ class EnumFillAdapter:
         if not isinstance(step, FillStep) or step.fill_kind != "enum":
             raise TypeError("EnumFillAdapter 只接受 enum FillStep")
         current_config = _read_config(context.session, step.config_ref)
+        current_config, unbind_note = _unbind_fixed_field_bindings(
+            current_config, step.target_fields
+        )
         enum_preview = _session_get(context.session, "enum_preview") or []
         mapping_table = _enum_mapping_table(enum_preview, step.target_fields)
         if not mapping_table:
@@ -134,7 +161,7 @@ class EnumFillAdapter:
                 after_count,
                 "enummapping_config",
             ),
-            message="枚举映射已填充到目标字段",
+            message="枚举映射已填充到目标字段" + unbind_note,
         )
 
 class ThreatFillAdapter:
@@ -203,6 +230,9 @@ class ThreatFillAdapter:
             artifact = dependency.artifact
 
         current_config = _read_config(context.session, step.config_ref)
+        current_config, unbind_note = _unbind_fixed_field_bindings(
+            current_config, step.target_fields
+        )
 
         mapping_rows = [row.model_dump(by_alias=True) for row in artifact.mappings]
         if not mapping_rows:
@@ -235,7 +265,7 @@ class ThreatFillAdapter:
                 after_count,
                 "threatmapping_config",
             ),
-            message="威胁映射已填充到目标字段",
+            message="威胁映射已填充到目标字段" + unbind_note,
         )
 
 class FillAdapter:

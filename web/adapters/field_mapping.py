@@ -621,6 +621,11 @@ class FieldMappingAdapter:
         staged_sub_rule_results = None
         staged_mapped_sub_rules = None
         event_annotation_summary: str | None = None
+        event_annotation_rows: tuple = ()
+        # 重映射覆盖提示（#126 决策 1）：会话已有映射结果时重新生成会丢弃手动调整
+        had_existing_mapped_rules = bool(
+            _session_get(context.session, "mapped_sub_rules")
+        )
         # 子规则计算可能抛错或原地修改输入，因此必须在 session 副本上完成后再提交。
         sub_rules = copy.deepcopy(_session_get(context.session, "mapped_sub_rules") or [])
         if not sub_rules:
@@ -668,7 +673,11 @@ class FieldMappingAdapter:
             )
             if isinstance(annotation_outcome, StepResult):
                 return annotation_outcome
-            staged_mapped_sub_rules, event_annotation_summary = annotation_outcome
+            (
+                staged_mapped_sub_rules,
+                event_annotation_summary,
+                event_annotation_rows,
+            ) = annotation_outcome
 
         staged_decoded_data = None
         download_kind = None
@@ -756,11 +765,17 @@ class FieldMappingAdapter:
         )
         if event_annotation_summary:
             message = f"{message}；{event_annotation_summary}"
+        if had_existing_mapped_rules and staged_mapped_sub_rules is not None:
+            message = (
+                f"{message}；⚠️ 重新映射已重新生成子规则，"
+                "此前手动调整（字段增删/事件名称修改）已被覆盖"
+            )
         return _success(
             step,
             FieldMappingArtifact(
                 mappings=typed_mappings,
                 item_count=len(typed_mappings),
+                event_annotations=event_annotation_rows,
                 download_kind=download_kind,
                 download_content=download_content,
             ),
@@ -772,12 +787,12 @@ class FieldMappingAdapter:
         step: FieldMappingStep,
         context: ExecutionContext,
         mapped_sub_rules: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], str] | StepResult:
+    ) -> tuple[list[dict[str, Any]], str | None, tuple] | StepResult:
         """判定并写入每条子规则的【事件名称】+ 绑定【事件级别】。
 
-        成功返回 (标注后的子规则, 摘要)；LLM 可重试错误重试一次，
-        仍失败返回 failed StepResult（调用方立即返回，session 不提交）。
-        待人工确认的子规则保持不变，仅计入摘要。
+        成功返回 (标注后的子规则, 摘要, 标注明细行)；LLM 可重试错误重试
+        一次，仍失败返回 failed StepResult（调用方立即返回，session 不提交）。
+        待人工确认的子规则保持不变，明细行 status=uncertain。
         """
         from agent.shared import event_classify
 
@@ -807,7 +822,7 @@ class FieldMappingAdapter:
         annotated = event_classify.apply_event_fields_to_sub_rules(mapped_sub_rules, judgments)
         if not judgments and not uncertain:
             # 无可判定子规则时不改数据、不向消息追加噪音
-            return mapped_sub_rules, ""
+            return mapped_sub_rules, "", ()
         threat_count = sum(
             1 for value in judgments.values() if value in event_classify.THREAT_EVENT_NAMES
         )
@@ -824,4 +839,24 @@ class FieldMappingAdapter:
             len(judgments),
             len(uncertain),
         )
-        return annotated, summary or None
+        from contracts.planner_models import EventAnnotationRow
+
+        annotation_rows: list[EventAnnotationRow] = []
+        uncertain_set = set(uncertain)
+        for rule in mapped_sub_rules:
+            rule_name = str(rule.get("name", ""))
+            event_name = judgments.get(rule_name, "")
+            if event_name:
+                annotation_rows.append(
+                    EventAnnotationRow(
+                        rule_name=rule_name,
+                        event_name=event_name,
+                        event_level=event_classify.EVENT_NAME_LEVEL_BINDING[event_name],
+                        status="judged",
+                    )
+                )
+            elif rule_name in uncertain_set:
+                annotation_rows.append(
+                    EventAnnotationRow(rule_name=rule_name, status="uncertain")
+                )
+        return annotated, summary or None, tuple(annotation_rows)

@@ -26,6 +26,7 @@
 ## 合法来源与依赖
 
 - `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`，但仅有 `session.decoded_config` 时也必须允许枚举填充，无需先做字段映射。字段调整类步骤（add/delete/merge/decode/regex_extract）同样如此，不得生成无 `config_ref` 的字段步骤。
+- 字段调整寻址（#126）：字段调整步骤可选携带 `target_rule_names`（点名某条/某几条子规则时）或 `rule_group`（"threat"/"non_threat"，用户说「所有威胁/非威胁子规则」时），两者互斥、都不带则全部子规则。`target_rule_names` 的名字必须**逐字取自** `mapped_sub_rule_names` / `decoded_config_rule_names`，不得编造或改写；用户点名不在名单中的子规则时 Clarification 并列出可用名单。用户要求"跳过已有字段"时 add_fields 携带 `skip_existing=true`。
 - 可引用会话产物来源只有 `session.artifacts.enum_values` 和 `session.artifacts.threat_mapping`，且必须存在于 `referenceable_artifacts`；旧 `last_*` 不是合法来源。
 - 产物目录中有 `source_field` 时，跨轮威胁填充只能使用同一目录项 `target_bindings` 中与所选 `config_ref` 对应的唯一 `target_field`。用户点名其他字段时 Clarification。
 - 最近威胁产物没有 `source_field`（用户直接给值）时，只有用户在当前文本明确指定目标字段才允许填充；未指定时 Clarification。
@@ -112,6 +113,14 @@ base64 解码请求头与请求体（可用配置）：
 把原始日志里的 client 提取出来（正则由系统按样本生成；可用配置）：
 ```json
 {"decision":"execute","plan_id":"plan-re","steps":[{"step_id":"re-1","type":"regex_extract","source_field":"original_log","description":"client","config_ref":"session.decoded_config"}]}
+```
+给指定子规则加字段（名字取自 facts 的子规则名单；#126 寻址）：
+```json
+{"decision":"execute","plan_id":"plan-add-target","steps":[{"step_id":"add-1","type":"add_fields","field_name":"备注","field_value":"重点","target_rule_names":["暴力破解_kv_子规则"],"config_ref":"session.mapped_sub_rules"}]}
+```
+所有威胁子规则批量删除字段（按已标注事件名称确定性分组）：
+```json
+{"decision":"execute","plan_id":"plan-del-group","steps":[{"step_id":"del-1","type":"delete_fields","fields":["临时字段"],"rule_group":"threat","config_ref":"session.mapped_sub_rules"}]}
 ```
 
 ## 正反例与复合计划

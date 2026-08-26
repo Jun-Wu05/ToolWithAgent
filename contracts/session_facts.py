@@ -33,6 +33,11 @@ class SessionFacts(BaseModel):
     existing_enum_value_count: int = Field(default=0, ge=0)
     existing_threat_mapping_count: int = Field(default=0, ge=0)
     mapped_sub_rule_count: int = Field(default=0, ge=0)
+    """映射后子规则数量。"""
+    mapped_sub_rule_names: tuple[str, ...] = ()
+    """子规则名单（entity name，去重保序），供字段调整寻址（#126）。"""
+    decoded_config_rule_names: tuple[str, ...] = ()
+    """上传配置的 entity 名单，供字段调整寻址（#126）。"""
     referenceable_artifacts: tuple[ReferenceableArtifactFact, ...] = ()
 
 
@@ -201,6 +206,26 @@ def _referenceable_artifacts(
         )
     return tuple(facts)
 
+def _collect_rule_names(config: Any) -> tuple[str, ...]:
+    """递归收集配置中全部 entity 的 name（去重保序，#126 寻址事实）。"""
+    names: list[str] = []
+
+    def _walk(node: Any) -> None:
+        """递归遍历配置，收集各 entity 的 name。"""
+        if isinstance(node, dict):
+            name = node.get("name")
+            if isinstance(name, str) and name and name not in names:
+                names.append(name)
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(config)
+    return tuple(names)
+
+
 def build_session_facts(session: Any) -> SessionFacts:
     """把会话状态投影为不可变安全快照；缺失状态按“不可用”处理。"""
     enum_preview = _read_session_value(session, "enum_preview", []) or []
@@ -232,5 +257,7 @@ def build_session_facts(session: Any) -> SessionFacts:
         ),
         existing_threat_mapping_count=len(threat_data),
         mapped_sub_rule_count=len(mapped_sub_rules),
+        mapped_sub_rule_names=_collect_rule_names(mapped_sub_rules),
+        decoded_config_rule_names=_collect_rule_names(decoded_data),
         referenceable_artifacts=_referenceable_artifacts(session, config_refs),
     )

@@ -18,6 +18,22 @@ from web.utils import render_log_parser_result
 logger = get_logger("plan_renderer")
 
 
+def _render_event_annotation_block(annotations) -> str:
+    """事件名称标注明细（#126）：以 Markdown 块渲染，位于映射表格上方。"""
+    rows = [
+        "🏷️ **事件名称标注**（自动写入，事件级别按绑定联动）",
+        "",
+        "| 子规则 | 事件名称 | 事件级别 |",
+        "| --- | --- | --- |",
+    ]
+    for item in annotations:
+        if item.status == "judged":
+            rows.append(f"| {item.rule_name} | {item.event_name} | {item.event_level} |")
+        else:
+            rows.append(f"| {item.rule_name} | ⚠️ 待人工确认 | — |")
+    return "\n".join(rows)
+
+
 def _download_filename(kind: str, timestamp: str) -> str:
     """按产物语义生成用户可见下载名。"""
     names = {
@@ -110,6 +126,9 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             elements.extend(create_dataframe_elements(rows))
+            # 标注明细以内容块渲染，位于表格元素上方（#126 展示分离）
+            if artifact.event_annotations:
+                lines.append(_render_event_annotation_block(artifact.event_annotations))
             if artifact.download_kind and artifact.download_content:
                 field_mapping_downloads.append(
                     (

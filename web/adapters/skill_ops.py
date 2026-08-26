@@ -103,28 +103,6 @@ def _map_skill_error(message: str) -> str:
     return "field_adjust_failed"
 
 
-def _field_exists_in_config(config: Any, field_name: str) -> bool:
-    """递归检查配置中是否已有该字段（normalize index 粒度）。"""
-
-    def _walk(node: Any) -> bool:
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for entry in normalize:
-                    if isinstance(entry, dict) and entry.get("index") == field_name:
-                        return True
-            for value in node.values():
-                if _walk(value):
-                    return True
-        elif isinstance(node, list):
-            for item in node:
-                if _walk(item):
-                    return True
-        return False
-
-    return _walk(config)
-
-
 def _first_field_sample(config: Any, field_name: str) -> str | None:
     """递归查找字段的第一条样本值（normalize result[0]），供正则生成。"""
 
@@ -171,6 +149,167 @@ def _description_keyword(description: str) -> str:
     return ""
 
 
+def _collect_entity_names(config: Any) -> list[str]:
+    """递归收集配置中全部 entity 名单（去重保序）。"""
+    names: list[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            name = node.get("name")
+            if isinstance(name, str) and name and name not in names:
+                names.append(name)
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(config)
+    return names
+
+
+def _iter_target_entities(config: Any, targets: list[str] | None):
+    """递归产出目标 entity dict；targets 为 None 时产出全部 entity。
+
+    entity 判定：含 parser 或 normalize 的 dict（入口规则与子规则都算）。
+    """
+    target_set = set(targets) if targets else None
+
+    def _walk(node: Any):
+        if isinstance(node, dict):
+            name = node.get("name")
+            looks_like_entity = isinstance(node.get("parser"), dict) or isinstance(
+                node.get("normalize"), list)
+            if looks_like_entity:
+                if target_set is None:
+                    yield node
+                elif isinstance(name, str) and name in target_set:
+                    yield node
+            for value in node.values():
+                yield from _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from _walk(item)
+
+    yield from _walk(config)
+
+
+def _entity_event_name(entity: dict) -> str | None:
+    """读取单条 entity 已标注的事件名称（addFields 固定值优先，normalize 兜底）。"""
+    parser = entity.get("parser") or {}
+    for filter_item in parser.get("filter") or []:
+        if (
+            isinstance(filter_item, dict)
+            and filter_item.get("name") == "addFields"
+            and filter_item.get("id") == ""
+            and isinstance(filter_item.get("fields"), dict)
+            and EVENT_NAME_FIELD in filter_item["fields"]
+        ):
+            value = filter_item["fields"][EVENT_NAME_FIELD]
+            if value in EVENT_NAME_LEVEL_BINDING:
+                return str(value)
+    for entry in entity.get("normalize") or []:
+        if isinstance(entry, dict) and entry.get("index") == EVENT_NAME_FIELD:
+            result = entry.get("result") or [""]
+            value = str(result[0]) if result else ""
+            if value in EVENT_NAME_LEVEL_BINDING:
+                return value
+    return None
+
+
+def _resolve_field_scope(
+    step: StepSpec, config: Any
+) -> tuple[list[str] | None, StepResult | None]:
+    """把 target_rule_names / rule_group 解析为目标名单（#126）。
+
+    - target_rule_names 非空：逐名校验存在性，未知名返回 rule_name_not_found；
+    - rule_group 非 all：按已标注事件名称 + 绑定表确定性分组；
+      无任何标注时返回 event_annotation_required；
+    - 其余：None 表示全部 entity。
+    """
+    from agent.shared.event_classify import THREAT_EVENT_NAMES
+
+    if step.target_rule_names:
+        available = _collect_entity_names(config)
+        available_set = set(available)
+        unknown = [name for name in step.target_rule_names if name not in available_set]
+        if unknown:
+            preview = "、".join(available[:20]) + ("等" if len(available) > 20 else "")
+            return None, _failed(
+                step,
+                "rule_name_not_found",
+                f"未找到子规则: {'、'.join(unknown)}。可用子规则: {preview}",
+            )
+        return list(step.target_rule_names), None
+
+    if step.rule_group != "all":
+        wanted_threat = step.rule_group == "threat"
+        targets = []
+        annotated = False
+        for entity in _iter_target_entities(config, None):
+            event_name = _entity_event_name(entity)
+            if event_name is None:
+                continue
+            annotated = True
+            is_threat = event_name in THREAT_EVENT_NAMES
+            if is_threat == wanted_threat:
+                name = entity.get("name")
+                if isinstance(name, str) and name:
+                    targets.append(name)
+        if not annotated:
+            return None, _failed(
+                step,
+                "event_annotation_required",
+                "按威胁/非威胁组批需要先完成字段映射（自动标注事件名称）后再试",
+            )
+        if not targets:
+            return None, _failed(
+                step,
+                "rule_name_not_found",
+                f"没有属于{'威胁' if wanted_threat else '非威胁'}组的子规则",
+            )
+        return targets, None
+
+    return None, None
+
+
+def _check_dangling_references(
+    step: Any, config: Any, targets: list[str] | None
+) -> StepResult | None:
+    """delete 前检查目标 entity 内对被删字段的悬空引用（#126）。
+
+    命中两类引用即拒绝：merger 的源字段、addFields 值中的 %{字段} 占位。
+    """
+    deleted = set(step.fields)
+    issues: list[str] = []
+    for entity in _iter_target_entities(config, targets):
+        name = entity.get("name") or "<未命名>"
+        parser = entity.get("parser") or {}
+        for filter_item in parser.get("filter") or []:
+            if not isinstance(filter_item, dict):
+                continue
+            if filter_item.get("name") == "merger":
+                overlap = deleted & set(filter_item.get("fields") or [])
+                if overlap:
+                    issues.append(f"{name}: merger 源字段引用 {sorted(overlap)}")
+            fields = filter_item.get("fields")
+            if isinstance(fields, dict):
+                for value in fields.values():
+                    if isinstance(value, str):
+                        refs = deleted & {
+                            ref for ref in deleted if f"%{{{ref}}}" in value
+                        }
+                        if refs:
+                            issues.append(f"{name}: %{{{sorted(refs)[0]}}} 引用")
+    if issues:
+        return _failed(
+            step,
+            "field_reference_conflict",
+            "以下引用了被删字段，请先解除引用再删除：" + "；".join(issues[:5]),
+        )
+    return None
+
+
 class FieldSkillAdapter:
     """字段调整适配器：读配置 → 调 skill 函数 → 写回 session → 产出下载产物。"""
 
@@ -202,27 +341,43 @@ class FieldSkillAdapter:
     # ---- 三类步骤的参数翻译与后处理 ----
 
     def _execute_add(self, step: AddFieldsStep, context: ExecutionContext) -> StepResult:
-        if step.field_name == EVENT_NAME_FIELD:
-            guard = self._guard_event_name(step, context)
-            if guard is not None:
-                return guard
-
         config = _read_config(context.session, step.config_ref)
         if not config:
             return _failed(step, "config_required", "当前没有可调整的解析规则")
 
-        result = self._skill_runner("add_fields")(config, step.field_name, step.field_value)
+        targets, scope_error = _resolve_field_scope(step, config)
+        if scope_error is not None:
+            return scope_error
+
+        if step.field_name == EVENT_NAME_FIELD:
+            guard = self._guard_event_name(
+                step, context, config, targets, check_level_conflict=not step.skip_existing
+            )
+            if guard is not None:
+                return guard
+
+        result = self._skill_runner("add_fields")(
+            config,
+            step.field_name,
+            step.field_value,
+            target_names=targets,
+            skip_existing=step.skip_existing,
+        )
         if result.get("status") != "success":
             return self._skill_error(step, result)
 
         updated = result["data"]
         message = str(result.get("message", ""))
 
-        # 事件名称绑定守卫：自动联动写入绑定的事件级别
+        # 事件名称绑定守卫：自动联动写入绑定的事件级别（同目标范围）
         if step.field_name == EVENT_NAME_FIELD:
             level = EVENT_NAME_LEVEL_BINDING[step.field_value]
             level_result = self._skill_runner("add_fields")(
-                updated, EVENT_LEVEL_FIELD, level
+                updated,
+                EVENT_LEVEL_FIELD,
+                level,
+                target_names=targets,
+                skip_existing=step.skip_existing,
             )
             if level_result.get("status") != "success":
                 return self._skill_error(step, level_result)
@@ -236,7 +391,17 @@ class FieldSkillAdapter:
         if not config:
             return _failed(step, "config_required", "当前没有可调整的解析规则")
 
-        result = self._skill_runner("delete_fields")(config, list(step.fields))
+        targets, scope_error = _resolve_field_scope(step, config)
+        if scope_error is not None:
+            return scope_error
+
+        dangling = _check_dangling_references(step, config, targets)
+        if dangling is not None:
+            return dangling
+
+        result = self._skill_runner("delete_fields")(
+            config, list(step.fields), target_names=targets
+        )
         if result.get("status") != "success":
             return self._skill_error(step, result)
 
@@ -251,8 +416,13 @@ class FieldSkillAdapter:
         if not config:
             return _failed(step, "config_required", "当前没有可调整的解析规则")
 
+        targets, scope_error = _resolve_field_scope(step, config)
+        if scope_error is not None:
+            return scope_error
+
         result = self._skill_runner("merge_fields")(
-            config, list(step.source_fields), step.target_field, step.sep
+            config, list(step.source_fields), step.target_field, step.sep,
+            target_names=targets,
         )
         if result.get("status") != "success":
             return self._skill_error(step, result)
@@ -265,7 +435,13 @@ class FieldSkillAdapter:
         if not config:
             return _failed(step, "config_required", "当前没有可调整的解析规则")
 
-        result = self._skill_runner("decode_fields")(config, list(step.fields))
+        targets, scope_error = _resolve_field_scope(step, config)
+        if scope_error is not None:
+            return scope_error
+
+        result = self._skill_runner("decode_fields")(
+            config, list(step.fields), target_names=targets
+        )
         if result.get("status") != "success":
             return self._skill_error(step, result)
 
@@ -280,6 +456,10 @@ class FieldSkillAdapter:
         config = _read_config(context.session, step.config_ref)
         if not config:
             return _failed(step, "config_required", "当前没有可调整的解析规则")
+
+        targets, scope_error = _resolve_field_scope(step, config)
+        if scope_error is not None:
+            return scope_error
 
         pattern = step.pattern
         if not pattern:
@@ -310,6 +490,7 @@ class FieldSkillAdapter:
             step.source_field,
             pattern,
             keyword=_description_keyword(step.description),
+            target_names=targets,
         )
         if result.get("status") != "success":
             return self._skill_error(step, result)
@@ -320,9 +501,18 @@ class FieldSkillAdapter:
     # ---- 守卫与收尾 ----
 
     def _guard_event_name(
-        self, step: AddFieldsStep, context: ExecutionContext
+        self,
+        step: AddFieldsStep,
+        context: ExecutionContext,
+        config: Any,
+        targets: list[str] | None,
+        check_level_conflict: bool = True,
     ) -> StepResult | None:
-        """【事件名称】绑定守卫：白名单校验 + 联动前置检查。"""
+        """【事件名称】绑定守卫：白名单校验恒开；联动前置检查限目标范围。
+
+        skip_existing 模式下已有字段的 entity 由跳过语义接管，
+        级别存在性冲突检查关闭（check_level_conflict=False）。
+        """
         if step.value_type == "reference":
             return _failed(
                 step,
@@ -336,14 +526,18 @@ class FieldSkillAdapter:
                 "invalid_event_name",
                 f"{EVENT_NAME_FIELD}必须是以下分类名之一: {legal}",
             )
-        config = _read_config(context.session, step.config_ref)
-        if config and _field_exists_in_config(config, EVENT_LEVEL_FIELD):
-            return _failed(
-                step,
-                "event_level_conflict",
-                f"{EVENT_LEVEL_FIELD}已存在；修改{EVENT_NAME_FIELD}请先删除"
-                f"{EVENT_NAME_FIELD}和{EVENT_LEVEL_FIELD}再重新添加",
-            )
+        if not check_level_conflict:
+            return None
+        for entity in _iter_target_entities(config, targets):
+            for entry in entity.get("normalize") or []:
+                if isinstance(entry, dict) and entry.get("index") == EVENT_LEVEL_FIELD:
+                    return _failed(
+                        step,
+                        "event_level_conflict",
+                        f"{EVENT_LEVEL_FIELD}已存在；修改{EVENT_NAME_FIELD}请先删除"
+                        f"{EVENT_NAME_FIELD}和{EVENT_LEVEL_FIELD}再重新添加"
+                        f"（或要求跳过已有字段的子规则）",
+                    )
         return None
 
     def _skill_error(self, step: StepSpec, result: Mapping[str, Any]) -> StepResult:

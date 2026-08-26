@@ -49,6 +49,7 @@ metadata:
 ## 约束与边界
 - 字段不存在时返回 `field_not_found` 并列出可用字段
 - 操作应用到每一个 entity；无 normalize 的 entity 跳过且计数如实
+- **子规则寻址（#126）**：`target_names` 按 entity name 精确过滤（None=全部），名单外原样透传
 
 ## 完整示例
 

@@ -68,6 +68,14 @@
     {"id": "clarify_no_logs", "category": "clarify", "user_text": "日志类型提取", "facts": {},
      "expect": {"decision": "clarification"}},
     {"id": "clarify_no_config_add", "category": "clarify", "user_text": "添加字段 主机ip，值为 1.1.1.1", "facts": {},
-     "expect": {"decision": "clarification"}}
+     "expect": {"decision": "clarification"}},
+    {"id": "targeting_add_fields", "category": "targeting", "user_text": "给 暴力破解_kv_子规则 添加字段 备注，值为 重点", "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "mapped_sub_rule_names": ["暴力破解_kv_子规则", "用户登录_json_子规则"]},
+     "expect": {"decision": "execute", "steps": [{"type": "add_fields", "field_name": "备注", "field_value": "重点", "target_rule_names": ["暴力破解_kv_子规则"]}]}},
+    {"id": "targeting_group_delete", "category": "targeting", "user_text": "把所有威胁子规则里的 临时字段 都删掉", "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "mapped_sub_rule_names": ["暴力破解_kv_子规则", "用户登录_json_子规则"]},
+     "expect": {"decision": "execute", "steps": [{"type": "delete_fields", "fields": ["临时字段"], "rule_group": "threat"}]}},
+    {"id": "targeting_unknown_rule", "category": "targeting", "user_text": "给 不存在的规则 添加字段 备注，值为 重点", "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "mapped_sub_rule_names": ["暴力破解_kv_子规则"]},
+     "expect": {"decision": "clarification"}},
+    {"id": "targeting_skip_existing", "category": "targeting", "user_text": "给所有子规则添加字段 标记，值为 1，已经有的跳过", "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "mapped_sub_rule_names": ["暴力破解_kv_子规则"]},
+     "expect": {"decision": "execute", "steps": [{"type": "add_fields", "field_name": "标记", "field_value": "1", "skip_existing": true}]}}
   ]
 }
