@@ -17,7 +17,7 @@
 5. `fill`（填充）：把值映射写入解析规则的 `normalize[].mappings`。必须显式提供 `fill_kind`、`target_fields`、映射 `source_ref` 和被修改配置 `config_ref`。枚举填充使用 `source_ref=session.enum_mapping_table`，目标字段只能取自 `enum_mapping_target_fields`，`config_ref` 取自 `available_config_refs`（`session.decoded_config` 或 `session.mapped_sub_rules` 均可）；本轮威胁填充引用前序 Threat Mapping 步骤；自然续接最近威胁结果时使用 `source_ref=session.artifacts.threat_mapping` 且不声明依赖。
 6. `remove_mapping`（取消映射）：清空指定字段的值映射，必须有 `target_fields` 和可用 `config_ref`。
 7. `export`（导出）：导出当前配置、入口规则或子规则，必须有合法 `source_ref`；本计划产物还要声明对应 `depends_on`。
-8. `add_fields`（添加字段）：在解析规则的每个 entity 上新增一个字段。必须显式提供 `field_name`（字段名）、`field_value`（值：固定值或 `%{index}` 引用，引用时 `value_type="reference"`）和 `config_ref`（取自 `available_config_refs`）。添加【事件名称】时：`value_type` 必须是 `fixed`，值必须是 21 个合法分类名之一（威胁组：网络攻击/病毒检测/邮件告警/终端告警/蜜罐告警/其他告警；非威胁组：登录事件/审计事件/会话操作/进程操作/用户操作/资源监控/邮件操作/dns查询/dns响应/数据库操作/ssh连接/认证事件/telnet连接/网络连接/web访问），【事件级别】由系统按绑定关系自动联动写入，**不要单独生成添加事件级别的步骤**。
+8. `add_fields`（添加字段）：在解析规则的每个 entity 上新增一个字段。必须显式提供 `field_name`（字段名）、`field_value`（值：固定值或 `%{index}` 引用，引用时 `value_type="reference"`）和 `config_ref`（取自 `available_config_refs`）。添加【事件名称】时：`value_type` 必须是 `fixed`，值必须是用户话术中出现的合法事件分类名（共 21 个，由执行器严格校验：威胁组 6 个如网络攻击、终端告警、其他告警；非威胁组 15 个如登录事件、web访问、数据库操作），【事件级别】由系统按绑定关系自动联动写入，**不要单独生成添加事件级别的步骤**。
 9. `delete_fields`（删除字段）：从解析规则移除一个或多个字段。必须提供 `fields`（至少一个字段名）和 `config_ref`。系统保留字段（original_log、rule_name_list、日志类型）会被执行器拒绝；修改事件名称的正确姿势是先 `delete_fields`（事件名称和事件级别一起删）再 `add_fields` 新值。
 10. `merge_fields`（合并字段）：把多个源字段合并为一个新字段。必须提供 `source_fields`（至少 2 个）、`target_field`、`sep`（分隔符，可为空字符串）和 `config_ref`。
 11. `decode_fields`（base64 解码字段）：对解析规则的指定字段启用运行时 base64 解码（原地覆盖字段值，不新增字段）。必须提供 `fields`（要解码的字段名列表）和 `config_ref`。触发词：「base64 解码 X」「解码 req_header / req_body」。
@@ -25,7 +25,7 @@
 
 ## 合法来源与依赖
 
-- `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`，但仅有 `session.decoded_config` 时也必须允许枚举填充，无需先做字段映射。
+- `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`，但仅有 `session.decoded_config` 时也必须允许枚举填充，无需先做字段映射。字段调整类步骤（add/delete/merge/decode/regex_extract）同样如此，不得生成无 `config_ref` 的字段步骤。
 - 可引用会话产物来源只有 `session.artifacts.enum_values` 和 `session.artifacts.threat_mapping`，且必须存在于 `referenceable_artifacts`；旧 `last_*` 不是合法来源。
 - 产物目录中有 `source_field` 时，跨轮威胁填充只能使用同一目录项 `target_bindings` 中与所选 `config_ref` 对应的唯一 `target_field`。用户点名其他字段时 Clarification。
 - 最近威胁产物没有 `source_field`（用户直接给值）时，只有用户在当前文本明确指定目标字段才允许填充；未指定时 Clarification。
@@ -36,25 +36,22 @@
 
 ## 消歧规则
 
-- “日志类型提取”是 `log_parse`，不是 `enum_extract`；它处理整列原始日志，默认不选字段、由系统自动探测分类特征字段，不存在必须选择哪个字段。只有用户以“作为/当作/设为/当日志类型”点名字段时才携带 `feature_field`；“把A的枚举值作为日志类型”即使句中出现“枚举”，也是携带 feature_field=A 的 `log_parse`，不是 `enum_extract`。
+- “日志类型提取”“日志分类”“日志解析”是 `log_parse`；“提取 X 的枚举值”“X 有哪些不同值”是 `enum_extract`，两者不可互换。只有用户以“作为/当作/设为/当日志类型”点名字段时 `log_parse` 才携带 `feature_field`（“把A的枚举值作为日志类型”即使句中出现“枚举”，也是携带 feature_field=A 的 `log_parse`）。
 - “删除字段 X”“移除字段 X”“去掉字段 X”是 `delete_fields`（移除整个字段及其条目）；“取消/删除 X 的映射”“清空 X 的值映射”是 `remove_mapping`（只清 mappings，字段保留）。两者不可互换：没提“映射”二字、只针对字段本身的删除是 `delete_fields`。
 - “添加字段 X，值为 Y”“新增字段 X 引用 Z”是 `add_fields`；“把 X 的枚举值填充回配置”是 `fill`。“合并字段 A 和 B 成 C”是 `merge_fields`。
 - “提取 X 的枚举值”（从日志列收集不同值）是 `enum_extract`，产物是值列表；“把原始日志/请求头里的 X 提取出来”（在解析规则上新增提取字段）是 `regex_extract`，产物是修改后的配置。两者不可互换。
 - “base64 解码 X”“解码字段 X”是 `decode_fields`（原地覆盖已有字段值）；“新增字段”是 `add_fields`。解码不产生新字段。
-- 字段调整步骤的目标数据由 `config_ref` 显式指定；用户未点名时取 `available_config_refs` 优先级（同时存在优先 `session.mapped_sub_rules`），不得生成无 config_ref 的字段步骤。
 - 【事件名称】【事件级别】【日志类型】是系统固定字段，由事件名称标注等机制独占；用户要求把某原始字段映射成这三个字段时 Clarification 说明这一约束，不得生成 `field_mapping` 步骤硬填。
 - 用户要求“填充/修改事件级别”时，正确路径是修改【事件名称】（`delete_fields` 删除事件名称和事件级别后 `add_fields` 新事件名称，级别自动联动）；不得对这两个字段生成 `fill` 或单独的 add_fields(事件级别) 步骤。
-- 只有明确的“提取 <字段> 的枚举值”才是 `enum_extract`，并且必须携带 `target_field`。
-- “日志分类”指日志类型分类；“提取事件级别的枚举值”指字段枚举提取，两者不可互换。
+- “把这些值做威胁映射”优先使用当前文本的显式值，其次使用本计划可依赖的 Enum Extract 步骤；只有“刚才的枚举结果”等自然续接才使用目录中的 `session.artifacts.enum_values`。
 - “枚举值处理”：存在可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）和枚举映射表时，“枚举值填充”“填充回配置”“写入解析规则”都表示枚举填充，**直接生成填充步骤，不必追问目标字段**——用户点名了目标字段就只填该字段；未点名就填充 `enum_mapping_target_fields` 的**全部**字段（多 sheet 映射表每个 sheet 的目标字段都填）。仅当缺少枚举映射表或可用配置时才追问/请求上传；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
 - 同一句要求互相冲突的操作（如“日志类型提取，但按事件级别做枚举提取，只执行一步”）时 Clarification，不自行选择。
-- “把这些值做威胁映射”优先使用当前文本的显式值，其次使用本计划可依赖的 Enum Extract 步骤；只有“刚才的枚举结果”等自然续接才使用目录中的 `session.artifacts.enum_values`。
 - “把刚才的威胁映射填充回去”使用 `session.artifacts.threat_mapping`。有字段血缘时必须采用目录中的唯一目标绑定；无字段血缘时必须由当前文本明确目标字段。
 - “提取 <字段> 的枚举值并进行威胁类型映射”只生成 `enum_extract → threat_mapping`；不得生成 `fill`，即使 session 存在配置。只有明确要求“填充回配置”或“写入解析规则”时才允许生成 `fill`。
 - 参数缺失、意图冲突或事实不足时必须 Clarification 并停止，不得生成猜测计划。
 - 追问衔接（#122）：上一轮助手是追问（如列出日志体可用字段）而本轮用户仅回复一个字段名或简短选择（如「Type」）时，视为对该追问的回答——生成对应步骤，字段名优先采用追问文案中列出的原样写法；不得因回复不是完整句子而再次追问或拒绝执行。
 
-## 七类单意图示例
+## 单意图示例
 
 日志类型提取（有日志）：
 ```json
@@ -121,39 +118,25 @@ base64 解码请求头与请求体（可用配置）：
 
 - 正：“识别日志类型” → `log_parse`；反：不得生成 `enum_extract` 或询问字段。
 - 正：“提取事件级别的枚举值” → `enum_extract(target_field=事件级别)`；反：不得生成 `log_parse`。
-- 无日志时“日志类型提取”：
+- 无日志/意图冲突/参数缺失都返回 clarification（无 steps、带 reason_code 与 question）。冲突表达如“日志类型提取，但按事件级别做枚举提取，只执行一步”：`{"reason_code":"conflicting_intent","question":"请确认本次要执行日志类型提取，还是提取事件级别的枚举值。"}`；无日志时：
 ```json
 {"decision":"clarification","plan_id":"plan-no-logs","reason_code":"missing_logs","question":"请先上传包含原始日志的数据。"}
-```
-- 冲突表达：
-```json
-{"decision":"clarification","plan_id":"plan-conflict","reason_code":"conflicting_intent","question":"请确认本次要执行日志类型提取，还是提取事件级别的枚举值。"}
 ```
 - “提取 event_type3 的枚举值，再做威胁映射并填充回 event_type3”（日志与子规则可用）：
 ```json
 {"decision":"execute","plan_id":"plan-compound","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"event_type3","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]},{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_type3"],"source_ref":"step:threat-1","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]}]}
 ```
-- “提取 category 的枚举值，然后按 category 做日志类型分类”（两个产物互补，无数据依赖，各成一步）：
-```json
-{"decision":"execute","plan_id":"plan-enum-logparse","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"category","source_ref":"session.logs"},{"step_id":"log-1","type":"log_parse","feature_field":"category"}]}
-```
-- “提取 alarm_name 的枚举值并进行威胁类型映射”（即使 session 有配置）：
+- “提取 alarm_name 的枚举值并进行威胁类型映射”（即使 session 有配置也不加 fill）：
 ```json
 {"decision":"execute","plan_id":"plan-enum-threat","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"alarm_name","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]}]}
 ```
-
-- 上一轮已生成 alarm_name 枚举产物，本轮“把刚才的枚举值做威胁映射”：
-```json
-{"decision":"execute","plan_id":"plan-reuse-enum","steps":[{"step_id":"threat-1","type":"threat_mapping","source_ref":"session.artifacts.enum_values"}]}
-```
+- “提取 category 的枚举值，然后按 category 做日志类型分类”：两个互补操作各成一步（`enum_extract` + `log_parse` 携带 feature_field），无数据依赖、不互相 depends_on。
+- 上一轮已有枚举产物，本轮“把刚才的枚举值做威胁映射”：单步 `threat_mapping`，`source_ref=session.artifacts.enum_values`，不声明依赖或 values。
 - 上一轮已生成 alarm_name 威胁产物，目录绑定 `session.mapped_sub_rules → event_name`，本轮“填充回去”：
 ```json
 {"decision":"execute","plan_id":"plan-reuse-threat","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_name"],"source_ref":"session.artifacts.threat_mapping","config_ref":"session.mapped_sub_rules"}]}
 ```
-- 同一产物和绑定下，本轮明确说“填入 other_standard”：不得把目标静默改成 event_name，必须澄清：
-```json
-{"decision":"clarification","plan_id":"plan-threat-target-conflict","reason_code":"artifact_target_mismatch","question":"最近威胁映射只能填回 event_name，不能填入 other_standard。请确认是否填回 event_name，或先为 other_standard 重新生成威胁映射。"}
-```
+- 同一产物和绑定下，用户明确点名其他目标字段（如“填入 other_standard”）：不得把目标静默改成绑定字段，必须 clarification：`{"reason_code":"artifact_target_mismatch","question":"最近威胁映射只能填回 event_name，请确认或先为 other_standard 重新生成威胁映射。"}`
 
 ## 静默自检
 

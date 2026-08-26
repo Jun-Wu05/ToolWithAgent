@@ -27,7 +27,8 @@ def test提示词定义七类操作及各自必需参数():
 
 def test提示词包含日志类型与枚举提取的正反例():
     """“日志类型提取”必须稳定落到无目标字段的 LogParseStep。"""
-    assert "“日志类型提取”是 `log_parse`，不是 `enum_extract`" in PROMPT
+    assert "“日志类型提取”“日志分类”“日志解析”是 `log_parse`" in PROMPT
+    assert "是 `enum_extract`，两者不可互换" in PROMPT
     assert '{"step_id":"log-1","type":"log_parse"}' in PROMPT
     assert '"type":"enum_extract","target_field":"事件级别"' in PROMPT
     assert "不得生成 `enum_extract` 或询问字段" in PROMPT
@@ -44,7 +45,7 @@ def test提示词定义显式分类特征字段语义():
 def test提示词消歧枚举字样与作为日志类型短语():
     """带「枚举」字样但含「作为日志类型」短语的表达仍属 log_parse，不误入枚举提取。"""
     assert "“把A的枚举值作为日志类型”即使句中出现“枚举”" in PROMPT
-    assert "携带 feature_field=A 的 `log_parse`，不是 `enum_extract`" in PROMPT
+    assert "也是携带 feature_field=A 的 `log_parse`" in PROMPT
     assert "用 X 区分日志类型" in PROMPT
 
 
