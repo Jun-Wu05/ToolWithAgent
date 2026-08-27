@@ -91,6 +91,11 @@ async def render_decision(decision: PlanDecision) -> None:
         await cl.Message(content=f"💡 {decision.question}{suffix}").send()
         return
     if decision.decision == "guidance":
+        # 信息型问题作答（#149）：planner 从会话事实直接生成的答案；
+        # 无 answer 时回退为能力说明。
+        if decision.answer:
+            await cl.Message(content=f"📖 {decision.answer}").send()
+            return
         await cl.Message(content="我可以处理日志类型提取、字段映射、枚举提取、威胁映射、填充、取消映射和导出。请说明目标与数据来源。").send()
         return
     raise ValueError("执行决策不能直接渲染")

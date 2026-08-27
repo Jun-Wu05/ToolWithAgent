@@ -15,6 +15,17 @@ from contracts.session_artifacts import (
     ReferenceableArtifactFact,
     ThreatArtifactSlot,
 )
+from agent.shared.event_classify import EVENT_NAME_LEVEL_BINDING, read_entity_event_name
+
+
+class EventAnnotationFact(BaseModel):
+    """一条子规则的事件标注事实（未标注时 event_name/event_level 为空串）。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rule_name: str = Field(min_length=1)
+    event_name: str = ""
+    event_level: str = ""
 
 
 class SessionFacts(BaseModel):
@@ -38,6 +49,8 @@ class SessionFacts(BaseModel):
     """子规则名单（entity name，去重保序），供字段调整寻址（#126）。"""
     decoded_config_rule_names: tuple[str, ...] = ()
     """上传配置的 entity 名单，供字段调整寻址（#126）。"""
+    event_annotations: tuple[EventAnnotationFact, ...] = ()
+    """各子规则的事件名称/级别标注（mapped_sub_rules 投影，#149 信息型问答事实）。"""
     referenceable_artifacts: tuple[ReferenceableArtifactFact, ...] = ()
 
 
@@ -226,6 +239,30 @@ def _collect_rule_names(config: Any) -> tuple[str, ...]:
     return tuple(names)
 
 
+def _collect_event_annotations(config: Any) -> tuple[EventAnnotationFact, ...]:
+    """按子规则投影事件名称/级别标注（#149）。
+
+    未标注子规则也占位（event_name 为空串），信息型问答才能报出全量名单；
+    事件级别由 21 名绑定表确定性推导，与联动写入语义一致。
+    """
+    facts: list[EventAnnotationFact] = []
+    for entity in config or []:
+        if not isinstance(entity, Mapping):
+            continue
+        name = entity.get("name")
+        if not (isinstance(name, str) and name):
+            continue
+        event_name = read_entity_event_name(entity) or ""
+        facts.append(
+            EventAnnotationFact(
+                rule_name=name,
+                event_name=event_name,
+                event_level=EVENT_NAME_LEVEL_BINDING.get(event_name, ""),
+            )
+        )
+    return tuple(facts)
+
+
 def build_session_facts(session: Any) -> SessionFacts:
     """把会话状态投影为不可变安全快照；缺失状态按“不可用”处理。"""
     enum_preview = _read_session_value(session, "enum_preview", []) or []
@@ -259,5 +296,6 @@ def build_session_facts(session: Any) -> SessionFacts:
         mapped_sub_rule_count=len(mapped_sub_rules),
         mapped_sub_rule_names=_collect_rule_names(mapped_sub_rules),
         decoded_config_rule_names=_collect_rule_names(decoded_data),
+        event_annotations=_collect_event_annotations(mapped_sub_rules),
         referenceable_artifacts=_referenceable_artifacts(session, config_refs),
     )

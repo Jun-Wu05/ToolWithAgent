@@ -628,3 +628,39 @@ def test多产物复合计划渲染为单条汇总(monkeypatch):
         "enumvalues_20260818_1006.json",
         "threatmapping_20260818_1006.xlsx",
     }
+
+
+def test信息型作答渲染为guidance答案而非能力说明(monkeypatch):
+    """guidance 携带 answer 时直接渲染事实答案；无 answer 时回退能力说明（#149）。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import PlanDecision
+
+    captured = {"messages": []}
+
+    class _Message:
+        """记录消息文案。"""
+
+        def __init__(self, content, elements=None, actions=None):
+            self.content = content
+
+        async def send(self):
+            captured["messages"].append(self.content)
+
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+
+    answered = PlanDecision.model_validate(
+        {
+            "decision": "guidance",
+            "answer": "当前子规则事件标注：AUDIT_kv_子规则=审计事件（信息）、IPS_kv_子规则=未标注。",
+        }
+    )
+    asyncio.run(renderer.render_decision(answered))
+
+    capabilities = PlanDecision.model_validate(
+        {"decision": "guidance", "guidance_code": "capabilities"}
+    )
+    asyncio.run(renderer.render_decision(capabilities))
+
+    assert captured["messages"][0].startswith("📖 当前子规则事件标注")
+    assert "AUDIT_kv_子规则=审计事件（信息）" in captured["messages"][0]
+    assert "我可以处理" in captured["messages"][1]

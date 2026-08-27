@@ -311,6 +311,7 @@ class PlanDecision(StrictContract):
     question: str | None = None
     choices: tuple[str, ...] = ()
     guidance_code: str | None = None
+    answer: str | None = None
     parameters: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -319,13 +320,13 @@ class PlanDecision(StrictContract):
         if self.decision == "execute":
             if not self.steps:
                 raise ValueError("执行决策至少需要一个步骤")
-            if self.question or self.guidance_code:
-                raise ValueError("执行决策不能同时携带澄清或帮助字段")
+            if self.question or self.guidance_code or self.answer:
+                raise ValueError("执行决策不能同时携带澄清、帮助或作答字段")
         elif self.decision == "clarification":
-            if self.steps or not self.question or not self.reason_code:
-                raise ValueError("澄清决策必须包含原因和问题，且不能包含步骤")
-        elif self.steps or not self.guidance_code:
-            raise ValueError("帮助决策必须包含 guidance_code，且不能包含步骤")
+            if self.steps or self.answer or not self.question or not self.reason_code:
+                raise ValueError("澄清决策必须包含原因和问题，且不能包含步骤或作答")
+        elif self.steps or not (self.guidance_code or self.answer):
+            raise ValueError("帮助决策必须包含 guidance_code 或 answer，且不能包含步骤")
 
         seen_step_ids: set[str] = set()
         for step in self.steps:

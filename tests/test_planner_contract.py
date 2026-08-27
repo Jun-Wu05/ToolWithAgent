@@ -126,8 +126,8 @@ def test执行决策不能没有步骤():
         PlanDecision.model_validate({"decision": "execute", "plan_id": "p", "steps": []})
 
 
-def test帮助决策必须含guidance_code且不含步骤():
-    """guidance 必须携带 guidance_code 且不能包含步骤（回归 #42）。"""
+def test帮助决策必须含guidance_code或answer且不含步骤():
+    """guidance 携带 guidance_code 或 answer 之一；不能包含步骤（回归 #42，#149 放宽）。"""
     from contracts.planner_models import PlanDecision
 
     with pytest.raises(ValidationError):
@@ -140,6 +140,85 @@ def test帮助决策必须含guidance_code且不含步骤():
                 "steps": [{"step_id": "s1", "type": "log_parse"}],
             }
         )
+    answered = PlanDecision.model_validate(
+        {
+            "decision": "guidance",
+            "answer": "当前子规则事件标注：AUDIT_kv_子规则=审计事件（信息）。",
+        }
+    )
+    assert answered.answer.startswith("当前子规则")
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "guidance",
+                "answer": "回答",
+                "steps": [{"step_id": "s1", "type": "log_parse"}],
+            }
+        )
+
+
+def test作答字段与执行澄清决策互斥():
+    """execute 与 clarification 不得携带 answer，保持三类决策互斥（#149）。"""
+    from contracts.planner_models import PlanDecision
+
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "steps": [
+                    {"step_id": "fm-1", "type": "field_mapping", "source_ref": "session.fields"}
+                ],
+                "answer": "顺带回答",
+            }
+        )
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "clarification",
+                "reason_code": "missing_facts",
+                "question": "请先完成字段映射",
+                "answer": "顺带回答",
+            }
+        )
+
+
+def test_session_facts投影子规则事件标注事实():
+    """各子规则事件名称/级别进入 facts；未标注子规则占位（#149 信息型问答）。"""
+    from contracts.session_facts import build_session_facts
+
+    session = {
+        "mapped_sub_rules": [
+            {
+                "name": "AUDIT_kv_子规则",
+                "parser": {
+                    "filter": [
+                        {"name": "addFields", "id": "", "fields": {"事件名称": "审计事件"}}
+                    ]
+                },
+            },
+            {
+                "name": "暴力破解_kv_子规则",
+                "normalize": [{"index": "事件名称", "result": ["终端告警"]}],
+            },
+            {"name": "IPS_kv_子规则", "normalize": [{"index": "src_ip", "field": "源IP"}]},
+        ]
+    }
+
+    facts = build_session_facts(session)
+
+    assert [row.rule_name for row in facts.event_annotations] == [
+        "AUDIT_kv_子规则",
+        "暴力破解_kv_子规则",
+        "IPS_kv_子规则",
+    ]
+    # filter addFields 与 normalize 两种写入来源都能读出，级别由绑定表确定性推导
+    assert facts.event_annotations[0].event_name == "审计事件"
+    assert facts.event_annotations[0].event_level == "信息"
+    assert facts.event_annotations[1].event_name == "终端告警"
+    assert facts.event_annotations[1].event_level == "提醒"
+    # 未标注子规则占位，信息型问答才能报出全量名单
+    assert facts.event_annotations[2].event_name == ""
+    assert facts.event_annotations[2].event_level == ""
 
 
 def test导出session来源不能声明步骤依赖():
