@@ -126,3 +126,13 @@ def test提示词要求字段名逐字取自当前原文():
     assert "逐字取自**当前用户原文**" in PROMPT
     assert "历史轮次出现过的字段名不得默认沿用" in PROMPT
     assert "由执行器解析为原始字段名" in PROMPT
+
+
+def test提示词要求信息型问题直接从会话事实作答():
+    """事实已含答案的信息型问题必须 guidance+answer 直接作答，不 Clarification（回归 #149）。"""
+    assert "信息型问题直接作答" in PROMPT
+    assert "`answer` 字段用事实直接作答" in PROMPT
+    assert "不得生成修改计划，也不得 Clarification" in PROMPT
+    assert "事实中无答案（如 `event_annotations` 为空且尚未字段映射）时仍 Clarification" in PROMPT
+    assert '"decision":"guidance","plan_id":"plan-qa","answer"' in PROMPT
+    assert "`guidance_code`、`answer`、`parameters`" in PROMPT

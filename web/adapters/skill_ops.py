@@ -16,6 +16,7 @@ from agent.shared.event_classify import (
     EVENT_LEVEL_FIELD,
     EVENT_NAME_FIELD,
     EVENT_NAME_LEVEL_BINDING,
+    read_entity_event_name,
 )
 from agent.shared.logger import get_logger
 
@@ -236,26 +237,8 @@ def _resolution_note(resolved: dict[str, str]) -> str:
 
 
 def _entity_event_name(entity: dict) -> str | None:
-    """读取单条 entity 已标注的事件名称（addFields 固定值优先，normalize 兜底）。"""
-    parser = entity.get("parser") or {}
-    for filter_item in parser.get("filter") or []:
-        if (
-            isinstance(filter_item, dict)
-            and filter_item.get("name") == "addFields"
-            and filter_item.get("id") == ""
-            and isinstance(filter_item.get("fields"), dict)
-            and EVENT_NAME_FIELD in filter_item["fields"]
-        ):
-            value = filter_item["fields"][EVENT_NAME_FIELD]
-            if value in EVENT_NAME_LEVEL_BINDING:
-                return str(value)
-    for entry in entity.get("normalize") or []:
-        if isinstance(entry, dict) and entry.get("index") == EVENT_NAME_FIELD:
-            result = entry.get("result") or [""]
-            value = str(result[0]) if result else ""
-            if value in EVENT_NAME_LEVEL_BINDING:
-                return value
-    return None
+    """读取单条 entity 已标注的事件名称；读取逻辑 SSOT 在 event_classify。"""
+    return read_entity_event_name(entity)
 
 
 def _resolve_field_scope(

@@ -119,6 +119,7 @@ _PLAN_DECISION_KEYS = frozenset(
         "question",
         "choices",
         "guidance_code",
+        "answer",
         "parameters",
     }
 )

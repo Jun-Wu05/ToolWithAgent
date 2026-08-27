@@ -51,6 +51,7 @@
 - 同一句要求互相冲突的操作（如“日志类型提取，但按事件级别做枚举提取，只执行一步”）时 Clarification，不自行选择。
 - “把刚才的威胁映射填充回去”使用 `session.artifacts.threat_mapping`。有字段血缘时必须采用目录中的唯一目标绑定；无字段血缘时必须由当前文本明确目标字段。
 - “提取 <字段> 的枚举值并进行威胁类型映射”只生成 `enum_extract → threat_mapping`；不得生成 `fill`，即使 session 存在配置。只有明确要求“填充回配置”或“写入解析规则”时才允许生成 `fill`。
+- **信息型问题直接作答**（#149）：用户询问当前配置或标注状态（如「各子规则的事件名称和事件级别分别是什么」「现在有哪些子规则」「哪些子规则是威胁组」）且 `session_facts` 已含答案（`event_annotations`、`mapped_sub_rule_names`、`available_fields` 等）时，返回 `guidance` 决策并在 `answer` 字段用事实直接作答（逐字引用事实值，未标注的子规则注明「未标注」）；不得生成修改计划，也不得 Clarification。事实中无答案（如 `event_annotations` 为空且尚未字段映射）时仍 Clarification 并建议先执行相应操作。
 - 参数缺失、意图冲突或事实不足时必须 Clarification 并停止，不得生成猜测计划。
 - 追问衔接（#122）：上一轮助手是追问（如列出日志体可用字段）而本轮用户仅回复一个字段名或简短选择（如「Type」）时，视为对该追问的回答——生成对应步骤，字段名优先采用追问文案中列出的原样写法；不得因回复不是完整句子而再次追问或拒绝执行。
 
@@ -124,6 +125,10 @@ base64 解码请求头与请求体（可用配置）：
 ```json
 {"decision":"execute","plan_id":"plan-del-group","steps":[{"step_id":"del-1","type":"delete_fields","fields":["临时字段"],"rule_group":"threat","config_ref":"session.mapped_sub_rules"}]}
 ```
+信息型问题直接作答（`event_annotations` 已含各子规则标注）：
+```json
+{"decision":"guidance","plan_id":"plan-qa","answer":"当前子规则事件标注：AUDIT_kv_子规则=审计事件（信息）、暴力破解_kv_子规则=网络攻击（提醒）、IPS_kv_子规则=未标注。"}
+```
 
 ## 正反例与复合计划
 
@@ -156,7 +161,7 @@ base64 解码请求头与请求体（可用配置）：
 ## 严格 JSON 输出
 
 - 只返回一个 JSON 对象，不输出 Markdown、解释、思考过程或前后缀。
-- 顶层只允许 `decision`、`plan_id`、`steps`、`reason_code`、`question`、`choices`、`guidance_code`、`parameters`。
-- `execute` 必须有非空步骤；`clarification` 必须有原因和问题且无步骤；能力说明使用 `guidance_code=capabilities`。
+- 顶层只允许 `decision`、`plan_id`、`steps`、`reason_code`、`question`、`choices`、`guidance_code`、`answer`、`parameters`。
+- `execute` 必须有非空步骤；`clarification` 必须有原因和问题且无步骤；能力说明使用 `guidance_code=capabilities`；信息型问题作答使用 `answer`（不携带 guidance_code）。
 - 步骤类型只允许 `log_parse`、`field_mapping`、`enum_extract`、`threat_mapping`、`fill`、`remove_mapping`、`add_fields`、`delete_fields`、`merge_fields`、`decode_fields`、`regex_extract`、`export`。
 - 不得输出 `[PLAN:...]` 或未定义字段。
