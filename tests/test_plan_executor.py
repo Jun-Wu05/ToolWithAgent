@@ -396,3 +396,102 @@ def test填充声称成功但零变更时判定失败():
 
     assert report.results[0].status == StepStatus.FAILED
     assert report.results[0].error_code == "no_effect"
+
+
+def _rename_decision(field_value="僵尸网络入侵", value_type="fixed"):
+    """构造 #148 复现形态的改名 delete+add 两步计划。"""
+    return PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-rename",
+            "steps": [
+                {
+                    "step_id": "del-1",
+                    "type": "delete_fields",
+                    "fields": ["事件名称", "事件级别"],
+                    "target_rule_names": ["RUN_INFO"],
+                    "config_ref": "session.mapped_sub_rules",
+                },
+                {
+                    "step_id": "add-1",
+                    "type": "add_fields",
+                    "field_name": "事件名称",
+                    "field_value": field_value,
+                    "value_type": value_type,
+                    "target_rule_names": ["RUN_INFO"],
+                    "config_ref": "session.mapped_sub_rules",
+                    "depends_on": ["del-1"],
+                },
+            ],
+        }
+    )
+
+
+def test改名计划携带非法事件名时整计划执行前拦截():
+    """add 的事件名非法：delete 不得先落盘删绑定对，任何适配器零调用（回归 #148）。"""
+    session = {
+        "mapped_sub_rules": [
+            {"name": "RUN_INFO", "normalize": [{"index": "事件名称"}, {"index": "事件级别"}]}
+        ]
+    }
+    delete_adapter = RecordingAdapter([])
+    add_adapter = RecordingAdapter([])
+
+    report = _execute_with_session(
+        _rename_decision(),
+        {"delete_fields": delete_adapter, "add_fields": add_adapter},
+        session,
+    )
+
+    assert report.status == StepStatus.FAILED
+    assert len(report.results) == 1
+    assert report.results[0].step_id == "add-1"
+    assert report.results[0].error_code == "invalid_event_name"
+    assert delete_adapter.calls == []
+    assert add_adapter.calls == []
+    message = report.results[0].message or ""
+    assert "必须是以下分类名之一" in message
+    assert "网络攻击" in message
+    assert "整份计划未执行" in message
+    assert session["mapped_sub_rules"][0]["normalize"] == [
+        {"index": "事件名称"},
+        {"index": "事件级别"},
+    ]
+
+
+def test改名计划合法事件名仍按两步计划执行():
+    """合法事件名不受计划级预校验影响，delete 与 add 都正常进入适配器。"""
+    delete_adapter = RecordingAdapter(
+        [StepResult(step_id="del-1", operation_type="delete_fields", status="success")]
+    )
+    add_adapter = RecordingAdapter(
+        [StepResult(step_id="add-1", operation_type="add_fields", status="success")]
+    )
+
+    report = _execute_with_session(
+        _rename_decision(field_value="终端告警"),
+        {"delete_fields": delete_adapter, "add_fields": add_adapter},
+        {"mapped_sub_rules": []},
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert len(delete_adapter.calls) == 1
+    assert len(add_adapter.calls) == 1
+
+
+def test事件名称引用型值在计划级拦截():
+    """%{x} 引用型事件名在计划级即被拒绝，前面的 delete 不得先执行（回归 #148）。"""
+    delete_adapter = RecordingAdapter([])
+    add_adapter = RecordingAdapter([])
+
+    report = _execute_with_session(
+        _rename_decision(field_value="%{x}", value_type="reference"),
+        {"delete_fields": delete_adapter, "add_fields": add_adapter},
+        {"mapped_sub_rules": []},
+    )
+
+    assert report.status == StepStatus.FAILED
+    assert report.results[0].error_code == "invalid_event_name"
+    assert "不支持引用型值" in (report.results[0].message or "")
+    assert delete_adapter.calls == []
+    assert add_adapter.calls == []
