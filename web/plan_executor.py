@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Optional, Protocol
 
+from agent.shared.event_classify import EVENT_NAME_FIELD, EVENT_NAME_LEVEL_BINDING
 from agent.shared.logger import get_logger
 from contracts.planner_models import (
+    AddFieldsStep,
     EnumExtractStep,
     ExecutionReport,
     ExportStep,
@@ -93,7 +95,30 @@ class PlanExecutor:
         )
         ledger: dict[str, StepResult] = {}
         ordered_results: list[StepResult] = []
-        for step in plan.steps:
+        # 计划级预校验（#148）：事件名的确定性非法值必须在**任何步骤执行前**拦截
+        # 整份计划——改名 delete+add 两步中，add 的非法事件名若等到执行期才拒绝，
+        # 前面的 delete 已联动删除绑定对并写盘，无法回滚。
+        plan_level_block = self._validate_plan_event_names(plan)
+        if plan_level_block is not None:
+            blocked_step, blocked_result = plan_level_block
+            ordered_results.append(blocked_result)
+            await self._publish_step_terminal(
+                plan.plan_id,
+                blocked_step,
+                blocked_result,
+                context.progress_sink,
+            )
+            logger.info(
+                "[EXECUTOR] 计划级拦截: plan_id=%s step_id=%s operation=%s status=%s "
+                "error_category=%s declared_step_count=%s",
+                plan.plan_id,
+                blocked_step.step_id,
+                blocked_step.type,
+                blocked_result.status.value,
+                blocked_result.error_code,
+                len(plan.steps),
+            )
+        for step in (plan.steps if plan_level_block is None else ()):
             await context.progress_sink.publish(
                 ProgressEvent(
                     plan_id=plan.plan_id,
@@ -283,6 +308,37 @@ class PlanExecutor:
                 "请回复要作为日志类型的字段名，或直接说“日志类型提取”由系统自动探测。"
             ),
         )
+
+    def _validate_plan_event_names(
+        self,
+        plan: PlanDecision,
+    ) -> tuple[StepSpec, StepResult] | None:
+        """计划级事件名称预校验（#148）。
+
+        与 ``FieldSkillAdapter._guard_event_name`` 前两段同源的确定性检查，
+        在步骤循环前扫描整份计划，命中即整计划不执行、配置零改动。
+        ``event_level_conflict`` 依赖配置现状（改名流程 delete 在前会误报），
+        仍留在执行期检查。
+        """
+        for step in plan.steps:
+            if not (isinstance(step, AddFieldsStep) and step.field_name == EVENT_NAME_FIELD):
+                continue
+            if step.value_type == "reference":
+                return step, self._error_result(
+                    step,
+                    "invalid_event_name",
+                    f"{EVENT_NAME_FIELD}必须是固定分类名，不支持引用型值；"
+                    "整份计划未执行，当前配置未改动",
+                )
+            if step.field_value not in EVENT_NAME_LEVEL_BINDING:
+                legal = "、".join(EVENT_NAME_LEVEL_BINDING)
+                return step, self._error_result(
+                    step,
+                    "invalid_event_name",
+                    f"{EVENT_NAME_FIELD}必须是以下分类名之一: {legal}；"
+                    "整份计划未执行，当前配置未改动",
+                )
+        return None
 
     def _validate_step(
         self,
