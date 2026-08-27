@@ -36,6 +36,7 @@ from web.adapters.shared import (
     _read_config,
     _success,
     _write_config,
+    field_vocabulary,
     format_field_vocabulary,
     iter_config_entities,
     resolve_field_names,
@@ -210,14 +211,20 @@ def _resolve_step_field_names(
             ),
         )
     error_code = "reference_target_not_found" if reference else "field_not_found"
-    return resolved, _failed(
-        step,
-        error_code,
-        (
-            f"未找到字段「{problem['name']}」。"
-            f"可用字段（原始名(标准名)）：{format_field_vocabulary(config, targets)}"
-        ),
+    message = (
+        f"未找到字段「{problem['name']}」。"
+        f"可用字段（原始名(标准名)）：{format_field_vocabulary(config, targets)}"
     )
+    # 近邻提示（#147）：字段并集上做确定性近似，只提示不自动改
+    import difflib
+
+    vocabulary_terms = [index for index, _ in field_vocabulary(config, targets)]
+    close_matches = difflib.get_close_matches(
+        problem["name"], vocabulary_terms, n=2, cutoff=0.8
+    )
+    if close_matches:
+        message += f"；您是不是要找：{'、'.join(close_matches)}？"
+    return resolved, _failed(step, error_code, message)
 
 
 def _resolution_note(resolved: dict[str, str]) -> str:
@@ -455,13 +462,23 @@ class FieldSkillAdapter:
                 f"字段 {reserved_hit} 为系统保留字段，不允许删除",
             )
 
+        # 绑定对联动删除（#147）：删 事件名称 或 事件级别 任一时自动扩展为两者，
+        # 避免留下"名称在、级别没"的绑定残缺；重新标注流程仍是删+加。
+        effective_fields = list(step.fields)
+        pair_note = ""
+        if any(name in (EVENT_NAME_FIELD, EVENT_LEVEL_FIELD) for name in effective_fields):
+            for pair_name in (EVENT_NAME_FIELD, EVENT_LEVEL_FIELD):
+                if pair_name not in effective_fields:
+                    effective_fields.append(pair_name)
+            pair_note = "；已联动删除绑定对（事件名称+事件级别）"
+
         # 字段名解析（#146）：标准名唯一映射到原始 index 后再做悬空检查与删除
         resolved_fields, resolve_error = _resolve_step_field_names(
-            step, config, targets, list(step.fields)
+            step, config, targets, effective_fields
         )
         if resolve_error is not None:
             return resolve_error
-        fields_resolved = [resolved_fields[name] for name in step.fields]
+        fields_resolved = [resolved_fields[name] for name in effective_fields]
 
         dangling = _check_dangling_references(step, config, targets, fields_resolved)
         if dangling is not None:
@@ -473,7 +490,11 @@ class FieldSkillAdapter:
         if result.get("status") != "success":
             return self._skill_error(step, result)
 
-        message = str(result.get("message", "")) + _resolution_note(resolved_fields)
+        message = (
+            str(result.get("message", ""))
+            + _resolution_note(resolved_fields)
+            + pair_note
+        )
         not_found = result.get("not_found")
         if not_found:
             message = f"{message}；未找到字段: {', '.join(not_found)}"

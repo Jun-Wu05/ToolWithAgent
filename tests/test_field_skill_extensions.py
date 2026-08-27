@@ -88,8 +88,9 @@ def _run(adapter, step, session):
 
 def test解码写入ognl并保持幂等合并(decode_module):
     """解码条目写入解码过滤器，重复调用合并不重复追加。"""
-    once = decode_module.decode_fields(_config(), ["req_header", "req_body_x"])
-    assert once["status"] == "error"  # req_body_x 不存在
+    # req_body_x 不存在于任何 entity → 全缺报错（#147 per-entity）
+    once = decode_module.decode_fields(_config(), ["req_body_x"])
+    assert once["status"] == "error"
 
     result = decode_module.decode_fields(_config(), ["req_header"])
     assert result["status"] == "success"

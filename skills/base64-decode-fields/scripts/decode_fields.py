@@ -61,7 +61,8 @@ def decode_fields(
     targets = set(target_names) if target_names else None
     results = []
     applied = 0
-    skipped = 0
+    skipped_empty = 0
+    skipped_reasons: list[tuple[str, str]] = []
     for entity in data:
         entity = copy.deepcopy(entity)
 
@@ -70,18 +71,19 @@ def decode_fields(
             continue
 
         normalize = entity.get("normalize") or []
+        name = entity.get("name") or "<未命名>"
         if not normalize:
-            skipped += 1
+            skipped_empty += 1
             results.append(entity)
             continue
 
         norm_indexes = {item.get("index") for item in normalize if item.get("index")}
         missing = [f for f in field_names if f not in norm_indexes]
         if missing:
-            return {
-                "status": "error",
-                "message": f"字段 {missing} 不存在，可用字段: {sorted(norm_indexes)}",
-            }
+            # 子规则字段集不同：缺字段的 entity 跳过并按名报告（#147）
+            skipped_reasons.append((name, f"缺 {'、'.join(missing)}"))
+            results.append(entity)
+            continue
 
         parser = entity.get("parser") or {}
         filters = parser.get("filter") or []
@@ -104,8 +106,18 @@ def decode_fields(
     message = f"成功为 {applied} 个 entity 启用 base64 解码: {', '.join(field_names)}"
     if targets is not None:
         message += f"（目标 {len(targets)} 个）"
-    if skipped:
-        message += f"（跳过 {skipped} 个无 normalize 的 entity）"
+    if skipped_reasons:
+        # 所有目标 entity 都缺字段 → 真错误（#147：与 merge 的全缺行为一致）
+        if applied == 0:
+            return {
+                "status": "error",
+                "message": f"字段 {field_names} 不存在于任何（目标）子规则",
+            }
+        detail = "；".join(f"{n}（{r}）" for n, r in skipped_reasons[:5])
+        more = f" 等 {len(skipped_reasons)} 条" if len(skipped_reasons) > 5 else ""
+        message += f"；跳过：{detail}{more}"
+    if skipped_empty:
+        message += f"（跳过 {skipped_empty} 个无 normalize 的 entity）"
     return {"status": "success", "data": results, "message": message}
 
 

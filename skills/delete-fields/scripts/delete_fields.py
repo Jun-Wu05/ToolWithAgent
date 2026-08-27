@@ -56,7 +56,11 @@ def delete_field(
     targets = set(target_names) if target_names else None
     results = []
     applied = 0
-    skipped = 0
+    total_deleted = 0
+    skipped_empty = 0
+    skipped_reasons: list[tuple[str, str]] = []
+    # 字段是否在任一目标 entity 中存在（#147：修 missing 被逐 entity 覆盖的 bug）
+    present_anywhere: dict[str, bool] = {f: False for f in fields_to_delete}
     for entity in data:
         entity = copy.deepcopy(entity)
 
@@ -66,41 +70,50 @@ def delete_field(
 
         # 获取 normalize 列表
         normalize = entity.get("normalize") or []
+        name = entity.get("name") or "<未命名>"
         if not normalize:
             # 无 normalize 的 entity 无字段可删，如实跳过
-            skipped += 1
+            skipped_empty += 1
             results.append(entity)
             continue
-        
+
         # 构建 index → normalize item 映射
         norm_map = {item.get("index"): item for item in normalize if item.get("index")}
-        
+
         # 验证要删除的字段存在（排除保留字段）
-        missing = [f for f in fields_to_delete if f not in norm_map]
         reserved = [f for f in fields_to_delete if f in RESERVED_FIELDS]
-        
+
         if reserved:
             return {
                 "status": "error",
                 "message": f"字段 {reserved} 为系统保留字段，不允许删除"
             }
-        
+
+        deletable = [f for f in fields_to_delete if f in norm_map]
+        for f in deletable:
+            present_anywhere[f] = True
+
+        if not deletable:
+            skipped_reasons.append((name, f"缺 {'、'.join(fields_to_delete)}"))
+            results.append(entity)
+            continue
+
         # 1. 添加 removeFields filter
         parser = entity.get("parser") or {}
         # 入口规则模板的 filter 可能为 null，初始化为空数组再追加
         filters = parser.get("filter") or []
-        
+
         # 检查是否已存在 removeFields filter，有则合并
         existing_remove = None
         for i, f in enumerate(filters):
             if f.get("name") == "removeFields":
                 existing_remove = i
                 break
-        
+
         if existing_remove is not None:
             # 合并到已有的 removeFields 中
             existing_fields = filters[existing_remove].get("fields", [])
-            for fld in fields_to_delete:
+            for fld in deletable:
                 if fld not in existing_fields:
                     existing_fields.append(fld)
             filters[existing_remove]["fields"] = existing_fields
@@ -108,34 +121,41 @@ def delete_field(
             remove_entry = {
                 "name": "removeFields",
                 "id": "",
-                "fields": [f for f in fields_to_delete if f in norm_map],
+                "fields": list(deletable),
             }
             filters.append(remove_entry)
-        
+
         parser["filter"] = filters
         entity["parser"] = parser
-        
-        # 2. 移除 normalize 条目（仅移除存在的字段）
-        deletable = [f for f in fields_to_delete if f in norm_map]
+
+        # 2. 移除 normalize 条目（仅移除该 entity 实际存在的字段）
         entity["normalize"] = [
             item for item in normalize
             if item.get("index") not in deletable
         ]
 
         applied += 1
+        total_deleted += len(deletable)
         results.append(entity)
 
-    deleted_count = len([f for f in fields_to_delete if f not in missing])
-    message = f"成功从 {applied} 个 entity 删除 {deleted_count} 个字段"
+    # 未找到 = 所有目标 entity 都没有该字段（#147：不再被最后一条 entity 覆盖）
+    not_found = [f for f, present in present_anywhere.items() if not present]
+    message = f"成功从 {applied} 个 entity 删除 {total_deleted} 个字段"
     if targets is not None:
         message += f"（目标 {len(targets)} 个）"
-    if skipped:
-        message += f"（跳过 {skipped} 个无 normalize 的 entity）"
+    if skipped_reasons:
+        detail = "；".join(f"{n}（{r}）" for n, r in skipped_reasons[:5])
+        more = f" 等 {len(skipped_reasons)} 条" if len(skipped_reasons) > 5 else ""
+        message += f"；跳过：{detail}{more}"
+    if skipped_empty:
+        message += f"（跳过 {skipped_empty} 个无 normalize 的 entity）"
+    if not_found:
+        message += f"；未找到字段: {', '.join(not_found)}（不存在于任何子规则）"
     return {
         "status": "success",
         "data": results,
         "message": message,
-        "not_found": missing if missing else None,
+        "not_found": not_found if not_found else None,
     }
 
 

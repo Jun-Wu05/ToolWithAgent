@@ -186,11 +186,11 @@ def test合并字段生成merger与预览条目(merge_module):
 
 
 def test合并字段源缺失时列出可用字段(merge_module):
-    """源字段不存在返回 error 并提示可用字段。"""
+    """所有 entity 都缺同一源字段返回 error 并列并集词表（#147 per-entity）。"""
     result = merge_module.merge_fields(_sample_entities(), ["a", "missing"], "d", "")
     assert result["status"] == "error"
     assert "missing" in result["message"]
-    assert "可用字段" in result["message"]
+    assert "不存在于任何（目标）子规则" in result["message"]
 
 
 # ---------------------------------------------------------------------------
