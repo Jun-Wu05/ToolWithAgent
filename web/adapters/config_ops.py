@@ -41,6 +41,8 @@ from web.adapters.shared import (
     _session_get,
     _session_set,
     _write_config,
+    format_field_vocabulary,
+    resolve_field_names,
 )
 
 
@@ -309,20 +311,57 @@ class RemoveMappingAdapter:
                 "枚举映射附件已更新，请先重新执行枚举填充",
             )
         current_config = _read_config(context.session, step.config_ref)
-        before_count = count_field_mappings(current_config, step.target_fields)
+        # 目标字段名解析（#146）：标准名唯一映射到原始 index 后再取消映射
+        resolved_targets, resolution_problems = resolve_field_names(
+            current_config, list(step.target_fields)
+        )
+        if resolution_problems:
+            problem = resolution_problems[0]
+            if problem["kind"] == "ambiguous":
+                return _failed(
+                    step,
+                    "field_name_ambiguous",
+                    (
+                        f"字段「{problem['name']}」是标准字段名，对应多个原始字段："
+                        f"{'、'.join(problem['candidates'])}；请改用其中的原始字段名"
+                    ),
+                )
+            return _failed(
+                step,
+                "field_not_found",
+                (
+                    f"未找到字段「{problem['name']}」。"
+                    f"可用字段（原始名(标准名)）："
+                    f"{format_field_vocabulary(current_config)}"
+                ),
+            )
+        effective_targets = tuple(
+            resolved_targets[name] for name in step.target_fields
+        )
+        resolution_changes = {
+            name: resolved_targets[name]
+            for name in step.target_fields
+            if resolved_targets[name] != name
+        }
+        before_count = count_field_mappings(current_config, effective_targets)
         updated_config = current_config
-        for target_field in step.target_fields:
+        for target_field in effective_targets:
             updated_config = remove_field_mappings_from_config(updated_config, target_field)
-        after_count = count_field_mappings(updated_config, step.target_fields)
+        after_count = count_field_mappings(updated_config, effective_targets)
         if before_count == after_count:
             return _needs_input(step, "mapping_not_found", "目标字段没有可取消的映射")
         _write_config(context.session, step.config_ref, updated_config)
+        note = (
+            f"；字段解析：{'、'.join(f'{k}→{v}' for k, v in resolution_changes.items())}"
+            if resolution_changes
+            else ""
+        )
         logger.info(
             "[REMOVE_MAPPING] 取消完成: step_id=%s config_ref=%s target_field_count=%s "
             "before_count=%s after_count=%s changed_count=%s",
             step.step_id,
             step.config_ref,
-            len(step.target_fields),
+            len(effective_targets),
             before_count,
             after_count,
             before_count - after_count,
@@ -337,7 +376,7 @@ class RemoveMappingAdapter:
                 after_count,
                 "cancelmapping_config",
             ),
-            message="目标字段映射已取消",
+            message="目标字段映射已取消" + note,
         )
 
 class ExportAdapter:

@@ -300,3 +300,110 @@ def _needs_input(step: StepSpec, error_code: str, message: str) -> StepResult:
         error_code=error_code,
         message=message,
     )
+
+
+# ===== 字段词汇解析（issue #146）：用户可用标准字段名指称字段，解析在执行层完成 =====
+
+
+def iter_config_entities(config: Any, targets: list[str] | None = None):
+    """递归产出 entity dict（含 parser 或 normalize 的 dict）。
+
+    targets 为 None 时产出全部 entity；否则只产出 name 命中名单的 entity。
+    """
+    target_set = set(targets) if targets else None
+
+    def _walk(node: Any):
+        """递归遍历配置，按 entity 特征与目标名单产出。"""
+        if isinstance(node, dict):
+            name = node.get("name")
+            looks_like_entity = isinstance(node.get("parser"), dict) or isinstance(
+                node.get("normalize"), list
+            )
+            if looks_like_entity:
+                if target_set is None:
+                    yield node
+                elif isinstance(name, str) and name in target_set:
+                    yield node
+            for value in node.values():
+                yield from _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from _walk(item)
+
+    yield from _walk(config)
+
+
+def field_vocabulary(config: Any, targets: list[str] | None = None) -> list[tuple[str, str]]:
+    """目标 entity 的（原始 index, 标准名）对照表，去重保序。"""
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for entity in iter_config_entities(config, targets):
+        for entry in entity.get("normalize") or []:
+            if not isinstance(entry, dict):
+                continue
+            index = entry.get("index")
+            if not index:
+                continue
+            pair = (str(index), str(entry.get("field") or ""))
+            if pair not in seen:
+                seen.add(pair)
+                pairs.append(pair)
+    return pairs
+
+
+def format_field_vocabulary(config: Any, targets: list[str] | None = None, limit: int = 30) -> str:
+    """把词汇对照表格式化为用户可读字符串（原始名(标准名)、…，超限截断）。"""
+    pairs = field_vocabulary(config, targets)
+    parts = [
+        index if not standard else f"{index}({standard})"
+        for index, standard in pairs[:limit]
+    ]
+    text = "、".join(parts)
+    if len(pairs) > limit:
+        text += f" 等 {len(pairs)} 项"
+    return text
+
+
+def resolve_field_names(
+    config: Any,
+    names: list[str],
+    targets: list[str] | None = None,
+) -> tuple[dict[str, str], list[dict]]:
+    """把字段名解析为配置的原始 index（确定性，不经 LLM）。
+
+    逐名规则：
+    - 精确命中任一目标 entity 的 normalize index → 原样通过；
+    - 否则按 normalize[].field（标准字段名）在目标 entity 内找**唯一**对应
+      index → 解析为该 index（用户以映射表展示名指称字段的场景）；
+    - 多个不同 index 对应同一标准名 → ambiguous 问题（列候选，不猜）；
+    - 零命中 → not_found 问题。
+
+    Returns:
+        (resolved: {原名: index}, problems: [{"name", "kind", "candidates"}])
+    """
+    resolved: dict[str, str] = {}
+    problems: list[dict] = []
+    for name in names:
+        exact = any(
+            any(
+                isinstance(entry, dict) and entry.get("index") == name
+                for entry in entity.get("normalize") or []
+            )
+            for entity in iter_config_entities(config, targets)
+        )
+        if exact:
+            resolved[name] = name
+            continue
+        candidates: list[str] = []
+        for index, standard in field_vocabulary(config, targets):
+            if standard == name and index not in candidates:
+                candidates.append(index)
+        if len(candidates) == 1:
+            resolved[name] = candidates[0]
+        elif len(candidates) > 1:
+            problems.append(
+                {"name": name, "kind": "ambiguous", "candidates": candidates}
+            )
+        else:
+            problems.append({"name": name, "kind": "not_found", "candidates": []})
+    return resolved, problems

@@ -76,6 +76,14 @@
     {"id": "targeting_unknown_rule", "category": "targeting", "user_text": "给 不存在的规则 添加字段 备注，值为 重点", "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "mapped_sub_rule_names": ["暴力破解_kv_子规则"]},
      "expect": {"decision": "clarification"}},
     {"id": "targeting_skip_existing", "category": "targeting", "user_text": "给所有子规则添加字段 标记，值为 1，已经有的跳过", "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "mapped_sub_rule_names": ["暴力破解_kv_子规则"]},
-     "expect": {"decision": "execute", "steps": [{"type": "add_fields", "field_name": "标记", "field_value": "1", "skip_existing": true}]}}
+     "expect": {"decision": "execute", "steps": [{"type": "add_fields", "field_name": "标记", "field_value": "1", "skip_existing": true}]}},
+    {"id": "vocab_add_merge_single_op", "category": "vocab", "user_text": "添加响应内容字段，合并HTTP请求头和HTTP请求体", "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "available_fields": ["req_head", "req_body", "src_ip"]},
+     "expect": {"decision": "execute", "steps": [{"type": "merge_fields", "source_fields": ["HTTP请求头", "HTTP请求体"], "target_field": "响应内容"}]}},
+    {"id": "vocab_verbatim_target_with_history", "category": "vocab", "user_text": "添加响应内容1字段，合并req_body和req_method",
+     "history": [{"role": "user", "content": "添加响应内容字段，合并HTTP请求头和HTTP请求体"}, {"role": "assistant", "content": "计划 plan-add-merge 执行结果：merge-1 失败：源字段不存在"}],
+     "facts": {"has_mapped_sub_rules": true, "available_config_refs": ["session.mapped_sub_rules"], "available_fields": ["req_body", "req_method"]},
+     "expect": {"decision": "execute", "steps": [{"type": "merge_fields", "source_fields": ["req_body", "req_method"], "target_field": "响应内容1"}]}},
+    {"id": "vocab_add_extract_single_op", "category": "vocab", "user_text": "添加 Referer 字段，把请求头里的 Referer 提取出来", "facts": {"has_decoded_config": true, "available_config_refs": ["session.decoded_config"]},
+     "expect": {"decision": "execute", "steps": [{"type": "regex_extract", "source_field": "req_header", "description": "Referer", "new_field": "Referer"}]}}
   ]
 }

@@ -111,3 +111,18 @@ def test提示词约束威胁产物字段绑定与无字段产物澄清():
     assert "只有用户在当前文本明确指定目标字段" in PROMPT
     assert '"reason_code":"artifact_target_mismatch"' in PROMPT
     assert "不得把目标静默改成" in PROMPT
+
+
+def test提示词包含合并与提取的单操作化规则():
+    """「添加X+合并/提取」不得拆成 add+操作 两步（#146 线上报错回归）。"""
+    assert "单操作化" in PROMPT
+    assert "禁止再生成 `add_fields`" in PROMPT
+    assert "merge 自身创建目标字段" in PROMPT
+    assert "只有当添加的字段与合并/提取的目标是**不同**字段时才拆成多步" in PROMPT
+
+
+def test提示词要求字段名逐字取自当前原文():
+    """目标与来源字段名不得沿用历史轮次（#146「响应内容1」丢字回归）。"""
+    assert "逐字取自**当前用户原文**" in PROMPT
+    assert "历史轮次出现过的字段名不得默认沿用" in PROMPT
+    assert "由执行器解析为原始字段名" in PROMPT

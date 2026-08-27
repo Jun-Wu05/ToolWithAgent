@@ -330,20 +330,34 @@ def test适配器合并源缺失映射field_not_found():
     assert result.error_code == "field_not_found"
 
 
-def test适配器删除字段作用于子规则并提示未找到字段():
-    """delete_fields 对 mapped_sub_rules 生效；不存在的字段在消息中列明。"""
+def test适配器删除字段作用于子规则并拒绝未找到字段():
+    """delete_fields 对 mapped_sub_rules 生效；不存在的字段被前置拒绝（#146）。"""
     session = {"mapped_sub_rules": _sample_entities()}
     step = DeleteFieldsStep(
         step_id="d1",
         type="delete_fields",
-        fields=("a", "nope"),
+        fields=("a",),
         config_ref="session.mapped_sub_rules",
     )
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status == StepStatus.SUCCESS
-    assert "nope" in result.message
     indexes = {item["index"] for item in session["mapped_sub_rules"][0]["normalize"]}
     assert "a" not in indexes
+
+    # 混入不存在的字段：适配器在词汇解析层拒绝并列出对照表（#146 新语义）
+    session2 = {"mapped_sub_rules": _sample_entities()}
+    step2 = DeleteFieldsStep(
+        step_id="d2",
+        type="delete_fields",
+        fields=("a", "nope"),
+        config_ref="session.mapped_sub_rules",
+    )
+    result2 = _run(FieldSkillAdapter(), step2, session2)
+    assert result2.status == StepStatus.FAILED
+    assert result2.error_code == "field_not_found"
+    assert "nope" in result2.message
+    indexes2 = {item["index"] for item in session2["mapped_sub_rules"][0]["normalize"]}
+    assert "a" in indexes2  # 拒绝时不做部分删除
 
 
 def test适配器删除保留字段返回reserved_field_rejected():
