@@ -10,45 +10,9 @@ import json
 from typing import Optional, Dict, Any, List
 
 from agent.shared.logger import get_logger
+from application.parsing import parse_json_safe
 
 logger = get_logger("web.utils")
-
-
-def parse_json_safe(text: str) -> Optional[Dict[str, Any]]:
-    """
-    安全解析 JSON，支持 markdown 代码块包装
-
-    Args:
-        text: 待解析的 JSON 文本
-
-    Returns:
-        解析后的字典，失败返回 None
-
-    Examples:
-        >>> parse_json_safe('{"key": "value"}')
-        {"key": "value"}
-
-        >>> parse_json_safe('```json\\n{"key": "value"}\\n```')
-        {"key": "value"}
-    """
-    if not text:
-        return None
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        text = "\n".join(lines).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        import re as _re
-        m = _re.search(r"\{.*\}", text, _re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
-    return None
 
 
 def render_log_parser_result(

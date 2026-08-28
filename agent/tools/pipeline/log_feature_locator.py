@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agent.core.prompts import load_log_feature_locate_prompt
+from agent.prompts import load_log_feature_locate_prompt
 from agent.shared.logger import get_logger
 from agent.tools.enum_extract_tool import sample_logs
 from agent.tools.pipeline.llm_client import _call_llm_direct, _try_parse_json

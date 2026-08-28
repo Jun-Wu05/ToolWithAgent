@@ -58,7 +58,7 @@
 全局状态管理：Agno 日志桥接标志
 
 ### 2.10 Application 运行时接缝
-`SessionState`、`PlanExecutor`、执行结果账本与 `NullProgressSink` 位于 `application/`。Web 只在组合根注入领域预检和日志，并保留 Chainlit 生命周期及渲染职责。导出 Adapter 已迁入 Application；其余业务 Adapter 仍暂存 `web/adapters/`。
+`SessionState`、`PlanExecutor`、执行结果账本与 `NullProgressSink` 位于 `application/`。Web 只在组合根注入领域预检和日志，并保留 Chainlit 生命周期及渲染职责。日志解析与导出 Adapter 已迁入 Application；字段映射、枚举、威胁、Fill/Remove 等其余业务 Adapter 仍暂存 `web/adapters/`。
 
 ---
 
@@ -83,7 +83,7 @@ Application PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.p
 用户输入 → PlannerAgent → PlanDecision → PlanExecutor → StepAdapter → 一次汇总
 
 ### 日志解析
-类型化 LogParseStep → ProfessionalAgentAdapter → 日志 Pipeline → log_classification
+类型化 LogParseStep → Application LogParseAdapter → 日志 Pipeline → log_classification
 
 ---
 

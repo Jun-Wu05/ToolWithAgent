@@ -19,7 +19,7 @@ import re as _re
 
 import httpx
 
-from agent.core.prompts import load_log_header_classify_prompt, load_kv_feature_identifier_prompt
+from agent.prompts import load_log_header_classify_prompt, load_kv_feature_identifier_prompt
 from agent.shared.logger import get_logger
 from agent.tools.enum_extract_tool import sample_logs
 from agent.tools.pipeline.extractors.header_extractor import aggregate_headers

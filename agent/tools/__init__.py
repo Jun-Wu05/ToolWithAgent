@@ -1,6 +1,6 @@
 """Agent工具包
 
-整合所有业务工具，提供统一的工具接口。web 层只允许使用本门面的公开名，
+整合所有业务工具，提供统一的工具接口。跨包适配器只允许使用本门面的公开名，
 禁止跨包引用下划线私有实现（Issue #88 工具门面）。
 """
 
@@ -19,7 +19,7 @@ from agent.tools.pipeline.log_classifier import classify_log_features
 
 
 def identify_log_format_headless(logs_text: str) -> str:
-    """日志格式识别纯函数入口（无 @tool 装饰，供 web 执行适配器调用）。"""
+    """日志格式识别纯函数入口（无 @tool 装饰，供 Application 适配器调用）。"""
     from agent.tools.pipeline.log_format_identifier import _do_identify_log_format
 
     return _do_identify_log_format(logs_text)
@@ -34,7 +34,7 @@ def classify_log_features_headless(
     header_end_marker: str,
     feature_field_explicit: bool = False,
 ) -> str:
-    """日志特征分类纯函数入口（无 @tool 装饰，供 web 执行适配器调用）。
+    """日志特征分类纯函数入口（无 @tool 装饰，供 Application 适配器调用）。
 
     ``feature_field_explicit=True`` 表示字段来自用户显式指定，
     分类必须按日志体路径使用该字段，Step 2a 定位器不得改写或改道。
@@ -50,6 +50,13 @@ def classify_log_features_headless(
         header_end_marker,
         feature_field_explicit=feature_field_explicit,
     )
+
+
+def fill_log_samples(classification: dict, logs_text: str) -> dict:
+    """真实日志样本回填门面，延迟绑定现有 Pipeline 实现。"""
+    from agent.tools.pipeline.log_sample_filler import fill_sample_logs
+
+    return fill_sample_logs(classification, logs_text)
 
 
 def call_llm_direct(*args, **kwargs):
@@ -77,6 +84,7 @@ __all__ = [
     'classify_log_features',
     'identify_log_format_headless',
     'classify_log_features_headless',
+    'fill_log_samples',
     'call_llm_direct',
     'load_object_mapping',
 ]

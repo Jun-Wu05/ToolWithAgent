@@ -13,6 +13,7 @@ from web.adapters.config_ops import (
     ThreatFillAdapter,
 )
 from application.adapters.export import ExportAdapter
+from application.adapters.log_parse import LogParseAdapter
 from web.adapters.field_mapping import (
     FieldMappingAdapter,
     FieldMappingBatchError,
@@ -31,5 +32,6 @@ __all__ = [
     "FillAdapter",
     "RemoveMappingAdapter",
     "ExportAdapter",
+    "LogParseAdapter",
     "logger",
 ]

@@ -9,12 +9,12 @@ from typing import Any
 
 from agent.shared.logger import get_logger
 
+from application.adapters.log_parse import LogParseAdapter
 from application.execution import ExecutionContext
 from contracts.planner_models import (
     EnumExtractStep,
     EnumValuesArtifact,
     FieldMappingStep,
-    LogClassificationArtifact,
     LogParseStep,
     StepResult,
     StepSpec,
@@ -52,6 +52,7 @@ class ProfessionalAgentAdapter:
         """保存专业 Agent 注册表、字段映射执行策略与可注入依赖（Issue #88 接缝）。"""
         self._team = team
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
+        self._log_parse_adapter = LogParseAdapter()
         self._field_mapping_adapter = FieldMappingAdapter(
             team,
             mapping_policy,
@@ -68,7 +69,7 @@ class ProfessionalAgentAdapter:
     ) -> StepResult:
         """执行日志、枚举、字段或威胁操作，并返回类型化产物。"""
         if isinstance(step, LogParseStep):
-            return await self._execute_log_parse(step, context)
+            return await self._log_parse_adapter.execute(step, context, dependencies)
         if isinstance(step, EnumExtractStep):
             return await self._execute_enum_extract(step, context)
         if isinstance(step, FieldMappingStep):
@@ -76,51 +77,6 @@ class ProfessionalAgentAdapter:
         if isinstance(step, ThreatMappingStep):
             return await self._execute_threat_mapping(step, context, dependencies)
         raise TypeError(f"ProfessionalAgentAdapter 不支持步骤类型: {step.type}")
-
-    async def _execute_log_parse(self, step: LogParseStep, context: ExecutionContext) -> StepResult:
-        """调用无界面日志 Pipeline，并将分类结果写入当前 session。"""
-        from agent.tools import classify_log_features_headless, identify_log_format_headless
-        from agent.tools.pipeline.log_sample_filler import fill_sample_logs
-        from web.utils import parse_json_safe
-
-        log_lines = _session_get(context.session, "raw_log_lines") or _session_get(
-            context.session, "original_log"
-        )
-        logs_text = "\n".join(str(line) for line in log_lines)
-        format_text = await asyncio.to_thread(identify_log_format_headless, logs_text)
-        format_info = parse_json_safe(format_text)
-        if not isinstance(format_info, dict):
-            return _failed(step, "log_format_invalid", "日志格式识别结果不合法")
-        classification_text = await asyncio.to_thread(
-            classify_log_features_headless,
-            logs_text,
-            format_info.get("format", "unknown"),
-            format_info.get("format_detail", ""),
-            # 用户显式指定的分类特征字段优先于 Step1 自动探测值。
-            step.feature_field or format_info.get("feature_field", "log_type"),
-            json.dumps(format_info, ensure_ascii=False),
-            format_info.get("header_end_marker", ""),
-            # 显式字段同时压制 Step 2a 定位器对特征字段的改写或改道。
-            feature_field_explicit=step.feature_field is not None,
-        )
-        classification = parse_json_safe(classification_text)
-        if not isinstance(classification, dict) or not classification:
-            return _failed(step, "log_parse_failed", "日志类型提取没有生成有效结果")
-        classification = fill_sample_logs(classification, logs_text)
-        _session_set(context.session, "log_classification", classification)
-        classification_details = classification.get("classification_details")
-        item_count = (
-            len(classification_details)
-            if isinstance(classification_details, list)
-            else len(classification)
-        )
-        return _success(
-            step,
-            LogClassificationArtifact(
-                classification=classification,
-                item_count=item_count,
-            ),
-        )
 
     async def _execute_enum_extract(self, step: EnumExtractStep, context: ExecutionContext) -> StepResult:
         """为显式字段生成正则并提取枚举；模型输出非法时失败，不使用默认正则。"""

@@ -13,7 +13,7 @@ import json
 import httpx
 from agno.tools import tool
 
-from agent.core.prompts import load_log_format_identify_prompt
+from agent.prompts import load_log_format_identify_prompt
 from agent.shared.logger import get_logger
 from agent.tools.enum_extract_tool import sample_logs
 from agent.tools.pipeline.llm_client import (

@@ -20,6 +20,39 @@ def _load_md_or_fail(filename: str, description: str) -> str:
     raise FileNotFoundError(f"提示词文件丢失: {filename} ({description})，请检查 agent/prompts/ 目录")
 
 
+def _load_optional_md(filename: str) -> str:
+    """加载日志 Pipeline 提示词；缺失时保持历史空字符串策略。"""
+    prompt_path = Path(__file__).parent / filename
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding="utf-8")
+    return ""
+
+
+def load_log_format_identify_prompt() -> str:
+    """加载日志格式识别提示词。"""
+    return _load_optional_md("log_format_identify.md")
+
+
+def load_log_classify_feature_prompt() -> str:
+    """加载日志特征分类提示词。"""
+    return _load_optional_md("log_classify_feature.md")
+
+
+def load_log_header_classify_prompt() -> str:
+    """加载日志头分类提示词。"""
+    return _load_optional_md("log_header_classify.md")
+
+
+def load_log_feature_locate_prompt() -> str:
+    """加载日志分类特征字段定位提示词。"""
+    return _load_optional_md("log_feature_locate.md")
+
+
+def load_kv_feature_identifier_prompt() -> str:
+    """加载 KV 特征正则生成提示词。"""
+    return _load_optional_md("kv_feature_identifier.md")
+
+
 def load_field_weak_prompt() -> str:
     """加载弱匹配标准字段映射提示词"""
     return _load_md_or_fail("field_weak.md", "字段映射弱匹配")

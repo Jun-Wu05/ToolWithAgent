@@ -11,7 +11,9 @@
 
 `SessionFacts` 是 session 领域判断的唯一投影。`contracts/session_facts.py` 只定义不可变事实类型；`application/session_projection.py` 是读取会话、汇总可用字段、解析配置目标并生成安全产物目录的单一实现。Planner 只负责理解，Executor 只负责校验和推进，Adapter 只负责执行，Renderer 只负责展示。这些模块之间只传递 Pydantic 模型或明确 dataclass。
 
-`SessionState`、`PlanExecutor`、结果账本推进和 `NullProgressSink` 已归属 Application。执行核心只依赖 Contracts 与标准库，Web 组合根通过 `ExecutionPolicy` 注入事件名与日志特征字段等领域预检，确保整计划失败关闭语义不变。导出 tracer 已迁至 Application Adapter；专业 Agent、Fill/Remove 等其余业务 Adapter 暂留在 `web/`，将在后续迁移切片中调整。
+`SessionState`、`PlanExecutor`、结果账本推进和 `NullProgressSink` 已归属 Application。执行核心只依赖 Contracts 与标准库，Web 组合根通过 `ExecutionPolicy` 注入事件名与日志特征字段等领域预检，确保整计划失败关闭语义不变。日志解析和导出 tracer 已迁至 Application Adapter；日志 Pipeline 继续作为领域实现由适配器延迟调用，模型参数与调用顺序不变。字段映射、枚举、威胁和 Fill/Remove 等其余业务 Adapter 暂留在 `web/`，将在后续迁移切片中调整。
+
+`LogParseAdapter` 按格式识别、分类、样本回填、Session 提交和类型化产物的固定顺序执行。Prompt 加载器与文件共同归属 `agent/prompts/`，支持非仓库工作目录；旧 Core Prompt 入口只重导出同一函数。规则导出消费下一轮重新投影后的 `SessionFacts`，不把计划开始时的不可变事实快照改成隐式可变状态。
 
 `ExecutionReport` 是一次计划的结果账本。后续步骤通过 `step:<step_id>` 消费本次依赖，禁止读取旧 `last_enum_extract_result` 代替本次输入。任何步骤失败或待输入都会停止计划。
 
