@@ -4,12 +4,14 @@
 自然语言 ──> PlannerAgent ──> PlanDecision
                                ├─ Clarification/Guidance ──> Renderer
                                └─ ExecutePlan ──> PlanExecutor ──> StepAdapter
-文件上传 ──> SessionFacts                                  ├─ 专业 Agent
+文件上传 ──> SessionState ──> Application 会话投影 ──> SessionFacts     ├─ 专业 Agent
 按钮事件 ──> StepSpec ────────────────────────────────────┤
 确定性清空 ──> Session                                    └─ 领域函数
 ```
 
-`SessionFacts` 是 session 领域判断的唯一投影。Planner 只负责理解，Executor 只负责校验和推进，Adapter 只负责执行，Renderer 只负责展示。这四个模块之间只传递 Pydantic 模型或明确 dataclass。
+`SessionFacts` 是 session 领域判断的唯一投影。`contracts/session_facts.py` 只定义不可变事实类型；`application/session_projection.py` 是读取会话、汇总可用字段、解析配置目标并生成安全产物目录的单一实现。Planner 只负责理解，Executor 只负责校验和推进，Adapter 只负责执行，Renderer 只负责展示。这些模块之间只传递 Pydantic 模型或明确 dataclass。
+
+当前仅完成会话投影的 Application 归属；`PlanExecutor`、`SessionState` 和 Adapter 尚保留在 `web/`，将在后续迁移切片中调整。
 
 `ExecutionReport` 是一次计划的结果账本。后续步骤通过 `step:<step_id>` 消费本次依赖，禁止读取旧 `last_enum_extract_result` 代替本次输入。任何步骤失败或待输入都会停止计划。
 

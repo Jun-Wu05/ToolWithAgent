@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from web.execution_adapters import create_default_adapters
 from web.plan_executor import ExecutionContext, PlanExecutor
 from contracts.planner_models import PlanDecision, StepStatus
-from contracts.session_facts import build_session_facts
+from application.session_projection import build_session_facts
 
 
 class _StaticMember:

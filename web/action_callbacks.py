@@ -112,7 +112,7 @@ async def on_start_enum_fill(action: cl.Action):
     """把枚举填充按钮转换为显式 FillStep 并复用统一执行器。"""
     from web.deterministic_plan import execute_deterministic_plan
     from contracts.planner_models import FillStep
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"开始枚举填充"按钮')
@@ -185,7 +185,7 @@ async def on_apply_field_mapping(action: cl.Action):
     """把标准字段映射按钮转换为 FieldMappingStep 并复用统一执行器。"""
     from web.deterministic_plan import execute_deterministic_plan
     from contracts.planner_models import FieldMappingStep
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     user_session = cl.user_session.get("user_session")
     logger.info('[ACTION] 用户点击"标准字段映射"按钮')

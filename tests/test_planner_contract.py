@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 
 def test_session_facts只暴露规划所需事实():
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     session = {
         "api_key": "secret-key",
@@ -34,7 +34,7 @@ def test_session_facts只暴露规划所需事实():
 
 def test系统元字段不进入字段映射输入():
     """original_log/日志类型 是系统元字段，必须从 available_fields 排除，不送给映射模型（回归 #50）。"""
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     facts = build_session_facts(
         {"decoded_fields": ["original_log", "日志类型", "src_ip", "event_type3"]}
@@ -184,7 +184,7 @@ def test作答字段与执行澄清决策互斥():
 
 def test_session_facts投影子规则事件标注事实():
     """各子规则事件名称/级别进入 facts；未标注子规则占位（#149 信息型问答）。"""
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     session = {
         "mapped_sub_rules": [
@@ -331,7 +331,7 @@ def test步骤结果拒绝未知或无约束产物():
 def test_session_facts集中汇总日志分类字段(monkeypatch):
     """证明 Planner 和执行器共享同一字段事实，不在各层重复解释日志状态。"""
     import web.field_source as field_source
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     monkeypatch.setattr(
         field_source,
@@ -352,7 +352,7 @@ def test_session_facts集中汇总日志分类字段(monkeypatch):
 def test有日志字段时Excel列头不进入字段映射输入(monkeypatch):
     """有真实日志字段时，Excel 列头（decoded_fields）不得混入映射候选（回归 #78）。"""
     import web.field_source as field_source
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     monkeypatch.setattr(
         field_source,
@@ -373,7 +373,7 @@ def test有日志字段时Excel列头不进入字段映射输入(monkeypatch):
 
 def test无日志字段时回退使用配置字段():
     """Base64/TXT 配置上传场景没有日志字段，decoded_fields 仍参与映射。"""
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
 
     facts = build_session_facts({"decoded_fields": ["event_type3", "src_ip"]})
 

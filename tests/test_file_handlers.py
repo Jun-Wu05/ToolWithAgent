@@ -125,7 +125,7 @@ def test数据表格含原始日志列时正常提取日志行(monkeypatch):
 def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     """新 Base64/TXT 提交后，旧日志数据集及其附件和派生结果全部失效。"""
     import web.file_handlers as file_handlers
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
     from web.session_state import SessionState
 
     captured = []
@@ -216,7 +216,7 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
 def test有效日志表原子替换旧配置数据集状态(monkeypatch):
     """新日志 Excel 提交后，旧配置引用、附件和派生结果对称失效。"""
     import web.file_handlers as file_handlers
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
     from web.session_state import SessionState
 
     captured = []
@@ -355,7 +355,7 @@ def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_p
     """枚举附件以 Sheet 为身份键，上传新 Sheet 不得覆盖已有 Sheet。"""
     import web.file_handlers as file_handlers
     from contracts.planner_models import FillStep, StepStatus
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
     from web.execution_adapters import EnumFillAdapter
     from web.plan_executor import ExecutionContext
     from web.session_state import SessionState
@@ -458,7 +458,7 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
     """同名 Sheet 的修改、删除和新增生效，主数据原有 mappings 不受影响。"""
     import web.file_handlers as file_handlers
     from contracts.planner_models import ExportStep, FillStep, PlanDecision, StepStatus
-    from contracts.session_facts import build_session_facts
+    from application.session_projection import build_session_facts
     from web.execution_adapters import EnumFillAdapter, ExportAdapter, create_default_adapters
     from web.plan_executor import ExecutionContext, PlanExecutor
     from web.session_state import SessionState

@@ -16,7 +16,7 @@ from web.execution_adapters import (
 )
 from web.plan_executor import ExecutionContext, PlanExecutor
 from contracts.planner_models import ExportStep, FieldMappingStep, FillStep, PlanDecision, StepStatus
-from contracts.session_facts import build_session_facts
+from application.session_projection import build_session_facts
 
 
 def test枚举映射表上下文执行填充而非枚举提取():

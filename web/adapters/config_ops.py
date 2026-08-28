@@ -16,7 +16,7 @@ from agent.shared.mapping_utils import (
     unbind_fixed_fields,
 )
 from agent.tools.rule_generator.field_mapping import MAPPING_EXCLUDED_STANDARD_FIELDS
-from contracts.artifact_targets import collect_standard_fields, resolve_standard_target
+from application.artifact_targets import collect_standard_fields, resolve_standard_target
 
 from web.plan_executor import ExecutionContext
 from contracts.planner_models import (

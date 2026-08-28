@@ -25,7 +25,7 @@ from agent.shared.event_classify import (
     classify_sub_rule_events,
 )
 from contracts.planner_models import FieldMappingStep
-from contracts.session_facts import build_session_facts
+from application.session_projection import build_session_facts
 from web.plan_executor import ExecutionContext
 from web.adapters.field_mapping import FieldMappingAdapter
 

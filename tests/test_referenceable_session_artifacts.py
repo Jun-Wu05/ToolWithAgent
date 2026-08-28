@@ -20,7 +20,7 @@ from contracts.planner_models import (
     ThreatMappingStep,
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
-from contracts.session_facts import build_session_facts
+from application.session_projection import build_session_facts
 from web.execution_adapters import ProfessionalAgentAdapter, create_default_adapters
 from web.file_handlers import _commit_enum_workbook
 from web.plan_executor import ExecutionContext, PlanExecutor

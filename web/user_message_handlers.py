@@ -16,7 +16,7 @@ from web.plan_executor import ExecutionContext, PlanExecutor
 from web.plan_renderer import render_decision, render_execution_report
 from contracts.planner_models import ConversationTurn
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
-from contracts.session_facts import build_session_facts
+from application.session_projection import build_session_facts
 
 logger = get_logger("user_message_handlers")
 

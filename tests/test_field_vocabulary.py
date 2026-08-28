@@ -15,7 +15,7 @@ from contracts.planner_models import (
     MergeFieldsStep,
     RemoveMappingStep,
 )
-from contracts.session_facts import build_session_facts
+from application.session_projection import build_session_facts
 from web.plan_executor import ExecutionContext
 from web.adapters.shared import (
     field_vocabulary,

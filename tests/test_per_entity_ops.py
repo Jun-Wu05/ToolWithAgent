@@ -18,7 +18,7 @@ from contracts.planner_models import (
     DeleteFieldsStep,
     MergeFieldsStep,
 )
-from contracts.session_facts import build_session_facts
+from application.session_projection import build_session_facts
 from web.plan_executor import ExecutionContext
 from web.adapters.skill_ops import FieldSkillAdapter
 
