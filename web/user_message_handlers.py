@@ -12,7 +12,8 @@ from agent.shared.logger import get_logger
 from web.chainlit_progress import get_session_progress_sink, reset_session_progress_sink
 from web.execution_adapters import create_default_adapters
 from web.history_store import append_history
-from web.plan_executor import ExecutionContext, PlanExecutor
+from application.execution import ExecutionContext
+from web.execution_policy import create_plan_executor
 from web.plan_renderer import render_decision, render_execution_report
 from contracts.planner_models import ConversationTurn
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
@@ -186,7 +187,7 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
             return
 
         # 执行器只接收 Planner 已校验的类型化步骤，原文不会继续向下游传播供猜参。
-        plan_executor = PlanExecutor(create_default_adapters(team))
+        plan_executor = create_plan_executor(create_default_adapters(team))
         execution_report = await plan_executor.execute(
             decision,
             ExecutionContext(

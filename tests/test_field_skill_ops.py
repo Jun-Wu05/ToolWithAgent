@@ -24,7 +24,7 @@ from contracts.planner_models import (
     StepStatus,
 )
 from application.session_projection import build_session_facts
-from web.plan_executor import ExecutionContext
+from application.execution import ExecutionContext
 from web.adapters.skill_ops import (
     FIELD_SKILL_REGISTRY,
     FieldSkillAdapter,

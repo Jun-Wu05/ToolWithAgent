@@ -48,11 +48,3 @@ class ProgressSink(Protocol):
 
     async def publish(self, event: ProgressEvent) -> None:
         """发布一个不含敏感原值的进度事件。"""
-
-
-class NullProgressSink:
-    """在无界面执行环境中丢弃进度事件。"""
-
-    async def publish(self, event: ProgressEvent) -> None:
-        """保持异步接口一致且不产生副作用。"""
-        return None

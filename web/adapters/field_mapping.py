@@ -11,7 +11,7 @@ from typing import Any
 
 from agent.shared.logger import get_logger
 
-from web.plan_executor import ExecutionContext
+from application.execution import ExecutionContext
 from contracts.progress import ProgressPhase, ProgressStatus
 from contracts.planner_models import (
     FieldMappingArtifact,
@@ -19,7 +19,7 @@ from contracts.planner_models import (
     FieldMappingStep,
     StepResult,
 )
-from web.adapters.shared import (
+from application.adapters.shared import (
     REPO_ROOT,
     _build_config_artifact,
     _count_tagged_normalize,

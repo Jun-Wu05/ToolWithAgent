@@ -6,7 +6,7 @@ import re
 from types import SimpleNamespace
 
 from web.execution_adapters import FieldMappingExecutionPolicy, ProfessionalAgentAdapter
-from web.plan_executor import ExecutionContext
+from application.execution import ExecutionContext
 from contracts.planner_models import FieldMappingStep, StepStatus
 from application.session_projection import build_session_facts
 

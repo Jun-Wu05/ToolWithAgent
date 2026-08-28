@@ -1,6 +1,6 @@
 # chainlit_app 模块说明
 
-> **文档版本**：2026-06-12  
+> **文档版本**：2026-08-28
 > **对应分支**：`refactor/chainlit-app-split-20260612`
 
 ---
@@ -21,7 +21,7 @@
 | settings_handler.py | ~180 | 模型设置更新 |
 | message_router.py | ~30 | 消息路由分发 |
 | upload_handlers.py | ~250 | 文件上传处理 |
-| user_message_handlers.py | ~140 | Planner、PlanExecutor 与 Renderer 的薄编排 |
+| user_message_handlers.py | ~140 | Planner、Application 执行器与 Renderer 的薄编排 |
 | action_callbacks.py | ~250 | Action 回调 |
 | utils.py | ~150 | 纯辅助函数 |
 | global_state.py | ~30 | 全局状态管理 |
@@ -57,6 +57,9 @@
 ### 2.9 global_state.py
 全局状态管理：Agno 日志桥接标志
 
+### 2.10 Application 运行时接缝
+`SessionState`、`PlanExecutor`、执行结果账本与 `NullProgressSink` 位于 `application/`。Web 只在组合根注入领域预检和日志，并保留 Chainlit 生命周期及渲染职责。导出 Adapter 已迁入 Application；其余业务 Adapter 仍暂存 `web/adapters/`。
+
 ---
 
 ## 3. 调用关系
@@ -64,9 +67,9 @@
 ```text
 用户 → chainlit_app.py → message_router.py
   ├─ 文件 → file_handlers.py → SessionFacts
-  └─ 文本 → user_message_handlers.py → PlannerAgent → PlanExecutor
-按钮 → action_callbacks.py → StepSpec → PlanExecutor
-PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.py
+  └─ 文本 → user_message_handlers.py → PlannerAgent → Application PlanExecutor
+按钮 → action_callbacks.py → StepSpec → Application PlanExecutor
+Application PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.py
 ```
 
 ---
@@ -86,8 +89,8 @@ PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.py
 
 ## 5. 设计原则
 
-1. **扁平化**：所有新文件直接放在 `web/` 目录下
-2. **避免循环依赖**：新模块之间不互相导入
+1. **边界清晰**：`web/` 保留 Chainlit 交互与组合，运行时核心归属 `application/`
+2. **避免循环依赖**：Application 运行时不反向导入 Web
 3. **会话类型统一**：使用 `SessionState` 数据类
 4. **失败关闭**：Planner 或步骤校验失败时不回退关键词路由
 5. **职责单一**：每个模块职责明确

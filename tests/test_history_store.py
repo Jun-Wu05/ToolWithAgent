@@ -14,7 +14,7 @@ from web.history_store import (
     append_history,
     format_history_for_prompt,
 )
-from web.session_state import SessionState
+from application.session_state import SessionState
 
 
 class TestHistoryEntryTruncation:

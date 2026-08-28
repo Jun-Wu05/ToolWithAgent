@@ -52,7 +52,11 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
     FakeExecutor.calls = 0
 
     monkeypatch.setattr(handlers, "_get_planner_service", lambda: planner)
-    monkeypatch.setattr(handlers, "PlanExecutor", FakeExecutor)
+    monkeypatch.setattr(
+        handlers,
+        "create_plan_executor",
+        lambda adapters: FakeExecutor(adapters),
+    )
     monkeypatch.setattr(handlers, "create_default_adapters", lambda team: {})
 
     lifecycle = []

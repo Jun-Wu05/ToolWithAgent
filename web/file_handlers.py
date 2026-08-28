@@ -21,7 +21,7 @@ from web.file_handler import (
 )
 from agent.tools import flatten_enum_mappings, read_enum_mappings_from_excel
 from web.parsers import create_dataframe_elements
-from web.session_state import PrimaryDatasetSnapshot
+from application.session_state import PrimaryDatasetSnapshot
 
 
 # 枚举映射表列头关键词（唯一实现；utils 版重复副本已删除）

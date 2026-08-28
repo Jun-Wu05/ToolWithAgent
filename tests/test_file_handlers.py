@@ -126,7 +126,7 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     """新 Base64/TXT 提交后，旧日志数据集及其附件和派生结果全部失效。"""
     import web.file_handlers as file_handlers
     from application.session_projection import build_session_facts
-    from web.session_state import SessionState
+    from application.session_state import SessionState
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -217,7 +217,7 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
     """新日志 Excel 提交后，旧配置引用、附件和派生结果对称失效。"""
     import web.file_handlers as file_handlers
     from application.session_projection import build_session_facts
-    from web.session_state import SessionState
+    from application.session_state import SessionState
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -278,7 +278,7 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
 def test无效配置上传保持当前有效会话(monkeypatch):
     """配置解码失败时不得提前清除旧主数据、附件或派生结果。"""
     import web.file_handlers as file_handlers
-    from web.session_state import SessionState
+    from application.session_state import SessionState
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -316,7 +316,7 @@ def test无效配置上传保持当前有效会话(monkeypatch):
 def test无效日志表上传保持当前有效会话(monkeypatch):
     """缺少原始日志列的 Excel 在提交前拒绝，旧会话完整保留。"""
     import web.file_handlers as file_handlers
-    from web.session_state import SessionState
+    from application.session_state import SessionState
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -357,8 +357,8 @@ def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_p
     from contracts.planner_models import FillStep, StepStatus
     from application.session_projection import build_session_facts
     from web.execution_adapters import EnumFillAdapter
-    from web.plan_executor import ExecutionContext
-    from web.session_state import SessionState
+    from application.execution import ExecutionContext
+    from application.session_state import SessionState
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -460,8 +460,8 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
     from contracts.planner_models import ExportStep, FillStep, PlanDecision, StepStatus
     from application.session_projection import build_session_facts
     from web.execution_adapters import EnumFillAdapter, ExportAdapter, create_default_adapters
-    from web.plan_executor import ExecutionContext, PlanExecutor
-    from web.session_state import SessionState
+    from application.execution import ExecutionContext, PlanExecutor
+    from application.session_state import SessionState
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -572,7 +572,7 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
 def test多Sheet工作簿任一Sheet无有效规则时整份拒绝(monkeypatch, tmp_path):
     """多 Sheet 上传必须先完整校验，失败时原附件和输出有效性均不变。"""
     import web.file_handlers as file_handlers
-    from web.session_state import SessionState
+    from application.session_state import SessionState
 
     captured = []
     _mount_message_capture(monkeypatch, captured)

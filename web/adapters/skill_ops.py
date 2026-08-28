@@ -20,7 +20,7 @@ from agent.shared.event_classify import (
 )
 from agent.shared.logger import get_logger
 
-from web.plan_executor import ExecutionContext
+from application.execution import ExecutionContext
 from contracts.planner_models import (
     AddFieldsStep,
     DecodeFieldsStep,
@@ -30,7 +30,7 @@ from contracts.planner_models import (
     StepResult,
     StepSpec,
 )
-from web.adapters.shared import (
+from application.adapters.shared import (
     REPO_ROOT,
     _build_config_artifact,
     _failed,

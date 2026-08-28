@@ -8,7 +8,7 @@ import chainlit as cl
 import threading
 
 from agent.shared.logger import get_logger
-from web.session_state import SessionState
+from application.session_state import SessionState
 from web.llm_client import setup_agno_logging_bridge
 from web.global_state import is_agno_bridge_installed, set_agno_bridge_installed
 

@@ -6,7 +6,8 @@ from typing import Any, Sequence
 
 from web.chainlit_progress import get_session_progress_sink
 from web.execution_adapters import create_default_adapters
-from web.plan_executor import ExecutionContext, PlanExecutor
+from application.execution import ExecutionContext
+from web.execution_policy import create_plan_executor
 from web.plan_renderer import render_execution_report
 from contracts.planner_models import PlanDecision, StepSpec
 from application.session_projection import build_session_facts
@@ -24,7 +25,7 @@ async def execute_deterministic_plan(
     progress_ledger = get_session_progress_sink()
     progress_sink = progress_ledger.begin_request()
     try:
-        report = await PlanExecutor(create_default_adapters(team)).execute(
+        report = await create_plan_executor(create_default_adapters(team)).execute(
             decision,
             ExecutionContext(
                 session=user_session,

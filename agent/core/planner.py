@@ -18,8 +18,8 @@ from pydantic import ValidationError
 from agent.core.model_config import ModelConfig
 from agent.shared.logger import get_logger
 from contracts.planner_models import ConversationTurn, FillStep, LogParseStep, PlanDecision
+from application.progress import NullProgressSink
 from contracts.progress import (
-    NullProgressSink,
     ProgressEvent,
     ProgressPhase,
     ProgressSink,

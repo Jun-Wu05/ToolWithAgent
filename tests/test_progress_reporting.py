@@ -429,7 +429,7 @@ def testChainlitPlanner与同一步骤的内部阶段原位更新(monkeypatch):
 
 def testPlanExecutor为每个成功业务步骤发布终态事件():
     """每个 StepResult 成功后都必须结束对应 Task，而不是只结束总计划。"""
-    from web.plan_executor import ExecutionContext, PlanExecutor
+    from application.execution import ExecutionContext, PlanExecutor
     from contracts.planner_models import PlanDecision, StepResult, StepStatus
 
     class _SuccessfulExportAdapter:
@@ -487,7 +487,7 @@ def testPlanExecutor为每个成功业务步骤发布终态事件():
 
 def testPlanExecutor执行前拦截终结当前步骤且不展示后续步骤():
     """待输入结果必须终结当前步骤，并在任何后续 started 事件前停止。"""
-    from web.plan_executor import ExecutionContext, PlanExecutor
+    from application.execution import ExecutionContext, PlanExecutor
     from contracts.planner_models import PlanDecision, StepStatus
 
     plan = PlanDecision.model_validate(

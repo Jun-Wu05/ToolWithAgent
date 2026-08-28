@@ -14,7 +14,7 @@ from web.execution_adapters import (
     ProfessionalAgentAdapter,
     create_default_adapters,
 )
-from web.plan_executor import ExecutionContext, PlanExecutor
+from application.execution import ExecutionContext, PlanExecutor
 from contracts.planner_models import ExportStep, FieldMappingStep, FillStep, PlanDecision, StepStatus
 from application.session_projection import build_session_facts
 
@@ -815,7 +815,7 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     威胁填充真实改变配置，最终一次汇总 + 一个下载文件（回归 #39）。"""
     import agent.tools.pipeline.llm_client as llm_client
     import web.plan_renderer as renderer
-    from web.plan_executor import ExecutionContext, PlanExecutor
+    from application.execution import ExecutionContext, PlanExecutor
     from contracts.planner_models import (
         ConfigExportArtifact,
         EnumValuesArtifact,

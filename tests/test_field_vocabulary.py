@@ -16,8 +16,8 @@ from contracts.planner_models import (
     RemoveMappingStep,
 )
 from application.session_projection import build_session_facts
-from web.plan_executor import ExecutionContext
-from web.adapters.shared import (
+from application.execution import ExecutionContext
+from application.adapters.shared import (
     field_vocabulary,
     format_field_vocabulary,
     resolve_field_names,

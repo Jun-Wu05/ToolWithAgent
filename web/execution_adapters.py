@@ -8,17 +8,17 @@ from web.adapters import create_default_adapters
 from web.adapters.agent_ops import ProfessionalAgentAdapter
 from web.adapters.config_ops import (
     EnumFillAdapter,
-    ExportAdapter,
     FillAdapter,
     RemoveMappingAdapter,
     ThreatFillAdapter,
 )
+from application.adapters.export import ExportAdapter
 from web.adapters.field_mapping import (
     FieldMappingAdapter,
     FieldMappingBatchError,
     FieldMappingExecutionPolicy,
 )
-from web.adapters.shared import logger
+from application.adapters.shared import logger
 
 __all__ = [
     "create_default_adapters",

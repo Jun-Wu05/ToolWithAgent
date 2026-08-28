@@ -11,7 +11,7 @@
 
 `SessionFacts` 是 session 领域判断的唯一投影。`contracts/session_facts.py` 只定义不可变事实类型；`application/session_projection.py` 是读取会话、汇总可用字段、解析配置目标并生成安全产物目录的单一实现。Planner 只负责理解，Executor 只负责校验和推进，Adapter 只负责执行，Renderer 只负责展示。这些模块之间只传递 Pydantic 模型或明确 dataclass。
 
-当前仅完成会话投影的 Application 归属；`PlanExecutor`、`SessionState` 和 Adapter 尚保留在 `web/`，将在后续迁移切片中调整。
+`SessionState`、`PlanExecutor`、结果账本推进和 `NullProgressSink` 已归属 Application。执行核心只依赖 Contracts 与标准库，Web 组合根通过 `ExecutionPolicy` 注入事件名与日志特征字段等领域预检，确保整计划失败关闭语义不变。导出 tracer 已迁至 Application Adapter；专业 Agent、Fill/Remove 等其余业务 Adapter 暂留在 `web/`，将在后续迁移切片中调整。
 
 `ExecutionReport` 是一次计划的结果账本。后续步骤通过 `step:<step_id>` 消费本次依赖，禁止读取旧 `last_enum_extract_result` 代替本次输入。任何步骤失败或待输入都会停止计划。
 
@@ -28,7 +28,7 @@ Fill、取消映射和配置导出必须携带显式配置来源。`session.deco
 
 ## UI 与观测
 
-核心层通过 `ProgressEvent` 和 `ProgressSink` 发布安全阶段。无 UI 时使用 `NullProgressSink`；Chainlit 使用一个持续更新的 `TaskList` 展示“理解指令、检索候选、处理第 N/M 批、校验写回、完成或失败”。超过 10 秒没有新阶段时只刷新等待时长，不展示模型推理或结构化 token。
+核心层通过 Contracts 的 `ProgressEvent` 和 `ProgressSink` 发布安全阶段。无 UI 时使用 Application 的 `NullProgressSink`；Chainlit 使用一个持续更新的 `TaskList` 展示“理解指令、检索候选、处理第 N/M 批、校验写回、完成或失败”。超过 10 秒没有新阶段时只刷新等待时长，不展示模型推理或结构化 token。
 
 模型边界日志使用 `MODEL_CALL_START/END/TIMEOUT`、`BATCH_START/END/RETRY` 和 `MODEL_USAGE`，包含 `plan_id`、`step_id`、批次、模型、数量、耗时、token 计数和稳定错误类别。字段检索 DEBUG 日志记录字段名、候选标准字段名与相似度分数（供字段映射优化分析），以及候选数量与耗时；仍禁止记录字段原值（日志取值）、API token、IP、日志样本和完整模型 JSON。
 

@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-import web.session_state as ss_module
+import application.session_state as ss_module
 
 
 def _collect_written_session_keys(root_dir: str) -> set:
@@ -77,14 +77,14 @@ class TestSessionStateContract:
 
         确保这个严格行为不会被意外放宽（若放宽，上面的扫描测试就失效了）。
         """
-        from web.session_state import SessionState
+        from application.session_state import SessionState
         s = SessionState()
         with pytest.raises(KeyError, match="没有字段"):
             s["nonexistent_field_xyz"] = "value"
 
     def test_defined_fields_are_writable(self):
         """SessionState 每个已定义字段都能正常读写（回归基本契约）。"""
-        from web.session_state import SessionState
+        from application.session_state import SessionState
         s = SessionState()
         # 抽查几个关键字段
         s["mapped_sub_rules"] = [{"normalize": []}]

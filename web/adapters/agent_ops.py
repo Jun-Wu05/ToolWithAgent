@@ -9,7 +9,7 @@ from typing import Any
 
 from agent.shared.logger import get_logger
 
-from web.plan_executor import ExecutionContext
+from application.execution import ExecutionContext
 from contracts.planner_models import (
     EnumExtractStep,
     EnumValuesArtifact,
@@ -24,7 +24,7 @@ from contracts.planner_models import (
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 from web.adapters.field_mapping import FieldMappingAdapter, FieldMappingExecutionPolicy
-from web.adapters.shared import (
+from application.adapters.shared import (
     REPO_ROOT,
     _failed,
     _needs_input,

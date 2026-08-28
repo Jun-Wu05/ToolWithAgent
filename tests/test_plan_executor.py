@@ -2,7 +2,8 @@
 
 import asyncio
 
-from web.plan_executor import ExecutionContext, PlanExecutor
+from application.execution import ExecutionContext
+from web.execution_policy import create_plan_executor
 from contracts.planner_models import (
     EnumValuesArtifact,
     PlanDecision,
@@ -29,7 +30,7 @@ class RecordingAdapter:
 def _execute(decision, adapters, facts=None):
     """用独立事件循环运行执行器，避免测试依赖额外 pytest 插件。"""
     return asyncio.run(
-        PlanExecutor(adapters).execute(
+        create_plan_executor(adapters).execute(
             decision,
             ExecutionContext(session=object(), session_facts=facts or SessionFacts()),
         )
@@ -67,7 +68,7 @@ def _success_log_result():
 
 def _execute_with_session(decision, adapters, session):
     return asyncio.run(
-        PlanExecutor(adapters).execute(
+        create_plan_executor(adapters).execute(
             decision,
             ExecutionContext(session=session, session_facts=SessionFacts(has_logs=True)),
         )
