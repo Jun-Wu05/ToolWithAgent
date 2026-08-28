@@ -345,6 +345,51 @@ def test设置保存按最终解析结果校验并放行环境变量密钥(monke
         reset_team_instance()
 
 
+def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
+    """首次设置应把展示占位值规范化为空模型，让探针选择规格默认模型。"""
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
+    placeholder = settings_handler.build_settings_widgets()[1].values[0]
+    session = SimpleNamespace(
+        current_provider=None, model_name=None, api_key=None, team=None
+    )
+    _install_chainlit_fakes(monkeypatch, session)
+    tested_models = []
+    team = object()
+
+    async def _fake_test(provider, key, model=None):
+        tested_models.append(model)
+        return {
+            "success": True,
+            "message": "ok",
+            "models_count": 2,
+            "models": ["deepseek-chat", "deepseek-reasoner"],
+        }
+
+    monkeypatch.setattr(
+        settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
+    )
+    monkeypatch.setattr(settings_handler, "reset_team_instance", lambda: None)
+    monkeypatch.setattr(settings_handler, "get_team_instance", lambda: team)
+
+    try:
+        asyncio.run(
+            settings_handler.on_settings_update(
+                {
+                    "provider": "deepseek",
+                    "model_name": placeholder,
+                    "api_key": "",
+                }
+            )
+        )
+
+        assert tested_models == [""]
+        assert session.model_name is None
+        assert session.team is team
+    finally:
+        ModelConfig.clear_runtime_config()
+
+
 def test设置保存密钥解析为空时拦截并提示变量名(monkeypatch):
     """当前家与环境变量都解析不出密钥时拦截，提示含具体变量名。"""
     _clean_env(monkeypatch)

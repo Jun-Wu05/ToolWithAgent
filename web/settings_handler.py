@@ -19,6 +19,7 @@ from agent.shared.logger import get_logger
 logger = get_logger("settings_handler")
 
 RESET_OPTION = "--- 重置设置 ---"
+MODEL_PLACEHOLDER = "请先配置 API Key 后获取模型列表"
 
 # ============= 模型列表缓存 =============
 
@@ -114,7 +115,7 @@ def build_settings_widgets(provider=None, models=None, api_key="", selected_mode
         model_select = Select(
             id="model_name",
             label="模型名称",
-            values=["请先配置 API Key 后获取模型列表"],
+            values=[MODEL_PLACEHOLDER],
             initial_index=0,
         )
     return [
@@ -353,6 +354,10 @@ async def on_settings_update(settings: dict):
     # 获取新的配置（使用 or 确保返回字符串，避免 None.strip() 报错）
     provider = (settings.get("provider") or "").strip()
     model = (settings.get("model_name") or "").strip()
+    if model == MODEL_PLACEHOLDER:
+        # Chainlit Select 必须有一个可提交值；首次设置时不能让展示占位文本
+        # 穿过表单接缝成为真实模型 ID，空值会由连接探针选择规格默认模型。
+        model = ""
     api_key = (settings.get("api_key") or "").strip()
 
     # 获取旧配置
