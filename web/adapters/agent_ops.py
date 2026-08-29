@@ -1,8 +1,7 @@
-"""日志解析、枚举提取与威胁映射适配器（Issue #88 拆分自 execution_adapters）。"""
+"""威胁映射适配器及已迁移专业操作的兼容委托。"""
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -11,6 +10,7 @@ from agent.shared.logger import get_logger
 
 from application.adapters.log_parse import LogParseAdapter
 from application.adapters.field_mapping import FieldMappingAdapter, FieldMappingExecutionPolicy
+from application.adapters.enum_extract import EnumExtractAdapter
 from application.execution import ExecutionContext
 from contracts.planner_models import (
     EnumExtractStep,
@@ -25,7 +25,6 @@ from contracts.planner_models import (
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 from application.adapters.shared import (
-    REPO_ROOT,
     _failed,
     _needs_input,
     _session_get,
@@ -53,6 +52,7 @@ class ProfessionalAgentAdapter:
         self._team = team
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
         self._log_parse_adapter = LogParseAdapter()
+        self._enum_extract_adapter = EnumExtractAdapter()
         self._field_mapping_adapter = FieldMappingAdapter(
             team,
             mapping_policy,
@@ -71,72 +71,12 @@ class ProfessionalAgentAdapter:
         if isinstance(step, LogParseStep):
             return await self._log_parse_adapter.execute(step, context, dependencies)
         if isinstance(step, EnumExtractStep):
-            return await self._execute_enum_extract(step, context)
+            return await self._enum_extract_adapter.execute(step, context, dependencies)
         if isinstance(step, FieldMappingStep):
             return await self._field_mapping_adapter.execute(step, context, dependencies)
         if isinstance(step, ThreatMappingStep):
             return await self._execute_threat_mapping(step, context, dependencies)
         raise TypeError(f"ProfessionalAgentAdapter 不支持步骤类型: {step.type}")
-
-    async def _execute_enum_extract(self, step: EnumExtractStep, context: ExecutionContext) -> StepResult:
-        """为显式字段生成正则并提取枚举；模型输出非法时失败，不使用默认正则。"""
-        from agent.tools import call_llm_direct
-        from agent.tools.enum_extract_tool import (
-            extract_enum_with_field,
-            sample_logs,
-            validate_and_fix_regex,
-            validate_regex_with_stats,
-        )
-        from web.utils import parse_json_safe
-
-        log_lines = _session_get(context.session, "raw_log_lines") or _session_get(
-            context.session, "original_log"
-        )
-        logs_text = "\n".join(str(line) for line in log_lines)
-        sampled_logs = sample_logs(logs_text, sample_size=20)
-        llm_input = (
-            f"{(REPO_ROOT / 'agent' / 'prompts' / 'enum_extract.md').read_text(encoding='utf-8')}\n\n"
-            f"目标字段：{step.target_field}\n"
-            f"采样日志：\n{sampled_logs}\n\n"
-            "只输出包含 field 和 regex 的 JSON；field 必须等于目标字段。"
-        )
-        response_text = await asyncio.to_thread(
-            call_llm_direct,
-            llm_input,
-            temperature=0.1,
-            max_tokens=500,
-            timeout=120,
-        )
-        regex_data = parse_json_safe(response_text)
-        if not isinstance(regex_data, dict):
-            return _failed(step, "enum_regex_invalid", "枚举正则生成结果不是合法 JSON")
-        if regex_data.get("field") != step.target_field or not regex_data.get("regex"):
-            return _failed(step, "enum_regex_invalid", "枚举正则结果缺少明确字段或正则")
-        regex = str(regex_data["regex"])
-        validation = validate_regex_with_stats(regex, sampled_logs)
-        if not validation.get("valid"):
-            fixed = validate_and_fix_regex(regex, sampled_logs, step.target_field)
-            if not fixed.get("valid"):
-                return _failed(step, "enum_regex_no_match", "生成的正则无法匹配目标字段")
-            regex = str(fixed["regex"])
-        enum_result = extract_enum_with_field(logs_text, step.target_field, regex)
-        values = enum_result.get("value", []) if isinstance(enum_result, dict) else []
-        if not values:
-            return _failed(step, "enum_extract_empty", "未提取到枚举值")
-        artifact = EnumValuesArtifact(
-            values=tuple(str(value) for value in values),
-            item_count=len(values),
-            field=str(enum_result.get("field") or step.target_field),
-            regex=str(enum_result.get("regex") or regex),
-            original_log=tuple(str(line) for line in enum_result.get("original_log", [])),
-        )
-        _session_set(context.session, "last_enum_extract_result", enum_result)
-        _session_set(
-            context.session,
-            "latest_enum_artifact",
-            EnumArtifactSlot(artifact=artifact, source_field=artifact.field),
-        )
-        return _success(step, artifact)
 
     async def _execute_threat_mapping(
         self,

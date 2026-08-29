@@ -19,7 +19,8 @@ from web.file_handler import (
     build_simplified_data,
     get_element_file_name,
 )
-from agent.tools import flatten_enum_mappings, read_enum_mappings_from_excel
+from agent.tools import read_enum_mappings_from_excel
+from application.enum_mapping_attachments import commit_enum_mapping_attachment
 from web.parsers import create_dataframe_elements
 from application.session_state import PrimaryDatasetSnapshot
 
@@ -86,37 +87,7 @@ def _commit_primary_dataset(user_session, snapshot: PrimaryDatasetSnapshot) -> N
     user_session.update(staged_values)
 
 
-def _commit_enum_workbook(user_session, excel_path: str, uploaded_sheets: dict) -> list:
-    """按 Sheet 原子合并枚举附件，并返回完整集合的兼容预览。"""
-    existing_sheets = user_session.get("enum_mapping_sheets", {}) or {}
-    merged_sheets = {
-        name: [dict(row) for row in rows]
-        for name, rows in existing_sheets.items()
-    }
-    merged_sheets.update(
-        {
-            name: [dict(row) for row in rows]
-            for name, rows in uploaded_sheets.items()
-        }
-    )
-    preview = flatten_enum_mappings(merged_sheets)
-    contributions = user_session.get("enum_fill_contributions", {}) or {}
-    stale_refs = set(user_session.get("stale_enum_config_refs", set()) or set())
-    stale_refs.update(contributions)
-    pending_refills = {
-        config_ref: set(sheet_names)
-        for config_ref, sheet_names in (
-            user_session.get("enum_pending_refills", {}) or {}
-        ).items()
-    }
-    for config_ref in contributions:
-        pending_refills.setdefault(config_ref, set()).update(uploaded_sheets)
-    user_session["enum_mapping_sheets"] = merged_sheets
-    user_session["enum_preview"] = preview
-    user_session["enum_excel_path"] = excel_path
-    user_session["stale_enum_config_refs"] = stale_refs
-    user_session["enum_pending_refills"] = pending_refills
-    return preview
+_commit_enum_workbook = commit_enum_mapping_attachment
 
 
 async def handle_file_upload(user_session, element):

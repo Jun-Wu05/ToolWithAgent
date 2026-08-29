@@ -6,6 +6,8 @@ from typing import Any
 
 __all__ = [
     "ExportAdapter",
+    "EnumExtractAdapter",
+    "EnumFillAdapter",
     "FieldMappingAdapter",
     "FieldMappingBatchError",
     "FieldMappingBatchRunner",
@@ -19,6 +21,12 @@ def __getattr__(name: str) -> Any:
     if name == "ExportAdapter":
         from application.adapters.export import ExportAdapter
         return ExportAdapter
+    if name == "EnumExtractAdapter":
+        from application.adapters.enum_extract import EnumExtractAdapter
+        return EnumExtractAdapter
+    if name == "EnumFillAdapter":
+        from application.adapters.enum_fill import EnumFillAdapter
+        return EnumFillAdapter
     if name == "FieldMappingAdapter":
         from application.adapters.field_mapping import FieldMappingAdapter
         return FieldMappingAdapter

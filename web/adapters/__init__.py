@@ -1,9 +1,9 @@
 """生产 StepAdapter 的唯一组合入口。
 
 落位：
-- Application Adapters —— field_mapping / log_parse / export 与共享运行时接缝
-- agent_ops.py —— enum_extract / threat_mapping 与迁移期日志委托
-- config_ops.py —— fill / remove_mapping / export 简单适配器
+- Application Adapters —— field_mapping / log_parse / enum_extract / enum_fill / export
+- agent_ops.py —— threat_mapping 与迁移期专业 Agent 委托
+- config_ops.py —— threat fill / remove_mapping 与枚举填充兼容导出
 - skill_ops.py —— add_fields / delete_fields / merge_fields 字段调整（PRD #124）
 
 ``create_default_adapters`` 是唯一公共组合入口，PlanExecutor 按 ``step.type``
@@ -13,6 +13,8 @@
 from typing import Any
 
 from application.adapters.export import ExportAdapter
+from application.adapters.enum_extract import EnumExtractAdapter
+from application.adapters.enum_fill import EnumFillAdapter
 from application.adapters.field_mapping import (
     FieldMappingAdapter,
     FieldMappingBatchError,
@@ -22,7 +24,6 @@ from application.adapters.log_parse import LogParseAdapter
 from application.execution import StepAdapter
 from web.adapters.agent_ops import ProfessionalAgentAdapter
 from web.adapters.config_ops import (
-    EnumFillAdapter,
     FillAdapter,
     RemoveMappingAdapter,
     ThreatFillAdapter,
@@ -39,7 +40,7 @@ def create_default_adapters(team: Any) -> dict[str, StepAdapter]:
     return {
         "log_parse": log_parse_adapter,
         "field_mapping": field_mapping_adapter,
-        "enum_extract": professional_adapter,
+        "enum_extract": EnumExtractAdapter(),
         "threat_mapping": professional_adapter,
         "fill": FillAdapter(),
         "remove_mapping": RemoveMappingAdapter(),

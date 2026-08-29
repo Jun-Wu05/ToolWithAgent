@@ -7,17 +7,16 @@ from typing import Any
 
 from agent.shared.logger import get_logger
 from agent.shared.mapping_utils import (
-    apply_enum_fill_with_contributions,
     apply_fill_to_config,
-    count_field_mapping_changes,
     count_field_mappings,
-    remove_enum_fill_contributions,
     remove_field_mappings_from_config,
-    unbind_fixed_fields,
 )
-from agent.tools.rule_generator.field_mapping import MAPPING_EXCLUDED_STANDARD_FIELDS
 from application.artifact_targets import collect_standard_fields, resolve_standard_target
 from application.adapters.export import ExportAdapter
+from application.adapters.enum_fill import EnumFillAdapter
+from application.adapters.fill_shared import (
+    unbind_fixed_field_bindings as _unbind_fixed_field_bindings,
+)
 
 from application.execution import ExecutionContext
 from contracts.planner_models import (
@@ -32,7 +31,6 @@ from contracts.session_artifacts import ThreatArtifactSlot
 from application.adapters.shared import (
     _CONFIG_SESSION_KEYS,
     _build_config_artifact,
-    _enum_mapping_table,
     _failed,
     _is_enum_config_stale,
     _needs_input,
@@ -46,124 +44,6 @@ from application.adapters.shared import (
 
 
 logger = get_logger("execution_adapters")
-
-
-def _unbind_fixed_field_bindings(
-    config: Any, target_fields: tuple[str, ...]
-) -> tuple[Any, str]:
-    """填充即解绑（#126）：固定字段的绑定固定值会让值映射失效，先解除。"""
-    fixed_hit = set(target_fields) & MAPPING_EXCLUDED_STANDARD_FIELDS
-    if not fixed_hit:
-        return config, ""
-    updated, unbound = unbind_fixed_fields(config, target_fields)
-    if not unbound:
-        return config, ""
-    note = (
-        f"；已解除 {len(unbound)} 条规则的固定值绑定"
-        f"（{'、'.join(sorted(fixed_hit))} 改由值映射控制）"
-    )
-    logger.info(
-        "[FILL_UNBIND] 填充即解绑: target_fields=%s unbound_rules=%s",
-        sorted(fixed_hit),
-        len(unbound),
-    )
-    return updated, note
-
-
-class EnumFillAdapter:
-    """以显式目标字段和配置来源执行枚举填充。"""
-
-    async def execute(
-        self,
-        step: StepSpec,
-        context: ExecutionContext,
-        dependencies: Mapping[str, StepResult],
-    ) -> StepResult:
-        """执行枚举填充；任一来源缺失时快速失败且不读取其他配置兜底。"""
-        if not isinstance(step, FillStep) or step.fill_kind != "enum":
-            raise TypeError("EnumFillAdapter 只接受 enum FillStep")
-        current_config = _read_config(context.session, step.config_ref)
-        current_config, unbind_note = _unbind_fixed_field_bindings(
-            current_config, step.target_fields
-        )
-        enum_preview = _session_get(context.session, "enum_preview") or []
-        mapping_table = _enum_mapping_table(enum_preview, step.target_fields)
-        if not mapping_table:
-            return _needs_input(step, "enum_mapping_required", "当前枚举映射表没有可用于目标字段的规则")
-
-        all_contributions = dict(
-            _session_get(context.session, "enum_fill_contributions", {}) or {}
-        )
-        config_contributions = dict(all_contributions.get(step.config_ref, {}) or {})
-        before_count = count_field_mappings(current_config, step.target_fields)
-        without_old_contributions = remove_enum_fill_contributions(
-            current_config,
-            config_contributions,
-            step.target_fields,
-        )
-        updated_config, new_contributions = apply_enum_fill_with_contributions(
-            without_old_contributions,
-            mapping_table,
-        )
-        after_count = count_field_mappings(updated_config, step.target_fields)
-        changed_count = count_field_mapping_changes(
-            current_config,
-            updated_config,
-            step.target_fields,
-        )
-        _write_config(context.session, step.config_ref, updated_config)
-        for field_name in step.target_fields:
-            if new_contributions.get(field_name):
-                config_contributions[field_name] = new_contributions[field_name]
-            else:
-                config_contributions.pop(field_name, None)
-        if config_contributions:
-            all_contributions[step.config_ref] = config_contributions
-        else:
-            all_contributions.pop(step.config_ref, None)
-        _session_set(context.session, "enum_fill_contributions", all_contributions)
-        pending_refills = {
-            config_ref: set(sheet_names)
-            for config_ref, sheet_names in (
-                _session_get(context.session, "enum_pending_refills", {}) or {}
-            ).items()
-        }
-        pending_for_config = pending_refills.get(step.config_ref, set())
-        pending_for_config.difference_update(step.target_fields)
-        if pending_for_config:
-            pending_refills[step.config_ref] = pending_for_config
-        else:
-            pending_refills.pop(step.config_ref, None)
-        _session_set(context.session, "enum_pending_refills", pending_refills)
-        stale_refs = set(
-            _session_get(context.session, "stale_enum_config_refs", set()) or set()
-        )
-        if step.config_ref not in pending_refills:
-            stale_refs.discard(step.config_ref)
-        _session_set(context.session, "stale_enum_config_refs", stale_refs)
-        logger.info(
-            "[ENUM_FILL] 填充完成: step_id=%s config_ref=%s target_field_count=%s "
-            "mapping_rule_count=%s before_count=%s after_count=%s changed_count=%s",
-            step.step_id,
-            step.config_ref,
-            len(step.target_fields),
-            sum(len(items) for items in mapping_table.values()),
-            before_count,
-            after_count,
-            changed_count,
-        )
-        return StepResult(
-            step_id=step.step_id,
-            operation_type=step.type,
-            status=StepStatus.SUCCESS,
-            changed_count=changed_count,
-            artifact=_build_config_artifact(
-                updated_config,
-                after_count,
-                "enummapping_config",
-            ),
-            message="枚举映射已填充到目标字段" + unbind_note,
-        )
 
 class ThreatFillAdapter:
     """只消费本次声明的威胁映射产物并填充显式配置来源。"""
