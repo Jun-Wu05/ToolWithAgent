@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,25 +10,17 @@ from agent.shared.logger import get_logger
 from application.adapters.log_parse import LogParseAdapter
 from application.adapters.field_mapping import FieldMappingAdapter, FieldMappingExecutionPolicy
 from application.adapters.enum_extract import EnumExtractAdapter
+from application.adapters.threat_mapping import ThreatMappingAdapter
 from application.execution import ExecutionContext
 from contracts.planner_models import (
     EnumExtractStep,
-    EnumValuesArtifact,
     FieldMappingStep,
     LogParseStep,
     StepResult,
     StepSpec,
-    ThreatMappingArtifact,
-    ThreatMappingRow,
     ThreatMappingStep,
 )
-from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 from application.adapters.shared import (
-    _failed,
-    _needs_input,
-    _session_get,
-    _session_set,
-    _success,
     run_member_stream,
 )
 
@@ -53,6 +44,7 @@ class ProfessionalAgentAdapter:
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
         self._log_parse_adapter = LogParseAdapter()
         self._enum_extract_adapter = EnumExtractAdapter()
+        self._threat_mapping_adapter = ThreatMappingAdapter(team)
         self._field_mapping_adapter = FieldMappingAdapter(
             team,
             mapping_policy,
@@ -75,63 +67,8 @@ class ProfessionalAgentAdapter:
         if isinstance(step, FieldMappingStep):
             return await self._field_mapping_adapter.execute(step, context, dependencies)
         if isinstance(step, ThreatMappingStep):
-            return await self._execute_threat_mapping(step, context, dependencies)
+            return await self._threat_mapping_adapter.execute(step, context, dependencies)
         raise TypeError(f"ProfessionalAgentAdapter 不支持步骤类型: {step.type}")
-
-    async def _execute_threat_mapping(
-        self,
-        step: ThreatMappingStep,
-        context: ExecutionContext,
-        dependencies: Mapping[str, StepResult],
-    ) -> StepResult:
-        """只使用显式值或本次依赖的枚举产物调用威胁映射 Agent。"""
-        from web.parsers import parse_json_threat_result
-
-        source_field: str | None = None
-        if step.source_ref == "user.values":
-            values = list(step.values)
-        elif step.source_ref == "session.artifacts.enum_values":
-            raw_slot = _session_get(context.session, "latest_enum_artifact")
-            try:
-                slot = (
-                    raw_slot
-                    if isinstance(raw_slot, EnumArtifactSlot)
-                    else EnumArtifactSlot.model_validate(raw_slot)
-                )
-            except (TypeError, ValueError):
-                return _needs_input(
-                    step,
-                    "artifact_source_unavailable",
-                    "最近枚举值产物已不可用，请重新提取枚举值",
-                )
-            values = list(slot.artifact.values)
-            source_field = slot.source_field
-        else:
-            dependency_id = step.source_ref.removeprefix("step:")
-            dependency = dependencies.get(dependency_id)
-            artifact = dependency.artifact if dependency else None
-            if not isinstance(artifact, EnumValuesArtifact):
-                return _failed(step, "dependency_type_mismatch", "依赖产物不是枚举值")
-            values = list(artifact.values)
-            source_field = artifact.field or None
-        model_input = json.dumps({"values": values}, ensure_ascii=False)
-        content = await self._run_member("ThreatAgent", model_input)
-        mapping_rows = parse_json_threat_result(content)
-        if not mapping_rows:
-            return _failed(step, "threat_mapping_empty", "威胁映射未生成有效结果")
-        typed_mappings = tuple(ThreatMappingRow.model_validate(row) for row in mapping_rows)
-        artifact = ThreatMappingArtifact(
-            mappings=typed_mappings,
-            item_count=len(typed_mappings),
-            source_field=source_field,
-        )
-        _session_set(context.session, "last_threat_data", mapping_rows)
-        _session_set(
-            context.session,
-            "latest_threat_artifact",
-            ThreatArtifactSlot(artifact=artifact, source_field=source_field),
-        )
-        return _success(step, artifact)
 
     async def _run_member(
         self,

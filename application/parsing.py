@@ -20,6 +20,134 @@ _MAPPING_REFUSAL_PATTERNS = [
 ]
 
 
+def _extract_structured_items(content: Any, logger_name: str) -> list[dict[str, Any]]:
+    """从 Pydantic、output_schema 字典或列表中提取结构化记录。"""
+    if hasattr(content, "items") and isinstance(content.items, list):
+        logger.info("[%s] 检测到 Pydantic 对象，直接提取 items", logger_name)
+        result = []
+        for item in content.items:
+            if hasattr(item, "model_dump"):
+                result.append(item.model_dump())
+            elif hasattr(item, "dict"):
+                result.append(item.dict())
+            else:
+                result.append(dict(item))
+        return result
+    if isinstance(content, dict) and isinstance(content.get("items"), list):
+        logger.info("[%s] 检测到 output_schema 格式，自动解包 items", logger_name)
+        return content["items"]
+    if isinstance(content, list):
+        logger.info("[%s] 检测到列表格式，直接使用", logger_name)
+        return content
+    return []
+
+
+def parse_json_threat_result(content: Any) -> list[dict[str, Any]]:
+    """解析威胁映射结果，只保留三列并兼容既有输出容错格式。"""
+    valid_columns = {"mappingType", "orgValue", "mappingValue"}
+
+    def validate_item(item: dict[str, Any]) -> bool:
+        if not isinstance(item, dict):
+            return False
+        if set(item) != valid_columns:
+            filtered = {key: value for key, value in item.items() if key in valid_columns}
+            if len(filtered) != 3:
+                return False
+            item.clear()
+            item.update(filtered)
+        return True
+
+    items = _extract_structured_items(content, "THREAT_PARSER")
+    if items:
+        valid_result = [item for item in items if validate_item(item)]
+        if valid_result:
+            logger.info(
+                "[THREAT_PARSER] Pydantic 对象解析成功，获得 %s 条有效记录",
+                len(valid_result),
+            )
+            return valid_result
+
+    logger.info(
+        "[THREAT_PARSER] 收到模型结果: content_type=%s content_length=%s",
+        type(content).__name__,
+        len(str(content)),
+    )
+    content_stripped = str(content).strip()
+    try:
+        result = json.loads(content_stripped)
+        items = _extract_structured_items(result, "THREAT_PARSER")
+        if items:
+            valid_result = [item for item in items if validate_item(item)]
+            if valid_result:
+                logger.info(
+                    "[THREAT_PARSER] 方法1解析成功，获得 %s 条有效记录",
+                    len(valid_result),
+                )
+                return valid_result
+    except json.JSONDecodeError:
+        pass
+
+    first_bracket = content_stripped.find("[")
+    last_bracket = content_stripped.rfind("]")
+    if first_bracket != -1 and last_bracket > first_bracket:
+        json_candidate = content_stripped[first_bracket : last_bracket + 1]
+        logger.info("[THREAT_PARSER] 方法2找到JSON候选，长度: %s", len(json_candidate))
+        try:
+            result = json.loads(json_candidate)
+            items = _extract_structured_items(result, "THREAT_PARSER")
+            if items:
+                valid_result = [item for item in items if validate_item(item)]
+                if valid_result:
+                    logger.info(
+                        "[THREAT_PARSER] 方法2解析成功，获得 %s 条有效记录",
+                        len(valid_result),
+                    )
+                    return valid_result
+        except json.JSONDecodeError as error:
+            logger.warning("[THREAT_PARSER] 方法2 JSON解析失败: %s", error)
+
+    if first_bracket == -1:
+        items_match = re.search(r'"items"\s*:\s*\[([\s\S]*?)\]', content_stripped)
+        if items_match:
+            items_candidate = "[" + items_match.group(1) + "]"
+            logger.info(
+                "[THREAT_PARSER] 方法2.5 尝试解析 items 子数组，长度: %s",
+                len(items_candidate),
+            )
+            try:
+                items_result = json.loads(items_candidate)
+                if isinstance(items_result, list) and items_result:
+                    valid_result = [item for item in items_result if validate_item(item)]
+                    if valid_result:
+                        logger.info(
+                            "[THREAT_PARSER] 方法2.5 解析成功，获得 %s 条有效记录",
+                            len(valid_result),
+                        )
+                        return valid_result
+            except json.JSONDecodeError as error:
+                logger.warning("[THREAT_PARSER] 方法2.5 JSON解析失败: %s", error)
+
+    matches = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", content_stripped)
+    logger.info("[THREAT_PARSER] 方法3找到 %s 个代码块", len(matches))
+    for match in matches:
+        try:
+            result = json.loads(match.strip())
+            items = _extract_structured_items(result, "THREAT_PARSER")
+            if items:
+                valid_result = [item for item in items if validate_item(item)]
+                if valid_result:
+                    logger.info(
+                        "[THREAT_PARSER] 方法3解析成功，获得 %s 条有效记录",
+                        len(valid_result),
+                    )
+                    return valid_result
+        except json.JSONDecodeError:
+            continue
+
+    logger.warning("[THREAT_PARSER] 解析失败，无法提取有效的威胁映射结果")
+    return []
+
+
 def parse_json_safe(text: str) -> dict[str, Any] | None:
     """解析 JSON 对象，兼容 Markdown 代码块与正文中的对象片段。"""
     if not text:

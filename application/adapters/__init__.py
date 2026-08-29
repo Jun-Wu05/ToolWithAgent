@@ -8,11 +8,14 @@ __all__ = [
     "ExportAdapter",
     "EnumExtractAdapter",
     "EnumFillAdapter",
+    "FillAdapter",
     "FieldMappingAdapter",
     "FieldMappingBatchError",
     "FieldMappingBatchRunner",
     "FieldMappingExecutionPolicy",
     "LogParseAdapter",
+    "ThreatFillAdapter",
+    "ThreatMappingAdapter",
 ]
 
 
@@ -27,6 +30,9 @@ def __getattr__(name: str) -> Any:
     if name == "EnumFillAdapter":
         from application.adapters.enum_fill import EnumFillAdapter
         return EnumFillAdapter
+    if name == "FillAdapter":
+        from application.adapters.fill import FillAdapter
+        return FillAdapter
     if name == "FieldMappingAdapter":
         from application.adapters.field_mapping import FieldMappingAdapter
         return FieldMappingAdapter
@@ -40,4 +46,10 @@ def __getattr__(name: str) -> Any:
     if name == "LogParseAdapter":
         from application.adapters.log_parse import LogParseAdapter
         return LogParseAdapter
+    if name == "ThreatFillAdapter":
+        from application.adapters.threat_fill import ThreatFillAdapter
+        return ThreatFillAdapter
+    if name == "ThreatMappingAdapter":
+        from application.adapters.threat_mapping import ThreatMappingAdapter
+        return ThreatMappingAdapter
     raise AttributeError(name)
