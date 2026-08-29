@@ -13,7 +13,7 @@ from contracts.planner_models import (
     StepSpec,
     StepStatus,
 )
-from web.field_source import extract_log_body_keys
+from application.field_source import extract_log_body_keys
 
 
 logger = get_logger("plan_executor")

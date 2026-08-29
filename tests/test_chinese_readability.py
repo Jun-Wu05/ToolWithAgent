@@ -30,7 +30,7 @@ CORE_MODULES = (
     Path("contracts/__init__.py"),
     Path("web/adapters/__init__.py"),
     Path("web/adapters/shared.py"),
-    Path("web/adapters/field_mapping.py"),
+    Path("application/adapters/field_mapping.py"),
     Path("web/adapters/agent_ops.py"),
     Path("web/adapters/config_ops.py"),
     Path("web/execution_adapters.py"),

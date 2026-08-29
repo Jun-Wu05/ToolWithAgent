@@ -80,7 +80,7 @@ def _run_mapping(fields, member, policy, session=None):
 def test字段映射25字段watchdog超时后拆成13和12并原子合并(monkeypatch):
     """超时大批不原样重试；子批结果去重并恢复原字段顺序。"""
     import web.execution_adapters as execution_adapters
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     messages = []
     monkeypatch.setattr(
@@ -116,7 +116,7 @@ def test字段映射25字段watchdog超时后拆成13和12并原子合并(monkey
 def test字段映射provider超时来源可观测且不原样重试(monkeypatch):
     """SDK timeout 使用 provider_sdk 标签并走同一层受限拆分。"""
     import web.execution_adapters as execution_adapters
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     messages = []
     monkeypatch.setattr(
@@ -145,7 +145,7 @@ def test字段映射provider超时来源可观测且不原样重试(monkeypatch)
 
 def test字段映射子批失败时session保持原子不变(monkeypatch):
     """任一子批失败都不得提交其他子批的成功结果。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     fields = [f"child_{index:02d}" for index in range(25)]
     session = {

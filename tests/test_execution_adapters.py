@@ -283,11 +283,11 @@ class _Team:
 
 def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     """验证批处理能力保留，且映射结果真正更新 mapped_sub_rules。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     import agent.tools.rule_generator as rule_generator
     import agent.tools.standard_mapper as standard_mapper
-    import web.field_source as field_source
+    import application.field_source as field_source
 
     fields = tuple(f"field_{index}" for index in range(26))
     generated_sub_rules = [
@@ -337,7 +337,7 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
     """Excel 行数据不是解析配置，自动下载必须来自本次生成的 mapped_sub_rules。"""
     import agent.tools.rule_generator as rule_generator
     import agent.tools.standard_mapper as standard_mapper
-    import web.field_source as field_source
+    import application.field_source as field_source
 
     monkeypatch.setattr(
         field_source,
@@ -639,7 +639,7 @@ class _ReorderedMappingMember:
 
 def test字段映射乱序返回不再判为失败(monkeypatch):
     """旧校验对返回顺序敏感会误判失败；现按集合归一、按输入顺序输出。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     fields = ["alpha", "beta", "gamma"]
     member = _ReorderedMappingMember()
@@ -694,7 +694,7 @@ class _DuplicateMappingMember:
 
 def test字段映射重复字段去重后不失败(monkeypatch):
     """模型把某字段重复返回时去重，整步成功且数量与输入一致。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     fields = ["alpha", "beta"]
     member = _DuplicateMappingMember()
@@ -985,7 +985,7 @@ class _TimeoutMappingMember:
 
 def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypatch):
     """任一批次超时应取消剩余任务，并保持 session 原子不变。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     session = {"decoded_fields": [f"field_{index:02d}" for index in range(51)]}
     member = _TimeoutMappingMember()
@@ -1026,7 +1026,7 @@ def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypa
 
 def test字段映射291字段形成12批且最大并发为3(monkeypatch):
     """291 个字段必须按 25 个一批执行，且并发上限固定为三批。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     fields = [f"field_{index:03d}" for index in range(291)]
     session = {"decoded_fields": fields}
@@ -1081,7 +1081,7 @@ class _PermanentMappingErrorMember:
 
 def test字段映射不可重试错误只调用一次(monkeypatch):
     """非连接、限流、服务端或超时错误不得浪费第二次模型调用。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     session = {"decoded_fields": ["field_a"]}
     member = _PermanentMappingErrorMember()

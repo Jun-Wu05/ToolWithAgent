@@ -226,7 +226,7 @@ def test枚举提取与显式字段日志类型提取复合计划两步各留产
 
 def test字段映射单步可运行(monkeypatch):
     """字段映射使用 SessionFacts 字段并调用明确命名的专业 Agent。"""
-    import web.input_builder as input_builder
+    import application.field_mapping_input as input_builder
 
     monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
     member = _StaticMember(

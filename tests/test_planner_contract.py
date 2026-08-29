@@ -330,7 +330,7 @@ def test步骤结果拒绝未知或无约束产物():
 
 def test_session_facts集中汇总日志分类字段(monkeypatch):
     """证明 Planner 和执行器共享同一字段事实，不在各层重复解释日志状态。"""
-    import web.field_source as field_source
+    import application.field_source as field_source
     from application.session_projection import build_session_facts
 
     monkeypatch.setattr(
@@ -351,7 +351,7 @@ def test_session_facts集中汇总日志分类字段(monkeypatch):
 
 def test有日志字段时Excel列头不进入字段映射输入(monkeypatch):
     """有真实日志字段时，Excel 列头（decoded_fields）不得混入映射候选（回归 #78）。"""
-    import web.field_source as field_source
+    import application.field_source as field_source
     from application.session_projection import build_session_facts
 
     monkeypatch.setattr(

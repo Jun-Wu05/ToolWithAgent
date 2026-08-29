@@ -10,6 +10,7 @@ from typing import Any
 from agent.shared.logger import get_logger
 
 from application.adapters.log_parse import LogParseAdapter
+from application.adapters.field_mapping import FieldMappingAdapter, FieldMappingExecutionPolicy
 from application.execution import ExecutionContext
 from contracts.planner_models import (
     EnumExtractStep,
@@ -23,7 +24,6 @@ from contracts.planner_models import (
     ThreatMappingStep,
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
-from web.adapters.field_mapping import FieldMappingAdapter, FieldMappingExecutionPolicy
 from application.adapters.shared import (
     REPO_ROOT,
     _failed,

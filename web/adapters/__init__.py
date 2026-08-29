@@ -1,19 +1,23 @@
 """生产 StepAdapter 的唯一组合入口。
 
 落位：
-- field_mapping.py —— 字段映射热点（适配器 + 执行策略 + 批次错误）
+- Application Adapters —— field_mapping / log_parse / export 与共享运行时接缝
 - agent_ops.py —— enum_extract / threat_mapping 与迁移期日志委托
 - config_ops.py —— fill / remove_mapping / export 简单适配器
 - skill_ops.py —— add_fields / delete_fields / merge_fields 字段调整（PRD #124）
-- Application Adapters —— log_parse / export 与共享运行时接缝
 
-``create_default_adapters`` 是唯一公共入口，PlanExecutor 按 ``step.type``
+``create_default_adapters`` 是唯一公共组合入口，PlanExecutor 按 ``step.type``
 字符串键注册分派，不感知适配器内部结构。
 """
 
 from typing import Any
 
 from application.adapters.export import ExportAdapter
+from application.adapters.field_mapping import (
+    FieldMappingAdapter,
+    FieldMappingBatchError,
+    FieldMappingExecutionPolicy,
+)
 from application.adapters.log_parse import LogParseAdapter
 from application.execution import StepAdapter
 from web.adapters.agent_ops import ProfessionalAgentAdapter
@@ -22,11 +26,6 @@ from web.adapters.config_ops import (
     FillAdapter,
     RemoveMappingAdapter,
     ThreatFillAdapter,
-)
-from web.adapters.field_mapping import (
-    FieldMappingAdapter,
-    FieldMappingBatchError,
-    FieldMappingExecutionPolicy,
 )
 from web.adapters.skill_ops import FieldSkillAdapter, FIELD_SKILL_REGISTRY
 

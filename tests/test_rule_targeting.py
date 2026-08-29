@@ -396,7 +396,7 @@ def _llm_json(results):
 
 def test标注明细行进入产物并区分待确认():
     """_annotate_event_names 返回 judged/uncertain 明细行（#126 展示分离数据源）。"""
-    from web.adapters.field_mapping import FieldMappingAdapter
+    from application.adapters.field_mapping import FieldMappingAdapter
 
     fake = _llm_json([
         {"rule_name": "暴力破解_kv_子规则", "event_name": "网络攻击", "group": "threat", "reason": "x"},

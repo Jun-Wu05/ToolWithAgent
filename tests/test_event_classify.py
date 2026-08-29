@@ -27,7 +27,7 @@ from agent.shared.event_classify import (
 from contracts.planner_models import FieldMappingStep
 from application.session_projection import build_session_facts
 from application.execution import ExecutionContext
-from web.adapters.field_mapping import FieldMappingAdapter
+from application.adapters.field_mapping import FieldMappingAdapter
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent

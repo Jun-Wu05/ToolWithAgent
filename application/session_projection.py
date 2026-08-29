@@ -25,7 +25,7 @@ def _read_session_value(session: Any, key: str, default: Any = None) -> Any:
 def _collect_available_fields(session: Any) -> tuple[str, ...]:
     """从唯一位置汇总可用字段，去重同时保留字段首次出现顺序。"""
     from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
-    from web.field_source import extract_log_fields_for_mapping
+    from application.field_source import extract_log_fields_for_mapping
 
     ordered_fields: list[str] = []
     seen_fields: set[str] = set()
