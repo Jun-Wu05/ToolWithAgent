@@ -27,6 +27,7 @@ def test_application_field_mapping_chain_has_no_web_or_chainlit_dependency() -> 
     violations = {}
     for relative in (
         "application/adapters/field_mapping.py",
+        "application/field_mapping_batch.py",
         "application/field_mapping_input.py",
         "application/field_source.py",
         "application/parsing.py",
@@ -40,6 +41,17 @@ def test_application_field_mapping_chain_has_no_web_or_chainlit_dependency() -> 
             violations[relative] = sorted(forbidden)
 
     assert violations == {}
+
+
+def test_field_mapping_adapter_no_longer_owns_batch_loop() -> None:
+    """Adapter 接口不再泄漏任务创建、Semaphore 或补查实现。"""
+    source = (
+        Path(__file__).parents[1] / "application/adapters/field_mapping.py"
+    ).read_text(encoding="utf-8")
+
+    assert "asyncio.create_task" not in source
+    assert "asyncio.Semaphore" not in source
+    assert "_backfill_field_mapping_rows" not in source
 
 
 def test_legacy_field_mapping_paths_reexport_identical_application_objects() -> None:

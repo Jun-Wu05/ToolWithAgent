@@ -1,17 +1,35 @@
-"""Application 所有的 StepAdapter 实现与共享接缝。"""
+"""Application StepAdapter 的惰性公共导出，避免适配器间初始化耦合。"""
 
-from application.adapters.export import ExportAdapter
-from application.adapters.field_mapping import (
-    FieldMappingAdapter,
-    FieldMappingBatchError,
-    FieldMappingExecutionPolicy,
-)
-from application.adapters.log_parse import LogParseAdapter
+from __future__ import annotations
+
+from typing import Any
 
 __all__ = [
     "ExportAdapter",
     "FieldMappingAdapter",
     "FieldMappingBatchError",
+    "FieldMappingBatchRunner",
     "FieldMappingExecutionPolicy",
     "LogParseAdapter",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """按需载入适配器，保留既有 ``application.adapters`` 导入路径。"""
+    if name == "ExportAdapter":
+        from application.adapters.export import ExportAdapter
+        return ExportAdapter
+    if name == "FieldMappingAdapter":
+        from application.adapters.field_mapping import FieldMappingAdapter
+        return FieldMappingAdapter
+    if name in {
+        "FieldMappingBatchError",
+        "FieldMappingBatchRunner",
+        "FieldMappingExecutionPolicy",
+    }:
+        from application import field_mapping_batch
+        return getattr(field_mapping_batch, name)
+    if name == "LogParseAdapter":
+        from application.adapters.log_parse import LogParseAdapter
+        return LogParseAdapter
+    raise AttributeError(name)
