@@ -3,7 +3,7 @@
 落位：
 - Application Adapters —— field_mapping / log_parse / enum / threat / fill / export
 - agent_ops.py —— 迁移期专业 Agent 兼容委托
-- config_ops.py —— remove_mapping 与填充兼容导出
+- config_ops.py —— 配置操作的迁移期同对象兼容导出
 - skill_ops.py —— add_fields / delete_fields / merge_fields 字段调整（PRD #124）
 
 ``create_default_adapters`` 是唯一公共组合入口，PlanExecutor 按 ``step.type``
@@ -21,12 +21,12 @@ from application.adapters.field_mapping import (
     FieldMappingExecutionPolicy,
 )
 from application.adapters.log_parse import LogParseAdapter
+from application.adapters.remove_mapping import RemoveMappingAdapter
 from application.adapters.fill import FillAdapter
 from application.adapters.threat_fill import ThreatFillAdapter
 from application.adapters.threat_mapping import ThreatMappingAdapter
 from application.execution import StepAdapter
 from web.adapters.agent_ops import ProfessionalAgentAdapter
-from web.adapters.config_ops import RemoveMappingAdapter
 from web.adapters.skill_ops import FieldSkillAdapter, FIELD_SKILL_REGISTRY
 
 

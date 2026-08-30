@@ -1,7 +1,7 @@
 """适配器共享接缝：会话读写、结果构造、进度发布与重试判定。
 
-本模块只放跨操作复用的纯函数；操作语义分别位于
-field_mapping.py / agent_ops.py / config_ops.py（Issue #88）。
+本模块只放跨操作复用的纯函数；操作语义分别位于字段映射、枚举填充、
+威胁填充、取消映射和导出适配器中。
 """
 
 from __future__ import annotations

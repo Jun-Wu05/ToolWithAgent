@@ -14,6 +14,7 @@ __all__ = [
     "FieldMappingBatchRunner",
     "FieldMappingExecutionPolicy",
     "LogParseAdapter",
+    "RemoveMappingAdapter",
     "ThreatFillAdapter",
     "ThreatMappingAdapter",
 ]
@@ -46,6 +47,9 @@ def __getattr__(name: str) -> Any:
     if name == "LogParseAdapter":
         from application.adapters.log_parse import LogParseAdapter
         return LogParseAdapter
+    if name == "RemoveMappingAdapter":
+        from application.adapters.remove_mapping import RemoveMappingAdapter
+        return RemoveMappingAdapter
     if name == "ThreatFillAdapter":
         from application.adapters.threat_fill import ThreatFillAdapter
         return ThreatFillAdapter

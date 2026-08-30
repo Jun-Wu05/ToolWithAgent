@@ -6,10 +6,11 @@
 
 from web.adapters import create_default_adapters
 from web.adapters.agent_ops import ProfessionalAgentAdapter
-from web.adapters.config_ops import EnumFillAdapter, RemoveMappingAdapter
+from web.adapters.config_ops import EnumFillAdapter
 from application.adapters.fill import FillAdapter
 from application.adapters.threat_fill import ThreatFillAdapter
 from application.adapters.threat_mapping import ThreatMappingAdapter
+from application.adapters.remove_mapping import RemoveMappingAdapter
 from application.adapters.export import ExportAdapter
 from application.adapters.field_mapping import (
     FieldMappingAdapter,
