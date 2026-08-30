@@ -10,7 +10,7 @@ import chainlit as cl
 from agent.core.planner import PlannerService
 from agent.shared.logger import get_logger
 from web.chainlit_progress import get_session_progress_sink, reset_session_progress_sink
-from web.execution_adapters import create_default_adapters
+from application.adapters.composition import create_default_adapters
 from web.history_store import append_history
 from application.execution import ExecutionContext
 from web.execution_policy import create_plan_executor

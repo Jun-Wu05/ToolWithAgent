@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "create_default_adapters",
     "ExportAdapter",
     "EnumExtractAdapter",
     "EnumFillAdapter",
@@ -24,6 +25,9 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """按需载入适配器，保留既有 ``application.adapters`` 导入路径。"""
+    if name == "create_default_adapters":
+        from application.adapters.composition import create_default_adapters
+        return create_default_adapters
     if name == "ExportAdapter":
         from application.adapters.export import ExportAdapter
         return ExportAdapter

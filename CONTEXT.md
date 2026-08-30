@@ -168,7 +168,7 @@ _避免使用_：旧结果缓存、全局历史产物
 - **渲染层（Renderer）**：只消费决策或 ExecutionReport，统一输出一次汇总
 
 **适配层词汇**（2026-08-14 架构拷问固化）：
-- **适配器包**：`application/adapters/` 承载已迁移的字段映射、日志解析、枚举提取/填充、威胁映射/填充、填充分派、取消映射与导出 StepAdapter，`web/adapters/` 暂存尚未迁移的操作和兼容入口。`create_default_adapters` 是唯一公共组合入口，PlanExecutor 按 `step.type` 字符串键注册分派，不感知适配器内部结构；专业 Agent 的 Prompt 与模型仍由 Agent 注册表在构造阶段固定。
+- **适配器包**：`application/adapters/` 承载全部生产 StepAdapter 与唯一 `create_default_adapters` 组合实现；`web/adapters/` 和 `web/execution_adapters.py` 只保留迁移期同对象兼容入口。PlanExecutor 按 `step.type` 字符串键注册分派，不感知适配器内部结构；专业 Agent 的模型仍由 Agent 注册表在构造阶段固定，全部 Prompt 文件及加载器统一归属 `agent/prompts/`。
 - **FieldMappingBatchRunner**：字段映射批处理执行器。输入字段列表与执行策略，输出完整映射行结果（含并发分批、超时拆批、重试、漏字段补查）；适配器只做 StepSpec 翻译、进度事件、产物构建与 session 一次性提交。
 - **枚举映射附件提交**：`application/enum_mapping_attachments.py` 按 Sheet 原子累积或同名替换枚举映射附件，并集中维护贡献对应配置的过期与待重填状态；Web 上传处理器只负责工作簿解析和 Chainlit 展示。
 - **依赖注入接缝**：适配器构造函数可选注入外部依赖（candidate_retriever / object_map_loader / llm_caller / prompt_loader，默认值=现模块函数），与 PlannerService(runner=...) 同构。测试传构造假件，不 monkeypatch 模块私有属性。

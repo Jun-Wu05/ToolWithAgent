@@ -1,12 +1,12 @@
 """兼容垫片：历史调用方仍从 web.execution_adapters 导入（Issue #88 拆分后）。
 
-真实实现归属于 Application Adapters 与少量尚未迁移的 Web Adapters；
-新代码请直接使用 ``web.adapters.create_default_adapters`` 组合入口。
+真实实现归属于 Application Adapters 与少量迁移期 Web 兼容委托；
+新代码请直接使用 Application 组合入口。
 """
 
-from web.adapters import create_default_adapters
+from application.adapters.composition import create_default_adapters
 from web.adapters.agent_ops import ProfessionalAgentAdapter
-from web.adapters.config_ops import EnumFillAdapter
+from application.adapters.enum_fill import EnumFillAdapter
 from application.adapters.fill import FillAdapter
 from application.adapters.threat_fill import ThreatFillAdapter
 from application.adapters.threat_mapping import ThreatMappingAdapter

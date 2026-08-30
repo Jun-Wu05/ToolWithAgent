@@ -30,8 +30,8 @@ toolswithagent/
 │   ├── user_message_handlers.py     # 用户文本消息处理（一次 Planner 调用 + Executor + 渲染）
 │   ├── action_callbacks.py          # Action 回调（按钮交互）
 │   ├── plan_executor.py             # 计划执行器（依赖账本、失败停止）
-│   ├── adapters/                    # StepAdapter 三档落位（field_mapping 热点 / agent_ops / config_ops / shared）
-│   ├── execution_adapters.py        # 兼容垫片：从 web.adapters 重导出公共入口
+│   ├── adapters/                    # Application Adapter 的 Web 兼容重导出
+│   ├── execution_adapters.py        # 兼容垫片：重导出 Application 公共入口
 │   ├── session_state.py             # 会话状态（SessionState）
 │   ├── field_source.py              # 字段映射的真实日志字段来源
 │   ├── input_builder.py             # 字段映射批次 LLM 输入构造（embedding 候选）
@@ -47,7 +47,7 @@ toolswithagent/
 │   ├── file_input.py                # Base64/JSON/TXT 解码与主数据原子提交
 │   ├── session_state.py             # 主数据及会话生命周期
 │   ├── execution.py                 # PlanExecutor / ExecutionContext
-│   └── adapters/                    # 类型化步骤的业务适配器
+│   └── adapters/                    # 全部业务适配器与唯一生产组合入口
 │
 ├── contracts/                       # 框架无关类型契约（web → contracts ← agent）
 │   ├── planner_models.py            # PlanDecision / StepSpec / Artifact 类型契约
@@ -61,7 +61,7 @@ toolswithagent/
 │   │   ├── agent.py                 # 上传解码兼容入口与历史 simple_encode
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
 │   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
-│   │   ├── prompts.py               # Pipeline Prompt 加载器
+│   │   ├── prompts.py               # Pipeline Prompt 的迁移期兼容重导出
 │   │   ├── field_retriever.py       # Embedding 语义检索（中文同义词 + tag 规则 + 精确匹配）
 │   │   └── tracing.py               # OpenTelemetry 请求追踪
 │   ├── tools/                       # Agent 工具集
@@ -75,7 +75,7 @@ toolswithagent/
 │   │   ├── field_mapping.py         # 字段映射核心算法
 │   │   ├── threat_fill.py           # 威胁填充逻辑
 │   │   └── logger.py                # 统一日志
-│   └── prompts/                     # LLM Prompt 模板（.md 文件）
+│   └── prompts/                     # 全部 LLM Prompt 模板与公开加载器
 │       ├── planner.md               # PlannerAgent 指令
 │       ├── threat_type.md           # ThreatAgent 指令
 │       └── log_*.md / kv_*.md       # 日志解析 Pipeline 各步指令

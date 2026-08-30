@@ -1,8 +1,24 @@
-"""
-Prompts 模块
-"""
-import os
+"""Prompt 资源及其归属于包内的加载策略。"""
+
 from pathlib import Path
+
+
+__all__ = [
+    "get_prompts_dir",
+    "load_enum_extract_prompt",
+    "load_enum_field_prompt",
+    "load_event_classify_prompt",
+    "load_field_strong_prompt",
+    "load_field_weak_prompt",
+    "load_kv_feature_identifier_prompt",
+    "load_log_classify_feature_prompt",
+    "load_log_feature_locate_prompt",
+    "load_log_format_identify_prompt",
+    "load_log_header_classify_prompt",
+    "load_planner_prompt",
+    "load_standard_fields",
+    "load_threat_type_prompt",
+]
 
 
 def get_prompts_dir() -> str:
@@ -87,3 +103,16 @@ def load_standard_fields() -> str:
 def load_enum_extract_prompt() -> str:
     """加载日志枚举提取提示词"""
     return _load_md_or_fail("enum_extract.md", "日志枚举提取")
+
+
+def load_planner_prompt() -> str:
+    """加载 Planner 指令；保留 ``Path.read_text`` 的原生缺失异常。"""
+    return (Path(__file__).parent / "planner.md").read_text(encoding="utf-8")
+
+
+def load_event_classify_prompt() -> str:
+    """加载事件名称判定知识；缺失时保留历史错误消息。"""
+    prompt_path = Path(__file__).parent / "event_classify.md"
+    if not prompt_path.is_file():
+        raise FileNotFoundError(f"事件名称判定知识文件不存在: {prompt_path}")
+    return prompt_path.read_text(encoding="utf-8")

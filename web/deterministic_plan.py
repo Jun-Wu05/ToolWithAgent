@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from web.chainlit_progress import get_session_progress_sink
-from web.execution_adapters import create_default_adapters
+from application.adapters.composition import create_default_adapters
 from application.execution import ExecutionContext
 from web.execution_policy import create_plan_executor
 from web.plan_renderer import render_execution_report

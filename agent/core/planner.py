@@ -9,13 +9,13 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from pathlib import Path
 from typing import Any
 
 from agno.agent import Agent
 from pydantic import ValidationError
 
 from agent.core.model_config import ModelConfig
+from agent.prompts import load_planner_prompt
 from agent.shared.logger import get_logger
 from contracts.planner_models import ConversationTurn, FillStep, LogParseStep, PlanDecision
 from application.progress import NullProgressSink
@@ -30,7 +30,6 @@ from contracts.session_facts import SessionFacts
 logger = get_logger("planner")
 
 PlannerRunner = Callable[[str], Awaitable[Any] | Any]
-_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "planner.md"
 
 
 def create_planner_agent() -> Agent:
@@ -42,7 +41,7 @@ def create_planner_agent() -> Agent:
         name="PlannerAgent",
         role="用户指令规划器",
         model=model,
-        instructions=_PROMPT_PATH.read_text(encoding="utf-8"),
+        instructions=load_planner_prompt(),
         tools=[],
         output_schema=PlanDecision,
         markdown=False,

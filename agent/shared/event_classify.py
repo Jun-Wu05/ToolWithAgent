@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 from typing import Any
 
+from agent.prompts import load_event_classify_prompt
 from agent.shared.logger import get_logger
 
 logger = get_logger("event_classify")
@@ -96,8 +96,6 @@ def read_entity_event_name(entity: Any) -> str | None:
                 return value
     return None
 
-_PROMPT_PATH = Path(__file__).resolve().parents[2] / "agent" / "prompts" / "event_classify.md"
-
 # 判定输入的规模约束：样本截断与字段数上限，防止单条子规则撑爆 prompt
 _SAMPLE_MAX_CHARS = 600
 _FIELD_LIST_LIMIT = 30
@@ -106,13 +104,6 @@ _FIELD_LIST_LIMIT = 30
 # ---------------------------------------------------------------------------
 # 信号组装与 LLM 判定
 # ---------------------------------------------------------------------------
-
-
-def _load_prompt_template() -> str:
-    """加载判定知识提示词；缺失时立即失败（知识文件是判定的必要条件）。"""
-    if not _PROMPT_PATH.is_file():
-        raise FileNotFoundError(f"事件名称判定知识文件不存在: {_PROMPT_PATH}")
-    return _PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def _build_rule_signals(sub_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -215,7 +206,7 @@ async def classify_sub_rule_events(
         return {}, []
 
     expected_names = {signal["rule_name"] for signal in signals}
-    template = _load_prompt_template()
+    template = load_event_classify_prompt()
     base_prompt = (
         f"{template}\n\n## 待判定子规则\n```json\n"
         f"{json.dumps(signals, ensure_ascii=False, indent=1)}\n```\n"
