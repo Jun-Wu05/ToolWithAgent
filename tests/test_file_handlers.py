@@ -213,6 +213,57 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     assert session.model_name == "model-a"
 
 
+def test真实base64上传贯通application解码原子提交与既有反馈(monkeypatch):
+    """最高层上传接缝使用真实解码器，并保持 Session 与用户消息契约。"""
+    import base64
+    import json
+
+    import web.file_handlers as file_handlers
+    from application.session_state import SessionState
+
+    captured = []
+    _mount_message_capture(monkeypatch, captured)
+    payload = {
+        "name": "new-rule",
+        "normalize": [
+            {"index": "src_ip"},
+            {"index": "original_log", "result": ["src_ip=1.1.1.1"]},
+        ],
+    }
+    encoded = base64.b64encode(
+        json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    monkeypatch.setattr(file_handlers, "read_element_content", lambda element: encoded)
+    enum_slot, threat_slot = _referenceable_artifact_slots()
+    session = SessionState(
+        decoded_data={"name": "old-rule"},
+        enum_excel_path="old.xlsx",
+        latest_enum_artifact=enum_slot,
+        latest_threat_artifact=threat_slot,
+    )
+
+    asyncio.run(
+        file_handlers.handle_file_upload(session, SimpleNamespace(name="new.txt"))
+    )
+
+    assert session.decoded_data == payload
+    assert session.decoded_fields == ["src_ip", "original_log"]
+    assert session.original_log == ["src_ip=1.1.1.1"]
+    assert session.raw_base64 == encoded
+    assert session.enum_excel_path is None
+    assert session.latest_enum_artifact is None
+    assert session.latest_threat_artifact is None
+    assert captured == [
+        """✅ **文件解码成功！**
+
+📊 **字段数量**：2 个
+📊 **日志行数**：1 行
+
+💡 如需处理其他文件，请输入 **"清空数据"** 或 **"切换文件"** 快速重置
+现在可以进行字段映射、威胁类型、枚举提取等操作。"""
+    ]
+
+
 def test有效日志表原子替换旧配置数据集状态(monkeypatch):
     """新日志 Excel 提交后，旧配置引用、附件和派生结果对称失效。"""
     import web.file_handlers as file_handlers

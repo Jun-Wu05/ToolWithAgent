@@ -30,7 +30,7 @@ __all__ = [
 
 # 子模块名 → 实际定义所在模块的映射（延迟导入用）。
 _LAZY_MODULES = {
-    "simple_decode": "agent.core.agent",
+    "simple_decode": "application.file_input",
     "create_data_mapping_team": "agent.core.team",
     "get_team_instance": "agent.core.team",
     "reset_team_instance": "agent.core.team",

@@ -5,10 +5,10 @@
 所有 UI 渲染保留在 chainlit_app.py 中。
 """
 
-import json
 from typing import Any, Dict, List
 
 from agent.shared.logger import get_logger
+from application.file_input import build_simplified_data, simple_decode
 
 logger = get_logger("file_handler")
 
@@ -43,40 +43,7 @@ def decode_file_content(file_content: str) -> Dict[str, Any]:
     Returns:
         dict: simple_decode 返回的解码结果
     """
-    from agent.core.agent import simple_decode
     return simple_decode(file_content)
-
-
-def build_simplified_data(decode_result: Dict[str, Any]) -> Dict[str, Any]:
-    """从解码结果构建 simplified_data（精简上下文，供 LLM 输入构建使用）
-
-    Args:
-        decode_result: simple_decode 返回的结果字典
-
-    Returns:
-        dict: 包含 fields 和 original_log_sample 的简化数据
-    """
-    indexes = decode_result.get("fields", [])
-    original_log = decode_result.get("original_log", [])
-
-    # 修复：original_log 可能是 string（JSON字符串）、list 或 dict
-    if isinstance(original_log, list):
-        first_item = original_log[0] if original_log else ""
-        if isinstance(first_item, (dict, list)):
-            original_log_sample = json.dumps(first_item, ensure_ascii=False)
-        else:
-            original_log_sample = str(first_item) if first_item else ""
-    elif isinstance(original_log, str):
-        original_log_sample = original_log
-    elif isinstance(original_log, dict):
-        original_log_sample = json.dumps(original_log, ensure_ascii=False)
-    else:
-        original_log_sample = str(original_log) if original_log else ""
-
-    return {
-        "fields": indexes,
-        "original_log_sample": original_log_sample
-    }
 
 
 def get_element_file_name(element) -> str:

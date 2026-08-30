@@ -21,6 +21,7 @@ from web.file_handler import (
 )
 from agent.tools import read_enum_mappings_from_excel
 from application.enum_mapping_attachments import commit_enum_mapping_attachment
+from application.file_input import commit_primary_dataset
 from web.parsers import create_dataframe_elements
 from application.session_state import PrimaryDatasetSnapshot
 
@@ -31,60 +32,6 @@ _ENUM_HEADER_KEYWORDS: Set[str] = {
     "原始值", "映射值", "映射类型",
     "目标字段", "target_field", "targetfield"
 }
-
-
-_PRIMARY_DATASET_STATE_KEYS = (
-    "decoded_data",
-    "decoded_fields",
-    "original_log",
-    "simplified_data",
-    "decoded_text",
-    "raw_log_lines",
-    "uploaded_file_name",
-    "uploaded_file_time",
-    "raw_base64",
-    "enum_excel_path",
-    "enum_preview",
-    "enum_mapping_sheets",
-    "enum_fill_contributions",
-    "stale_enum_config_refs",
-    "enum_pending_refills",
-    "last_mapping_data",
-    "excel_data",
-    "excel_filename",
-    "last_threat_data",
-    "last_enum_extract_result",
-    "latest_threat_artifact",
-    "latest_enum_artifact",
-    "log_classification",
-    "mapped_sub_rules",
-    "sub_rule_mapping_results",
-    "batch_mapping_results",
-    "conversation_history",
-)
-
-
-def _commit_primary_dataset(user_session, snapshot: PrimaryDatasetSnapshot) -> None:
-    """兼容 SessionState 与旧字典测试替身，集中提交主数据快照。"""
-    replace = getattr(user_session, "replace_primary_dataset", None)
-    if callable(replace):
-        replace(snapshot)
-        return
-    staged_values = {
-        "decoded_data": snapshot.decoded_data,
-        "decoded_fields": list(snapshot.decoded_fields),
-        "original_log": snapshot.original_log,
-        "simplified_data": snapshot.simplified_data,
-        "decoded_text": snapshot.decoded_text,
-        "raw_log_lines": snapshot.raw_log_lines,
-        "raw_base64": snapshot.raw_base64,
-        "uploaded_file_name": snapshot.uploaded_file_name,
-        "uploaded_file_time": snapshot.uploaded_file_time,
-        "conversation_history": [],
-    }
-    for key in _PRIMARY_DATASET_STATE_KEYS:
-        user_session.pop(key, None)
-    user_session.update(staged_values)
 
 
 _commit_enum_workbook = commit_enum_mapping_attachment
@@ -189,7 +136,7 @@ async def handle_file_upload(user_session, element):
                 uploaded_file_name=file_name_val,
                 uploaded_file_time=file_time,
             )
-            _commit_primary_dataset(user_session, snapshot)
+            commit_primary_dataset(user_session, snapshot)
             logger.info(f"[FILE_UPLOAD] 记录上传文件元信息: name={file_name_val}, time={file_time}")
 
             # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
@@ -336,7 +283,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
             uploaded_file_name=file_name,
             uploaded_file_time=file_time,
         )
-        _commit_primary_dataset(user_session, snapshot)
+        commit_primary_dataset(user_session, snapshot)
 
         await cl.Message(
             content=f"📊 已读取 Excel 文件 `{file_name}`\n\n"

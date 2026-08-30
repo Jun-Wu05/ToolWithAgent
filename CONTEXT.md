@@ -149,6 +149,7 @@ _避免使用_：旧结果缓存、全局历史产物
 | ThreatAgent | 原始值 → 标准威胁分类映射 | 不做字段映射或读取旧结果兜底 |
 | Enum Extract Adapter | 为显式目标字段提取枚举值 | 不猜测目标字段，不做填充 |
 | Log Parser Adapter | 日志格式识别 + 特征分类 | 不做字段/值映射 |
+| File Input Module | 确定性解析 Base64、JSON 与纯文本输入，并原子提交主数据快照 | 不理解用户意图，不渲染 Chainlit 消息，不统一其他业务 Base64 格式 |
 | Field Skill Adapter | 解析规则字段增删合并（调用 skills/ 脚本单一事实源）+ 事件名称绑定守卫 | 不做意图理解，不猜参数，不在适配器内复制脚本逻辑 |
 | Renderer | 渲染 Clarification、Guidance 或 ExecutionReport | 不执行业务、不解释 session |
 

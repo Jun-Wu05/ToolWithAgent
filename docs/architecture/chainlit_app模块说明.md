@@ -43,7 +43,7 @@
 @cl.on_message 分发：文件 → upload_handlers，文本 → user_message_handlers
 
 ### 2.5 upload_handlers.py
-文件上传处理：Excel 类型检测、Base64 解码和 SessionFacts 所需状态建立
+文件上传适配：Excel 类型检测、Chainlit 反馈；Base64/JSON/TXT 解码与主数据原子提交委托 Application 文件输入模块
 
 ### 2.6 user_message_handlers.py
 用户文本处理：调用 Planner 一次、执行类型化计划并统一渲染报告
@@ -58,7 +58,7 @@
 全局状态管理：Agno 日志桥接标志
 
 ### 2.10 Application 运行时接缝
-`SessionState`、`PlanExecutor`、执行结果账本与 `NullProgressSink` 位于 `application/`。Web 只在组合根注入领域预检和日志，并保留 Chainlit 生命周期及渲染职责。日志解析与导出 Adapter 已迁入 Application；字段映射、枚举、威胁、Fill/Remove 等其余业务 Adapter 仍暂存 `web/adapters/`。
+`SessionState`、`PlanExecutor`、文件输入、执行结果账本与 `NullProgressSink` 位于 `application/`。Web 只在组合根注入领域预检和日志，并保留 Chainlit 生命周期及渲染职责。文件输入模块负责 Base64/JSON/TXT 确定性解码和主数据原子提交；Web 文件上传适配器保留元素读取、Excel 分流与用户反馈。
 
 ---
 
@@ -66,7 +66,7 @@
 
 ```text
 用户 → chainlit_app.py → message_router.py
-  ├─ 文件 → file_handlers.py → SessionFacts
+  ├─ 文件 → file_handlers.py → Application file_input.py → SessionState → SessionFacts
   └─ 文本 → user_message_handlers.py → PlannerAgent → Application PlanExecutor
 按钮 → action_callbacks.py → StepSpec → Application PlanExecutor
 Application PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.py
@@ -77,7 +77,7 @@ Application PlanExecutor → StepAdapter → ExecutionReport → plan_renderer.p
 ## 4. 数据流
 
 ### 文件上传
-用户上传 → 文件类型识别/解码 → 更新 SessionState → SessionFacts 投影
+用户上传 → Web 文件类型识别 → Application 解码/原子提交 → SessionState → SessionFacts 投影
 
 ### 用户文本
 用户输入 → PlannerAgent → PlanDecision → PlanExecutor → StepAdapter → 一次汇总

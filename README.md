@@ -26,7 +26,7 @@ toolswithagent/
 │   ├── start_handler.py             # @cl.on_chat_start 实现
 │   ├── settings_handler.py          # @cl.on_settings_update 实现
 │   ├── message_router.py            # @cl.on_message 路由分发
-│   ├── file_handlers.py             # 文件上传处理（含 Excel 检测，数据表须含"原始日志"列）
+│   ├── file_handlers.py             # Chainlit 文件上传适配（Excel 检测与用户反馈）
 │   ├── user_message_handlers.py     # 用户文本消息处理（一次 Planner 调用 + Executor + 渲染）
 │   ├── action_callbacks.py          # Action 回调（按钮交互）
 │   ├── plan_executor.py             # 计划执行器（依赖账本、失败停止）
@@ -43,6 +43,12 @@ toolswithagent/
 │   ├── llm_client.py / model_manager.py    # LLM 客户端与模型管理
 │   └── utils.py / global_state.py / constants.py  # 辅助函数
 │
+├── application/                     # 无 Chainlit 依赖的应用运行时
+│   ├── file_input.py                # Base64/JSON/TXT 解码与主数据原子提交
+│   ├── session_state.py             # 主数据及会话生命周期
+│   ├── execution.py                 # PlanExecutor / ExecutionContext
+│   └── adapters/                    # 类型化步骤的业务适配器
+│
 ├── contracts/                       # 框架无关类型契约（web → contracts ← agent）
 │   ├── planner_models.py            # PlanDecision / StepSpec / Artifact 类型契约
 │   ├── session_facts.py             # SessionFacts 投影（Planner 输入）
@@ -52,7 +58,7 @@ toolswithagent/
 │   ├── core/                        # 核心层
 │   │   ├── team.py                  # Agno Team 与专业 Agent 构造
 │   │   ├── planner.py               # 独立 PlannerAgent（ADR-0005）
-│   │   ├── agent.py                 # Agent 基础构造
+│   │   ├── agent.py                 # 上传解码兼容入口与历史 simple_encode
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
 │   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
 │   │   ├── prompts.py               # Pipeline Prompt 加载器
