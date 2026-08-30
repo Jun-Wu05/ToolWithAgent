@@ -13,6 +13,8 @@ __all__ = [
     "FieldMappingBatchError",
     "FieldMappingBatchRunner",
     "FieldMappingExecutionPolicy",
+    "FieldSkillAdapter",
+    "FIELD_SKILL_REGISTRY",
     "LogParseAdapter",
     "RemoveMappingAdapter",
     "ThreatFillAdapter",
@@ -37,6 +39,9 @@ def __getattr__(name: str) -> Any:
     if name == "FieldMappingAdapter":
         from application.adapters.field_mapping import FieldMappingAdapter
         return FieldMappingAdapter
+    if name in {"FieldSkillAdapter", "FIELD_SKILL_REGISTRY"}:
+        from application.adapters import field_skill
+        return getattr(field_skill, name)
     if name in {
         "FieldMappingBatchError",
         "FieldMappingBatchRunner",

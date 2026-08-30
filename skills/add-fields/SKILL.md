@@ -24,7 +24,7 @@ metadata:
 ```
 用户指令 → PlannerAgent 生成 add_fields 类型化步骤
   （field_name / field_value / value_type=fixed|reference / config_ref）
-→ FieldSkillAdapter（web/adapters/skill_ops.py，按声明式注册表分发）
+→ FieldSkillAdapter（application/adapters/field_skill.py，按声明式注册表分发）
 → 本目录 scripts/add_fields.py 的 add_field() 纯函数（单一事实源）
 → 结果写回 session 原配置来源，产出 field_adjusted_config 下载产物
 ```

@@ -25,7 +25,7 @@ metadata:
 
 ```
 用户指令 → PlannerAgent 生成 delete_fields 类型化步骤（fields / config_ref）
-→ FieldSkillAdapter（web/adapters/skill_ops.py）
+→ FieldSkillAdapter（application/adapters/field_skill.py）
 → scripts/delete_fields.py 的 delete_field() 纯函数（单一事实源）
 → 结果写回 session，产出 field_adjusted_config 下载产物
 ```

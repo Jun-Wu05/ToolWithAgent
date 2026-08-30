@@ -21,7 +21,7 @@ metadata:
 
 ```
 用户指令 → PlannerAgent 生成 decode_fields 类型化步骤（fields / config_ref）
-→ FieldSkillAdapter（web/adapters/skill_ops.py 注册表）
+→ FieldSkillAdapter（application/adapters/field_skill.py 注册表）
 → scripts/decode_fields.py 的 decode_fields() 纯函数（单一事实源）
 → 结果写回 session，产出 field_adjusted_config 下载产物
 ```

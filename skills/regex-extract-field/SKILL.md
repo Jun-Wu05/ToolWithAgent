@@ -27,7 +27,7 @@ metadata:
 ```
 用户指令 → PlannerAgent 生成 regex_extract 类型化步骤
   （source_field / description / 可选 new_field 与 pattern / config_ref）
-→ FieldSkillAdapter：pattern 缺省时调 agent/shared/regex_extract.py
+→ FieldSkillAdapter（application/adapters/field_skill.py）：pattern 缺省时调 agent/shared/regex_extract.py
   按样本 LLM 生成（re.compile + fullmatch 硬校验，失败带反馈重试一次）
 → scripts/extract_field.py 的 extract_field() 纯函数（单一事实源）
 → 结果写回 session，产物消息附正则原文

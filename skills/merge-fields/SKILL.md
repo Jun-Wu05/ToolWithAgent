@@ -22,7 +22,7 @@ metadata:
 ```
 用户指令 → PlannerAgent 生成 merge_fields 类型化步骤
   （source_fields≥2 / target_field / sep / config_ref）
-→ FieldSkillAdapter（web/adapters/skill_ops.py）
+→ FieldSkillAdapter（application/adapters/field_skill.py）
 → scripts/merge_fields.py 的 merge_fields() 纯函数（单一事实源）
 → 结果写回 session，产出 field_adjusted_config 下载产物
 ```
