@@ -12,9 +12,12 @@ import httpx
 from chainlit.input_widget import Select, TextInput
 
 from agent.core import model_config
-from agent.core.model_config import ModelConfig
-from agent.core.team import get_team_instance, reset_team_instance
 from agent.shared.logger import get_logger
+from application.model_runtime import (
+    apply_model_settings,
+    reset_model_settings,
+    resolve_api_key,
+)
 
 logger = get_logger("settings_handler")
 
@@ -364,7 +367,7 @@ async def on_settings_update(settings: dict):
     old_provider = user_session.current_provider
 
     # 使用界面的 API Key，或按表单所选供应商解析环境变量密钥
-    test_key = api_key if api_key else ModelConfig.get_api_key(provider or None)
+    test_key = api_key if api_key else resolve_api_key(provider or None)
 
     # 检测供应商是否切换
     provider_changed = old_provider and provider and old_provider != provider
@@ -372,16 +375,7 @@ async def on_settings_update(settings: dict):
     # 检测是否点击了重置选项
     if provider == RESET_OPTION:
         # 重置配置
-        user_session.current_provider = None
-        user_session.model_name = None
-        user_session.api_key = None
-
-        # 清除运行时配置
-        ModelConfig.clear_runtime_config()
-
-        # 清除 Team 缓存
-        reset_team_instance()
-        user_session.team = None
+        reset_model_settings(user_session)
 
         logger.info("[SETTINGS] 设置已重置")
 
@@ -437,20 +431,7 @@ async def on_settings_update(settings: dict):
 
     if result["success"]:
         # 测试成功，应用配置
-        user_session.current_provider = provider if provider else None
-        user_session.model_name = model if model else None
-        user_session.api_key = api_key if api_key else None
-
-        # 应用运行时配置
-        ModelConfig.set_runtime_config(
-            provider=user_session.current_provider,
-            api_key=user_session.api_key,
-            model=user_session.model_name
-        )
-
-        # 清除单例缓存并重新初始化 Team
-        reset_team_instance()
-        user_session.team = get_team_instance()
+        apply_model_settings(user_session, provider, model, api_key)
 
         logger.info("[SETTINGS] Team 已重新初始化")
 

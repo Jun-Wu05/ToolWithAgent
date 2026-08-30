@@ -22,29 +22,20 @@ def _import_roots(path: Path) -> set[str]:
     return roots
 
 
-def test上传解码由application唯一实现且旧agent入口保持同一对象() -> None:
-    """Web 直接跨 Application 接缝，旧入口只兼容重导出。"""
+def test上传解码由application唯一实现且web直接调用() -> None:
+    """Web 直接跨 Application 接缝，迁移入口不再重导出。"""
     root = Path(__file__).parents[1]
     module_path = root / "application/file_input.py"
     assert module_path.exists()
     assert _import_roots(module_path).isdisjoint({"agent", "web", "chainlit"})
 
-    from agent.core import simple_decode as PackageLegacyDecode
-    from agent.core.agent import simple_decode as ModuleLegacyDecode
-    from application.file_input import build_simplified_data, simple_decode
-    from web.file_handler import build_simplified_data as LegacySimplifiedData
-
-    assert PackageLegacyDecode is simple_decode
-    assert ModuleLegacyDecode is simple_decode
-    assert LegacySimplifiedData is build_simplified_data
-
     agent_source = (root / "agent/core/agent.py").read_text(encoding="utf-8")
     web_source = (root / "web/file_handler.py").read_text(encoding="utf-8")
     upload_source = (root / "web/file_handlers.py").read_text(encoding="utf-8")
     assert "def simple_decode" not in agent_source
-    assert "from application.file_input import" in web_source
-    assert "simple_decode" in web_source
-    assert "agent.core.agent import simple_decode" not in web_source
+    assert "simple_decode" not in agent_source
+    assert "simple_decode" not in web_source
+    assert "simple_decode" in upload_source
     assert "def _commit_primary_dataset" not in upload_source
 
 

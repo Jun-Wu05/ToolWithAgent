@@ -70,18 +70,16 @@ def test_default_composition_uses_application_adapters_and_one_field_skill_insta
     assert len({id(adapter) for adapter in skill_adapters}) == 1
 
 
-def test_only_one_factory_definition_and_web_paths_are_identity_reexports() -> None:
-    """Compatibility paths cannot become a second production composition root."""
+def test_only_one_factory_definition_and_migration_shims_are_deleted() -> None:
+    """The completed migration leaves one production composition root."""
     from application.adapters import create_default_adapters as package_factory
     from application.adapters.composition import create_default_adapters
-    from web.adapters import create_default_adapters as legacy_adapter_factory
-    from web.execution_adapters import create_default_adapters as legacy_execution_factory
 
     assert package_factory is create_default_adapters
-    assert legacy_adapter_factory is create_default_adapters
-    assert legacy_execution_factory is create_default_adapters
 
     root = Path(__file__).parents[1]
+    assert not any((root / "web/adapters").glob("*.py"))
+    assert not (root / "web/execution_adapters.py").exists()
     definitions = []
     for package in ("application", "web", "agent", "skills"):
         for path in (root / package).rglob("*.py"):
@@ -96,7 +94,7 @@ def test_only_one_factory_definition_and_web_paths_are_identity_reexports() -> N
 
 
 def test_production_web_callers_import_application_composition_directly() -> None:
-    """Web runtime uses Application; only compatibility modules retain old paths."""
+    """Web runtime delegates request execution through the Application runtime."""
     root = Path(__file__).parents[1]
     for relative in ("web/user_message_handlers.py", "web/deterministic_plan.py"):
         path = root / relative
@@ -105,10 +103,9 @@ def test_production_web_callers_import_application_composition_directly() -> Non
             node
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
-            and any(alias.name == "create_default_adapters" for alias in node.names)
+            and node.module == "application.request_runtime"
         ]
         assert len(imports) == 1
-        assert imports[0].module == "application.adapters.composition"
 
 
 def test_package_dependency_direction_is_static_and_one_way() -> None:

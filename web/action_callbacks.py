@@ -44,7 +44,7 @@ def _build_retrieval_candidates_map(mapping_results: list) -> dict[str, str]:
     candidates_map: dict[str, str] = {f: "" for f in all_fields}
 
     try:
-        from agent.core.field_retriever import batch_retrieve_candidates
+        from application.field_runtime import batch_retrieve_candidates
         raw = batch_retrieve_candidates(all_fields, top_k=5)
     except Exception as e:
         logger.warning(f"[EXPORT] 检索候选失败，候选列留空: {e}")

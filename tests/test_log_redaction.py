@@ -40,7 +40,7 @@ def test字段检索诊断完整记录字段名与相似度(caplog):
 
 def test字段映射解析日志不记录完整模型输出(caplog):
     """结构化模型结果只记录类型和数量，不记录字段原值或部分 JSON。"""
-    from web.parsers import parse_json_mapping_result
+    from application.parsing import parse_json_mapping_result
 
     caplog.set_level(logging.INFO)
     secret_value = "secret-token-10.0.0.1"

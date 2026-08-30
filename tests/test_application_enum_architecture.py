@@ -41,28 +41,21 @@ def test_application枚举模块不依赖web或chainlit() -> None:
     assert violations == {}
 
 
-def test默认组合直接使用application枚举提取且旧填充路径同对象() -> None:
-    """生产组合与兼容导出跨越同一接缝，不保留第二份实现。"""
+def test默认组合直接使用application枚举适配器() -> None:
+    """生产组合直接注册 Application 枚举适配器。"""
     from application.adapters.enum_extract import EnumExtractAdapter
-    from application.adapters.enum_fill import EnumFillAdapter
-    from web.adapters import create_default_adapters
-    from web.adapters.config_ops import EnumFillAdapter as ConfigLegacyFill
-    from web.execution_adapters import EnumFillAdapter as LegacyFill
+    from application.adapters import create_default_adapters
 
     adapters = create_default_adapters(None)
     assert isinstance(adapters["enum_extract"], EnumExtractAdapter)
-    assert LegacyFill is EnumFillAdapter
-    assert ConfigLegacyFill is EnumFillAdapter
+    assert "fill" in adapters
 
 
 def test_web不再拥有枚举提取或填充实现() -> None:
     """兼容模块只委派或重导出，枚举实现不得跨接缝重新出现。"""
     root = Path(__file__).parents[1]
-    agent_source = (root / "web/adapters/agent_ops.py").read_text(encoding="utf-8")
-    config_source = (root / "web/adapters/config_ops.py").read_text(encoding="utf-8")
-
-    assert "async def _execute_enum_extract" not in agent_source
-    assert "class EnumFillAdapter" not in config_source
+    assert not any((root / "web/adapters").glob("*.py"))
+    assert not (root / "web/execution_adapters.py").exists()
 
 
 def test枚举prompt内容和缺失策略不变(monkeypatch) -> None:

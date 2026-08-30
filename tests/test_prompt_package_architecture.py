@@ -105,7 +105,7 @@ def test_prompt_loaders_do_not_cache(monkeypatch, tmp_path) -> None:
 
 def test_prompt_consumers_use_the_package_and_legacy_exports_are_identical() -> None:
     """Consumers import canonical loaders; old log paths remain identity shims."""
-    import agent.core.prompts as legacy_prompts
+    import agent.prompts as legacy_prompts
     import agent.prompts as prompts
 
     root = Path(__file__).parents[1]

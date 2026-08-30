@@ -43,6 +43,7 @@ class FakeExecutor:
 
 def _run(monkeypatch, decision, user_text="处理请求", session=None):
     """运行入口并返回 Planner、事件顺序和渲染类型。"""
+    import application.request_runtime as request_runtime
     import web.user_message_handlers as handlers
 
     events = []
@@ -51,13 +52,13 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
     FakeExecutor.events = events
     FakeExecutor.calls = 0
 
-    monkeypatch.setattr(handlers, "_get_planner_service", lambda: planner)
+    monkeypatch.setattr(request_runtime, "PlannerService", lambda: planner)
     monkeypatch.setattr(
-        handlers,
+        request_runtime,
         "create_plan_executor",
         lambda adapters: FakeExecutor(adapters),
     )
-    monkeypatch.setattr(handlers, "create_default_adapters", lambda team: {})
+    monkeypatch.setattr(request_runtime, "create_default_adapters", lambda team: {})
 
     lifecycle = []
 

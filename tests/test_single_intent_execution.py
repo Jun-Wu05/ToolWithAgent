@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from types import SimpleNamespace
 
-from web.execution_adapters import create_default_adapters
+from application.adapters import create_default_adapters
 from application.execution import ExecutionContext, PlanExecutor
 from contracts.planner_models import PlanDecision, StepStatus
 from application.session_projection import build_session_facts

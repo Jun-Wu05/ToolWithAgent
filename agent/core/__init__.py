@@ -6,7 +6,7 @@ Agent Core 模块
 设计说明（循环 import 治理）：
   原先本文件在顶层 eager 导入 agent.core.team，而 team.py 又顶层导入
   agent.tools，agent.tools.__init__ 链上的若干 pipeline 子模块又会回头导入
-  agent.core.prompts / model_config 等，每次都会触发本 __init__ 重跑，形成
+  agent.core.model_config 等，每次都会触发本 __init__ 重跑，形成
   agent.tools ↔ agent.core 的循环 import。
 
   采用 PEP 562 模块级 __getattr__：仅在被实际访问包级属性（agent.core.xxx）
@@ -19,7 +19,6 @@ Agent Core 模块
 # 子模块路径已在 team.py / agent.py 中定义，这里仅声明可被包级访问。
 __all__ = [
     # Agent 工具函数
-    "simple_decode",
     # Team
     "create_data_mapping_team",
     "get_team_instance",
@@ -30,7 +29,6 @@ __all__ = [
 
 # 子模块名 → 实际定义所在模块的映射（延迟导入用）。
 _LAZY_MODULES = {
-    "simple_decode": "application.file_input",
     "create_data_mapping_team": "agent.core.team",
     "get_team_instance": "agent.core.team",
     "reset_team_instance": "agent.core.team",

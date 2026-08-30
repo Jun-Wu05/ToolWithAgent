@@ -7,7 +7,6 @@
 import base64
 import json
 
-from application.file_input import simple_decode
 
 
 def simple_encode(data: dict) -> dict:
@@ -21,4 +20,4 @@ def simple_encode(data: dict) -> dict:
         return {"status": "error", "error_message": str(error)}
 
 
-__all__ = ["simple_decode", "simple_encode"]
+__all__ = ["simple_encode"]

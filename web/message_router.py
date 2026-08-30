@@ -9,6 +9,7 @@ import asyncio
 import chainlit as cl
 from agent.core.tracing import trace_request
 from agent.shared.logger import get_logger
+from application.model_runtime import ensure_team
 
 logger = get_logger("message_router")
 
@@ -49,7 +50,6 @@ def get_user_message_handlers():
     return _user_message_handlers
 
 
-@cl.on_message
 @trace_request("user_request")
 async def on_message(message: cl.Message):
     """
@@ -61,18 +61,12 @@ async def on_message(message: cl.Message):
     3. per-session 加锁，保证同一会话请求串行（防并发竞态）
     """
     user_session = cl.user_session.get("user_session")
-    team = user_session.team if user_session else None
-
-    if team is None:
+    try:
         # .env 优先：配置可解析即懒初始化 Team；密钥缺失时提示应设置的变量名。
-        from agent.core.team import get_team_instance
-
-        try:
-            team = get_team_instance()
-            user_session.team = team
-        except ValueError as config_error:
-            await cl.Message(content=f"⚠️ {config_error}").send()
-            return
+        team = ensure_team(user_session)
+    except ValueError as config_error:
+        await cl.Message(content=f"⚠️ {config_error}").send()
+        return
 
     # per-session 加锁：同一会话的并发请求串行化，避免状态竞态
     lock = _get_session_lock(user_session)

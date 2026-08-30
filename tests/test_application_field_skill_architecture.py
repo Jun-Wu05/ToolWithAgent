@@ -33,8 +33,8 @@ def test字段skill适配器由application唯一实现并由生产组合直接�
         FIELD_SKILL_REGISTRY,
         FieldSkillAdapter,
     )
-    from web.adapters import create_default_adapters
-    from web.adapters.skill_ops import FieldSkillAdapter as LegacyAdapter
+    from application.adapters import create_default_adapters
+    from application.adapters.field_skill import FieldSkillAdapter as LegacyAdapter
 
     adapters = create_default_adapters(None)
     assert LegacyAdapter is FieldSkillAdapter
@@ -50,8 +50,7 @@ def test字段skill适配器由application唯一实现并由生产组合直接�
     }
     assert isinstance(adapters["add_fields"], FieldSkillAdapter)
 
-    legacy_source = (root / "web/adapters/skill_ops.py").read_text(encoding="utf-8")
-    assert "class FieldSkillAdapter" not in legacy_source
+    assert not any((root / "web/adapters").glob("*.py"))
 
 
 def test字段skill注册表与application惰性导出保持精确契约() -> None:
@@ -92,7 +91,7 @@ def test字段skill脚本从非仓库cwd与冷启动顺序均可定位(tmp_path:
     root = Path(__file__).parents[1]
     script = """
 import json
-import web.adapters.skill_ops as legacy
+import application.adapters.field_skill as legacy
 from application.adapters import FIELD_SKILL_REGISTRY, FieldSkillAdapter
 from application.adapters.field_skill import _load_skill_function
 

@@ -369,8 +369,14 @@ def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
     )
-    monkeypatch.setattr(settings_handler, "reset_team_instance", lambda: None)
-    monkeypatch.setattr(settings_handler, "get_team_instance", lambda: team)
+    def _apply_model_settings(user_session, provider, model, api_key):
+        user_session.current_provider = provider or None
+        user_session.model_name = model or None
+        user_session.api_key = api_key or None
+        user_session.team = team
+        return team
+
+    monkeypatch.setattr(settings_handler, "apply_model_settings", _apply_model_settings)
 
     try:
         asyncio.run(

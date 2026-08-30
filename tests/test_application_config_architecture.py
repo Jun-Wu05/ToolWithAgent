@@ -31,21 +31,12 @@ def test取消映射由application唯一实现并由生产组合直接注册() -
     assert module_path.exists()
     assert _import_roots(module_path).isdisjoint({"web", "chainlit"})
 
-    from application.adapters.export import ExportAdapter
     from application.adapters.remove_mapping import RemoveMappingAdapter
-    from web.adapters import create_default_adapters
-    from web.adapters.config_ops import ExportAdapter as LegacyExport
-    from web.adapters.config_ops import RemoveMappingAdapter as LegacyRemove
-    from web.execution_adapters import RemoveMappingAdapter as ExecutionRemove
+    from application.adapters import create_default_adapters
 
     adapters = create_default_adapters(None)
     assert isinstance(adapters["remove_mapping"], RemoveMappingAdapter)
-    assert LegacyRemove is RemoveMappingAdapter
-    assert ExecutionRemove is RemoveMappingAdapter
-    assert LegacyExport is ExportAdapter
-
-    web_source = (root / "web/adapters/config_ops.py").read_text(encoding="utf-8")
-    assert "class RemoveMappingAdapter" not in web_source
+    assert not any((root / "web/adapters").glob("*.py"))
 
 
 def test取消映射通过标准字段名原子写回原配置来源() -> None:

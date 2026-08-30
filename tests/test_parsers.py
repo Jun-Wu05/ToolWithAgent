@@ -6,7 +6,7 @@ import logging
 def test空结构化结果不再误报解析失败(caplog):
     """模型返回空 FieldMappingList 是合法的"无映射"，不应落入字符串兜底误报失败。"""
     from agent.core.team import FieldMappingList
-    from web.parsers import parse_json_mapping_result
+    from application.parsing import parse_json_mapping_result
 
     caplog.set_level(logging.DEBUG)
     result = parse_json_mapping_result(FieldMappingList(items=[]))
@@ -19,7 +19,7 @@ def test空结构化结果不再误报解析失败(caplog):
 def test结构化结果记录模型原始返回(caplog):
     """字段映射解析时在 DEBUG 记录模型原始返回，便于排查（仅字段名，无原值）。"""
     from agent.core.team import FieldMappingItem, FieldMappingList
-    from web.parsers import parse_json_mapping_result
+    from application.parsing import parse_json_mapping_result
 
     caplog.set_level(logging.DEBUG)
     payload = FieldMappingList(

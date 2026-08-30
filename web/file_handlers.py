@@ -15,13 +15,11 @@ logger = get_logger("upload_handlers")
 # 从拆分模块导入业务函数
 from web.file_handler import (
     read_element_content,
-    decode_file_content,
-    build_simplified_data,
     get_element_file_name,
 )
 from agent.tools import read_enum_mappings_from_excel
 from application.enum_mapping_attachments import commit_enum_mapping_attachment
-from application.file_input import commit_primary_dataset
+from application.file_input import build_simplified_data, commit_primary_dataset, simple_decode
 from web.parsers import create_dataframe_elements
 from application.session_state import PrimaryDatasetSnapshot
 
@@ -32,9 +30,6 @@ _ENUM_HEADER_KEYWORDS: Set[str] = {
     "原始值", "映射值", "映射类型",
     "目标字段", "target_field", "targetfield"
 }
-
-
-_commit_enum_workbook = commit_enum_mapping_attachment
 
 
 async def handle_file_upload(user_session, element):
@@ -67,7 +62,7 @@ async def handle_file_upload(user_session, element):
 
                 # 是枚举映射表 → 全工作簿解析成功后再原子合并到当前附件集合
                 uploaded_sheets = read_enum_mappings_from_excel(excel_path)
-                enum_preview = _commit_enum_workbook(
+                enum_preview = commit_enum_mapping_attachment(
                     user_session,
                     excel_path,
                     uploaded_sheets,
@@ -121,7 +116,7 @@ async def handle_file_upload(user_session, element):
 
         # ========== 正常模式：解码 Base64 内容 ==========
         # 委托 file_handler 处理解码
-        result = decode_file_content(file_content)
+        result = simple_decode(file_content)
 
         if result["status"] == "success":
             file_name_val = get_element_file_name(element)

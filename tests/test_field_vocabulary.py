@@ -22,7 +22,7 @@ from application.adapters.shared import (
     format_field_vocabulary,
     resolve_field_names,
 )
-from web.adapters.skill_ops import FieldSkillAdapter
+from application.adapters.field_skill import FieldSkillAdapter
 
 
 def _config():
@@ -208,7 +208,7 @@ def test取消映射标准名目标解析():
 
 
 def _RemoveMappingRunner():
-    from web.adapters.config_ops import RemoveMappingAdapter
+    from application.adapters.remove_mapping import RemoveMappingAdapter
     return RemoveMappingAdapter()
 
 

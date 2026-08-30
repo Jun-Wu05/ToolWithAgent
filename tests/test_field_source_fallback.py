@@ -7,7 +7,7 @@ field_source 字段提取测试 — 日志解析结果路径 + 原始日志直�
   根因：field_source 只在 intent=mapping 时生效，且无日志解析时无兜底。
   修复：① general 意图也用日志字段 ② 无日志解析时从原始日志直接提取 KV 字段。
 """
-from web.field_source import extract_log_fields_for_mapping, _extract_kv_fields_from_lines
+from application.field_source import extract_log_fields_for_mapping, _extract_kv_fields_from_lines
 
 
 # 真实 KV 日志行（启明天阗 syslog+kv 格式）

@@ -64,14 +64,14 @@ def test_legacy_field_mapping_paths_reexport_identical_application_objects() -> 
     from application.field_mapping_input import build_batch_llm_input
     from application.field_source import extract_log_fields_for_mapping
     from application.parsing import parse_json_mapping_result
-    from web.adapters.field_mapping import (
+    from application.adapters.field_mapping import (
         FieldMappingAdapter as LegacyAdapter,
         FieldMappingBatchError as LegacyBatchError,
         FieldMappingExecutionPolicy as LegacyPolicy,
     )
-    from web.field_source import extract_log_fields_for_mapping as legacy_field_source
-    from web.input_builder import build_batch_llm_input as legacy_input_builder
-    from web.parsers import parse_json_mapping_result as legacy_parser
+    from application.field_source import extract_log_fields_for_mapping as legacy_field_source
+    from application.field_mapping_input import build_batch_llm_input as legacy_input_builder
+    from application.parsing import parse_json_mapping_result as legacy_parser
 
     assert LegacyAdapter is FieldMappingAdapter
     assert LegacyBatchError is FieldMappingBatchError
@@ -84,7 +84,7 @@ def test_legacy_field_mapping_paths_reexport_identical_application_objects() -> 
 def test_default_composition_uses_application_field_mapping_adapter() -> None:
     """唯一生产组合入口直接注册 Application 字段映射适配器。"""
     from application.adapters.field_mapping import FieldMappingAdapter
-    from web.adapters import create_default_adapters
+    from application.adapters import create_default_adapters
 
     assert isinstance(create_default_adapters(None)["field_mapping"], FieldMappingAdapter)
 

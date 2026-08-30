@@ -21,8 +21,8 @@ from contracts.planner_models import (
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 from application.session_projection import build_session_facts
-from web.execution_adapters import ProfessionalAgentAdapter, create_default_adapters
-from web.file_handlers import _commit_enum_workbook
+from application.adapters import ProfessionalAgentAdapter, create_default_adapters
+from application.enum_mapping_attachments import commit_enum_mapping_attachment
 from application.execution import ExecutionContext, PlanExecutor
 from application.session_state import SessionState
 
@@ -194,7 +194,7 @@ def test枚举映射附件上传不清除可引用产物():
         "latest_threat_artifact": threat_slot,
     }
 
-    _commit_enum_workbook(
+    commit_enum_mapping_attachment(
         session,
         "enum.xlsx",
         {

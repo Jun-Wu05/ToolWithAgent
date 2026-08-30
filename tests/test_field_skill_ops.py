@@ -25,7 +25,7 @@ from contracts.planner_models import (
 )
 from application.session_projection import build_session_facts
 from application.execution import ExecutionContext
-from web.adapters.skill_ops import (
+from application.adapters.field_skill import (
     FIELD_SKILL_REGISTRY,
     FieldSkillAdapter,
     _load_skill_function,
@@ -268,7 +268,7 @@ def test契约三类新步骤进入判别联合():
 
 def test注册表脚本均存在且适配器表包含新类型():
     """注册表条目指向真实脚本；默认适配器表按类型注册。"""
-    from web.adapters import create_default_adapters
+    from application.adapters import create_default_adapters
 
     for step_type, (script_rel, function_name) in FIELD_SKILL_REGISTRY.items():
         assert (_REPO_ROOT / script_rel).is_file(), script_rel

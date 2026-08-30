@@ -1,6 +1,4 @@
-"""Chainlit 展示工具及 Application JSON 解析兼容导出。"""
-
-from application.parsing import parse_json_mapping_result, parse_json_threat_result
+"""Chainlit DataFrame display helpers."""
 
 
 def create_dataframe_elements(mapping_data: list) -> list:
@@ -22,6 +20,4 @@ def create_dataframe_elements(mapping_data: list) -> list:
 
 __all__ = [
     "create_dataframe_elements",
-    "parse_json_mapping_result",
-    "parse_json_threat_result",
 ]

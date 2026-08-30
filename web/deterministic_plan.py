@@ -5,12 +5,9 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from web.chainlit_progress import get_session_progress_sink
-from application.adapters.composition import create_default_adapters
-from application.execution import ExecutionContext
-from web.execution_policy import create_plan_executor
+from application.request_runtime import run_deterministic_plan
 from web.plan_renderer import render_execution_report
 from contracts.planner_models import PlanDecision, StepSpec
-from application.session_projection import build_session_facts
 
 
 async def execute_deterministic_plan(
@@ -21,17 +18,14 @@ async def execute_deterministic_plan(
 ) -> None:
     """执行确定性事件生成的计划；事件适配层必须事先提供全部参数。"""
     decision = PlanDecision(decision="execute", plan_id=plan_id, steps=tuple(steps))
-    session_facts = build_session_facts(user_session)
     progress_ledger = get_session_progress_sink()
     progress_sink = progress_ledger.begin_request()
     try:
-        report = await create_plan_executor(create_default_adapters(team)).execute(
-            decision,
-            ExecutionContext(
-                session=user_session,
-                session_facts=session_facts,
-                progress_sink=progress_sink,
-            ),
+        report = await run_deterministic_plan(
+            session=user_session,
+            team=team,
+            plan=decision,
+            progress_sink=progress_sink,
         )
         await render_execution_report(report)
     finally:

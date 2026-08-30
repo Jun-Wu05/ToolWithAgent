@@ -7,7 +7,7 @@ history_store 截断阈值与滑动窗口回归测试。
   DEFAULT_HISTORY_MAX_CHARS 原 2000，与单条 1500 几乎相等，
   1 条满长记录吃满总窗口导致多轮退化。同步放大到 6000。
 """
-from web.history_store import (
+from application.history import (
     MAX_ENTRY_CHARS,
     DEFAULT_HISTORY_MAX_CHARS,
     DEFAULT_HISTORY_ROUNDS,

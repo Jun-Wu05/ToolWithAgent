@@ -20,7 +20,7 @@ from contracts.planner_models import (
 )
 from application.session_projection import build_session_facts
 from application.execution import ExecutionContext
-from web.adapters.skill_ops import FieldSkillAdapter
+from application.adapters.field_skill import FieldSkillAdapter
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 

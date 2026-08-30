@@ -3,7 +3,7 @@
 import asyncio
 
 from application.execution import ExecutionContext
-from web.execution_policy import create_plan_executor
+from application.execution_policy import create_plan_executor
 from contracts.planner_models import (
     EnumValuesArtifact,
     PlanDecision,

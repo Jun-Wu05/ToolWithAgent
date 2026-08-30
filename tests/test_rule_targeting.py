@@ -23,7 +23,7 @@ from contracts.planner_models import (
 )
 from application.session_projection import build_session_facts
 from application.execution import ExecutionContext
-from web.adapters.skill_ops import FieldSkillAdapter
+from application.adapters.field_skill import FieldSkillAdapter
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -347,7 +347,7 @@ def test解绑清空的过滤器整体移除():
 
 def test枚举填充事件级别即解绑():
     """EnumFillAdapter 对事件级别填充：先解绑再写 mappings，消息注明。"""
-    from web.adapters.config_ops import EnumFillAdapter
+    from application.adapters.enum_fill import EnumFillAdapter
     from contracts.planner_models import FillStep
 
     config = [

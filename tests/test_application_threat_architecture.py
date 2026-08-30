@@ -41,36 +41,22 @@ def test_application威胁模块不依赖web或chainlit() -> None:
     assert violations == {}
 
 
-def test默认组合直接使用application威胁适配器且旧路径同对象() -> None:
-    """生产组合和全部兼容路径跨越同一个对象接缝。"""
+def test默认组合直接使用application威胁适配器() -> None:
+    """生产组合直接注册 Application 威胁适配器。"""
     from application.adapters.fill import FillAdapter
-    from application.adapters.threat_fill import ThreatFillAdapter
     from application.adapters.threat_mapping import ThreatMappingAdapter
-    from application.parsing import parse_json_threat_result
-    from web.adapters import create_default_adapters
-    from web.adapters.config_ops import FillAdapter as LegacyFill
-    from web.adapters.config_ops import ThreatFillAdapter as LegacyThreatFill
-    from web.execution_adapters import ThreatFillAdapter as ExecutionThreatFill
-    from web.parsers import parse_json_threat_result as LegacyParser
+    from application.adapters import create_default_adapters
 
     adapters = create_default_adapters(None)
     assert isinstance(adapters["threat_mapping"], ThreatMappingAdapter)
     assert isinstance(adapters["fill"], FillAdapter)
-    assert LegacyFill is FillAdapter
-    assert LegacyThreatFill is ThreatFillAdapter
-    assert ExecutionThreatFill is ThreatFillAdapter
-    assert LegacyParser is parse_json_threat_result
 
 
 def test_web不再拥有威胁映射或填充实现() -> None:
     """兼容模块只委派或重导出，威胁实现不得跨接缝重新出现。"""
     root = Path(__file__).parents[1]
-    agent_source = (root / "web/adapters/agent_ops.py").read_text(encoding="utf-8")
-    config_source = (root / "web/adapters/config_ops.py").read_text(encoding="utf-8")
-
-    assert "async def _execute_threat_mapping" not in agent_source
-    assert "class ThreatFillAdapter" not in config_source
-    assert "class FillAdapter" not in config_source
+    assert not any((root / "web/adapters").glob("*.py"))
+    assert not (root / "web/execution_adapters.py").exists()
 
 
 def test威胁映射精确调用一次并按顺序提交双槽() -> None:

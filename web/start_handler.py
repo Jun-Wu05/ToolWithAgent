@@ -8,6 +8,7 @@ import chainlit as cl
 import threading
 
 from agent.shared.logger import get_logger
+from application.field_runtime import init_field_cache
 from application.session_state import SessionState
 from web.llm_client import setup_agno_logging_bridge
 from web.global_state import is_agno_bridge_installed, set_agno_bridge_installed
@@ -40,8 +41,6 @@ async def on_chat_start():
     logger.info("[START] 启动时不初始化 Team，等待用户配置")
     
     # 后台线程初始化语义检索 embedding 缓存，不阻塞 Chat 启动
-    from agent.core.field_retriever import init_field_cache
-
     def _background_init_cache() -> None:
         try:
             cache_ready = init_field_cache()

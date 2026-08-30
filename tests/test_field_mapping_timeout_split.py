@@ -5,7 +5,7 @@ import json
 import re
 from types import SimpleNamespace
 
-from web.execution_adapters import FieldMappingExecutionPolicy, ProfessionalAgentAdapter
+from application.adapters import FieldMappingExecutionPolicy, ProfessionalAgentAdapter
 from application.execution import ExecutionContext
 from contracts.planner_models import FieldMappingStep, StepStatus
 from application.session_projection import build_session_facts
@@ -79,7 +79,7 @@ def _run_mapping(fields, member, policy, session=None):
 
 def test字段映射25字段watchdog超时后拆成13和12并原子合并(monkeypatch):
     """超时大批不原样重试；子批结果去重并恢复原字段顺序。"""
-    import web.execution_adapters as execution_adapters
+    import application.adapters.field_mapping as execution_adapters
     import application.field_mapping_input as input_builder
 
     messages = []
@@ -115,7 +115,7 @@ def test字段映射25字段watchdog超时后拆成13和12并原子合并(monkey
 
 def test字段映射provider超时来源可观测且不原样重试(monkeypatch):
     """SDK timeout 使用 provider_sdk 标签并走同一层受限拆分。"""
-    import web.execution_adapters as execution_adapters
+    import application.adapters.field_mapping as execution_adapters
     import application.field_mapping_input as input_builder
 
     messages = []

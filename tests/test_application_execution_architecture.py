@@ -36,30 +36,16 @@ def test_application_runtime_core_has_no_ui_or_domain_dependencies() -> None:
     assert violations == {}
 
 
-def test_legacy_runtime_paths_reexport_identical_application_objects() -> None:
-    """迁移期旧路径只允许重导出同一对象，不能保留第二份实现。"""
-    from application.adapters.export import ExportAdapter
-    from application.execution import ExecutionContext, PlanExecutor, StepAdapter
-    from application.session_state import PrimaryDatasetSnapshot, SessionState
-    from web.adapters.config_ops import ExportAdapter as LegacyConfigExportAdapter
-    from web.execution_adapters import ExportAdapter as LegacyExecutionExportAdapter
-    from web.plan_executor import (
-        ExecutionContext as LegacyExecutionContext,
-        PlanExecutor as LegacyPlanExecutor,
-        StepAdapter as LegacyStepAdapter,
-    )
-    from web.session_state import (
-        PrimaryDatasetSnapshot as LegacyPrimaryDatasetSnapshot,
-        SessionState as LegacySessionState,
-    )
-
-    assert LegacyExecutionContext is ExecutionContext
-    assert LegacyPlanExecutor is PlanExecutor
-    assert LegacyStepAdapter is StepAdapter
-    assert LegacyPrimaryDatasetSnapshot is PrimaryDatasetSnapshot
-    assert LegacySessionState is SessionState
-    assert LegacyConfigExportAdapter is ExportAdapter
-    assert LegacyExecutionExportAdapter is ExportAdapter
+def test_legacy_runtime_paths_are_deleted() -> None:
+    """Completed migration removes the temporary Web runtime paths."""
+    root = Path(__file__).parents[1]
+    for relative in (
+        "web/plan_executor.py",
+        "web/session_state.py",
+        "web/execution_adapters.py",
+    ):
+        assert not (root / relative).exists()
+    assert not any((root / "web/adapters").glob("*.py"))
 
 
 def test_export_tracer_runs_through_application_without_mutating_session() -> None:

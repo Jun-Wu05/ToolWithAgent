@@ -1,15 +1,14 @@
-"""威胁映射适配器及已迁移专业操作的兼容委托。"""
+"""供多类专业步骤调用方使用的 Application 组合适配器。"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
-from agent.shared.logger import get_logger
-
-from application.adapters.log_parse import LogParseAdapter
-from application.adapters.field_mapping import FieldMappingAdapter, FieldMappingExecutionPolicy
 from application.adapters.enum_extract import EnumExtractAdapter
+from application.adapters.field_mapping import FieldMappingAdapter, FieldMappingExecutionPolicy
+from application.adapters.log_parse import LogParseAdapter
+from application.adapters.shared import run_member_stream
 from application.adapters.threat_mapping import ThreatMappingAdapter
 from application.execution import ExecutionContext
 from contracts.planner_models import (
@@ -20,16 +19,10 @@ from contracts.planner_models import (
     StepSpec,
     ThreatMappingStep,
 )
-from application.adapters.shared import (
-    run_member_stream,
-)
-
-
-logger = get_logger("execution_adapters")
 
 
 class ProfessionalAgentAdapter:
-    """直接调用已选定专业 Agent 或领域 Pipeline，不承担意图理解与界面渲染。"""
+    """把兼容的专业步骤分派给各自聚焦的 Application 适配器。"""
 
     def __init__(
         self,
@@ -39,9 +32,8 @@ class ProfessionalAgentAdapter:
         object_map_loader: Any | None = None,
         event_classifier: Any | None = None,
     ) -> None:
-        """保存专业 Agent 注册表、字段映射执行策略与可注入依赖（Issue #88 接缝）。"""
+        """创建日志、枚举、字段与威胁适配器并保存 Team。"""
         self._team = team
-        self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
         self._log_parse_adapter = LogParseAdapter()
         self._enum_extract_adapter = EnumExtractAdapter()
         self._threat_mapping_adapter = ThreatMappingAdapter(team)
@@ -59,7 +51,7 @@ class ProfessionalAgentAdapter:
         context: ExecutionContext,
         dependencies: Mapping[str, StepResult],
     ) -> StepResult:
-        """执行日志、枚举、字段或威胁操作，并返回类型化产物。"""
+        """按类型把步骤分派给唯一的聚焦适配器。"""
         if isinstance(step, LogParseStep):
             return await self._log_parse_adapter.execute(step, context, dependencies)
         if isinstance(step, EnumExtractStep):
@@ -79,7 +71,7 @@ class ProfessionalAgentAdapter:
         step_id: str = "pending",
         batch_number: int | None = None,
     ) -> Any:
-        """消费专业 Agent 事件流，只接收完成事件内容并记录安全 token 计数。"""
+        """消费指定专业 Agent 的事件流并返回完成内容。"""
         return await run_member_stream(
             self._team,
             member_name,

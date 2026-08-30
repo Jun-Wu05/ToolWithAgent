@@ -5,10 +5,9 @@
 所有 UI 渲染保留在 chainlit_app.py 中。
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 from agent.shared.logger import get_logger
-from application.file_input import build_simplified_data, simple_decode
 
 logger = get_logger("file_handler")
 
@@ -32,18 +31,6 @@ def read_element_content(element) -> str:
         return str(content)
     else:
         return str(element)
-
-
-def decode_file_content(file_content: str) -> Dict[str, Any]:
-    """解码 Base64 文件内容
-
-    Args:
-        file_content: 原始文件内容字符串
-
-    Returns:
-        dict: simple_decode 返回的解码结果
-    """
-    return simple_decode(file_content)
 
 
 def get_element_file_name(element) -> str:

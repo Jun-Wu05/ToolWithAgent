@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from types import SimpleNamespace
 
-from web.execution_adapters import (
+from application.adapters import (
     EnumFillAdapter,
     ExportAdapter,
     FieldMappingExecutionPolicy,

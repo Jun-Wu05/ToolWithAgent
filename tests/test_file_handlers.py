@@ -134,7 +134,7 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     monkeypatch.setattr(file_handlers, "get_element_file_name", lambda element: element.name)
     monkeypatch.setattr(
         file_handlers,
-        "decode_file_content",
+        "simple_decode",
         lambda content: {
             "status": "success",
             "decoded_json": {
@@ -336,7 +336,7 @@ def test无效配置上传保持当前有效会话(monkeypatch):
     monkeypatch.setattr(file_handlers, "read_element_content", lambda element: "invalid")
     monkeypatch.setattr(
         file_handlers,
-        "decode_file_content",
+        "simple_decode",
         lambda content: {"status": "error", "error_message": "invalid base64"},
     )
     enum_slot, threat_slot = _referenceable_artifact_slots()
@@ -407,7 +407,7 @@ def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_p
     import web.file_handlers as file_handlers
     from contracts.planner_models import FillStep, StepStatus
     from application.session_projection import build_session_facts
-    from web.execution_adapters import EnumFillAdapter
+    from application.adapters import EnumFillAdapter
     from application.execution import ExecutionContext
     from application.session_state import SessionState
 
@@ -510,7 +510,7 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
     import web.file_handlers as file_handlers
     from contracts.planner_models import ExportStep, FillStep, PlanDecision, StepStatus
     from application.session_projection import build_session_facts
-    from web.execution_adapters import EnumFillAdapter, ExportAdapter, create_default_adapters
+    from application.adapters import EnumFillAdapter, ExportAdapter, create_default_adapters
     from application.execution import ExecutionContext, PlanExecutor
     from application.session_state import SessionState
 

@@ -211,13 +211,13 @@ def test_nonempty_failed_classification_preserves_historical_success_result() ->
 
 def test_legacy_json_prompt_and_adapter_paths_reexport_identical_objects() -> None:
     """迁移期旧入口必须引用同一对象，不能保留第二份实现。"""
-    import agent.core.prompts as legacy_prompts
+    import agent.prompts as legacy_prompts
     import agent.prompts as prompts
     from application.adapters.log_parse import LogParseAdapter
     from application.parsing import parse_json_safe
-    from web.adapters.agent_ops import LogParseAdapter as LegacyAgentOpsAdapter
-    from web.execution_adapters import LogParseAdapter as LegacyExecutionAdapter
-    from web.utils import parse_json_safe as legacy_parse_json_safe
+    from application.adapters.log_parse import LogParseAdapter as LegacyAgentOpsAdapter
+    from application.adapters.log_parse import LogParseAdapter as LegacyExecutionAdapter
+    from application.parsing import parse_json_safe as legacy_parse_json_safe
 
     prompt_names = (
         "load_log_format_identify_prompt",
@@ -304,7 +304,7 @@ def test_default_composition_traces_log_classification_to_rule_export(monkeypatc
     from application.execution import ExecutionContext, PlanExecutor
     from application.session_projection import build_session_facts
     from contracts.planner_models import PlanDecision, StepStatus
-    from web.adapters import create_default_adapters
+    from application.adapters import create_default_adapters
 
     calls = []
     classification = {

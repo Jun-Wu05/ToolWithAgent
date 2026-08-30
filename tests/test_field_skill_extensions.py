@@ -21,7 +21,7 @@ from contracts.planner_models import (
 )
 from application.session_projection import build_session_facts
 from application.execution import ExecutionContext
-from web.adapters.skill_ops import (
+from application.adapters.field_skill import (
     FIELD_SKILL_REGISTRY,
     FieldSkillAdapter,
     _load_skill_function,
