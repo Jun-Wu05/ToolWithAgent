@@ -21,33 +21,31 @@ toolswithagent/
 ├── chainlit.md                      # Chainlit 界面说明
 ├── CHANGELOG.md                     # 变更日志
 │
-├── web/                             # Chainlit Web 界面
-│   ├── chainlit_app.py              # 薄入口：生命周期钩子 + 转发
-│   ├── start_handler.py             # @cl.on_chat_start 实现
-│   ├── settings_handler.py          # @cl.on_settings_update 实现
-│   ├── message_router.py            # @cl.on_message 路由分发
-│   ├── file_handlers.py             # Chainlit 文件上传适配（Excel 检测与用户反馈）
-│   ├── user_message_handlers.py     # 用户文本消息处理（一次 Planner 调用 + Executor + 渲染）
-│   ├── action_callbacks.py          # Action 回调（按钮交互）
-│   ├── plan_executor.py             # 计划执行器（依赖账本、失败停止）
-│   ├── adapters/                    # Application Adapter 的 Web 兼容重导出
-│   ├── execution_adapters.py        # 兼容垫片：重导出 Application 公共入口
-│   ├── session_state.py             # 会话状态（SessionState）
-│   ├── field_source.py              # 字段映射的真实日志字段来源
-│   ├── input_builder.py             # 字段映射批次 LLM 输入构造（embedding 候选）
-│   ├── parsers.py                   # 模型输出 JSON 解析
-│   ├── plan_renderer.py             # 统一渲染器（Clarification/ExecutionReport）
-│   ├── deterministic_plan.py        # 按钮入口的类型化计划
-│   ├── history_store.py             # 受限对话历史
-│   ├── chainlit_progress.py         # 进度事件的 Chainlit 展示
-│   ├── llm_client.py / model_manager.py    # LLM 客户端与模型管理
-│   └── utils.py / global_state.py / constants.py  # 辅助函数
+├── web/                             # Chainlit 输入、生命周期、进度与渲染
+│   ├── chainlit_app.py              # 薄入口：注册 3 个生命周期钩子
+│   ├── start_handler.py             # 聊天启动与 SessionState 装配
+│   ├── settings_handler.py          # 设置控件、连接探针与模型配置 UI
+│   ├── message_router.py            # 每会话锁 + 文件/文本分发
+│   ├── file_handlers.py             # Excel 分流、元素读取与用户反馈
+│   ├── user_message_handlers.py     # 自然语言入口：调用 Application 后渲染
+│   ├── action_callbacks.py          # 10 个确定性 Action callback
+│   ├── deterministic_plan.py        # 按钮计划的 Web 适配
+│   ├── plan_renderer.py             # Clarification/ExecutionReport 渲染
+│   ├── chainlit_progress.py         # ProgressEvent → Chainlit TaskList
+│   └── parsers.py / utils.py / llm_client.py / global_state.py / constants.py
 │
 ├── application/                     # 无 Chainlit 依赖的应用运行时
+│   ├── request_runtime.py           # Planner→Executor 请求编排与确定性入口
+│   ├── execution.py                 # PlanExecutor、ExecutionContext、StepAdapter
+│   ├── execution_policy.py          # 领域预检与执行器组合策略
+│   ├── session_state.py             # 主数据、产物与会话生命周期
+│   ├── session_projection.py        # SessionState → 安全 SessionFacts
+│   ├── history.py                   # 受限对话历史
+│   ├── model_runtime.py             # 模型设置、Team 懒初始化与重置
+│   ├── field_runtime.py             # 字段向量缓存/检索公共入口
 │   ├── file_input.py                # Base64/JSON/TXT 解码与主数据原子提交
-│   ├── session_state.py             # 主数据及会话生命周期
-│   ├── execution.py                 # PlanExecutor / ExecutionContext
-│   └── adapters/                    # 全部业务适配器与唯一生产组合入口
+│   ├── field_mapping_batch.py       # FieldMappingBatchRunner 执行策略
+│   └── adapters/                    # 12 类步骤适配器与唯一生产组合入口
 │
 ├── contracts/                       # 框架无关类型契约（web → contracts ← agent）
 │   ├── planner_models.py            # PlanDecision / StepSpec / Artifact 类型契约
@@ -61,7 +59,6 @@ toolswithagent/
 │   │   ├── agent.py                 # 上传解码兼容入口与历史 simple_encode
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
 │   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
-│   │   ├── prompts.py               # Pipeline Prompt 的迁移期兼容重导出
 │   │   ├── field_retriever.py       # Embedding 语义检索（中文同义词 + tag 规则 + 精确匹配）
 │   │   └── tracing.py               # OpenTelemetry 请求追踪
 │   ├── tools/                       # Agent 工具集
@@ -94,7 +91,7 @@ toolswithagent/
 ├── tests/                           # 离线回归测试（pytest）
 │
 └── docs/                            # 项目文档
-    ├── adr/                         # 架构决策记录（ADR-0001 ~ 0005）
+    ├── adr/                         # 架构决策记录（ADR-0001 ~ 0009）
     ├── architecture/                # 架构概览、代码级设计、统一 Planner 架构、测试场景手册等
     ├── prd/                         # 产品需求文档
     └── agents/                      # Agent 工作流说明（issue 跟踪 / triage 标签 / 领域文档）
@@ -145,7 +142,8 @@ chainlit run web/chainlit_app.py
 | [代码级设计说明](docs/architecture/代码级设计说明.md) | 模块依赖图、函数签名、关键算法、数据流、配置结构 |
 | [chainlit_app模块说明](docs/architecture/chainlit_app模块说明.md) | Web UI 层模块职责、调用关系、数据流 |
 | [测试场景手册](docs/architecture/测试场景手册.md) | 冒烟测试场景与预期 |
-| [ADR](docs/adr/0005-independent-planner-agent.md) | 架构决策记录（最新：ADR-0005 独立 PlannerAgent） |
+| [ADR-0009](docs/adr/0009-application-runtime-ownership.md) | Application 运行时归属、依赖方向与迁移边界 |
+| [源码分析地图](docs/source-code-analysis.html) | 最终生产文件、物理行数、语义层、依赖与推荐阅读顺序 |
 | [PRD](docs/prd/unified-planner-routing.md) | 产品需求文档（最新：统一 Planner 路由） |
 | [CHANGELOG](CHANGELOG.md) | 按版本整理的完整变更记录 |
 | [项目概要](docs/architecture/项目概要.md) | 项目背景、目标、功能全景 |

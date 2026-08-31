@@ -32,6 +32,7 @@
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- Application 运行时提取完成：SessionFacts 投影、PlanExecutor、全部业务 Adapter、FieldMappingBatchRunner、文件输入、Prompt 组合、模型/历史/字段运行时与 Web 请求入口统一落位；Web 收缩为 Chainlit 输入、生命周期、进度和渲染，并新增 ADR-0009、静态依赖门禁与最终源码分析快照（#130 #132–#144）
 - 字段映射下载契约显式化：`filled_config` 单载荷改为 `download_kind/download_content`，Excel 日志映射导出 mapped_sub_rules、真实配置导出 mapped_config、无回填目标不附下载；恢复日志分类历史渲染（详情/样本/完整 JSON）与规则导出动作（#75）
 - 删除死代码 `build_llm_input`（曾把旧枚举结果注入威胁输入）与可读性清理（#44 #59）
 - 可读性清理（-230行）：双重访问清理（getattr or get → .get()，hasattr/else 5行 → [k]=v），提取批处理 helper（batch_mapping_helper.py），提取数据源 helper（_resolve_fill_data_source），魔法字符串集中（EXCLUDED_FIELD_INDICES）

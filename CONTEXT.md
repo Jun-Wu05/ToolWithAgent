@@ -168,10 +168,12 @@ _避免使用_：旧结果缓存、全局历史产物
 - **渲染层（Renderer）**：只消费决策或 ExecutionReport，统一输出一次汇总
 
 **适配层词汇**（2026-08-14 架构拷问固化）：
-- **适配器包**：`application/adapters/` 承载全部生产 StepAdapter 与唯一 `create_default_adapters` 组合实现；`web/adapters/` 和 `web/execution_adapters.py` 只保留迁移期同对象兼容入口。PlanExecutor 按 `step.type` 字符串键注册分派，不感知适配器内部结构；专业 Agent 的模型仍由 Agent 注册表在构造阶段固定，全部 Prompt 文件及加载器统一归属 `agent/prompts/`。
+- **适配器包**：`application/adapters/` 承载全部生产 StepAdapter 与唯一 `create_default_adapters` 组合实现；迁移期 Web 兼容入口已删除。PlanExecutor 按 `step.type` 字符串键注册分派，不感知适配器内部结构；专业 Agent 的模型仍由 Agent 注册表在构造阶段固定，全部 Prompt 文件及加载器统一归属 `agent/prompts/`。
 - **FieldMappingBatchRunner**：字段映射批处理执行器。输入字段列表与执行策略，输出完整映射行结果（含并发分批、超时拆批、重试、漏字段补查）；适配器只做 StepSpec 翻译、进度事件、产物构建与 session 一次性提交。
 - **枚举映射附件提交**：`application/enum_mapping_attachments.py` 按 Sheet 原子累积或同名替换枚举映射附件，并集中维护贡献对应配置的过期与待重填状态；Web 上传处理器只负责工作簿解析和 Chainlit 展示。
 - **依赖注入接缝**：适配器构造函数可选注入外部依赖（candidate_retriever / object_map_loader / llm_caller / prompt_loader，默认值=现模块函数），与 PlannerService(runner=...) 同构。测试传构造假件，不 monkeypatch 模块私有属性。
 - **工具门面**：web 跨包只允许导入 agent/tools 的公开名，禁止下划线私有名跨包引用。
+
+**物理运行时边界**（ADR-0009）：`web/` 只拥有 Chainlit 输入、生命周期、进度和渲染；`application/request_runtime.py` 统一自然语言与确定性请求，`application/execution.py` 拥有执行账本，`application/session_state.py` 与 `application/session_projection.py` 拥有会话及安全事实投影。Application 核心只依赖 Contracts 与标准库；Application Adapters 在明确接缝处依赖 Agent、领域函数和 Skills，禁止反向导入 Web。
 
 **反模式（禁止）**把用户原文整句透传给执行层，让 handler 用正则/隐式状态自行抠参。这等同于把理解工作外包给执行器，是 #15 bug 的根因。
