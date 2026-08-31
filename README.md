@@ -138,6 +138,7 @@ chainlit run web/chainlit_app.py
 |------|------|
 | [CONTEXT.md](CONTEXT.md) | 领域术语表（映射/填充/解析规则等核心概念与角色边界） |
 | [架构概览](docs/architecture/架构概览.md) | 系统架构图、核心流程、外部依赖、错误处理策略 |
+| [领域能力目录](docs/architecture/领域能力目录.md) | 领域能力、公共入口、依赖方向、测试接缝与生命周期状态 |
 | [统一Planner架构](docs/architecture/统一Planner架构.md) | 独立 PlannerAgent + PlanExecutor 架构说明 |
 | [代码级设计说明](docs/architecture/代码级设计说明.md) | 模块依赖图、函数签名、关键算法、数据流、配置结构 |
 | [chainlit_app模块说明](docs/architecture/chainlit_app模块说明.md) | Web UI 层模块职责、调用关系、数据流 |

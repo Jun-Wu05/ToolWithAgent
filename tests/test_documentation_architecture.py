@@ -10,6 +10,7 @@ MAINTAINED_ARCHITECTURE_DOCS = (
     ROOT / "README.md",
     ROOT / "CONTEXT.md",
     ROOT / "docs" / "architecture" / "架构概览.md",
+    ROOT / "docs" / "architecture" / "领域能力目录.md",
     ROOT / "docs" / "architecture" / "代码级设计说明.md",
     ROOT / "docs" / "architecture" / "chainlit_app模块说明.md",
     ROOT / "docs" / "architecture" / "统一Planner架构.md",
