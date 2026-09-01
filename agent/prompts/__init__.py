@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from agent.core.standard_field_catalog import get_standard_field_catalog
+
 
 __all__ = [
     "get_prompts_dir",
@@ -91,13 +93,10 @@ def load_enum_field_prompt() -> str:
 
 def load_standard_fields() -> str:
     """加载标准字段表（全量返回）"""
-    data_path = Path(__file__).parent.parent.parent / "config" / "标准字段.txt"
-    
-    if data_path.exists():
-        content = data_path.read_text(encoding='utf-8')
-        return content
-    
-    return "标准字段表加载失败"
+    try:
+        return get_standard_field_catalog().standard_fields_text
+    except (FileNotFoundError, OSError):
+        return "标准字段表加载失败"
 
 
 def load_enum_extract_prompt() -> str:

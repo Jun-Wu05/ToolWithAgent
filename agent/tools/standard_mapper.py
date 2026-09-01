@@ -11,7 +11,7 @@ from typing import Any, Optional
 from agno.tools import tool
 from openpyxl import load_workbook
 
-from agent.prompts import load_standard_fields
+from agent.core.standard_field_catalog import get_standard_field_catalog
 from agent.shared.logger import get_logger
 
 logger = get_logger("standard_mapper")
@@ -29,15 +29,11 @@ def _get_valid_field_names() -> set:
     global _valid_field_names
     if _valid_field_names is None:
         try:
-            raw = load_standard_fields()
-            names: set = set()
-            for line in raw.strip().split("\n")[1:]:  # 跳过表头
-                cols = line.strip().split("\t")
-                if cols and cols[0]:
-                    # 去除 BOM 字符
-                    name = cols[0].lstrip("\ufeff").strip()
-                    if name:
-                        names.add(name)
+            names = {
+                field.system_property_name
+                for field in get_standard_field_catalog().fields
+                if field.system_property_name
+            }
             _valid_field_names = names
             logger.info(f"[VALIDATOR] 标准字段白名单已加载：{len(names)} 个合法系统属性名称")
         except Exception as e:
@@ -268,28 +264,7 @@ def generate_mapping_table_tool(
 
 def _load_standard_fields_list() -> list[dict]:
     """Load standard fields table as structured list"""
-    raw_text = load_standard_fields()
-    lines = raw_text.strip().split("\n")
-    header = None
-    fields = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if header is None:
-            # Strip BOM from the first column header if present
-            raw_cols = [col.strip() for col in line.split("\t")]
-            if raw_cols:
-                raw_cols[0] = raw_cols[0].lstrip('\ufeff')
-            header = raw_cols
-            continue
-        cols = [col.strip() for col in line.split("\t")]
-        if len(cols) >= len(header):
-            entry = dict(zip(header, cols))
-            fields.append(entry)
-    
-    return fields
+    return get_standard_field_catalog().records()
 
 
 import re
@@ -350,17 +325,10 @@ def _load_synonyms() -> dict[str, list[str]]:
     if _synonyms_cache is not None:
         return _synonyms_cache
 
-    synonyms_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "config", "field_synonyms.json"
-    )
     try:
-        if os.path.exists(synonyms_path):
-            with open(synonyms_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            _synonyms_cache = data
-            logger.info(f"[SYNONYMS] 加载缩写映射表：{len(data)} 条（已缓存）")
-            return _synonyms_cache
+        _synonyms_cache = get_standard_field_catalog().synonyms
+        logger.info(f"[SYNONYMS] 加载缩写映射表：{len(_synonyms_cache)} 条（已缓存）")
+        return _synonyms_cache
     except Exception as e:
         logger.warning(f"[SYNONYMS] 加载缩写映射表失败: {e}")
     _synonyms_cache = {}

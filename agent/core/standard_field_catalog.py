@@ -78,12 +78,14 @@ class StandardFieldCatalog:
         fields: Sequence[StandardField],
         synonyms: Mapping[str, Mapping[str, Any]],
         tag_rules: Mapping[str, Sequence[str]],
+        standard_fields_text: str = "",
     ) -> None:
         self._fields = tuple(fields)
         self._synonyms = _freeze_synonyms(synonyms)
         self._tag_rules = MappingProxyType(
             {name: tuple(keywords) for name, keywords in tag_rules.items()}
         )
+        self._standard_fields_text = standard_fields_text
         self._name_index = MappingProxyType(
             self.build_name_index(field.as_record() for field in self._fields)
         )
@@ -105,14 +107,13 @@ class StandardFieldCatalog:
         tag_rules_path: Path,
     ) -> "StandardFieldCatalog":
         """Parse resource files without performing network or retrieval work."""
-        fields = _parse_standard_fields(
-            standard_fields_path.read_text(encoding="utf-8")
-        )
+        standard_fields_text = standard_fields_path.read_text(encoding="utf-8")
+        fields = _parse_standard_fields(standard_fields_text)
         synonyms = _read_json_mapping(synonyms_path)
         tag_resource = _read_json_mapping(tag_rules_path)
         raw_rules = tag_resource.get("rules", tag_resource)
         tag_rules = raw_rules if isinstance(raw_rules, Mapping) else {}
-        return cls(fields, synonyms, tag_rules)
+        return cls(fields, synonyms, tag_rules, standard_fields_text)
 
     @property
     def fields(self) -> tuple[StandardField, ...]:
@@ -129,6 +130,10 @@ class StandardFieldCatalog:
     @property
     def name_index(self) -> Mapping[str, int]:
         return self._name_index
+
+    @property
+    def standard_fields_text(self) -> str:
+        return self._standard_fields_text
 
     def records(self) -> list[dict[str, str]]:
         """Return defensive mutable copies for legacy consumers."""

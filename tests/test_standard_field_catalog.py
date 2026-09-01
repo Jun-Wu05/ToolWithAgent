@@ -110,3 +110,37 @@ def test_field_retriever_delegates_catalog_facts_and_index(monkeypatch) -> None:
     records = field_retriever._load_standard_fields()
     assert records[0]["_tags"] == ["network"]
     assert field_retriever._build_field_name_index(records) == {"delegated": 0}
+
+
+def test_remaining_consumers_delegate_to_catalog_and_keep_prompt_policy(monkeypatch) -> None:
+    """standard_mapper 与 Prompt 公共入口共享 Catalog，且保留旧返回策略。"""
+    from types import SimpleNamespace
+
+    import agent.prompts as prompts
+    from agent.tools import standard_mapper
+
+    class FakeCatalog:
+        fields = (SimpleNamespace(system_property_name="源地址"),)
+        synonyms = {"src": {"en": "source", "zh": ("源",)}}
+        standard_fields_text = "系统属性名称\t字段名称\n源地址\tsrc_address\n"
+
+        def records(self):
+            return [{"系统属性名称": "源地址", "字段名称": "src_address"}]
+
+    fake = FakeCatalog()
+    monkeypatch.setattr(standard_mapper, "get_standard_field_catalog", lambda: fake)
+    monkeypatch.setattr(prompts, "get_standard_field_catalog", lambda: fake)
+    monkeypatch.setattr(standard_mapper, "_valid_field_names", None)
+    monkeypatch.setattr(standard_mapper, "_synonyms_cache", None)
+
+    assert standard_mapper._get_valid_field_names() == {"源地址"}
+    assert standard_mapper._load_standard_fields_list() == fake.records()
+    assert standard_mapper._load_synonyms() is fake.synonyms
+    assert prompts.load_standard_fields() == fake.standard_fields_text
+
+    monkeypatch.setattr(
+        prompts,
+        "get_standard_field_catalog",
+        lambda: (_ for _ in ()).throw(FileNotFoundError),
+    )
+    assert prompts.load_standard_fields() == "标准字段表加载失败"
