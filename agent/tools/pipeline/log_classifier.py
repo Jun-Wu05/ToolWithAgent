@@ -28,6 +28,7 @@ from agent.tools.pipeline.llm_client import (
     _call_llm_direct,
     normalize_log_format,
 )
+from agent.tools.pipeline.classification_policy import decide_body_key_route
 
 logger = get_logger("log_parser_pipeline")
 
@@ -662,10 +663,11 @@ def _do_classify_log_features(
             coverage = _kv_key_line_coverage(
                 normalized, feature_field, routing_delimit, routing_tab
             )
-            if coverage >= 0.8:
+            route = decide_body_key_route(feature_field, coverage)
+            if route.use_body_path:
                 logger.info(
                     f"[_do_classify_log_features] 特征键 '{feature_field}' 行覆盖率 "
-                    f"{coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
+                    f"{route.coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
                 )
                 return _classify_kv_features(
                     logs_str=normalized,
@@ -677,10 +679,11 @@ def _do_classify_log_features(
                 )
         else:
             coverage = _json_key_line_coverage(logs_str, feature_field)
-            if coverage >= 0.8:
+            route = decide_body_key_route(feature_field, coverage)
+            if route.use_body_path:
                 logger.info(
                     f"[_do_classify_log_features] JSON 特征键 '{feature_field}' 行覆盖率 "
-                    f"{coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
+                    f"{route.coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
                 )
                 return _classify_json_features(
                     logs_str=logs_str,

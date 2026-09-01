@@ -67,7 +67,7 @@ toolswithagent/
 │   │   ├── enum_field_tool.py       # 枚举映射表读取
 │   │   ├── base64_tool.py           # Base64 编解码
 │   │   ├── rule_generator/          # 解析规则生成（入口/子规则、字段映射回写）
-│   │   ├── pipeline/                # 日志解析 Pipeline（格式识别/特征定位/分类）
+│   │   ├── pipeline/                # 日志解析 Pipeline（格式识别/特征定位/分类策略）
 │   │   └── log_pattern_store.py     # 日志模式知识库
 │   ├── shared/                      # 共享算法
 │   │   ├── field_mapping.py         # 字段映射核心算法

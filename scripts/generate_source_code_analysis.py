@@ -71,9 +71,9 @@ LAYER_INFO = {
         "upstream": "LogParseAdapter",
         "downstream": "规则生成与 Session 产物",
         "reading": [
+            "agent/tools/pipeline/classification_policy.py",
             "agent/tools/pipeline/log_format_identifier.py",
             "agent/tools/pipeline/log_classifier.py",
-            "agent/tools/pipeline/log_sample_filler.py",
         ],
     },
     "解析规则生成": {
@@ -132,6 +132,7 @@ RESPONSIBILITIES = {
     "agent/core/standard_field_catalog.py": "只读标准字段 schema、资源解析与确定性名称/别名 lookup。",
     "agent/core/field_retriever.py": "标准字段 embedding、缓存、候选排除与排序策略。",
     "agent/prompts/__init__.py": "全部 Prompt 的公开加载器与包相对资源定位。",
+    "agent/tools/pipeline/classification_policy.py": "日志体特征键覆盖率的纯路由策略。",
 }
 
 
