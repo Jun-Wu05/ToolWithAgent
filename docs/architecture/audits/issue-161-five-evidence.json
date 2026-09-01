@@ -59,7 +59,7 @@
         "dynamic_registrations": [],
         "package_reexports": [],
         "test_dependencies": [],
-      "external_dependencies": {
+        "external_dependencies": {
           "status": "confirmed-no-consumers",
           "evidence": "维护者已在 #162 与独立删除 Issue #168 中确认没有仓库外消费者。"
         }
@@ -78,13 +78,20 @@
         "production_imports": [],
         "dynamic_registrations": [],
         "package_reexports": [],
-        "test_dependencies": [],
+        "test_dependencies": [
+          {
+            "path": "tests/test_resilience_characterization.py",
+            "line": 7,
+            "kind": "import",
+            "detail": "agent.core.resilience"
+          }
+        ],
         "external_dependencies": {
           "status": "pending-human-confirmation",
           "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
         }
       },
-      "summary": "四类仓库内证据均为空，且尚无 characterization；历史意图与外部消费者仍待确认。",
+      "summary": "存在独立 characterization 测试，但未发现生产导入、动态注册或包级重导出；外部消费者仍待确认。",
       "decision": "retain-needs-info",
       "deletion_authorized": false
     },
