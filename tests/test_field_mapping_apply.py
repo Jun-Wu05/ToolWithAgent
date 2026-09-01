@@ -83,6 +83,47 @@ def test上传配置已映射条目保留原值且未映射条目正常写入():
     assert "field" not in config["normalize"][1] or config["normalize"][1]["field"] == ""
 
 
+def test子规则重映射时显式未匹配行清空旧字段映射():
+    """#165 冲突落选行不得在 mapped_sub_rules 中残留上次映射。"""
+    from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_sub_rules
+
+    sub_rules = [
+        {
+            "name": "rule-a",
+            "normalize": [
+                {
+                    "index": "src_ip",
+                    "field": "旧标准字段",
+                    "entity": "旧对象",
+                    "sim": True,
+                    "core": False,
+                }
+            ],
+        }
+    ]
+    mapping_results = [
+        {
+            "rule_name": "rule-a",
+            "mappings": [
+                {
+                    "原始字段名": "src_ip",
+                    "系统属性名称": "未匹配",
+                    "匹配状态": "未匹配",
+                }
+            ],
+        }
+    ]
+
+    result = apply_field_mapping_to_sub_rules(sub_rules, mapping_results)
+    normalized = result[0]["normalize"][0]
+
+    assert normalized["field"] is None
+    assert normalized["entity"] is None
+    assert normalized["sim"] is None
+    assert normalized["core"] is None
+    assert sub_rules[0]["normalize"][0]["field"] == "旧标准字段"
+
+
 def test多子规则共享字段全部回写且不新增normalize():
     """#23: 共享字段复用到所有子规则、独有字段按作用域回写，且不新增 normalize 项。
 

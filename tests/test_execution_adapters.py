@@ -918,6 +918,135 @@ def test上传规则全部已映射时直接成功且不调模型():
     assert "所有字段均已映射，无需再次执行" in (report.results[0].message or "")
 
 
+def test字段映射一对一冲突裁决后仅写回保留者():
+    """Adapter 在任何 apply 前裁决，并让 Session、Artifact 与消息保持一致。"""
+    class CollisionMember:
+        name = "FieldMappingAgent"
+
+        def __init__(self):
+            self.calls = []
+
+        def run(self, model_input):
+            self.calls.append(model_input)
+            return [
+                {"原始字段名": "src", "系统属性名称": "源IP", "匹配状态": "匹配成功"},
+                {"原始字段名": "client", "系统属性名称": "源IP", "匹配状态": "匹配成功"},
+            ]
+
+    candidate_calls = []
+
+    def retrieve(fields):
+        candidate_calls.append(tuple(fields))
+        return "\n".join(
+            [
+                "## 标准字段候选（语义检索 top-5，按相似度降序）：",
+                "src → 源IP(0.91, source_ip)",
+                "client → 源IP(1.00, client)",
+            ]
+        )
+
+    session = {
+        "decoded_fields": ["src", "client"],
+        "decoded_data": {
+            "normalize": [
+                {"index": "src", "field": ""},
+                {"index": "client", "field": ""},
+            ]
+        },
+    }
+    member = CollisionMember()
+    result = asyncio.run(
+        ProfessionalAgentAdapter(
+            _Team(member),
+            candidate_retriever=retrieve,
+            object_map_loader=lambda _path: {},
+        ).execute(
+            FieldMappingStep(
+                step_id="mapping-conflict", type="field_mapping", source_ref="session.fields"
+            ),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert len(member.calls) == 1
+    assert candidate_calls == [("src", "client"), ("src", "client")]
+    assert [row["匹配状态"] for row in session["last_mapping_data"]] == [
+        "未匹配",
+        "匹配成功",
+    ]
+    normalized = {entry["index"]: entry for entry in session["decoded_data"]["normalize"]}
+    assert normalized["src"].get("field", "") == ""
+    assert normalized["client"]["field"] == "源IP"
+    assert [row.match_status for row in result.artifact.mappings] == ["未匹配", "匹配成功"]
+    assert "检测到 1 组占用冲突，保留 1 个、1 个置未匹配" in (result.message or "")
+    assert "源IP：保留 client；落选 src；依据：精确命中（1.00）" in (result.message or "")
+
+
+def test字段映射新行撞上传配置既有标准字段时落选():
+    """#163 跳过的既有映射是只读占用方，新行即使精确命中也不能覆盖或撞入。"""
+    from application.adapters.field_mapping import FieldMappingAdapter
+
+    class ExistingCollisionRunner:
+        async def run(self, fields, **_kwargs):
+            assert list(fields) == ["client_ip"]
+            return [
+                {
+                    "原始字段名": "client_ip",
+                    "系统属性名称": "源IP",
+                    "匹配状态": "匹配成功",
+                }
+            ]
+
+    session = {
+        "decoded_fields": ["external_src", "client_ip"],
+        "decoded_data": {
+            "normalize": [
+                {
+                    "index": "external_src",
+                    "field": "源IP",
+                    "entity": "外部对象",
+                    "sim": False,
+                    "core": True,
+                },
+                {"index": "client_ip", "field": ""},
+            ]
+        },
+    }
+    result = asyncio.run(
+        FieldMappingAdapter(
+            team=None,
+            batch_runner=ExistingCollisionRunner(),
+            candidate_retriever=lambda fields: "client_ip → 源IP(1.00, client_ip)",
+            object_map_loader=lambda _path: {},
+        ).execute(
+            FieldMappingStep(
+                step_id="mapping-existing-conflict",
+                type="field_mapping",
+                source_ref="session.fields",
+            ),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    normalized = {entry["index"]: entry for entry in session["decoded_data"]["normalize"]}
+    assert result.status == StepStatus.SUCCESS
+    assert normalized["external_src"] == {
+        "index": "external_src",
+        "field": "源IP",
+        "entity": "外部对象",
+        "sim": False,
+        "core": True,
+    }
+    assert normalized["client_ip"].get("field", "") == ""
+    assert session["last_mapping_data"][0]["匹配状态"] == "未匹配"
+    assert "保留 external_src；落选 client_ip；依据：既有上传映射占用" in (
+        result.message or ""
+    )
+
+
 def test威胁映射依赖产物不是枚举值时失败():
     """依赖步骤产物不是 EnumValuesArtifact 时返回 dependency_type_mismatch（回归 #38）。"""
     from contracts.planner_models import ConfigExportArtifact, StepResult, ThreatMappingStep

@@ -39,6 +39,7 @@ class FieldMappingAdapter:
     ) -> None:
         """保存批处理 Runner、执行策略及领域服务接缝。"""
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
+        self._candidate_retriever = candidate_retriever
         self._object_map_loader = object_map_loader
         self._event_classifier = event_classifier
         self._batch_runner = (
@@ -118,6 +119,19 @@ class FieldMappingAdapter:
         if len(mapping_rows) != len(mappable_fields):
             return _failed(step, "field_mapping_incomplete", "字段映射结果数量与输入字段数量不一致")
 
+        from application.field_mapping_conflicts import (
+            format_field_mapping_conflicts,
+            resolve_field_mapping_conflicts,
+        )
+
+        decoded_data = _session_get(context.session, "decoded_data")
+        conflict_outcome = resolve_field_mapping_conflicts(
+            mapping_rows,
+            decoded_data=decoded_data,
+            candidate_retriever=self._candidate_retriever,
+        )
+        mapping_rows = list(conflict_outcome.rows)
+        conflict_summary = format_field_mapping_conflicts(conflict_outcome.details)
         typed_mappings = tuple(FieldMappingRow.model_validate(row) for row in mapping_rows)
         staged_sub_rule_results = None
         staged_mapped_sub_rules = None
@@ -168,7 +182,6 @@ class FieldMappingAdapter:
         staged_decoded_data = None
         download_kind = None
         download_content = None
-        decoded_data = _session_get(context.session, "decoded_data")
         has_decoded_config = "session.decoded_config" in context.session_facts.available_config_refs
         if has_decoded_config and isinstance(decoded_data, (dict, list)) and decoded_data:
             from agent.tools import load_object_mapping
@@ -240,6 +253,8 @@ class FieldMappingAdapter:
                 f"跳过已映射 {context.session_facts.decoded_mapped_field_count} 个"
                 "（保留原映射）"
             )
+        if conflict_summary:
+            message = f"{message}；{conflict_summary}"
         if event_annotation_summary:
             message = f"{message}；{event_annotation_summary}"
         if had_existing_mapped_rules and staged_mapped_sub_rules is not None:

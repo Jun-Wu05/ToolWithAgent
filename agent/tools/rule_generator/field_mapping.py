@@ -64,8 +64,9 @@ def apply_field_mapping_to_sub_rules(
 ) -> list[dict[str, Any]]:
     """将标准字段映射结果应用到子规则的 normalize 条目上。
 
-    遍历每条子规则的 normalize 条目，对匹配的 index 设置
-    field（标准字段名）、entity（对象）、sim（True）、core（False）。
+    遍历每条子规则的 normalize 条目，对匹配成功的 index 设置
+    field（标准字段名）、entity（对象）、sim（True）、core（False）；显式未匹配行
+    恢复为 field/entity/sim/core=None，避免重新映射时残留旧映射。
 
     Args:
         sub_rules: 子规则列表（会被深拷贝，不修改原始数据）。
@@ -129,6 +130,11 @@ def apply_field_mapping_to_sub_rules(
                 entry["entity"] = object_entity_map.get(system_prop, "事件")
                 entry["sim"] = True
                 entry["core"] = False
+            else:
+                entry["field"] = None
+                entry["entity"] = None
+                entry["sim"] = None
+                entry["core"] = None
 
     return result_rules
 

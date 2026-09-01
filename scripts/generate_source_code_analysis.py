@@ -46,6 +46,7 @@ LAYER_INFO = {
             "application/adapters/composition.py",
             "application/adapters/field_mapping.py",
             "application/field_mapping_batch.py",
+            "application/field_mapping_conflicts.py",
         ],
     },
     "类型化契约": {
@@ -119,6 +120,7 @@ RESPONSIBILITIES = {
     "application/field_runtime.py": "字段缓存初始化与候选检索公共入口。",
     "application/file_input.py": "Base64/JSON/TXT 确定性解码与主数据原子提交。",
     "application/field_mapping_batch.py": "字段映射分批、并发、超时、重试和漏字段补查。",
+    "application/field_mapping_conflicts.py": "字段映射目标一对一占用冲突的确定性裁决。",
     "application/adapters/composition.py": "全部 StepAdapter 的唯一生产组合入口。",
     "application/adapters/field_skill_policy.py": "Field Skill 删除前的纯悬空引用扫描策略。",
     "web/user_message_handlers.py": "自然语言 Web 适配、进度衔接与结果渲染。",
@@ -164,6 +166,7 @@ def layer_for(relative: str) -> str:
     if relative.startswith("application/adapters/") or relative in {
         "application/execution_policy.py",
         "application/field_mapping_batch.py",
+        "application/field_mapping_conflicts.py",
         "application/field_mapping_input.py",
         "application/field_source.py",
         "application/parsing.py",
@@ -299,7 +302,7 @@ def build_payload() -> dict:
             "自然语言": ["Chainlit Message", "run_user_request", "SessionFacts", "PlannerAgent", "PlanExecutor", "StepAdapter", "ExecutionReport", "Renderer"],
             "确定性 Action": ["Action callback", "StepSpec", "run_deterministic_plan", "PlanExecutor", "StepAdapter", "ExecutionReport", "Renderer"],
             "文件输入": ["Chainlit Element", "Web 类型识别", "Application file_input", "主数据原子提交", "SessionFacts"],
-            "字段映射": ["字段来源", "候选检索", "FieldMappingBatchRunner", "事件名称标注", "Session 原子写回", "Artifact"],
+            "字段映射": ["字段来源", "候选检索", "FieldMappingBatchRunner", "一对一冲突裁决", "事件名称标注", "Session 原子写回", "Artifact"],
         },
         "files": records,
     }
