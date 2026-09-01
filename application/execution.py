@@ -123,12 +123,14 @@ class PlanExecutor:
 
         self._logger.info(
             "[EXECUTOR] 计划开始: plan_id=%s step_count=%s available_config_refs=%s "
-            "has_logs=%s available_field_count=%s enum_target_field_count=%s",
+            "has_logs=%s available_field_count=%s mappable_field_count=%s "
+            "enum_target_field_count=%s",
             plan.plan_id,
             len(plan.steps),
             list(context.session_facts.available_config_refs),
             context.session_facts.has_logs,
             len(context.session_facts.available_fields),
+            len(context.session_facts.mappable_fields),
             len(context.session_facts.enum_mapping_target_fields),
         )
         ledger: dict[str, StepResult] = {}
@@ -192,7 +194,8 @@ class PlanExecutor:
                 self._logger.info(
                     "[EXECUTOR] 执行前拦截: plan_id=%s step_id=%s operation=%s status=%s "
                     "error_category=%s required_config_ref=%s observed_config_refs=%s "
-                    "has_logs=%s available_field_count=%s enum_target_field_count=%s",
+                    "has_logs=%s available_field_count=%s mappable_field_count=%s "
+                    "enum_target_field_count=%s",
                     plan.plan_id,
                     step.step_id,
                     step.type,
@@ -202,6 +205,7 @@ class PlanExecutor:
                     list(context.session_facts.available_config_refs),
                     context.session_facts.has_logs,
                     len(context.session_facts.available_fields),
+                    len(context.session_facts.mappable_fields),
                     len(context.session_facts.enum_mapping_target_fields),
                 )
                 break
@@ -313,8 +317,8 @@ class PlanExecutor:
 
         if isinstance(step, LogParseStep) and not session_facts.has_logs:
             return self._needs_input_result(step, "logs_required", "请先上传包含日志的数据")
-        if isinstance(step, FieldMappingStep) and not session_facts.available_fields:
-            return self._needs_input_result(step, "fields_required", "请先上传包含可映射字段的数据")
+        if isinstance(step, FieldMappingStep) and not session_facts.mappable_fields:
+            return self._needs_input_result(step, "fields_required", "当前没有可映射的原始字段")
         if (
             isinstance(step, ExportStep)
             and step.source_ref in {"session.decoded_config", "session.mapped_sub_rules"}

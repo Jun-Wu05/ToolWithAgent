@@ -281,6 +281,48 @@ class _Team:
         self.members = [member]
 
 
+def test字段映射批次只消费原始字段候选池():
+    """标准名保留在 Planner 词典中，但不得再次送入映射 LLM。"""
+    from application.adapters.field_mapping import FieldMappingAdapter
+    from contracts.session_facts import SessionFacts
+
+    class RecordingBatchRunner:
+        def __init__(self) -> None:
+            self.fields = []
+
+        async def run(self, fields, **kwargs):
+            self.fields = list(fields)
+            return [
+                {
+                    "原始字段名": field,
+                    "系统属性名称": f"标准_{field}",
+                    "匹配状态": "匹配成功",
+                }
+                for field in fields
+            ]
+
+    runner = RecordingBatchRunner()
+    facts = SessionFacts(
+        available_fields=("src_ip", "源IP"),
+        mappable_fields=("src_ip",),
+    )
+
+    result = asyncio.run(
+        FieldMappingAdapter(team=None, batch_runner=runner).execute(
+            FieldMappingStep(
+                step_id="mapping-pool",
+                type="field_mapping",
+                source_ref="session.fields",
+            ),
+            ExecutionContext(session={}, session_facts=facts),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert runner.fields == ["src_ip"]
+
+
 def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     """验证批处理能力保留，且映射结果真正更新 mapped_sub_rules。"""
     import application.field_mapping_input as input_builder

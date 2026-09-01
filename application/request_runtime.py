@@ -120,11 +120,12 @@ async def run_user_request(
     session_facts = build_session_facts(session)
     logger.info(
         "[SESSION_FACTS] 指令执行前状态: has_logs=%s has_log_classification=%s "
-        "available_field_count=%s enum_mapping_row_count=%s "
+        "available_field_count=%s mappable_field_count=%s enum_mapping_row_count=%s "
         "enum_target_field_count=%s available_config_refs=%s referenceable_artifacts=%s",
         session_facts.has_logs,
         session_facts.has_log_classification,
         len(session_facts.available_fields),
+        len(session_facts.mappable_fields),
         session_facts.enum_mapping_row_count,
         len(session_facts.enum_mapping_target_fields),
         list(session_facts.available_config_refs),

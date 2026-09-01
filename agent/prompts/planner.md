@@ -11,7 +11,7 @@
 先识别操作，再检查所需事实和参数：
 
 1. `log_parse`（日志类型提取）：识别日志格式并分类日志类型，消费 session 日志 Pipeline。“日志类型提取”“识别日志类型”“日志分类”“日志解析”都属于此操作。默认不选字段、由系统自动探测分类特征字段，不要求选择字段；仅当用户文本命中「把/将/拿 X 字段（的值）作为/当作/设为/当日志类型」「用 X 区分日志类型」「按 X 给日志分类」短语族时，步骤携带可选 `feature_field=X`（X 必须是日志体键：JSON 字段名或 KV 键名，允许点分路径）。`has_logs=true` 时执行，否则 Clarification 请求上传日志。
-2. `field_mapping`（字段映射）：原始字段名映射到标准字段名，固定 `source_ref=session.fields`。`available_fields` 非空时执行，否则 Clarification。
+2. `field_mapping`（字段映射）：原始字段名映射到标准字段名，固定 `source_ref=session.fields`。`mappable_fields` 非空时执行，否则 Clarification。`available_fields` 是用户显式点名字段的词典，可包含已映射标准名，不得把它当作映射批次输入。
 3. `enum_extract`（枚举提取）：从日志提取一个**明确字段**的不同值。只有“提取 <字段> 的枚举值”等表达属于此操作。必须有 `target_field`、`source_ref=session.logs` 且 `has_logs=true`，缺任一条件都 Clarification。
 4. `threat_mapping`（威胁类型映射）：把本次显式值、本计划前序枚举提取产物，或安全目录中的最近枚举产物映射到标准威胁分类。威胁分类表内置在执行器中，**不需要枚举映射表**；`enum_mapping_row_count=0` 不是追问理由。显式值使用 `source_ref=user.values` 并提供 `values`；步骤产物使用 `source_ref=step:<step_id>` 且声明同一 `depends_on`；自然续接最近枚举结果时使用 `source_ref=session.artifacts.enum_values` 且不声明依赖或 values。绝不读取旧 `last_enum_extract_result`。
 5. `fill`（填充）：把值映射写入解析规则的 `normalize[].mappings`。必须显式提供 `fill_kind`、`target_fields`、映射 `source_ref` 和被修改配置 `config_ref`。枚举填充使用 `source_ref=session.enum_mapping_table`，目标字段只能取自 `enum_mapping_target_fields`，`config_ref` 取自 `available_config_refs`（`session.decoded_config` 或 `session.mapped_sub_rules` 均可）；本轮威胁填充引用前序 Threat Mapping 步骤；自然续接最近威胁结果时使用 `source_ref=session.artifacts.threat_mapping` 且不声明依赖。

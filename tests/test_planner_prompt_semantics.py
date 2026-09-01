@@ -136,3 +136,10 @@ def test提示词要求信息型问题直接从会话事实作答():
     assert "事实中无答案（如 `event_annotations` 为空且尚未字段映射）时仍 Clarification" in PROMPT
     assert '"decision":"guidance","plan_id":"plan-qa","answer"' in PROMPT
     assert "`guidance_code`、`answer`、`parameters`" in PROMPT
+
+
+def test提示词区分planner点名词典与字段映射候选池():
+    """映射可执行性只看 mappable_fields，available_fields 仍服务用户点名。"""
+    assert "`mappable_fields` 非空时执行" in PROMPT
+    assert "`available_fields` 是用户显式点名字段的词典" in PROMPT
+    assert "不得把它当作映射批次输入" in PROMPT

@@ -45,7 +45,10 @@ def test_application_projects_stable_safe_session_facts() -> None:
         "mapped_sub_rules": [
             {
                 "name": "AUDIT_kv_子规则",
-                "normalize": [{"index": "src_ip", "field": "源IP"}],
+                "normalize": [
+                    {"index": "src_ip", "field": "源IP"},
+                    {"index": "源IP", "field": ""},
+                ],
                 "parser": {
                     "filter": [
                         {"name": "addFields", "id": "", "fields": {"事件名称": "审计事件"}}
@@ -68,6 +71,7 @@ def test_application_projects_stable_safe_session_facts() -> None:
         "session.mapped_sub_rules",
     )
     assert facts.available_fields == ("alarm_name", "src_ip", "源IP")
+    assert facts.mappable_fields == ("alarm_name", "src_ip")
     assert facts.enum_mapping_target_fields == ("event_name",)
     assert facts.decoded_config_rule_names == ("decoded-rule",)
     assert facts.mapped_sub_rule_names == ("AUDIT_kv_子规则", "addFields")

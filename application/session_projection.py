@@ -22,32 +22,54 @@ def _read_session_value(session: Any, key: str, default: Any = None) -> Any:
     return getattr(session, key, default)
 
 
-def _collect_available_fields(session: Any) -> tuple[str, ...]:
-    """从唯一位置汇总可用字段，去重同时保留字段首次出现顺序。"""
+def _collect_field_pools(session: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """构建 Planner 点名词典与字段映射候选池。"""
     from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
     from application.field_source import extract_log_fields_for_mapping
 
-    ordered_fields: list[str] = []
-    seen_fields: set[str] = set()
+    available_fields: list[str] = []
+    seen_available_fields: set[str] = set()
+    mappable_fields: list[str] = []
+    seen_mappable_fields: set[str] = set()
+    mapped_standard_fields: set[str] = set()
 
-    def append_fields(values: Any) -> None:
+    def append_fields(values: Any, target: list[str], seen: set[str]) -> None:
         for item in values or []:
             field_name = str(item).strip()
-            if field_name and field_name not in seen_fields and field_name not in EXCLUDED_FIELD_INDICES:
-                seen_fields.add(field_name)
-                ordered_fields.append(field_name)
+            if field_name and field_name not in seen and field_name not in EXCLUDED_FIELD_INDICES:
+                seen.add(field_name)
+                target.append(field_name)
 
     classification = _read_session_value(session, "log_classification")
     raw_log_lines = _read_session_value(session, "raw_log_lines", []) or []
     log_fields = extract_log_fields_for_mapping(classification, raw_log_lines)
-    append_fields(log_fields or _read_session_value(session, "decoded_fields", []) or [])
+    base_fields = log_fields or _read_session_value(session, "decoded_fields", []) or []
+    append_fields(base_fields, available_fields, seen_available_fields)
+    append_fields(base_fields, mappable_fields, seen_mappable_fields)
     for sub_rule in _read_session_value(session, "mapped_sub_rules", []) or []:
         if not isinstance(sub_rule, Mapping):
             continue
         for normalization in sub_rule.get("normalize", []) or []:
             if isinstance(normalization, Mapping):
-                append_fields(normalization.get(key) for key in ("index", "field"))
-    return tuple(ordered_fields)
+                original_field = normalization.get("index")
+                standard_field = normalization.get("field")
+                append_fields(
+                    (original_field, standard_field),
+                    available_fields,
+                    seen_available_fields,
+                )
+                append_fields(
+                    (original_field,),
+                    mappable_fields,
+                    seen_mappable_fields,
+                )
+                standard_name = str(standard_field or "").strip()
+                if standard_name:
+                    mapped_standard_fields.add(standard_name)
+    return (
+        tuple(available_fields),
+        tuple(field for field in mappable_fields if field not in mapped_standard_fields),
+    )
 
 
 def _collect_enum_target_fields(enum_preview: Any) -> tuple[str, ...]:
@@ -170,6 +192,7 @@ def build_session_facts(session: Any) -> SessionFacts:
     enum_preview = _read_session_value(session, "enum_preview", []) or []
     mapped_sub_rules = _read_session_value(session, "mapped_sub_rules", []) or []
     decoded_data = _read_session_value(session, "decoded_data")
+    available_fields, mappable_fields = _collect_field_pools(session)
     config_refs: tuple[ConfigRef, ...] = tuple(
         ref
         for ref, config in (
@@ -184,7 +207,8 @@ def build_session_facts(session: Any) -> SessionFacts:
         has_log_classification=bool(_read_session_value(session, "log_classification")),
         has_mapped_sub_rules=bool(mapped_sub_rules),
         available_config_refs=config_refs,
-        available_fields=_collect_available_fields(session),
+        available_fields=available_fields,
+        mappable_fields=mappable_fields,
         enum_mapping_target_fields=_collect_enum_target_fields(enum_preview),
         enum_mapping_row_count=len(enum_preview),
         existing_enum_value_count=_count_enum_values(_read_session_value(session, "last_enum_extract_result")),

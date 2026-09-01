@@ -66,7 +66,7 @@ class FieldMappingAdapter:
         self, step: FieldMappingStep, context: ExecutionContext
     ) -> StepResult:
         """运行批处理，验证完整结果，再计算产物并一次性提交 Session。"""
-        available_fields = list(context.session_facts.available_fields)
+        mappable_fields = list(context.session_facts.mappable_fields)
         simplified_data = _session_get(context.session, "simplified_data", {}) or {}
         original_log_sample = (
             simplified_data.get("original_log_sample", "")
@@ -81,7 +81,7 @@ class FieldMappingAdapter:
 
         try:
             mapping_rows = await self._batch_runner.run(
-                available_fields,
+                mappable_fields,
                 original_log_sample=original_log_sample,
                 plan_id=context.plan_id,
                 step_id=step.step_id,
@@ -99,7 +99,7 @@ class FieldMappingAdapter:
             context, step, ProgressPhase.VALIDATION, ProgressStatus.RUNNING,
             "field_mapping_validating",
         )
-        if len(mapping_rows) != len(available_fields):
+        if len(mapping_rows) != len(mappable_fields):
             return _failed(step, "field_mapping_incomplete", "字段映射结果数量与输入字段数量不一致")
 
         typed_mappings = tuple(FieldMappingRow.model_validate(row) for row in mapping_rows)

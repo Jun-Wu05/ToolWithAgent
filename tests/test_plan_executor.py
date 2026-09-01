@@ -306,8 +306,8 @@ def test枚举提取目标字段未出现在字段映射列表时仍进入适配
     assert len(adapter.calls) == 1
 
 
-def test字段映射无可用字段时在适配器前拦截():
-    """无可用字段时以 fields_required 拦截，适配器不被调用（回归 #40）。"""
+def test字段映射无原始字段候选时在适配器前拦截():
+    """Planner 词典只剩标准名时仍以 fields_required 拦截（回归 #164）。"""
     decision = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -320,7 +320,7 @@ def test字段映射无可用字段时在适配器前拦截():
     report = _execute(
         decision,
         {"field_mapping": adapter},
-        SessionFacts(available_fields=()),
+        SessionFacts(available_fields=("源IP",), mappable_fields=()),
     )
 
     assert report.results[0].status == StepStatus.NEEDS_INPUT

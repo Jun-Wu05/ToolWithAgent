@@ -24,7 +24,10 @@ class SessionFacts(BaseModel):
     has_log_classification: bool = False
     has_mapped_sub_rules: bool = False
     available_config_refs: tuple[ConfigRef, ...] = ()
+    # Planner 点名词典：包含原始字段名和已映射的标准字段名。
     available_fields: tuple[str, ...] = ()
+    # 字段映射输入：只包含仍可送入映射批次的原始字段名。
+    mappable_fields: tuple[str, ...] = ()
     enum_mapping_target_fields: tuple[str, ...] = ()
     enum_mapping_row_count: int = Field(default=0, ge=0)
     existing_enum_value_count: int = Field(default=0, ge=0)
