@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "issue": 161,
+  "recorded_at": "2026-09-01",
+  "scope": "audit-only",
+  "scanner": "python scripts/audit_module_usage.py",
+  "policy": {
+    "repository_evidence": "生产导入、动态注册、包级重导出和测试依赖由仓库扫描器复核。",
+    "external_evidence": "仓库外依赖不能由仓库扫描证明，必须由维护者、部署清单、发布契约或等价证据人工确认。",
+    "authorization": "审计记录不授权 characterization、删除、合并或重构；这些动作必须使用独立 Issue。"
+  },
+  "candidates": [
+    {
+      "id": "base64-tool",
+      "name": "Base64 Tool",
+      "module_names": ["agent.tools.base64_tool"],
+      "module_paths": ["agent/tools/base64_tool.py"],
+      "evidence": {
+        "production_imports": [],
+        "dynamic_registrations": [
+          {
+            "path": "agent/tools/base64_tool.py",
+            "line": 106,
+            "kind": "decorator",
+            "detail": "@tool"
+          },
+          {
+            "path": "agent/tools/base64_tool.py",
+            "line": 172,
+            "kind": "decorator",
+            "detail": "@tool"
+          }
+        ],
+        "package_reexports": [],
+        "test_dependencies": [],
+        "external_dependencies": {
+          "status": "pending-human-confirmation",
+          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+        }
+      },
+      "summary": "存在两个定义级 @tool 装饰器，但未发现生产入口加载、包级重导出或测试依赖；装饰器存在不等于已进入生产工具组合。",
+      "decision": "retain-needs-info",
+      "deletion_authorized": false
+    },
+    {
+      "id": "web-constants",
+      "name": "Web 单常量模块",
+      "module_names": ["web.constants"],
+      "module_paths": ["web/constants.py"],
+      "evidence": {
+        "production_imports": [],
+        "dynamic_registrations": [],
+        "package_reexports": [],
+        "test_dependencies": [],
+        "external_dependencies": {
+          "status": "pending-human-confirmation",
+          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+        }
+      },
+      "summary": "四类仓库内证据均为空；该结论仅表示当前仓库零引用。",
+      "decision": "retain-needs-info",
+      "deletion_authorized": false
+    },
+    {
+      "id": "resilience",
+      "name": "容错模块",
+      "module_names": ["agent.core.resilience"],
+      "module_paths": ["agent/core/resilience.py"],
+      "evidence": {
+        "production_imports": [],
+        "dynamic_registrations": [],
+        "package_reexports": [],
+        "test_dependencies": [],
+        "external_dependencies": {
+          "status": "pending-human-confirmation",
+          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+        }
+      },
+      "summary": "四类仓库内证据均为空，且尚无 characterization；历史意图与外部消费者仍待确认。",
+      "decision": "retain-needs-info",
+      "deletion_authorized": false
+    },
+    {
+      "id": "confirmation-tool",
+      "name": "旧确认工具",
+      "module_names": ["agent.tools.confirmation_tool"],
+      "module_paths": ["agent/tools/confirmation_tool.py"],
+      "evidence": {
+        "production_imports": [],
+        "dynamic_registrations": [
+          {
+            "path": "agent/tools/confirmation_tool.py",
+            "line": 13,
+            "kind": "decorator",
+            "detail": "@tool"
+          },
+          {
+            "path": "agent/tools/confirmation_tool.py",
+            "line": 54,
+            "kind": "decorator",
+            "detail": "@tool"
+          },
+          {
+            "path": "agent/tools/confirmation_tool.py",
+            "line": 85,
+            "kind": "decorator",
+            "detail": "@tool"
+          },
+          {
+            "path": "agent/tools/confirmation_tool.py",
+            "line": 110,
+            "kind": "decorator",
+            "detail": "@tool"
+          }
+        ],
+        "package_reexports": [],
+        "test_dependencies": [],
+        "external_dependencies": {
+          "status": "pending-human-confirmation",
+          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+        }
+      },
+      "summary": "存在四个定义级 @tool 装饰器，但未发现生产入口加载；需与现行类型化 HITL 和 Chainlit Action 的所有权另行对照。",
+      "decision": "retain-needs-info",
+      "deletion_authorized": false
+    },
+    {
+      "id": "log-bridge-state",
+      "name": "重复日志桥状态",
+      "module_names": ["web.global_state", "web.llm_client"],
+      "module_paths": ["web/global_state.py", "web/llm_client.py"],
+      "evidence": {
+        "production_imports": [
+          {
+            "path": "web/start_handler.py",
+            "line": 13,
+            "kind": "import",
+            "detail": "web.llm_client"
+          },
+          {
+            "path": "web/start_handler.py",
+            "line": 14,
+            "kind": "import",
+            "detail": "web.global_state"
+          }
+        ],
+        "dynamic_registrations": [],
+        "package_reexports": [],
+        "test_dependencies": [],
+        "external_dependencies": {
+          "status": "pending-human-confirmation",
+          "evidence": "启动和部署方式是否在仓库外依赖两个状态所有者，需人工确认。"
+        }
+      },
+      "summary": "两个模块均被启动流程直接使用；问题是日志桥安装状态的重复生命周期所有权，不是死代码。",
+      "decision": "retain-active",
+      "deletion_authorized": false
+    }
+  ],
+  "false_positive_control": {
+    "name": "日志知识库存储",
+    "module_names": ["agent.tools.log_pattern_store"],
+    "module_paths": ["agent/tools/log_pattern_store.py"],
+    "expected_production_importers": [
+      "agent/tools/pipeline/common/knowledge_store.py",
+      "agent/tools/pipeline/log_header_processor.py"
+    ],
+    "reason": "两个生产调用均为函数体内延迟导入；只统计顶层 import 会把在用能力误报为零引用。"
+  }
+}
