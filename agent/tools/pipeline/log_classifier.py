@@ -181,6 +181,7 @@ def _classify_json_features(
         extractor_func=extractor.extract_value,
         feature_field=feature_field,
         header_end_marker=header_end_marker,
+        sample_format="json",
     )
 
     # 6. 填充元数据字段

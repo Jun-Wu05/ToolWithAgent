@@ -172,3 +172,27 @@ class TestRealSamplesJSON:
         rs = result["classification_details"][0]["real_samples"]
         assert '"log_type":"nginx"' in rs, "JSON body 应被保留"
         assert "Jul 28" not in rs, "syslog 头应被剥离"
+
+    def test_syslog_json_without_marker_uses_explicit_json_format(self):
+        """body-key 快路清空 marker 后，显式 JSON 语义仍应提取 JSON body。"""
+        parsed = {
+            "feature_field": "log_type",
+            "feature_identifier": "",
+            "feature_body_group": 0,
+            "classification_details": [{"logtype": "nginx"}],
+        }
+
+        result = match_real_samples(
+            parsed,
+            SYSLOG_JSON_LINE,
+            _dummy_extractor,
+            feature_field="log_type",
+            header_end_marker="",
+            sample_format="json",
+        )
+
+        detail = result["classification_details"][0]
+        assert detail["sample"] == SYSLOG_JSON_LINE
+        assert detail["real_samples"] == (
+            '{"log_type":"nginx","src_ip":"10.1.2.3","action":"block"}'
+        )

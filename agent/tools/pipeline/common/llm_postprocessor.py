@@ -129,6 +129,7 @@ def match_real_samples(
     extractor_func,
     feature_field: str | None = None,
     header_end_marker: str = "",
+    sample_format: str = "",
 ) -> dict:
     """用真实原始日志行替换匿名化的样本行。
 
@@ -143,11 +144,13 @@ def match_real_samples(
         extractor_func:    可调用对象 ``(line, feature_field) -> value``。
         feature_field:     字段名覆盖；回退使用 ``parsed["feature_field"]``。
         header_end_marker: 头部与 body 的分隔符。
+        sample_format:     调用方确认的样本格式；``json`` 不依赖 marker 提取 body。
 
     Returns:
         同一个 ``parsed`` 字典（为方便链式调用而原地修改并返回）。
     """
     ff = feature_field or parsed.get("feature_field", "log_type")
+    is_json_sample = sample_format.strip().lower() == "json"
     log_lines = [l for l in logs_str.strip().split("\n") if l.strip()]
     details = parsed.get("classification_details", [])
     
@@ -176,7 +179,11 @@ def match_real_samples(
         body = line
         
         # CHANGED: 优先使用 feature_identifier 正则提取 body（KV 格式）
-        if feature_pattern:
+        if is_json_sample:
+            from agent.tools.pipeline.common.json_utils import extract_json_body
+
+            body = extract_json_body(line) or line
+        elif feature_pattern:
             match = feature_pattern.search(line)
             if match and len(match.groups()) >= feature_body_group:
                 body = match.group(feature_body_group)
@@ -210,7 +217,13 @@ def match_real_samples(
         detail["sample"] = matched_line
         
         # real_samples: 优先使用 feature_identifier 正则提取 body（KV 格式）
-        if has_feature_identifier and feature_pattern and matched_line:
+        if is_json_sample and matched_line:
+            from agent.tools.pipeline.common.json_utils import strip_header_to_body
+
+            detail["real_samples"] = strip_header_to_body(
+                matched_line, header_end_marker, is_json=True
+            )
+        elif has_feature_identifier and feature_pattern and matched_line:
             match = feature_pattern.search(matched_line)
             if match and len(match.groups()) >= feature_body_group:
                 detail["real_samples"] = match.group(feature_body_group)
@@ -269,6 +282,7 @@ def postprocess_llm_classification(
     extractor_func,
     feature_field: str | None = None,
     header_end_marker: str = "",
+    sample_format: str = "",
 ) -> dict:
     """完整的 LLM 响应后处理管线。
 
@@ -284,6 +298,7 @@ def postprocess_llm_classification(
         extractor_func:    可调用对象 ``(line, feature_field) -> value``。
         feature_field:     字段名覆盖。
         header_end_marker: 头部与 body 的分隔符。
+        sample_format:     调用方确认的样本格式。
 
     Returns:
         包含 status、classification_details、feature_count 等键的字典。
@@ -305,6 +320,7 @@ def postprocess_llm_classification(
         parsed, logs_str, extractor_func,
         feature_field=feature_field,
         header_end_marker=header_end_marker,
+        sample_format=sample_format,
     )
 
     return parsed
