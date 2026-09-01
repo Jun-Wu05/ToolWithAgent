@@ -87,13 +87,13 @@ LAYER_INFO = {
         ],
     },
     "领域能力": {
-        "description": "标准字段检索、字段/值映射、事件名称标注、枚举与威胁领域操作。",
+        "description": "标准字段目录与检索、字段/值映射、事件名称标注、枚举与威胁领域操作。",
         "upstream": "Application Adapters",
         "downstream": "配置与类型化产物",
         "reading": [
+            "agent/core/standard_field_catalog.py",
             "agent/core/field_retriever.py",
             "agent/shared/mapping_utils.py",
-            "agent/shared/event_classify.py",
         ],
     },
     "字段调整 Skills": {
@@ -129,6 +129,8 @@ RESPONSIBILITIES = {
     "agent/core/planner.py": "无业务工具的独立 PlannerAgent。",
     "agent/core/team.py": "专业 Agent 注册表与模型固定构造。",
     "agent/core/model_config.py": "ProviderSpec 注册表、密钥解析与模型构造。",
+    "agent/core/standard_field_catalog.py": "只读标准字段 schema、资源解析与确定性名称/别名 lookup。",
+    "agent/core/field_retriever.py": "标准字段 embedding、缓存、候选排除与排序策略。",
     "agent/prompts/__init__.py": "全部 Prompt 的公开加载器与包相对资源定位。",
 }
 
@@ -177,6 +179,11 @@ def layer_for(relative: str) -> str:
         return "日志解析 Pipeline"
     if relative.startswith("agent/tools/rule_generator/"):
         return "解析规则生成"
+    if relative in {
+        "agent/core/standard_field_catalog.py",
+        "agent/core/field_retriever.py",
+    }:
+        return "领域能力"
     if relative.startswith("agent/core/") or relative == "agent/__init__.py":
         return "规划、模型与可观测性"
     return "领域能力"

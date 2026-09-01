@@ -23,6 +23,11 @@ from typing import Optional
 
 import numpy as np
 
+from agent.core.standard_field_catalog import (
+    compact_field_name,
+    get_standard_field_catalog,
+    normalize_field_name,
+)
 from agent.shared.logger import get_logger
 
 logger = get_logger("field_retriever")
@@ -53,28 +58,9 @@ RETRIEVE_DEBUG_TRACE = True
 # 字段同义词表路径（外置配置：缩写→英文全称 + 中文同义词）
 _SYNONYMS_PATH = Path(__file__).parent.parent.parent / "config" / "field_synonyms.json"
 
-# 同义词表缓存（懒加载）。结构：{ token: {"en": str, "zh": [str, ...]} }
-_SYNONYMS: Optional[dict[str, dict]] = None
-
-
-def _load_synonyms() -> dict[str, dict]:
-    """懒加载字段同义词表。
-
-    field_synonyms.json 结构：{ "token": {"en": "英文全称", "zh": ["中文同义词", ...]} }
-    - en：缩写/字段名 → 英文全称，用于 embedding 前文本展开（替代原 ABBR_EXPANSIONS）
-    - zh：token → 中文同义词列表，用于 query 文本跨语言桥接（提升中文标准字段召回）
-    """
-    global _SYNONYMS
-    if _SYNONYMS is None:
-        try:
-            _SYNONYMS = json.loads(_SYNONYMS_PATH.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            logger.warning(f"同义词表不存在: {_SYNONYMS_PATH}，缩写展开与中文桥接将禁用")
-            _SYNONYMS = {}
-        except Exception as e:
-            logger.warning(f"加载同义词表失败: {e}，缩写展开与中文桥接将禁用")
-            _SYNONYMS = {}
-    return _SYNONYMS
+def _load_synonyms():
+    """Compatibility wrapper for Catalog-owned synonym facts."""
+    return get_standard_field_catalog().synonyms
 
 
 # 缓存文件路径
@@ -85,28 +71,9 @@ _CACHE_META_PATH = Path(__file__).parent.parent.parent / "config" / "标准字�
 
 
 _TAG_RULES_PATH = Path(__file__).parent.parent.parent / "config" / "tag_rules.json"
-_TAG_RULES: Optional[dict[str, list[str]]] = None
-
-
-def _load_tag_rules() -> dict[str, list[str]]:
-    """懒加载标签规则表 tag_rules.json。
-
-    结构：{ "标签名": ["关键词1", "关键词2", ...] }
-    匹配在 token 级进行（字段名拆分后的每个 token 与关键词严格相等），
-    避免子串误匹配（如 'severity' 含 'ver' 误触发 version）。
-    """
-    global _TAG_RULES
-    if _TAG_RULES is None:
-        try:
-            data = json.loads(_TAG_RULES_PATH.read_text(encoding="utf-8"))
-            _TAG_RULES = data.get("rules", data) if isinstance(data, dict) else data
-        except FileNotFoundError:
-            logger.warning(f"标签规则表不存在: {_TAG_RULES_PATH}，标签生成将禁用")
-            _TAG_RULES = {}
-        except Exception as e:
-            logger.warning(f"加载标签规则表失败: {e}，标签生成将禁用")
-            _TAG_RULES = {}
-    return _TAG_RULES
+def _load_tag_rules():
+    """Compatibility wrapper for Catalog-owned deterministic tag rules."""
+    return get_standard_field_catalog().tag_rules
 
 
 def _generate_field_tags(field_name: str) -> list[str]:
@@ -177,27 +144,8 @@ def _load_standard_fields() -> list[dict]:
 
     返回 list[dict]，每个 dict 包含所有列及复合文本字段 _composite_text。
     """
-    header: Optional[list[str]] = None
-    records: list[dict] = []
-
-    raw = _STANDARD_FIELDS_PATH.read_text(encoding="utf-8")
-    lines = raw.strip().split("\n")
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        cols = [c.strip() for c in line.split("\t")]
-        if header is None:
-            # 去除首列 BOM 字符
-            if cols:
-                cols[0] = cols[0].lstrip("\ufeff")
-            header = cols
-            continue
-        # 补齐列数（某些行末尾可能缺列）
-        if len(cols) < len(header):
-            cols.extend([""] * (len(header) - len(cols)))
-        entry = dict(zip(header, cols[:len(header)]))
+    records = get_standard_field_catalog().records()
+    for entry in records:
         # 构造复合文本：包含所有维度用于 semantic matching
         system_name = entry.get("系统属性名称", "")
         field_name = entry.get("字段名称", "")
@@ -212,8 +160,6 @@ def _load_standard_fields() -> list[dict]:
         tag_text = f"[TAGS:{' '.join(field_tags)}]" if field_tags else ""
         entry["_composite_text"] = f"{english_expanded} {tag_text} || {system_name} | {field_name} | {obj} | {data_type} | {description}"
         entry["_tags"] = field_tags
-        records.append(entry)
-
     return records
 
 
@@ -543,13 +489,7 @@ def _normalize_field_name(name: str) -> str:
     Returns:
         规范化后的字段名
     """
-    # 先转连字符为下划线
-    name = name.replace("-", "_")
-    # camelCase → snake_case：小写字母后跟大写字母 → 插入下划线
-    name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
-    # 连续大写后跟小写（处理首字母大写缩写如 macOS → mac_os 跳过，只处理全大写序列）
-    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    return name.lower()
+    return normalize_field_name(name)
 
 
 def _compact_field_name(name: str) -> str:
@@ -559,7 +499,7 @@ def _compact_field_name(name: str) -> str:
     （filename）之间的差异。标准字段表里 filename / file_name / fileName
     会被归一化到同一个紧凑形式，从而在 Layer1 精确匹配时命中。
     """
-    return re.sub(r"[_\-\s]", "", name).lower()
+    return compact_field_name(name)
 
 
 def _build_field_name_index(records: list[dict]) -> dict[str, int]:
@@ -580,38 +520,7 @@ def _build_field_name_index(records: list[dict]) -> dict[str, int]:
     Returns:
         dict: 规范化字段名 → 在 records 中的索引位置
     """
-    index: dict[str, int] = {}
-    # 字段名称（英文）→ 记录索引的反向映射，供 synonyms.zh 反向索引查用
-    field_name_to_idx: dict[str, int] = {}
-    for i, rec in enumerate(records):
-        field_name = rec.get("字段名称", "")
-        if not field_name:
-            continue
-        # 注册两级 key：snake_case 形式 + 紧凑形式（消除 file_name/filename 鸿沟）
-        for key in (_normalize_field_name(field_name), _compact_field_name(field_name)):
-            # 若存在多个记录映射到同一 key，保留第一个（最权威）
-            if key not in index:
-                index[key] = i
-        # 记录原始字段名称（小写）→ 索引，供 synonyms.zh 反向桥接
-        fn_lower = field_name.lower()
-        if fn_lower not in field_name_to_idx:
-            field_name_to_idx[fn_lower] = i
-        # 中文系统属性名作为 key（中文不做 normalize，保持原值）
-        sys_name = rec.get("系统属性名称", "")
-        if sys_name and sys_name not in index:
-            index[sys_name] = i
-
-    # synonyms.zh 反向索引：synonyms key 命中某记录字段名称时，
-    # 其 zh 同义词全部注册指向同一记录（如「攻击类型」→ threat_type 记录）
-    synonyms = _load_synonyms()
-    for syn_key, entry in synonyms.items():
-        target_idx = field_name_to_idx.get(syn_key.lower())
-        if target_idx is None:
-            continue
-        for zh in entry.get("zh", []):
-            if zh and zh not in index:
-                index[zh] = target_idx
-    return index
+    return get_standard_field_catalog().build_name_index(records)
 
 
 def _load_cache() -> tuple[Optional[np.ndarray], Optional[list[dict]]]:

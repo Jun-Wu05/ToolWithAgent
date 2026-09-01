@@ -59,7 +59,8 @@ toolswithagent/
 │   │   ├── agent.py                 # 上传解码兼容入口与历史 simple_encode
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
 │   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
-│   │   ├── field_retriever.py       # Embedding 语义检索（中文同义词 + tag 规则 + 精确匹配）
+│   │   ├── standard_field_catalog.py # 只读标准字段 schema、资源与确定性 lookup
+│   │   ├── field_retriever.py       # Embedding 语义检索（缓存 + 排除 + 候选排序）
 │   │   └── tracing.py               # OpenTelemetry 请求追踪
 │   ├── tools/                       # Agent 工具集
 │   │   ├── standard_mapper.py       # 字段映射工具
