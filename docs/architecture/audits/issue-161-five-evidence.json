@@ -129,13 +129,20 @@
           }
         ],
         "package_reexports": [],
-        "test_dependencies": [],
+        "test_dependencies": [
+          {
+            "path": "tests/test_confirmation_tool_characterization.py",
+            "line": 9,
+            "kind": "import",
+            "detail": "agent.tools.confirmation_tool"
+          }
+        ],
         "external_dependencies": {
           "status": "pending-human-confirmation",
           "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
         }
       },
-      "summary": "存在四个定义级 @tool 装饰器，但未发现生产入口加载；需与现行类型化 HITL 和 Chainlit Action 的所有权另行对照。",
+      "summary": "存在四个定义级 @tool 装饰器和独立 characterization 测试，但未发现生产入口加载；现行 HITL 由类型化计划与 Chainlit Action 拥有。",
       "decision": "retain-needs-info",
       "deletion_authorized": false
     },
