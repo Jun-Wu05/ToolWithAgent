@@ -120,6 +120,7 @@ RESPONSIBILITIES = {
     "application/file_input.py": "Base64/JSON/TXT 确定性解码与主数据原子提交。",
     "application/field_mapping_batch.py": "字段映射分批、并发、超时、重试和漏字段补查。",
     "application/adapters/composition.py": "全部 StepAdapter 的唯一生产组合入口。",
+    "application/adapters/field_skill_policy.py": "Field Skill 删除前的纯悬空引用扫描策略。",
     "web/user_message_handlers.py": "自然语言 Web 适配、进度衔接与结果渲染。",
     "web/message_router.py": "每会话锁、Team 获取以及文件/文本消息分发。",
     "web/file_handlers.py": "Chainlit 文件读取、Excel 分流和上传反馈。",

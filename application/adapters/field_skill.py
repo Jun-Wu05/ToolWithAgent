@@ -42,6 +42,7 @@ from application.adapters.shared import (
     iter_config_entities,
     resolve_field_names,
 )
+from application.adapters.field_skill_policy import find_dangling_references
 
 
 logger = get_logger("execution_adapters")
@@ -308,27 +309,18 @@ def _check_dangling_references(
     命中两类引用即拒绝：merger 的源字段、addFields 值中的 %{字段} 占位。
     deleted_names 传入解析后的原始字段名（#146）。
     """
-    deleted = set(deleted_names or step.fields)
+    deleted = deleted_names or step.fields
     issues: list[str] = []
-    for entity in _iter_target_entities(config, targets):
-        name = entity.get("name") or "<未命名>"
-        parser = entity.get("parser") or {}
-        for filter_item in parser.get("filter") or []:
-            if not isinstance(filter_item, dict):
-                continue
-            if filter_item.get("name") == "merger":
-                overlap = deleted & set(filter_item.get("fields") or [])
-                if overlap:
-                    issues.append(f"{name}: merger 源字段引用 {sorted(overlap)}")
-            fields = filter_item.get("fields")
-            if isinstance(fields, dict):
-                for value in fields.values():
-                    if isinstance(value, str):
-                        refs = deleted & {
-                            ref for ref in deleted if f"%{{{ref}}}" in value
-                        }
-                        if refs:
-                            issues.append(f"{name}: %{{{sorted(refs)[0]}}} 引用")
+    conflicts = find_dangling_references(_iter_target_entities(config, targets), deleted)
+    for conflict in conflicts:
+        if conflict.kind == "merger":
+            issues.append(
+                f"{conflict.entity_name}: merger 源字段引用 {list(conflict.fields)}"
+            )
+        else:
+            issues.append(
+                f"{conflict.entity_name}: %{{{conflict.fields[0]}}} 引用"
+            )
     if issues:
         return _failed(
             step,

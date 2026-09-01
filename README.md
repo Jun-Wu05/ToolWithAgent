@@ -45,7 +45,7 @@ toolswithagent/
 │   ├── field_runtime.py             # 字段向量缓存/检索公共入口
 │   ├── file_input.py                # Base64/JSON/TXT 解码与主数据原子提交
 │   ├── field_mapping_batch.py       # FieldMappingBatchRunner 执行策略
-│   └── adapters/                    # 12 类步骤适配器与唯一生产组合入口
+│   └── adapters/                    # 12 类步骤适配器、共享守卫策略与唯一生产组合入口
 │
 ├── contracts/                       # 框架无关类型契约（web → contracts ← agent）
 │   ├── planner_models.py            # PlanDecision / StepSpec / Artifact 类型契约
