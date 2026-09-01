@@ -148,9 +148,9 @@
     },
     {
       "id": "log-bridge-state",
-      "name": "重复日志桥状态",
-      "module_names": ["web.global_state", "web.llm_client"],
-      "module_paths": ["web/global_state.py", "web/llm_client.py"],
+      "name": "日志桥安装状态",
+      "module_names": ["web.llm_client"],
+      "module_paths": ["web/llm_client.py"],
       "evidence": {
         "production_imports": [
           {
@@ -158,25 +158,28 @@
             "line": 13,
             "kind": "import",
             "detail": "web.llm_client"
-          },
-          {
-            "path": "web/start_handler.py",
-            "line": 14,
-            "kind": "import",
-            "detail": "web.global_state"
           }
         ],
         "dynamic_registrations": [],
         "package_reexports": [],
-        "test_dependencies": [],
+        "test_dependencies": [
+          {
+            "path": "tests/test_log_bridge_ownership.py",
+            "line": 10,
+            "kind": "import",
+            "detail": "web.llm_client"
+          }
+        ],
         "external_dependencies": {
           "status": "pending-human-confirmation",
-          "evidence": "启动和部署方式是否在仓库外依赖两个状态所有者，需人工确认。"
+          "evidence": "仓库内已确认单一所有者；仓库外是否直接依赖日志客户端的内部状态，仍需人工确认。"
         }
       },
-      "summary": "两个模块均被启动流程直接使用；问题是日志桥安装状态的重复生命周期所有权，不是死代码。",
+      "summary": "Issue #171 已删除外部门控与 web.global_state；web.llm_client.setup_agno_logging_bridge 是唯一幂等状态所有者。",
       "decision": "retain-active",
-      "deletion_authorized": false
+      "deletion_authorized": false,
+      "removed_duplicate_path": "web/global_state.py",
+      "resolved_in_issue": 171
     }
   ],
   "false_positive_control": {

@@ -21,7 +21,6 @@
   - web/user_message_handlers.py 用户文本消息处理
   - web/action_callbacks.py     确定性事件适配
   - web/utils.py                纯辅助函数
-  - web/global_state.py         全局状态管理
 """
 
 # === CRITICAL: 这必须在所有其他导入之前 ===

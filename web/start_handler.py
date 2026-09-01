@@ -11,7 +11,6 @@ from agent.shared.logger import get_logger
 from application.field_runtime import init_field_cache
 from application.session_state import SessionState
 from web.llm_client import setup_agno_logging_bridge
-from web.global_state import is_agno_bridge_installed, set_agno_bridge_installed
 
 logger = get_logger("start_handler")
 
@@ -28,9 +27,7 @@ async def on_chat_start():
     5. 发送欢迎消息
     """
     # 安装 Agno 日志拦截器（仅一次）
-    if not is_agno_bridge_installed():
-        setup_agno_logging_bridge()
-        set_agno_bridge_installed(True)
+    setup_agno_logging_bridge()
 
     # 创建用户会话状态（使用结构化 SessionState）
     user_session = SessionState.create_default()

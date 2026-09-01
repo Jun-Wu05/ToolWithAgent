@@ -32,7 +32,7 @@ toolswithagent/
 │   ├── deterministic_plan.py        # 按钮计划的 Web 适配
 │   ├── plan_renderer.py             # Clarification/ExecutionReport 渲染
 │   ├── chainlit_progress.py         # ProgressEvent → Chainlit TaskList
-│   └── parsers.py / utils.py / llm_client.py / global_state.py
+│   └── parsers.py / utils.py / llm_client.py
 │
 ├── application/                     # 无 Chainlit 依赖的应用运行时
 │   ├── request_runtime.py           # Planner→Executor 请求编排与确定性入口
