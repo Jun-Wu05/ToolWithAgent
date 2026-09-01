@@ -59,14 +59,15 @@
         "dynamic_registrations": [],
         "package_reexports": [],
         "test_dependencies": [],
-        "external_dependencies": {
-          "status": "pending-human-confirmation",
-          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+      "external_dependencies": {
+          "status": "confirmed-no-consumers",
+          "evidence": "维护者已在 #162 与独立删除 Issue #168 中确认没有仓库外消费者。"
         }
       },
-      "summary": "四类仓库内证据均为空；该结论仅表示当前仓库零引用。",
-      "decision": "retain-needs-info",
-      "deletion_authorized": false
+      "summary": "删除前四类仓库内证据均为空，维护者确认无仓库外消费者；已由独立 Issue #168 授权删除。",
+      "decision": "delete-authorized",
+      "deletion_authorized": true,
+      "deleted_in_issue": 168
     },
     {
       "id": "resilience",

@@ -41,19 +41,35 @@ def test_审计记录覆盖五个样本与五类证据() -> None:
     }
     for candidate in payload["candidates"]:
         assert set(candidate["evidence"]) == required_evidence
-        for module_path in candidate["module_paths"]:
-            assert (ROOT / module_path).is_file(), "审计 Issue 不得删除候选模块"
-        assert candidate["evidence"]["external_dependencies"]["status"] == (
-            "pending-human-confirmation"
-        )
-        assert candidate["decision"] in {"retain-needs-info", "retain-active"}
-        assert candidate["deletion_authorized"] is False
+        if candidate["deletion_authorized"]:
+            assert candidate["decision"] == "delete-authorized"
+            assert candidate["deleted_in_issue"] == 168
+            assert all(not (ROOT / path).exists() for path in candidate["module_paths"])
+            assert candidate["evidence"]["external_dependencies"]["status"] == (
+                "confirmed-no-consumers"
+            )
+        else:
+            for module_path in candidate["module_paths"]:
+                assert (ROOT / module_path).is_file(), "未授权候选模块必须继续保留"
+            assert candidate["evidence"]["external_dependencies"]["status"] == (
+                "pending-human-confirmation"
+            )
+            assert candidate["decision"] in {"retain-needs-info", "retain-active"}
 
 
 def test_仓库扫描结果与版本化内部证据一致() -> None:
     payload = _audit_payload()
 
     for candidate in payload["candidates"]:
+        if candidate["deletion_authorized"]:
+            for category in (
+                "production_imports",
+                "dynamic_registrations",
+                "package_reexports",
+                "test_dependencies",
+            ):
+                assert candidate["evidence"][category] == []
+            continue
         actual = scan_module_usage(
             ROOT,
             module_names=tuple(candidate["module_names"]),
