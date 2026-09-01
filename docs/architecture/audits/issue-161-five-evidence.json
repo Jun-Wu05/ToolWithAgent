@@ -32,13 +32,20 @@
           }
         ],
         "package_reexports": [],
-        "test_dependencies": [],
+        "test_dependencies": [
+          {
+            "path": "tests/test_base64_tool_characterization.py",
+            "line": 8,
+            "kind": "import",
+            "detail": "agent.tools.base64_tool"
+          }
+        ],
         "external_dependencies": {
           "status": "pending-human-confirmation",
           "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
         }
       },
-      "summary": "存在两个定义级 @tool 装饰器，但未发现生产入口加载、包级重导出或测试依赖；装饰器存在不等于已进入生产工具组合。",
+      "summary": "存在两个定义级 @tool 装饰器和独立 characterization 测试，但未发现生产入口加载或包级重导出；装饰器存在不等于已进入生产工具组合。",
       "decision": "retain-needs-info",
       "deletion_authorized": false
     },
