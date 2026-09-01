@@ -28,6 +28,9 @@ class SessionFacts(BaseModel):
     available_fields: tuple[str, ...] = ()
     # 字段映射输入：只包含仍可送入映射批次的原始字段名。
     mappable_fields: tuple[str, ...] = ()
+    # 上传配置中以 normalize[].field 是否非空判定的映射状态计数。
+    decoded_mapped_field_count: int = Field(default=0, ge=0)
+    decoded_unmapped_field_count: int = Field(default=0, ge=0)
     enum_mapping_target_fields: tuple[str, ...] = ()
     enum_mapping_row_count: int = Field(default=0, ge=0)
     existing_enum_value_count: int = Field(default=0, ge=0)

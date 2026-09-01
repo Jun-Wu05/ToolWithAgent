@@ -19,7 +19,7 @@ from application.field_mapping_batch import (
 )
 from contracts.progress import ProgressPhase, ProgressStatus
 from contracts.planner_models import (
-    FieldMappingArtifact, FieldMappingRow, FieldMappingStep, StepResult,
+    FieldMappingArtifact, FieldMappingRow, FieldMappingStep, StepResult, StepStatus,
 )
 
 logger = get_logger("execution_adapters")
@@ -67,6 +67,22 @@ class FieldMappingAdapter:
     ) -> StepResult:
         """运行批处理，验证完整结果，再计算产物并一次性提交 Session。"""
         mappable_fields = list(context.session_facts.mappable_fields)
+        if (
+            not mappable_fields
+            and context.session_facts.has_decoded_config
+            and context.session_facts.decoded_mapped_field_count > 0
+            and context.session_facts.decoded_unmapped_field_count == 0
+        ):
+            skipped_count = context.session_facts.decoded_mapped_field_count
+            return StepResult(
+                step_id=step.step_id,
+                operation_type=step.type,
+                status=StepStatus.SUCCESS,
+                message=(
+                    "所有字段均已映射，无需再次执行；"
+                    f"跳过已映射 {skipped_count} 个（保留原映射）"
+                ),
+            )
         simplified_data = _session_get(context.session, "simplified_data", {}) or {}
         original_log_sample = (
             simplified_data.get("original_log_sample", "")
@@ -197,16 +213,18 @@ class FieldMappingAdapter:
             _session_set(context.session, "decoded_data", staged_decoded_data)
 
         updated_normalize_count = 0
+        decoded_added_count = 0
         if staged_mapped_sub_rules is not None:
             updated_normalize_count += max(
                 0, _count_tagged_normalize(staged_mapped_sub_rules)
                 - _count_tagged_normalize(sub_rules)
             )
         if staged_decoded_data is not None:
-            updated_normalize_count += max(
+            decoded_added_count = max(
                 0, _count_tagged_normalize(staged_decoded_data)
                 - _count_tagged_normalize(decoded_data)
             )
+            updated_normalize_count += decoded_added_count
         logger.info(
             "[FIELD_MAPPING_WRITEBACK] plan_id=%s step_id=%s 唯一字段映射数=%s "
             "实际更新normalize项数=%s",
@@ -216,6 +234,12 @@ class FieldMappingAdapter:
             f"字段映射完成：唯一字段 {len(typed_mappings)} 项，"
             f"实际更新 {updated_normalize_count} 个 normalize 项"
         )
+        if staged_decoded_data is not None:
+            message = (
+                f"{message}；上传规则新增映射 {decoded_added_count} 个 / "
+                f"跳过已映射 {context.session_facts.decoded_mapped_field_count} 个"
+                "（保留原映射）"
+            )
         if event_annotation_summary:
             message = f"{message}；{event_annotation_summary}"
         if had_existing_mapped_rules and staged_mapped_sub_rules is not None:

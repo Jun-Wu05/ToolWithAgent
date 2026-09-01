@@ -22,7 +22,46 @@ def _read_session_value(session: Any, key: str, default: Any = None) -> Any:
     return getattr(session, key, default)
 
 
-def _collect_field_pools(session: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _collect_decoded_field_mapping_state(
+    decoded_data: Any,
+) -> tuple[set[str], int, int]:
+    """按非空 field 识别上传配置的已映射字段；mappings 不参与判定。"""
+    from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
+
+    mapped_indices: set[str] = set()
+    mapped_count = 0
+    unmapped_count = 0
+
+    def walk(node: Any) -> None:
+        nonlocal mapped_count, unmapped_count
+        if isinstance(node, Mapping):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for entry in normalize:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    index = str(entry.get("index") or "").strip()
+                    if not index or index in EXCLUDED_FIELD_INDICES:
+                        continue
+                    if str(entry.get("field") or "").strip():
+                        mapped_indices.add(index)
+                        mapped_count += 1
+                    else:
+                        unmapped_count += 1
+            for key, value in node.items():
+                if key != "normalize":
+                    walk(value)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+
+    walk(decoded_data)
+    return mapped_indices, mapped_count, unmapped_count
+
+
+def _collect_field_pools(
+    session: Any, decoded_mapped_indices: set[str]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """构建 Planner 点名词典与字段映射候选池。"""
     from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
     from application.field_source import extract_log_fields_for_mapping
@@ -43,10 +82,17 @@ def _collect_field_pools(session: Any) -> tuple[tuple[str, ...], tuple[str, ...]
     classification = _read_session_value(session, "log_classification")
     raw_log_lines = _read_session_value(session, "raw_log_lines", []) or []
     log_fields = extract_log_fields_for_mapping(classification, raw_log_lines)
+    mapped_sub_rules = _read_session_value(session, "mapped_sub_rules", []) or []
     base_fields = log_fields or _read_session_value(session, "decoded_fields", []) or []
     append_fields(base_fields, available_fields, seen_available_fields)
-    append_fields(base_fields, mappable_fields, seen_mappable_fields)
-    for sub_rule in _read_session_value(session, "mapped_sub_rules", []) or []:
+    # 日志/子规则来源仍全量映射；纯上传回退只发送 field 为空的原始字段。
+    mappable_base_fields = (
+        base_fields
+        if log_fields or mapped_sub_rules
+        else [field for field in base_fields if str(field).strip() not in decoded_mapped_indices]
+    )
+    append_fields(mappable_base_fields, mappable_fields, seen_mappable_fields)
+    for sub_rule in mapped_sub_rules:
         if not isinstance(sub_rule, Mapping):
             continue
         for normalization in sub_rule.get("normalize", []) or []:
@@ -192,7 +238,12 @@ def build_session_facts(session: Any) -> SessionFacts:
     enum_preview = _read_session_value(session, "enum_preview", []) or []
     mapped_sub_rules = _read_session_value(session, "mapped_sub_rules", []) or []
     decoded_data = _read_session_value(session, "decoded_data")
-    available_fields, mappable_fields = _collect_field_pools(session)
+    decoded_mapped_indices, decoded_mapped_count, decoded_unmapped_count = (
+        _collect_decoded_field_mapping_state(decoded_data)
+    )
+    available_fields, mappable_fields = _collect_field_pools(
+        session, decoded_mapped_indices
+    )
     config_refs: tuple[ConfigRef, ...] = tuple(
         ref
         for ref, config in (
@@ -209,6 +260,8 @@ def build_session_facts(session: Any) -> SessionFacts:
         available_config_refs=config_refs,
         available_fields=available_fields,
         mappable_fields=mappable_fields,
+        decoded_mapped_field_count=decoded_mapped_count,
+        decoded_unmapped_field_count=decoded_unmapped_count,
         enum_mapping_target_fields=_collect_enum_target_fields(enum_preview),
         enum_mapping_row_count=len(enum_preview),
         existing_enum_value_count=_count_enum_values(_read_session_value(session, "last_enum_extract_result")),

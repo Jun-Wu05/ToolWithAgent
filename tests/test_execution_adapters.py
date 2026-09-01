@@ -821,6 +821,103 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     assert downloaded == session["decoded_data"]
 
 
+def test上传规则字段映射仅处理未映射字段并报告差分():
+    """纯上传路径的 LLM 输入、写回与用户消息共用同一语义。"""
+    session = {
+        "decoded_fields": ["alpha", "beta"],
+        "decoded_data": [
+            {
+                "name": "r",
+                "normalize": [
+                    {
+                        "index": "alpha",
+                        "field": "外部标准",
+                        "entity": "外部对象",
+                        "sim": False,
+                        "core": True,
+                    },
+                    {"index": "beta", "field": ""},
+                ],
+            }
+        ],
+    }
+    member = _MappingMember()
+    adapter = ProfessionalAgentAdapter(
+        _Team(member),
+        candidate_retriever=lambda fields: "",
+        object_map_loader=lambda path: {},
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            FieldMappingStep(
+                step_id="mapping-uploaded",
+                type="field_mapping",
+                source_ref="session.fields",
+            ),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert len(member.calls) == 1
+    assert '"beta"' in member.calls[0]
+    assert '"alpha"' not in member.calls[0]
+    normalized = {entry["index"]: entry for entry in session["decoded_data"][0]["normalize"]}
+    assert normalized["alpha"]["field"] == "外部标准"
+    assert normalized["alpha"]["entity"] == "外部对象"
+    assert normalized["alpha"]["sim"] is False
+    assert normalized["alpha"]["core"] is True
+    assert normalized["beta"]["field"] == "标准_beta"
+    assert "新增映射 1 个" in (result.message or "")
+    assert "跳过已映射 1 个（保留原映射）" in (result.message or "")
+
+
+def test上传规则全部已映射时直接成功且不调模型():
+    """全已映射不是无数据，Executor 应放行 Adapter 返回零调用成功。"""
+    session = {
+        "decoded_fields": ["alpha", "beta"],
+        "decoded_data": {
+            "normalize": [
+                {"index": "alpha", "field": "标准_alpha"},
+                {"index": "beta", "field": "标准_beta"},
+            ]
+        },
+    }
+    member = _MappingMember()
+    adapter = ProfessionalAgentAdapter(
+        _Team(member),
+        candidate_retriever=lambda fields: "",
+        object_map_loader=lambda path: {},
+    )
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "all-mapped",
+            "steps": [
+                {
+                    "step_id": "mapping-all",
+                    "type": "field_mapping",
+                    "source_ref": "session.fields",
+                }
+            ],
+        }
+    )
+
+    report = asyncio.run(
+        PlanExecutor({"field_mapping": adapter}).execute(
+            decision,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert member.calls == []
+    assert report.results[0].artifact is None
+    assert "所有字段均已映射，无需再次执行" in (report.results[0].message or "")
+
+
 def test威胁映射依赖产物不是枚举值时失败():
     """依赖步骤产物不是 EnumValuesArtifact 时返回 dependency_type_mismatch（回归 #38）。"""
     from contracts.planner_models import ConfigExportArtifact, StepResult, ThreatMappingStep

@@ -141,8 +141,9 @@ def apply_field_mapping_to_config(
     """把字段映射结果递归应用到配置的所有 normalize 条目。
 
     遍历范围与 _extract_normalize_indexes 一致（递归 dict/list），对匹配 index 且
-    「匹配成功」的条目设置 field（标准字段名）、entity（对象）、sim=True、core=False。
-    未匹配、未匹配状态、以及 EXCLUDED_FIELD_INDICES 中的元字段保持不变。不修改原对象。
+    「匹配成功」且原 field 为空的条目设置 field（标准字段名）、entity（对象）、
+    sim=True、core=False。已有非空 field 的外部映射、未匹配、未匹配状态，以及
+    EXCLUDED_FIELD_INDICES 中的元字段保持不变。不修改原对象。
     """
     if object_entity_map is None:
         object_entity_map = {}
@@ -161,6 +162,8 @@ def apply_field_mapping_to_config(
                         continue
                     idx = entry.get("index", "")
                     if not idx or idx in EXCLUDED_FIELD_INDICES:
+                        continue
+                    if str(entry.get("field") or "").strip():
                         continue
                     mapping = field_map.get(idx)
                     if not mapping:

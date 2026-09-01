@@ -88,3 +88,42 @@ def test_application_projects_stable_safe_session_facts() -> None:
         "artifact-secret",
     ):
         assert sensitive_value not in dumped
+
+
+def test上传规则投影仅把未映射字段放入映射池() -> None:
+    """field 是已映射的唯一判定，mappings 非空不阻止字段映射。"""
+    from application.session_projection import build_session_facts
+
+    session = {
+        "decoded_fields": ["src_ip", "event_type", "threat_code"],
+        "decoded_data": {
+            "normalize": [
+                {
+                    "index": "src_ip",
+                    "field": "源IP",
+                    "entity": "网络对象",
+                    "sim": False,
+                    "core": True,
+                },
+                {"index": "event_type", "field": ""},
+                {
+                    "index": "threat_code",
+                    "field": "",
+                    "mappings": [
+                        {
+                            "mappingType": "EQUAL",
+                            "orgValue": "1",
+                            "mappingValue": "高",
+                        }
+                    ],
+                },
+            ]
+        },
+    }
+
+    facts = build_session_facts(session)
+
+    assert facts.available_fields == ("src_ip", "event_type", "threat_code")
+    assert facts.mappable_fields == ("event_type", "threat_code")
+    assert facts.decoded_mapped_field_count == 1
+    assert facts.decoded_unmapped_field_count == 2

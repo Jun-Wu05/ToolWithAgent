@@ -43,6 +43,46 @@ def test字段映射回填递归嵌套normalize():
     assert target["entity"] == "事件"  # 无 object_entity_map 时默认「事件」
 
 
+def test上传配置已映射条目保留原值且未映射条目正常写入():
+    """写回层保护外部已有映射，同时允许 mappings 非空的未映射字段参与。"""
+    from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_config
+
+    config = {
+        "normalize": [
+            {
+                "index": "src_ip",
+                "field": "外部源IP",
+                "entity": "外部对象",
+                "sim": False,
+                "core": True,
+            },
+            {
+                "index": "threat_code",
+                "field": "",
+                "mappings": [
+                    {"mappingType": "EQUAL", "orgValue": "1", "mappingValue": "高"}
+                ],
+            },
+        ]
+    }
+    mappings = [
+        {"原始字段名": "src_ip", "系统属性名称": "源IP", "匹配状态": "匹配成功"},
+        {"原始字段名": "threat_code", "系统属性名称": "威胁等级", "匹配状态": "匹配成功"},
+    ]
+
+    result = apply_field_mapping_to_config(
+        config,
+        mappings,
+        {"源IP": "网络对象", "威胁等级": "事件"},
+    )
+    normalized = {entry["index"]: entry for entry in result["normalize"]}
+
+    assert normalized["src_ip"] == config["normalize"][0]
+    assert normalized["threat_code"]["field"] == "威胁等级"
+    assert normalized["threat_code"]["mappings"] == config["normalize"][1]["mappings"]
+    assert "field" not in config["normalize"][1] or config["normalize"][1]["field"] == ""
+
+
 def test多子规则共享字段全部回写且不新增normalize():
     """#23: 共享字段复用到所有子规则、独有字段按作用域回写，且不新增 normalize 项。
 

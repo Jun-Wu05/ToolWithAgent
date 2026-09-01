@@ -318,7 +318,15 @@ class PlanExecutor:
         if isinstance(step, LogParseStep) and not session_facts.has_logs:
             return self._needs_input_result(step, "logs_required", "请先上传包含日志的数据")
         if isinstance(step, FieldMappingStep) and not session_facts.mappable_fields:
-            return self._needs_input_result(step, "fields_required", "当前没有可映射的原始字段")
+            all_uploaded_fields_mapped = (
+                session_facts.has_decoded_config
+                and session_facts.decoded_mapped_field_count > 0
+                and session_facts.decoded_unmapped_field_count == 0
+            )
+            if not all_uploaded_fields_mapped:
+                return self._needs_input_result(
+                    step, "fields_required", "当前没有可映射的原始字段"
+                )
         if (
             isinstance(step, ExportStep)
             and step.source_ref in {"session.decoded_config", "session.mapped_sub_rules"}
