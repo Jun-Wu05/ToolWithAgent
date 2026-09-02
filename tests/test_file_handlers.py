@@ -160,7 +160,6 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
         log_classification={"types": ["IPS"]},
         mapped_sub_rules=[{"normalize": [{"index": "old_field"}]}],
         last_mapping_data=[{"原始字段": "old_field"}],
-        batch_mapping_results=[{"rule_name": "old"}],
         sub_rule_mapping_results=[{"rule_name": "old"}],
         last_enum_extract_result={"field": "old_field", "value": ["old"]},
         last_threat_data=[{"orgValue": "old"}],
@@ -194,7 +193,6 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     assert session.log_classification is None
     assert session.mapped_sub_rules is None
     assert session.last_mapping_data is None
-    assert session.batch_mapping_results is None
     assert session.sub_rule_mapping_results is None
     assert session.last_enum_extract_result is None
     assert session.last_threat_data is None

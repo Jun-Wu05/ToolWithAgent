@@ -17,7 +17,7 @@
   - web/start_handler.py        @cl.on_chat_start 逻辑
   - web/settings_handler.py     @cl.on_settings_update 逻辑
   - web/message_router.py       @cl.on_message 路由分发
-  - web/upload_handlers.py      文件上传处理
+  - web/file_handlers.py        文件上传处理
   - web/user_message_handlers.py 用户文本消息处理
   - web/action_callbacks.py     确定性事件适配
   - web/utils.py                纯辅助函数

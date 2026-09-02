@@ -213,7 +213,6 @@ _PRIMARY_DATASET_STATE_KEYS = (
     "pending_rule_source_step",
     "mapped_sub_rules",
     "sub_rule_mapping_results",
-    "batch_mapping_results",
     "conversation_history",
 )
 
