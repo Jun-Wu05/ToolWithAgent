@@ -407,7 +407,6 @@ def generate_sub_rule(
     *,
     is_json: bool = False,
     is_syslog_json: bool = False,
-    is_pure_json: bool = False,
     is_kv: bool = False,
     feature_field: str = "",
     rule_source_fields: RuleSourceFields | None = None,
@@ -423,7 +422,6 @@ def generate_sub_rule(
         uuid_str: 可复用 UUID。
         is_json: 是否为 JSON 格式（纯JSON 或 syslog+JSON）。
         is_syslog_json: 是否为 syslog+JSON 格式。
-        is_pure_json: 是否为纯 JSON 格式。
         is_kv: 是否为 KV 格式（纯KV 或 syslog+KV）。
         feature_field: 特征字段名（如 "categoryName"、"type"）。
     """
@@ -508,7 +506,6 @@ def generate_sub_rules(
     is_kv = "KV" in log_format
     format_detail = (classification.get("log_format_detail", "") or "")
     is_syslog_json = is_json and ("日志头" in format_detail)
-    is_pure_json = is_json and not is_syslog_json
     feature_field = classification.get("feature_field", "")
 
     rules: list[dict[str, Any]] = []
@@ -521,7 +518,6 @@ def generate_sub_rules(
             date_str=date_str,
             is_json=is_json,
             is_syslog_json=is_syslog_json,
-            is_pure_json=is_pure_json,
             is_kv=is_kv,
             feature_field=feature_field,
             rule_source_fields=rule_source_fields,
@@ -536,24 +532,24 @@ def generate_sub_rules(
 
 def generate_rules(
     classification: dict[str, Any],
-    mode: str = "both",
+    mode: str,
     rule_source_fields: RuleSourceFields | None = None,
 ) -> dict[str, Any]:
     """根据 mode 生成规则，返回统一的 dict 结构。
 
     Args:
         classification: 日志解析输出的完整 JSON（dict）。
-        mode: "entry" | "sub" | "both"
+        mode: "entry" | "sub"
 
     Returns:
         {"success": bool, "rule_count": int, "rules": list[dict],
-         "file_name": str, "error": str}
+         "error": str}
     """
     date_str = time.strftime("%Y%m%d")
     rules: list[dict[str, Any]] = []
 
     try:
-        if mode in ("entry", "both"):
+        if mode == "entry":
             rule = generate_entry_rule(
                 classification,
                 date_str=date_str,
@@ -561,7 +557,7 @@ def generate_rules(
             )
             rules.append(rule)
 
-        if mode in ("sub", "both"):
+        if mode == "sub":
             sub_rules = generate_sub_rules(
                 classification,
                 date_str=date_str,
@@ -569,21 +565,10 @@ def generate_rules(
             )
             rules.extend(sub_rules)
 
-        # 生成文件名
-        feature_field = classification.get("feature_field", "log_type")
-        if mode == "entry":
-            suffix = f"入口规则_{feature_field}"
-        elif mode == "sub":
-            suffix = f"子规则_{feature_field}"
-        else:
-            suffix = f"规则_{feature_field}"
-        file_name = f"{suffix}_{date_str}.txt"
-
         return {
             "success": True,
             "rule_count": len(rules),
             "rules": rules,
-            "file_name": file_name,
             "error": "",
         }
     except Exception as e:
@@ -591,7 +576,6 @@ def generate_rules(
             "success": False,
             "rule_count": 0,
             "rules": [],
-            "file_name": "",
             "error": str(e),
         }
 

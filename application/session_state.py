@@ -18,7 +18,6 @@ _MAPPED_SUB_RULE_CONFIG_REF = "session.mapped_sub_rules"
 _MAPPING_DERIVED_STATE_KEYS = (
     "mapped_sub_rules",
     "sub_rule_mapping_results",
-    "batch_mapping_results",
     "last_mapping_data",
     "excel_data",
     "excel_filename",
@@ -200,9 +199,6 @@ class SessionState:
     sub_rule_mapping_results: Optional[List[Dict[str, Any]]] = None
     """标准字段映射结果（每条子规则的映射对照表）"""
 
-    batch_mapping_results: Optional[List[Dict[str, Any]]] = None
-    """批量字段映射结果（聊天输入"映射"路径），供 Excel 导出使用"""
-
     # ---- 模型配置 ----
     current_provider: Optional[str] = None
     """当前供应商（"deepseek" | "siliconflow"）"""
@@ -261,7 +257,6 @@ class SessionState:
         self.pending_rule_source_step = None
         self.mapped_sub_rules = None
         self.sub_rule_mapping_results = None
-        self.batch_mapping_results = None
         # 主数据失效时 Planner 历史也必须失效，避免旧文件语义污染新请求。
         self.conversation_history = []
 
@@ -310,8 +305,6 @@ class SessionState:
         # 字段映射状态
         if self.last_mapping_data:
             parts.append(f"- 字段映射：已完成（{len(self.last_mapping_data)} 条）")
-        if self.batch_mapping_results:
-            parts.append("- 字段映射：已完成（批量映射）")
 
         # 子规则状态
         if self.mapped_sub_rules:

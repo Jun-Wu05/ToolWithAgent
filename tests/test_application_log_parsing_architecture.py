@@ -151,7 +151,6 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
             }
         ],
         "sub_rule_mapping_results": [{"rule_name": "old"}],
-        "batch_mapping_results": [{"原始字段名": "kind"}],
         "last_mapping_data": [{"原始字段名": "kind"}],
         "excel_data": b"old-workbook",
         "excel_filename": "old.xlsx",
@@ -198,7 +197,6 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
     for key in (
         "mapped_sub_rules",
         "sub_rule_mapping_results",
-        "batch_mapping_results",
         "last_mapping_data",
         "excel_data",
         "excel_filename",

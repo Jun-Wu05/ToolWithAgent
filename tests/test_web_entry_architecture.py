@@ -72,16 +72,11 @@ def test_action_callbacks_are_registered_once() -> None:
     """Keep every user-visible Action callback registered exactly once."""
     root = Path(__file__).parents[1]
     expected = {
-        "fill_threat_with_field",
-        "confirm_fill",
         "start_enum_fill",
         "export_rules",
         "export_sub_rules",
         "apply_field_mapping",
         "export_mapped_sub_rules",
-        "export_field_mapping_excel",
-        "export_batch_field_mapping_excel",
-        "export_enum_mapping_excel",
         "submit_rule_source_fields",
         "cancel_rule_source_fields",
     }

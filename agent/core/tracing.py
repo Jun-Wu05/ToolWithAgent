@@ -24,7 +24,6 @@ from typing import Optional, Callable, Any
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 import functools
-import asyncio as asyncio_mod
 
 
 # contextvars 支持异步环境下的请求隔离
@@ -58,16 +57,6 @@ class TraceContext:
     def get() -> Optional["TraceContext"]:
         """获取当前请求的追踪上下文"""
         return _current_trace.get()
-
-    @staticmethod
-    def set(ctx: "TraceContext") -> None:
-        """设置当前请求的追踪上下文"""
-        _current_trace.set(ctx)
-
-    @staticmethod
-    def reset() -> None:
-        """重置追踪上下文"""
-        _current_trace.set(None)
 
     @classmethod
     @contextmanager
@@ -120,17 +109,6 @@ class TraceContext:
         finally:
             _current_trace.reset(token)
 
-    def to_dict(self) -> dict:
-        """序列化为字典（用于 JSON 日志）"""
-        return {
-            "trace_id": self.trace_id,
-            "span_id": self.span_id,
-            "parent_span_id": self.parent_span_id,
-            "user_id": self.user_id,
-            "operation": self.operation,
-            "start_time": self.start_time,
-        }
-
     def to_log_prefix(self) -> str:
         """生成日志前缀字符串"""
         parts = [f"[trace={self.trace_id}][span={self.span_id}]"]
@@ -170,29 +148,6 @@ def trace_request(operation: str = "root"):
                     )
                     raise
 
-        @functools.wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            with TraceContext.new(operation=operation) as ctx:
-                from agent.shared.logger import get_logger
-                logger = get_logger("tracing")
-                logger.info(f"{ctx.to_log_prefix()} 请求开始")
-                try:
-                    result = func(*args, **kwargs)
-                    elapsed = time.time() - ctx.start_time
-                    logger.info(
-                        f"{ctx.to_log_prefix()} 请求完成，耗时 {elapsed:.2f}s"
-                    )
-                    return result
-                except Exception as e:
-                    elapsed = time.time() - ctx.start_time
-                    logger.error(
-                        f"{ctx.to_log_prefix()} 请求失败，耗时 {elapsed:.2f}s: {e}"
-                    )
-                    raise
-
-        # 根据函数类型返回对应的包装器
-        if asyncio_mod.iscoroutinefunction(func):
-            return async_wrapper
-        return sync_wrapper
+        return async_wrapper
 
     return decorator

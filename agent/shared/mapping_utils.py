@@ -76,7 +76,7 @@ def unbind_fixed_fields(
 def append_mappings_to_normalize(normalize_item: dict, mappings: list[dict]) -> int:
     """向 normalize 项的 mappings 列表追加映射（按 orgValue 去重）。
 
-    消除 threat_fill.py / enum_field_tool.py / field_mapping.py 中4处重复的去重追加逻辑。
+    消除 enum_field_tool.py / field_mapping.py 中重复的去重追加逻辑。
 
     Args:
         normalize_item: normalize 条目（会被原地修改）

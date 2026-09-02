@@ -6,8 +6,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from agent.tools.pipeline.models import AggregationResult
-
 
 class ValueExtractor(ABC):
     """从日志行中提取特征值的策略接口。
@@ -48,7 +46,7 @@ class ValueExtractor(ABC):
             max_lines:     最大处理行数。
 
         Returns:
-            聚合结果字典（参见 ``AggregationResult`` TypedDict）。
+            聚合结果字典。
         """
         from agent.tools.pipeline.common.aggregator import aggregate_by_field
 

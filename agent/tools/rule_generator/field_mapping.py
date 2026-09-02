@@ -1,6 +1,6 @@
 """标准字段映射模块。
 
-提供子规则字段映射信息的提取和映射结果应用功能。
+提供映射结果应用到子规则/配置的功能。
 本模块独立于规则生成逻辑，可单独使用。
 """
 
@@ -22,38 +22,6 @@ EXCLUDED_FIELD_INDICES = frozenset(
 MAPPING_EXCLUDED_STANDARD_FIELDS = frozenset(
     {EVENT_NAME_FIELD, EVENT_LEVEL_FIELD, "日志类型"}
 )
-
-
-def extract_sub_rule_mapping_info(sub_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """从子规则列表中提取字段映射所需信息（字段列表 + 原始日志样本）。
-
-    对每条子规则，提取 normalize 条目的 index 列表和 sample（原始日志），
-    供 Agent/LLM 进行标准字段映射分析。
-
-    Args:
-        sub_rules: generate_sub_rules() 输出的子规则列表。
-
-    Returns:
-        [{"rule_name": str, "fields": [str], "sample_log": str}, ...]
-    """
-    result: list[dict[str, Any]] = []
-    for rule in sub_rules:
-        rule_name: str = rule.get("name", "")
-        sample_log: str = rule.get("sample", "")
-
-        # 提取 normalize entries 的 index（排除元字段）
-        fields: list[str] = []
-        for entry in rule.get("normalize", []):
-            idx = entry.get("index", "")
-            if idx and idx not in EXCLUDED_FIELD_INDICES:
-                fields.append(idx)
-
-        result.append({
-            "rule_name": rule_name,
-            "fields": fields,
-            "sample_log": sample_log,
-        })
-    return result
 
 
 def apply_field_mapping_to_sub_rules(
@@ -189,25 +157,3 @@ def apply_field_mapping_to_config(
 
     _apply(updated)
     return updated
-
-
-def apply_enum_fill_to_sub_rules(
-    sub_rules: list[dict[str, Any]],
-    mapping_table: dict[str, list[dict]],
-    target_field: str = None,
-) -> list[dict[str, Any]]:
-    """对子规则列表应用枚举/威胁填充（mappings 追加）。
-
-    向后兼容包装：委托 agent.shared.mapping_utils.apply_fill_to_sub_rules。
-    威胁填充和枚举填充在 apply 层面是同一操作，统一到共享函数消除重复。
-
-    Args:
-        sub_rules: 子规则列表（generate_sub_rules 输出，字段映射后含 field 标注）
-        mapping_table: {字段名: [{mappingType, orgValue, mappingValue}, ...]}
-        target_field: 可选，只填充该字段；None 表示填充 mapping_table 里所有字段
-
-    Returns:
-        深拷贝后的 sub_rules，匹配的 normalize 项已追加 mappings
-    """
-    from agent.shared.mapping_utils import apply_fill_to_sub_rules
-    return apply_fill_to_sub_rules(sub_rules, mapping_table, target_field)
