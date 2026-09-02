@@ -11,6 +11,7 @@ from application.execution import ExecutionContext
 from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
 from application.session_projection import build_session_facts
+from application.threat_chain import run_threat_chain_after_mapping
 from contracts.planner_models import ExecutionReport, PlanDecision
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressSink, ProgressStatus
 
@@ -85,6 +86,7 @@ def clear_session_data(session: Any) -> None:
         "latest_enum_artifact",
         "rule_source_fields",
         "pending_rule_source_step",
+        "threat_source_field_override",
         "mapped_sub_rules",
         "enum_preview",
         "enum_excel_path",
@@ -169,13 +171,21 @@ async def run_user_request(
         )
     if decision.decision != "execute":
         return decision
-    return await create_plan_executor(create_default_adapters(team)).execute(
+    report = await create_plan_executor(create_default_adapters(team)).execute(
         decision,
         ExecutionContext(
             session=session,
             session_facts=session_facts,
             progress_sink=progress_sink,
         ),
+    )
+    # 执行后确定性续跑（#173）：字段映射判出威胁子规则时自动补全威胁类型链路
+    return await run_threat_chain_after_mapping(
+        report=report,
+        plan_steps=decision.steps,
+        session=session,
+        team=team,
+        progress_sink=progress_sink,
     )
 
 
@@ -188,11 +198,19 @@ async def run_deterministic_plan(
 ) -> ExecutionReport:
     """执行入口已提供全部参数的类型化确定性计划。"""
     session_facts = build_session_facts(session)
-    return await create_plan_executor(create_default_adapters(team)).execute(
+    report = await create_plan_executor(create_default_adapters(team)).execute(
         plan,
         ExecutionContext(
             session=session,
             session_facts=session_facts,
             progress_sink=progress_sink,
         ),
+    )
+    # 执行后确定性续跑（#173）：按钮/确定性入口的字段映射同样触发威胁链路
+    return await run_threat_chain_after_mapping(
+        report=report,
+        plan_steps=plan.steps,
+        session=session,
+        team=team,
+        progress_sink=progress_sink,
     )

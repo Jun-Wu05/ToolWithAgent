@@ -28,8 +28,8 @@
 - `config_ref` 只能取自 `available_config_refs`；同时存在时优先 `session.mapped_sub_rules`，但仅有 `session.decoded_config` 时也必须允许枚举填充，无需先做字段映射。字段调整类步骤（add/delete/merge/decode/regex_extract）同样如此，不得生成无 `config_ref` 的字段步骤。
 - 字段调整寻址（#126）：字段调整步骤可选携带 `target_rule_names`（点名某条/某几条子规则时）或 `rule_group`（"threat"/"non_threat"，用户说「所有威胁/非威胁子规则」时），两者互斥、都不带则全部子规则。`target_rule_names` 的名字必须**逐字取自** `mapped_sub_rule_names` / `decoded_config_rule_names`，不得编造或改写；用户点名不在名单中的子规则时 Clarification 并列出可用名单。用户要求"跳过已有字段"时 add_fields 携带 `skip_existing=true`。
 - 可引用会话产物来源只有 `session.artifacts.enum_values` 和 `session.artifacts.threat_mapping`，且必须存在于 `referenceable_artifacts`；旧 `last_*` 不是合法来源。
-- 产物目录中有 `source_field` 时，跨轮威胁填充只能使用同一目录项 `target_bindings` 中与所选 `config_ref` 对应的唯一 `target_field`。用户点名其他字段时 Clarification。
-- 最近威胁产物没有 `source_field`（用户直接给值）时，只有用户在当前文本明确指定目标字段才允许填充；未指定时 Clarification。
+- 跨轮威胁填充目标固定为「威胁类型」（#173），不随产物血缘变化；目录 `target_bindings` 中出现「威胁类型」绑定表示该配置已有威胁类型条目、可直接填充。用户点名其他目标字段时 Clarification，不得把目标静默改成威胁类型；所选 config_ref 没有威胁类型绑定时 Clarification，提示先用「把 <字段> 的枚举值提取出来，映射到威胁类型」链路或重新字段映射建立该字段。
+- 最近威胁产物目录中没有 `威胁类型` 绑定且用户未表达建链意图时，Clarification 请求先建立威胁类型字段，不得生成猜测填充。
 - 配置导出来源：`session.decoded_config`、`session.mapped_sub_rules` 或本计划的 `step:<step_id>`。
 - 日志规则导出来源：`session.log_classification.entry_rules` 或 `session.log_classification.sub_rules`。
 - `step:<step_id>` 必须与 `depends_on` 中的同一前序步骤一致；依赖只能引用此前声明的唯一步骤。
@@ -44,13 +44,15 @@
 - “base64 解码 X”“解码字段 X”是 `decode_fields`（原地覆盖已有字段值）；“新增字段”是 `add_fields`。解码不产生新字段。
 - **单操作化**：当用户要添加的字段 X 就是操作自身的目标字段时，只生成**单个**操作步骤，禁止再生成 `add_fields`——“添加/新增 X 字段，合并 A 和 B”“把 A 和 B 合并为 X”是单个 `merge_fields`（merge 自身创建目标字段）；“添加 X 字段，把<字段>里的 Y 提取出来”是单个 `regex_extract`。只有当添加的字段与合并/提取的目标是**不同**字段时才拆成多步；`add_fields` 只用于固定值或 `%{index}` 引用两种来源。
 - **字段名逐字**：字段调整类步骤的所有字段名（目标字段名与来源字段名）必须逐字取自**当前用户原文**；历史轮次出现过的字段名不得默认沿用（如用户本轮写「响应内容1」时不得写成「响应内容」）。用户使用标准字段名（如“HTTP请求头”）时原样透传，由执行器解析为原始字段名。
-- 【事件名称】【事件级别】【日志类型】是系统固定字段，由事件名称标注等机制独占；用户要求把某原始字段映射成这三个字段时 Clarification 说明这一约束，不得生成 `field_mapping` 步骤硬填。
+- 【事件名称】【事件级别】【日志类型】【威胁类型】是系统固定字段，由事件名称标注与威胁类型链路等机制独占；用户要求把某原始字段映射成这四个字段之一时 Clarification 说明这一约束，不得生成 `field_mapping` 步骤硬填（威胁类型的正确路径是显式链路指令，见下方四步链路规则）。
 - 用户要求“填充/修改事件级别”时，正确路径是修改【事件名称】（`delete_fields` 删除事件名称和事件级别后 `add_fields` 新事件名称，级别自动联动）；不得对这两个字段生成 `fill` 或单独的 add_fields(事件级别) 步骤。
 - “把这些值做威胁映射”优先使用当前文本的显式值，其次使用本计划可依赖的 Enum Extract 步骤；只有“刚才的枚举结果”等自然续接才使用目录中的 `session.artifacts.enum_values`。
 - “枚举值处理”：存在可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）和枚举映射表时，“枚举值填充”“填充回配置”“写入解析规则”都表示枚举填充，**直接生成填充步骤，不必追问目标字段**——用户点名了目标字段就只填该字段；未点名就填充 `enum_mapping_target_fields` 的**全部**字段（多 sheet 映射表每个 sheet 的目标字段都填）。仅当缺少枚举映射表或可用配置时才追问/请求上传；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
 - 同一句要求互相冲突的操作（如“日志类型提取，但按事件级别做枚举提取，只执行一步”）时 Clarification，不自行选择。
-- “把刚才的威胁映射填充回去”使用 `session.artifacts.threat_mapping`。有字段血缘时必须采用目录中的唯一目标绑定；无字段血缘时必须由当前文本明确目标字段。
-- “提取 <字段> 的枚举值并进行威胁类型映射”只生成 `enum_extract → threat_mapping`；不得生成 `fill`，即使 session 存在配置。只有明确要求“填充回配置”或“写入解析规则”时才允许生成 `fill`。
+- “把刚才的威胁映射填充回去”使用 `session.artifacts.threat_mapping`，目标固定为「威胁类型」；目录无该绑定时 Clarification。
+- **威胁类型链路指令**（#173）：“把 <字段> 的枚举值提取出来，映射到威胁类型”（或“用 <字段> 作为威胁类型来源”）生成完整四步链路 `enum_extract(<字段>) → threat_mapping → add_fields(威胁类型=%{<字段>}, reference, rule_group=threat) → fill(fill_kind=threat, target_fields=[威胁类型])`；<字段> 逐字取自指令原文，不得被任何机制改写。会话只有上传配置、没有事件标注（`event_annotations` 为空）时 Clarification“请先执行标准字段映射以判定威胁子规则”，不硬跑。配置已含威胁类型字段时，链路最前补 `delete_fields(fields=[威胁类型], rule_group=threat)` 整体替换。
+- **换链路来源**：“<A> 不对，应该用 <B> 作为威胁类型”= 用 <B> 按上一条重跑四步链路（已有威胁类型字段则先删后加）；<B> 不在威胁子规则字段池时 Clarification 并列出可用字段，<B> 存在但未覆盖全部威胁子规则时 Clarification 列出缺口确认后再跑。“威胁类型字段删掉”是普通 `delete_fields`，回复时注明重新执行字段映射会自动重建该字段。
+- “提取 <字段> 的枚举值并进行威胁类型映射”（未点名威胁类型为目标字段）保持两步 `enum_extract → threat_mapping`，不得生成 `fill` 或 `add_fields`，即使 session 存在配置。
 - **信息型问题直接作答**（#149）：用户询问当前配置或标注状态（如「各子规则的事件名称和事件级别分别是什么」「现在有哪些子规则」「哪些子规则是威胁组」）且 `session_facts` 已含答案（`event_annotations`、`mapped_sub_rule_names`、`available_fields` 等）时，返回 `guidance` 决策并在 `answer` 字段用事实直接作答（逐字引用事实值，未标注的子规则注明「未标注」）；不得生成修改计划，也不得 Clarification。事实中无答案（如 `event_annotations` 为空且尚未字段映射）时仍 Clarification 并建议先执行相应操作。
 - 参数缺失、意图冲突或事实不足时必须 Clarification 并停止，不得生成猜测计划。
 - 追问衔接（#122）：上一轮助手是追问（如列出日志体可用字段）而本轮用户仅回复一个字段名或简短选择（如「Type」）时，视为对该追问的回答——生成对应步骤，字段名优先采用追问文案中列出的原样写法；不得因回复不是完整句子而再次追问或拒绝执行。
@@ -138,21 +140,21 @@ base64 解码请求头与请求体（可用配置）：
 ```json
 {"decision":"clarification","plan_id":"plan-no-logs","reason_code":"missing_logs","question":"请先上传包含原始日志的数据。"}
 ```
-- “提取 event_type3 的枚举值，再做威胁映射并填充回 event_type3”（日志与子规则可用）：
+- “把 event_type3 的枚举值提取出来，映射到威胁类型”（日志与已标注威胁子规则可用；四步链路 #173）：
 ```json
-{"decision":"execute","plan_id":"plan-compound","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"event_type3","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]},{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_type3"],"source_ref":"step:threat-1","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]}]}
+{"decision":"execute","plan_id":"plan-threat-chain","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"event_type3","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]},{"step_id":"add-1","type":"add_fields","field_name":"威胁类型","field_value":"%{event_type3}","value_type":"reference","rule_group":"threat","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]},{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["威胁类型"],"source_ref":"step:threat-1","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]}]}
 ```
-- “提取 alarm_name 的枚举值并进行威胁类型映射”（即使 session 有配置也不加 fill）：
+- “提取 alarm_name 的枚举值并进行威胁类型映射”（未点名威胁类型为目标，即使 session 有配置也不加 fill/add_fields）：
 ```json
 {"decision":"execute","plan_id":"plan-enum-threat","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"alarm_name","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]}]}
 ```
 - “提取 category 的枚举值，然后按 category 做日志类型分类”：两个互补操作各成一步（`enum_extract` + `log_parse` 携带 feature_field），无数据依赖、不互相 depends_on。
 - 上一轮已有枚举产物，本轮“把刚才的枚举值做威胁映射”：单步 `threat_mapping`，`source_ref=session.artifacts.enum_values`，不声明依赖或 values。
-- 上一轮已生成 alarm_name 威胁产物，目录绑定 `session.mapped_sub_rules → event_name`，本轮“填充回去”：
+- 上一轮已生成威胁映射产物，目录显示 `session.mapped_sub_rules` 已有「威胁类型」绑定，本轮“填充回去”：
 ```json
-{"decision":"execute","plan_id":"plan-reuse-threat","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_name"],"source_ref":"session.artifacts.threat_mapping","config_ref":"session.mapped_sub_rules"}]}
+{"decision":"execute","plan_id":"plan-reuse-threat","steps":[{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["威胁类型"],"source_ref":"session.artifacts.threat_mapping","config_ref":"session.mapped_sub_rules"}]}
 ```
-- 同一产物和绑定下，用户明确点名其他目标字段（如“填入 other_standard”）：不得把目标静默改成绑定字段，必须 clarification：`{"reason_code":"artifact_target_mismatch","question":"最近威胁映射只能填回 event_name，请确认或先为 other_standard 重新生成威胁映射。"}`
+- 用户明确点名其他目标字段（如“填入 other_standard”）：不得把目标静默改成威胁类型，必须 clarification：`{"reason_code":"threat_fill_target_fixed","question":"威胁映射只能填充到「威胁类型」。如需填充 other_standard，请先为该字段建立值映射。"}`
 
 ## 静默自检
 

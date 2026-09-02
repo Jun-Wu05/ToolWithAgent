@@ -711,7 +711,10 @@ def _format_candidate(row: CandidateRow) -> str:
 
 
 def batch_retrieve_candidates_table(
-    raw_field_names: list[str], top_k: int = 6
+    raw_field_names: list[str],
+    top_k: int = 6,
+    *,
+    include_mapping_excluded: bool = False,
 ) -> CandidateTable:
     """
     对一批原始字段名执行语义检索，返回结构化候选表（#180 结构化出口）。
@@ -725,6 +728,9 @@ def batch_retrieve_candidates_table(
     Args:
         raw_field_names: 原始字段名列表
         top_k: 每个字段返回的候选数（默认 6，调用方常用 5）
+        include_mapping_excluded: 保留映射黑名单记录（默认剔除）。
+            #173 威胁链路 X 判定需要检索黑名单字段「威胁类型」自身的相似度，
+            这是黑名单记录唯一的合法消费场景。
 
     Returns:
         {原始字段名: [(系统属性名称, 相似度, 字段英文名, by_stripped变体)]}；
@@ -743,7 +749,8 @@ def batch_retrieve_candidates_table(
         embeddings, records = _load_cache()
         if embeddings is None or records is None:
             return {}
-    embeddings, records = _apply_mapping_exclusions(embeddings, records)
+    if not include_mapping_excluded:
+        embeddings, records = _apply_mapping_exclusions(embeddings, records)
 
     # 批量嵌入用户字段名 — 按 EMBEDDING_BATCH_SIZE 分批，防止 413 Request Entity Too Large
     all_vectors: list[np.ndarray] = []

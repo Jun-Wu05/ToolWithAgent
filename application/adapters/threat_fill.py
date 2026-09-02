@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from agent.shared.logger import get_logger
+from agent.shared.event_classify import THREAT_TYPE_FIELD
 from agent.shared.mapping_utils import apply_fill_to_config, count_field_mappings
 from application.adapters.fill_shared import unbind_fixed_field_bindings
 from application.adapters.shared import (
@@ -16,7 +17,6 @@ from application.adapters.shared import (
     _session_get,
     _write_config,
 )
-from application.artifact_targets import collect_standard_fields, resolve_standard_target
 from application.execution import ExecutionContext
 from contracts.planner_models import (
     FillStep,
@@ -65,29 +65,16 @@ class ThreatFillAdapter:
                     "最近威胁映射产物已不可用，请重新执行威胁映射",
                 )
             artifact = slot.artifact
-            current_config = _read_config(context.session, step.config_ref)
-            if artifact.source_field:
-                expected_target = resolve_standard_target(current_config, artifact.source_field)
-                if expected_target is None:
-                    return _needs_input(
-                        step,
-                        "artifact_target_unavailable",
-                        "最近威胁映射的来源字段没有唯一可填充标准字段",
-                    )
-                if step.target_fields != (expected_target,):
-                    return _needs_input(
-                        step,
-                        "artifact_target_mismatch",
-                        f"最近威胁映射只能填回标准字段: {expected_target}",
-                    )
-            else:
-                available_targets = set(collect_standard_fields(current_config))
-                if step.target_fields[0] not in available_targets:
-                    return _needs_input(
-                        step,
-                        "artifact_target_unavailable",
-                        "指定字段不是当前配置中的可填充标准字段",
-                    )
+            # 威胁映射产物的填充目标固定为「威胁类型」（#173 修复 1）：
+            # 值域上威胁映射本就只属于威胁类型的枚举集合；按 source_field 血缘
+            # 推导会在字段映射改判后静默漂移到无关字段。用户显式点名其他字段
+            # 由 Planner 澄清拦截（planner.md 既有模式）。
+            if step.target_fields != (THREAT_TYPE_FIELD,):
+                return _needs_input(
+                    step,
+                    "threat_fill_target_fixed",
+                    f"威胁映射只能填充到固定目标字段「{THREAT_TYPE_FIELD}」",
+                )
         else:
             dependency_id = step.source_ref.removeprefix("step:")
             dependency = dependencies.get(dependency_id)
