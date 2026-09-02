@@ -28,7 +28,7 @@ git branch -D <分支> && git push github --delete <分支>
 ## 前提
 
 - 远程：`github` = Jun-Wu05/ToolWithAgent（issue 与 PR 所在）；`origin` = gitcode 镜像，不用管。
-- 本地 master 不被任何 worktree 占用（主 worktree 常驻在特性分支上），因此可以直接 `git fetch github master:master` 更新引用。
+- 主 worktree 默认驻留 master：更新用 `git pull --ff-only github master`；若主 worktree 临时切到特性分支（master 不被任何 worktree 占用），才可用 `git fetch github master:master` 直接更新引用。
 - Python 用全局环境（无仓库内 venv）；测试全离线，但依赖两个 gitignore 的本地文件组（见第 2 步）。
 
 ## 流程
