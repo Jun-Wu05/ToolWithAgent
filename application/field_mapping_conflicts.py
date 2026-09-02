@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -13,7 +12,10 @@ from typing import Any
 
 logger = logging.getLogger("execution_adapters")
 
-CandidateRetriever = Callable[[list[str]], str]
+CandidateTable = dict[str, list[tuple[str, float, str, str]]]
+"""结构化候选表：原始字段名 → [(系统属性名称, 相似度, 字段英文名, by_stripped变体)]（#180）。"""
+
+CandidateRetriever = Callable[[list[str]], CandidateTable]
 
 
 @dataclass(frozen=True)
@@ -66,25 +68,16 @@ def _collect_existing_assignments(decoded_data: Any) -> dict[str, tuple[str, ...
     return {standard: tuple(originals) for standard, originals in assignments.items()}
 
 
-def _parse_candidate_scores(candidate_text: str) -> dict[str, dict[str, float]]:
-    """解析既有紧凑候选文本为 original → standard → score。"""
-    scores: dict[str, dict[str, float]] = defaultdict(dict)
-    candidate_pattern = re.compile(r"(?:^|\|)\s*(.*?)\((\d+(?:\.\d+)?)\s*,")
-    for raw_line in candidate_text.splitlines():
-        if " → " not in raw_line:
-            continue
-        original, candidates = raw_line.split(" → ", 1)
-        original = original.strip()
-        if not original:
-            continue
-        for match in candidate_pattern.finditer(candidates):
-            standard = match.group(1).strip()
-            score = float(match.group(2))
-            if standard:
-                scores[original][standard] = max(
-                    score, scores[original].get(standard, float("-inf"))
-                )
-    return dict(scores)
+def _table_to_scores(table: CandidateTable) -> dict[str, dict[str, float]]:
+    """把结构化候选表折叠为 original → standard → 最高相似度。"""
+    scores: dict[str, dict[str, float]] = {}
+    for original, rows in table.items():
+        best: dict[str, float] = {}
+        for standard, score, _english, _variant in rows:
+            best[standard] = max(score, best.get(standard, float("-inf")))
+        if best:
+            scores[original] = best
+    return scores
 
 
 def _choose_new_winner(
@@ -156,14 +149,14 @@ def resolve_field_mapping_conflicts(
     if rankable_fields:
         retriever = candidate_retriever
         if retriever is None:
-            from application.field_runtime import batch_retrieve_candidates
+            from agent.core.field_retriever import batch_retrieve_candidates_table
 
-            retriever = batch_retrieve_candidates
+            retriever = batch_retrieve_candidates_table
         try:
-            candidate_text = retriever(rankable_fields)
-            retrieval_available = bool(candidate_text and candidate_text.strip())
+            candidate_table = retriever(rankable_fields)
+            retrieval_available = bool(candidate_table)
             if retrieval_available:
-                candidate_scores = _parse_candidate_scores(candidate_text)
+                candidate_scores = _table_to_scores(candidate_table)
         except Exception as error:  # noqa: BLE001 - 可用性优先，稳定降级到行序
             retrieval_available = False
             logger.warning(

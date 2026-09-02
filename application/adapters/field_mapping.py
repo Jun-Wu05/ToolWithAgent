@@ -37,7 +37,12 @@ class FieldMappingAdapter:
         event_classifier: Any | None = None,
         batch_runner: Any | None = None,
     ) -> None:
-        """保存批处理 Runner、执行策略及领域服务接缝。"""
+        """保存批处理 Runner、执行策略及领域服务接缝。
+
+        candidate_retriever 为结构化候选检索器（返回 #180 候选表），
+        供冲突裁决直接消费；批处理 prompt 需要的 markdown 文本在
+        _build_prompt_prequery 注入边界处渲染。
+        """
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
         self._candidate_retriever = candidate_retriever
         self._object_map_loader = object_map_loader
@@ -48,9 +53,30 @@ class FieldMappingAdapter:
             else FieldMappingBatchRunner(
                 team,
                 policy=self._mapping_policy,
-                candidate_retriever=candidate_retriever,
+                candidate_retriever=self._build_prompt_prequery(),
             )
         )
+
+    def _build_prompt_prequery(self) -> Any | None:
+        """把结构化候选检索器适配成 prompt 注入需要的 markdown 文本检索器。
+
+        未注入时返回 None，批处理走 field_mapping_input 的模块默认真实检索，
+        生产 prompt 字节不变；注入假件时每批只调用一次检索器。
+        """
+        retriever = self._candidate_retriever
+        if retriever is None:
+            return None
+
+        def prequery(fields: list[str]) -> str:
+            """取结构化候选表并渲染为 prompt 注入用的 markdown 文本。"""
+            table = retriever(fields)
+            if not table:
+                return ""
+            from agent.core.field_retriever import render_candidates_markdown
+
+            return render_candidates_markdown(table, top_k=5)
+
+        return prequery
 
     async def execute(
         self,

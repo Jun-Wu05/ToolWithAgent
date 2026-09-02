@@ -146,7 +146,7 @@ def test_field_mapping_tracer_preserves_calls_order_and_session_commit() -> None
             {
                 "field_mapping": FieldMappingAdapter(
                     SimpleNamespace(members=[member]),
-                    candidate_retriever=lambda fields: "",
+                    candidate_retriever=lambda fields: {},
                 )
             }
         ).execute(

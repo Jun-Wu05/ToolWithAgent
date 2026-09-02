@@ -69,7 +69,7 @@ def _run_mapping(fields, member, policy, session=None):
     """通过真实 Adapter 接缝执行一步字段映射。"""
     session = session or {"decoded_fields": fields}
     return asyncio.run(
-        ProfessionalAgentAdapter(_Team(member), mapping_policy=policy, candidate_retriever=lambda fields: "").execute(
+        ProfessionalAgentAdapter(_Team(member), mapping_policy=policy, candidate_retriever=lambda fields: {}).execute(
             FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields"),
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
             {},
