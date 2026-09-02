@@ -74,11 +74,11 @@ def test提示词允许decoded_config直接执行枚举填充():
 
 
 def test提示词明确区分枚举提取威胁映射与枚举填充():
-    """提取并映射只产生两步，只有明确回写配置才允许追加 fill。"""
+    """未点名威胁类型的提取+映射保持两步，不加 fill/add_fields（#173 修订后语义）。"""
     assert "提取 alarm_name 的枚举值并进行威胁类型映射" in PROMPT
     assert "enum_extract → threat_mapping" in PROMPT
-    assert "不得生成 `fill`" in PROMPT
-    assert "明确要求“填充回配置”或“写入解析规则”" in PROMPT
+    assert "不得生成 `fill` 或 `add_fields`" in PROMPT
+    assert "未点名威胁类型为目标字段" in PROMPT
 
 
 def test提示词声明威胁映射不依赖枚举映射表():
@@ -104,13 +104,23 @@ def test提示词只允许白名单会话产物并声明选择优先级():
     assert "旧 `last_*` 不是合法来源" in PROMPT
 
 
-def test提示词约束威胁产物字段绑定与无字段产物澄清():
-    """有字段产物不得改投其他字段，无字段产物必须由用户明确目标。"""
-    assert "只能使用同一目录项 `target_bindings`" in PROMPT
-    assert "没有 `source_field`" in PROMPT
-    assert "只有用户在当前文本明确指定目标字段" in PROMPT
-    assert '"reason_code":"artifact_target_mismatch"' in PROMPT
-    assert "不得把目标静默改成" in PROMPT
+def test提示词约束威胁填充固定目标与无绑定澄清():
+    """威胁填充目标固定为威胁类型；点名其他字段或无绑定必须澄清（#173）。"""
+    assert "目标固定为「威胁类型」" in PROMPT
+    assert '`target_bindings` 中出现「威胁类型」绑定' in PROMPT
+    assert '"reason_code":"threat_fill_target_fixed"' in PROMPT
+    assert "不得把目标静默改成威胁类型" in PROMPT
+
+
+def test提示词声明威胁链路四步指令与换来源话术():
+    """显式链路指令生成四步且 X 逐字；换来源/删字段话术消歧（#173）。"""
+    assert "威胁类型链路指令" in PROMPT
+    assert "enum_extract(<字段>) → threat_mapping → add_fields(威胁类型=%{<字段>}, reference, rule_group=threat)" in PROMPT
+    assert "逐字取自指令原文" in PROMPT
+    assert "请先执行标准字段映射以判定威胁子规则" in PROMPT
+    assert "换链路来源" in PROMPT
+    assert "重新执行字段映射会自动重建该字段" in PROMPT
+    assert "未点名威胁类型为目标字段）保持两步" in PROMPT
 
 
 def test提示词包含合并与提取的单操作化规则():
