@@ -1,6 +1,29 @@
 # Issue 实施 SOP：git worktree 隔离工作流
 
-每个 issue 在独立 git worktree 中实施，主 worktree（可能带着未收尾的 WIP）与 master 互不干扰；做完即删，同一时间只保留一个临时 worktree。该流程已在 #178（五组删除）、#179（bug 修复）上完整验证。
+每个 issue 从 master 开短命分支实施、PR 合并后即删分支；**较大改动用独立 git worktree 隔离，小改动在主 worktree 直通**（判据见下），同一时间只保留一个临时 worktree。该流程已在 #178（worktree 五组删除）、#179（worktree bug 修复）、#176（主 worktree 直通小修复）上完整验证。
+
+## 是否需要建 worktree：自动判据
+
+不是按"感觉大小"判断，按可客观检查的信号。**任一命中 → 建 worktree**：
+
+| 信号 | 检查方式 |
+|---|---|
+| 预计改动 ≥3 个文件，或跨 ≥2 个模块目录（agent / application / web / contracts / skills） | 读 issue 的修复方案/影响清单 |
+| issue 要求分组提交（含实现顺序、多阶段、"每组提交便于单独 revert"字样） | 读 issue 正文 |
+| 主 worktree 有未提交 WIP，且改动文件可能与之相交 | `git status` + 文件清单比对 |
+| 需要长时间在隔离目录跑基线/验收（如重复全量测试对比） | 实施计划 |
+
+**全部不命中 → 直通**（小改动：单/双文件、单 commit 可完成、主 worktree 干净或零交集、issue 已给完整修复方案）：
+
+```bat
+git checkout -b codex/issue-<NNN>-<slug> master   & :: 主 worktree 内，未跟踪文件不受影响
+:: …实现 → 全量 pytest 绿 →（动了生产 .py 则先重生成快照）…
+git push github <分支> → PR（Closes #NNN）→ squash merge
+git checkout master && git fetch github master:master
+git branch -D <分支> && git push github --delete <分支>
+```
+
+两条路径共享不变式：**从 master 开分支、全量 pytest 绿、PR 带 `Closes #NNN`、做完删分支**；worktree 路径另需第 2 步补环境文件。
 
 ## 前提
 
