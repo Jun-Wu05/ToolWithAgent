@@ -32,6 +32,7 @@ CORE_MODULES = (
     Path("application/adapters/field_mapping.py"),
     Path("application/execution_policy.py"),
     Path("application/threat_chain_policy.py"),
+    Path("application/threat_chain.py"),
 )
 
 

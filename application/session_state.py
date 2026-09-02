@@ -75,6 +75,7 @@ def commit_log_classification(session: Any, classification: Dict[str, Any]) -> b
 
     _write_state_value(session, "rule_source_fields", None)
     _write_state_value(session, "pending_rule_source_step", None)
+    _write_state_value(session, "threat_source_field_override", None)
     _write_state_value(session, "log_classification", classification)
     return had_mapping_derivatives
 
@@ -192,6 +193,10 @@ class SessionState:
     pending_rule_source_step: Optional[StepSpec] = None
     """因缺少规则来源字段而等待表单提交的类型化步骤"""
 
+    threat_source_field_override: Optional[str] = None
+    """威胁链路来源字段覆盖（#173）：用户显式纠正过 X 后记忆，自动入口直接
+    使用；新上传主数据或重新日志类型提取时清除（数据换了旧纠正失效）"""
+
     # ---- 标准字段映射结果 ----
     mapped_sub_rules: Optional[List[Dict[str, Any]]] = None
     """映射后的子规则列表，供导出使用"""
@@ -255,6 +260,7 @@ class SessionState:
         self.log_classification = None
         self.rule_source_fields = None
         self.pending_rule_source_step = None
+        self.threat_source_field_override = None
         self.mapped_sub_rules = None
         self.sub_rule_mapping_results = None
         # 主数据失效时 Planner 历史也必须失效，避免旧文件语义污染新请求。

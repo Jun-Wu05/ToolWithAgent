@@ -38,6 +38,8 @@ _OPERATION_TEXT = {
     "fill": "配置填充",
     "remove_mapping": "取消映射",
     "export": "导出",
+    "add_fields": "添加字段",
+    "delete_fields": "删除字段",
 }
 
 _OPERATION_STATE_SUFFIX = {
