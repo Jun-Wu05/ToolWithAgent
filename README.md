@@ -28,7 +28,7 @@ toolswithagent/
 │   ├── message_router.py            # 每会话锁 + 文件/文本分发
 │   ├── file_handlers.py             # Excel 分流、元素读取与用户反馈
 │   ├── user_message_handlers.py     # 自然语言入口：调用 Application 后渲染
-│   ├── action_callbacks.py          # 10 个业务 Action + 2 个弹窗内部 Action
+│   ├── action_callbacks.py          # 5 个业务 Action + 2 个弹窗内部 Action
 │   ├── deterministic_plan.py        # 按钮计划的 Web 适配
 │   ├── plan_renderer.py             # Clarification/ExecutionReport 渲染
 │   ├── chainlit_progress.py         # ProgressEvent → Chainlit TaskList
@@ -71,7 +71,6 @@ toolswithagent/
 │   │   └── log_pattern_store.py     # 日志模式知识库
 │   ├── shared/                      # 共享算法
 │   │   ├── field_mapping.py         # 字段映射核心算法
-│   │   ├── threat_fill.py           # 威胁填充逻辑
 │   │   └── logger.py                # 统一日志
 │   └── prompts/                     # 全部 LLM Prompt 模板与公开加载器
 │       ├── planner.md               # PlannerAgent 指令

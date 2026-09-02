@@ -35,18 +35,13 @@
 - `@cl.on_settings_update`
 - `@cl.on_message`
 
-用户可见业务 Action callback 固定为 10 个；数据源弹窗另注册提交、取消 2 个内部 Action：
+用户可见业务 Action callback 固定为 5 个；数据源弹窗另注册提交、取消 2 个内部 Action：
 
-1. fill_threat_with_field
-2. confirm_fill
-3. start_enum_fill
-4. export_rules
-5. export_sub_rules
-6. apply_field_mapping
-7. export_mapped_sub_rules
-8. export_field_mapping_excel
-9. export_batch_field_mapping_excel
-10. export_enum_mapping_excel
+1. start_enum_fill
+2. export_rules
+3. export_sub_rules
+4. apply_field_mapping
+5. export_mapped_sub_rules
 
 `tests/test_web_entry_architecture.py` 静态校验注册数量和名称，并阻止 Web 入口直接拥有 Team、Provider 或字段检索依赖。
 
