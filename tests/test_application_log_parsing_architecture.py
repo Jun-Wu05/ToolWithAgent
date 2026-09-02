@@ -128,6 +128,120 @@ def test_log_parse_adapter_preserves_call_order_session_and_progress() -> None:
     ]
 
 
+def test重新提取日志类型原子清理映射派生状态并释放白板导出gate(monkeypatch) -> None:
+    """新分类不得与旧映射、事件标注、手动调整或其枚举账本混用。"""
+    import agent.tools.rule_generator as rule_generator
+
+    from application.adapters.export import ExportAdapter
+    from application.adapters.log_parse import LogParseAdapter
+    from application.execution import ExecutionContext
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import ExportStep, LogParseStep, StepStatus
+
+    mapped_ref = "session.mapped_sub_rules"
+    decoded_ref = "session.decoded_config"
+    session = {
+        "raw_log_lines": ["kind=new src=1"],
+        "decoded_data": {"name": "uploaded", "normalize": []},
+        "log_classification": {"classification_details": [{"logtype": "old"}]},
+        "mapped_sub_rules": [
+            {
+                "name": "old",
+                "normalize": [{"index": "kind", "field": "事件名称"}],
+            }
+        ],
+        "sub_rule_mapping_results": [{"rule_name": "old"}],
+        "batch_mapping_results": [{"原始字段名": "kind"}],
+        "last_mapping_data": [{"原始字段名": "kind"}],
+        "excel_data": b"old-workbook",
+        "excel_filename": "old.xlsx",
+        "enum_fill_contributions": {
+            mapped_ref: {"kind": [{"orgValue": "old"}]},
+            decoded_ref: {"severity": [{"orgValue": "high"}]},
+        },
+        "stale_enum_config_refs": {mapped_ref, decoded_ref},
+        "enum_pending_refills": {
+            mapped_ref: {"kind"},
+            decoded_ref: {"severity"},
+        },
+    }
+    classification = {
+        "classification_details": [{"logtype": "new", "sample": "kind=new src=1"}]
+    }
+
+    result = asyncio.run(
+        LogParseAdapter(
+            format_identifier=lambda _: '{"format":"kv","feature_field":"kind"}',
+            classifier=lambda *args, **kwargs: json.dumps(
+                classification, ensure_ascii=False
+            ),
+            sample_filler=lambda value, _: value,
+        ).execute(
+            LogParseStep(step_id="reparse", type="log_parse"),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.SUCCESS
+    assert session["log_classification"] == classification
+    for key in (
+        "mapped_sub_rules",
+        "sub_rule_mapping_results",
+        "batch_mapping_results",
+        "last_mapping_data",
+        "excel_data",
+        "excel_filename",
+    ):
+        assert session[key] is None
+    assert session["enum_fill_contributions"] == {
+        decoded_ref: {"severity": [{"orgValue": "high"}]}
+    }
+    assert session["stale_enum_config_refs"] == {decoded_ref}
+    assert session["enum_pending_refills"] == {decoded_ref: {"severity"}}
+    assert "⚠️" in result.message
+    assert "映射" in result.message
+    assert "事件标注" in result.message
+    assert "手动调整" in result.message
+
+    mapped_export = asyncio.run(
+        ExportAdapter().execute(
+            ExportStep(
+                step_id="export-mapped",
+                type="export",
+                source_ref=mapped_ref,
+            ),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+    assert mapped_export.status == StepStatus.NEEDS_INPUT
+    assert mapped_export.error_code == "export_source_required"
+
+    calls = []
+    monkeypatch.setattr(
+        rule_generator,
+        "generate_rules",
+        lambda value, mode: calls.append((value, mode))
+        or {"success": True, "rules": [{"name": "new"}]},
+    )
+    monkeypatch.setattr(rule_generator, "rules_to_base64_text", lambda rules: "new-rules")
+    whiteboard_export = asyncio.run(
+        ExportAdapter().execute(
+            ExportStep(
+                step_id="export-whiteboard",
+                type="export",
+                source_ref="session.log_classification.sub_rules",
+            ),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+    assert whiteboard_export.status == StepStatus.SUCCESS
+    assert whiteboard_export.artifact.content == "new-rules"
+    assert calls == [(classification, "sub")]
+
+
 def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session() -> None:
     """格式或分类 JSON 非法时失败关闭，并保留此前成功分类。"""
     from application.adapters.log_parse import LogParseAdapter
@@ -148,6 +262,7 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
     invalid_session = {
         "raw_log_lines": ["kind=attack"],
         "log_classification": previous,
+        "mapped_sub_rules": [{"name": "old-mapped"}],
     }
     invalid = asyncio.run(
         execute(
@@ -162,6 +277,7 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
     assert invalid.status == StepStatus.FAILED
     assert invalid.error_code == "log_format_invalid"
     assert invalid_session["log_classification"] is previous
+    assert invalid_session["mapped_sub_rules"] == [{"name": "old-mapped"}]
 
     empty_session = {
         "raw_log_lines": ["kind=attack"],

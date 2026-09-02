@@ -91,3 +91,39 @@ class TestSessionStateContract:
         assert s.mapped_sub_rules == [{"normalize": []}]
         s["last_threat_data"] = [{"a": 1}]
         assert s.last_threat_data == [{"a": 1}]
+
+    def test_log_classification_commit_clears_only_mapped_rule_derivatives(self):
+        """生产 SessionState 与字典测试接缝共享同一派生状态失效语义。"""
+        from application.session_state import SessionState, commit_log_classification
+
+        mapped_ref = "session.mapped_sub_rules"
+        decoded_ref = "session.decoded_config"
+        session = SessionState(
+            decoded_data={"normalize": []},
+            mapped_sub_rules=[{"name": "old"}],
+            sub_rule_mapping_results=[{"rule_name": "old"}],
+            last_mapping_data=[{"原始字段名": "kind"}],
+            enum_fill_contributions={
+                mapped_ref: {"kind": [{"orgValue": "old"}]},
+                decoded_ref: {"severity": [{"orgValue": "high"}]},
+            },
+            stale_enum_config_refs={mapped_ref, decoded_ref},
+            enum_pending_refills={
+                mapped_ref: {"kind"},
+                decoded_ref: {"severity"},
+            },
+        )
+
+        cleared = commit_log_classification(session, {"types": ["new"]})
+
+        assert cleared is True
+        assert session.log_classification == {"types": ["new"]}
+        assert session.mapped_sub_rules is None
+        assert session.sub_rule_mapping_results is None
+        assert session.last_mapping_data is None
+        assert session.decoded_data == {"normalize": []}
+        assert session.enum_fill_contributions == {
+            decoded_ref: {"severity": [{"orgValue": "high"}]}
+        }
+        assert session.stale_enum_config_refs == {decoded_ref}
+        assert session.enum_pending_refills == {decoded_ref: {"severity"}}

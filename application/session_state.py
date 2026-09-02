@@ -5,10 +5,75 @@
 通过单一 key "user_session" 存储整个对象，所有字段通过 property 访问。
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Optional, List, Dict, Set
 
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+
+
+_MAPPED_SUB_RULE_CONFIG_REF = "session.mapped_sub_rules"
+_MAPPING_DERIVED_STATE_KEYS = (
+    "mapped_sub_rules",
+    "sub_rule_mapping_results",
+    "batch_mapping_results",
+    "last_mapping_data",
+    "excel_data",
+    "excel_filename",
+)
+
+
+def _read_state_value(session: Any, key: str, default: Any = None) -> Any:
+    """读取 SessionState 或测试字典，不把兼容细节泄漏给生命周期操作。"""
+    if isinstance(session, Mapping):
+        return session.get(key, default)
+    return getattr(session, key, default)
+
+
+def _write_state_value(session: Any, key: str, value: Any) -> None:
+    """写入 SessionState 或测试字典。"""
+    if isinstance(session, dict):
+        session[key] = value
+        return
+    setattr(session, key, value)
+
+
+def commit_log_classification(session: Any, classification: Dict[str, Any]) -> bool:
+    """提交新日志分类并失效所有依赖旧分类的映射后子规则状态。
+
+    返回是否实际清除了非空派生状态，供调用方决定是否向用户显示覆盖警告。
+    与上传配置绑定的枚举贡献必须保留；这里只移除已失效的映射后子规则引用。
+    """
+    had_mapping_derivatives = any(
+        bool(_read_state_value(session, key)) for key in _MAPPING_DERIVED_STATE_KEYS
+    )
+    for key in _MAPPING_DERIVED_STATE_KEYS:
+        _write_state_value(session, key, None)
+
+    contributions = dict(
+        _read_state_value(session, "enum_fill_contributions", {}) or {}
+    )
+    if contributions.pop(_MAPPED_SUB_RULE_CONFIG_REF, None) is not None:
+        had_mapping_derivatives = True
+    _write_state_value(session, "enum_fill_contributions", contributions)
+
+    stale_refs = set(
+        _read_state_value(session, "stale_enum_config_refs", set()) or set()
+    )
+    if _MAPPED_SUB_RULE_CONFIG_REF in stale_refs:
+        had_mapping_derivatives = True
+        stale_refs.discard(_MAPPED_SUB_RULE_CONFIG_REF)
+    _write_state_value(session, "stale_enum_config_refs", stale_refs)
+
+    pending_refills = dict(
+        _read_state_value(session, "enum_pending_refills", {}) or {}
+    )
+    if pending_refills.pop(_MAPPED_SUB_RULE_CONFIG_REF, None) is not None:
+        had_mapping_derivatives = True
+    _write_state_value(session, "enum_pending_refills", pending_refills)
+
+    _write_state_value(session, "log_classification", classification)
+    return had_mapping_derivatives
 
 
 @dataclass(frozen=True)

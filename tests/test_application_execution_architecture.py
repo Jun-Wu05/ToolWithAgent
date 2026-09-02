@@ -123,3 +123,38 @@ def test_export_tracer_preserves_missing_and_stale_source_errors() -> None:
     stale = asyncio.run(execute(stale_session, "session.decoded_config"))
     assert stale.status == StepStatus.NEEDS_INPUT
     assert stale.results[0].error_code == "enum_refill_required"
+
+
+def test_planner_typed_sub_rule_export_cannot_bypass_mapped_rule_guard() -> None:
+    """自然语言 Planner 产出的同一 source_ref 必须在执行接缝被统一拦截。"""
+    from application.adapters.export import ExportAdapter
+    from application.execution import ExecutionContext, PlanExecutor
+    from application.session_state import SessionState
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import ExportStep, PlanDecision, StepStatus
+
+    session = SessionState(
+        log_classification={"types": ["AUDIT"]},
+        mapped_sub_rules=[
+            {
+                "name": "AUDIT",
+                "normalize": [{"index": "event", "field": "事件名称"}],
+            }
+        ],
+    )
+    step = ExportStep(
+        step_id="export-sub",
+        type="export",
+        source_ref="session.log_classification.sub_rules",
+    )
+
+    report = asyncio.run(
+        PlanExecutor({"export": ExportAdapter()}).execute(
+            PlanDecision(decision="execute", plan_id="planner-export", steps=(step,)),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "mapped_sub_rules_present"
+    assert "生成映射后子规则" in report.results[0].message

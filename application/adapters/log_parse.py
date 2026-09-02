@@ -6,9 +6,10 @@ import asyncio
 import json
 from collections.abc import Callable, Mapping
 
-from application.adapters.shared import _failed, _session_get, _session_set, _success
+from application.adapters.shared import _failed, _session_get, _success
 from application.execution import ExecutionContext
 from application.parsing import parse_json_safe
+from application.session_state import commit_log_classification
 from contracts.planner_models import (
     LogClassificationArtifact,
     LogParseStep,
@@ -92,17 +93,26 @@ class LogParseAdapter:
             return _failed(step, "log_parse_failed", "日志类型提取没有生成有效结果")
 
         classification = self._sample_filler(classification, logs_text)
-        _session_set(context.session, "log_classification", classification)
+        cleared_mapping_derivatives = commit_log_classification(
+            context.session, classification
+        )
         classification_details = classification.get("classification_details")
         item_count = (
             len(classification_details)
             if isinstance(classification_details, list)
             else len(classification)
         )
+        message = None
+        if cleared_mapping_derivatives:
+            message = (
+                "日志类型提取完成；⚠️ 已清除上一轮字段映射、事件标注和手动调整，"
+                "如需完整版子规则请重新执行字段映射"
+            )
         return _success(
             step,
             LogClassificationArtifact(
                 classification=classification,
                 item_count=item_count,
             ),
+            message=message,
         )

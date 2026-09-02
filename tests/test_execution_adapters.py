@@ -1515,6 +1515,49 @@ def test未映射子规则导出保留明确下载语义(monkeypatch):
     assert calls == ["sub"]
 
 
+def test已有映射结果时白板子规则导出被统一gate拦截(monkeypatch):
+    """按钮与 Planner 共用的导出接缝不得重建并下载白板子规则。"""
+    import agent.tools.rule_generator as rule_generator
+
+    calls = []
+    monkeypatch.setattr(
+        rule_generator,
+        "generate_rules",
+        lambda classification, mode: calls.append((classification, mode)),
+    )
+    session = {
+        "log_classification": {"类型A": {}},
+        "mapped_sub_rules": [
+            {
+                "name": "类型A",
+                "normalize": [{"index": "alarm_name", "field": "事件名称"}],
+            }
+        ],
+    }
+    step = ExportStep(
+        step_id="export-whiteboard",
+        type="export",
+        source_ref="session.log_classification.sub_rules",
+    )
+
+    result = asyncio.run(
+        ExportAdapter().execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.NEEDS_INPUT
+    assert result.error_code == "mapped_sub_rules_present"
+    assert "映射" in result.message
+    assert "事件标注" in result.message
+    assert "手动调整" in result.message
+    assert "生成映射后子规则" in result.message
+    assert result.artifact is None
+    assert calls == []
+
+
 def test映射后子规则导出消费mapped_sub_rules而不是重新生成配置(monkeypatch):
     """映射后子规则导出应保留字段映射结果，并通过统一配置产物编码。"""
     import base64
