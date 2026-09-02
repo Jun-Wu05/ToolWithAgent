@@ -20,7 +20,7 @@
 | `message_router.py` | 每会话锁、Team 获取、文件/文本分发和请求追踪 | model_runtime |
 | `file_handlers.py` | 读取 Chainlit 元素、Excel 分流、表格展示和上传提示 | file_input、enum_mapping_attachments |
 | `user_message_handlers.py` | 调用自然语言请求运行时并渲染决策/报告 | request_runtime |
-| `action_callbacks.py` | 注册 10 个用户可见 Action callback 并构造完整 StepSpec | deterministic_plan |
+| `action_callbacks.py` | 注册 10 个用户可见业务 Action 与 2 个弹窗内部 Action，并构造完整 StepSpec | deterministic_plan |
 | `deterministic_plan.py` | 为按钮请求装配进度并转发执行 | request_runtime |
 | `chainlit_progress.py` | ProgressEvent → 持续更新的 TaskList | contracts.progress |
 | `plan_renderer.py` | Clarification、Guidance、ExecutionReport、表格与附件 | contracts.planner_models |
@@ -35,7 +35,7 @@
 - `@cl.on_settings_update`
 - `@cl.on_message`
 
-Action callback 固定为 10 个：
+用户可见业务 Action callback 固定为 10 个；数据源弹窗另注册提交、取消 2 个内部 Action：
 
 1. fill_threat_with_field
 2. confirm_fill

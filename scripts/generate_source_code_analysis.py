@@ -126,7 +126,7 @@ RESPONSIBILITIES = {
     "web/user_message_handlers.py": "自然语言 Web 适配、进度衔接与结果渲染。",
     "web/message_router.py": "每会话锁、Team 获取以及文件/文本消息分发。",
     "web/file_handlers.py": "Chainlit 文件读取、Excel 分流和上传反馈。",
-    "web/action_callbacks.py": "十个确定性 Action callback 的 Chainlit 接线。",
+    "web/action_callbacks.py": "十个用户可见业务 Action 与两个弹窗内部 Action 的 Chainlit 接线。",
     "contracts/planner_models.py": "PlanDecision、StepSpec、Artifact 与 ExecutionReport 契约。",
     "contracts/session_facts.py": "Planner 可见的安全会话事实契约。",
     "agent/core/planner.py": "无业务工具的独立 PlannerAgent。",

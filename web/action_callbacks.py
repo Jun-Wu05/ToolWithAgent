@@ -14,6 +14,24 @@ from agent.shared.logger import get_logger
 logger = get_logger("action_callbacks")
 
 
+@cl.action_callback("submit_rule_source_fields")
+async def on_submit_rule_source_fields(action: cl.Action):
+    """接收非阻塞数据源弹窗提交，并续跑触发弹窗的原始步骤。"""
+    from web.rule_source_form import handle_rule_source_submission
+
+    user_session = cl.user_session.get("user_session")
+    await handle_rule_source_submission(action.payload, user_session)
+
+
+@cl.action_callback("cancel_rule_source_fields")
+async def on_cancel_rule_source_fields(action: cl.Action):
+    """接收数据源弹窗取消或超时，并清理待执行步骤。"""
+    from web.rule_source_form import handle_rule_source_cancel
+
+    user_session = cl.user_session.get("user_session")
+    await handle_rule_source_cancel(action.payload, user_session)
+
+
 def _build_retrieval_candidates_map(mapping_results: list) -> dict[str, str]:
     """为导出 xlsx 重新检索每个原始字段的标准字段候选 top3。
 

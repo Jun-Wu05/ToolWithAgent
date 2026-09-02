@@ -82,6 +82,8 @@ def test_action_callbacks_are_registered_once() -> None:
         "export_field_mapping_excel",
         "export_batch_field_mapping_excel",
         "export_enum_mapping_excel",
+        "submit_rule_source_fields",
+        "cancel_rule_source_fields",
     }
     registrations = _chainlit_decorators(root / "web/action_callbacks.py")
     names = [value for decorator, value in registrations if decorator == "action_callback"]
