@@ -7,7 +7,11 @@
 import copy
 from typing import Any
 
-from agent.shared.event_classify import EVENT_LEVEL_FIELD, EVENT_NAME_FIELD
+from agent.shared.event_classify import (
+    EVENT_LEVEL_FIELD,
+    EVENT_NAME_FIELD,
+    THREAT_TYPE_FIELD,
+)
 
 # normalize entries 的 index 排除集合：系统自动生成的元字段，不参与用户字段映射
 # web/action_callbacks.py 也引用此常量（原散落 4 处 literal）
@@ -17,10 +21,11 @@ EXCLUDED_FIELD_INDICES = frozenset(
 )
 
 # 映射目标黑名单：被系统固定字段机制独占的标准字段，禁止用户字段映射占用
-# （issue #125）。与 EXCLUDED_FIELD_INDICES 对称：前者管映射输入侧（index 排除），
-# 本常量管映射目标侧（候选过滤 + 白名单降级）。后续新增固定枚举字段只加一个名字。
+# （issue #125 先例）。与 EXCLUDED_FIELD_INDICES 对称：前者管映射输入侧（index 排除），
+# 本常量管映射目标侧（候选过滤 + 白名单降级）。威胁类型由 #173 链路独占产出
+# （裸映射在平台侧是数据污染），成为第 4 个黑名单字段。
 MAPPING_EXCLUDED_STANDARD_FIELDS = frozenset(
-    {EVENT_NAME_FIELD, EVENT_LEVEL_FIELD, "日志类型"}
+    {EVENT_NAME_FIELD, EVENT_LEVEL_FIELD, "日志类型", THREAT_TYPE_FIELD}
 )
 
 

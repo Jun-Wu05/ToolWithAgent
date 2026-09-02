@@ -66,6 +66,8 @@ EVENT_NAME_LEVEL_BINDING: dict[str, str] = {
 
 EVENT_NAME_FIELD = "事件名称"
 EVENT_LEVEL_FIELD = "事件级别"
+THREAT_TYPE_FIELD = "威胁类型"
+"""系统固定字段名单一来源：威胁类型链路独占产出的第 4 个固定枚举字段（#173）。"""
 
 ALL_EVENT_NAMES = frozenset(EVENT_NAME_LEVEL_BINDING)
 

@@ -325,6 +325,23 @@ def test解绑助手删除绑定键保留normalize():
     assert "事件级别" in config[0]["parser"]["filter"][0]["fields"]
 
 
+def test解绑跳过引用值绑定():
+    """%{字段} 引用绑定不在解除范围（#173）：威胁类型链路的取值语义依赖引用存活。"""
+    config = [
+        {
+            "name": "r3",
+            "normalize": [{"index": "威胁类型", "mappings": []}],
+            "parser": {"filter": [
+                {"fields": {"威胁类型": "%{attack_type}"},
+                 "name": "addFields", "id": ""},
+            ]},
+        }
+    ]
+    updated, unbound = unbind_fixed_fields(config, ["威胁类型"])
+    assert unbound == []
+    assert updated[0]["parser"]["filter"][0]["fields"]["威胁类型"] == "%{attack_type}"
+
+
 def test解绑清空的过滤器整体移除():
     """绑定 addFields 的键被清空时整个过滤器移除，不留空 addFields。"""
     config = [

@@ -15,15 +15,26 @@ from collections import Counter
 from typing import Any
 
 
+def _is_reference_value(value: Any) -> bool:
+    """判断 addFields 绑定值是否为运行时引用（%{字段} 形态，#173）。"""
+    return (
+        isinstance(value, str)
+        and value.startswith("%{")
+        and value.endswith("}")
+    )
+
+
 def unbind_fixed_fields(
     config: Any,
     field_names: list[str] | tuple[str, ...],
 ) -> tuple[Any, list[str]]:
     """删除 addFields 固定值绑定中命中目标字段的键（填充即解绑，#126）。
 
-    固定字段（事件名称/事件级别/日志类型）由标注机制以 addFields 固定值
-    写入，运行时优先于 normalize 值映射生效；用户显式枚举填充这些字段时，
-    必须先解除绑定，值映射才能真正生效。normalize 条目保留（填充目标）。
+    固定字段（事件名称/事件级别/日志类型/威胁类型）由标注或威胁链路机制以
+    addFields 写入，运行时优先于 normalize 值映射生效；用户显式枚举填充固定值
+    时，必须先解除绑定，值映射才能真正生效。normalize 条目保留（填充目标）。
+    ``%{字段}`` 引用值绑定不在解除范围（#173）：威胁类型链路的取值语义就是
+    「引用来源字段的运行时值，再经 mappings 转换」，引用与值映射共生。
 
     Returns:
         (更新后的配置深拷贝, 解除绑定的 entity 名单)；无命中时原样深拷贝。
@@ -33,7 +44,7 @@ def unbind_fixed_fields(
     unbound: list[str] = []
 
     def _walk(node: Any) -> None:
-        """递归遍历配置，移除各 entity 绑定过滤器中命中目标字段的键。"""
+        """递归遍历配置，移除各 entity 绑定过滤器中命中目标字段的固定值键。"""
         if isinstance(node, dict):
             parser = node.get("parser")
             if isinstance(parser, dict) and isinstance(parser.get("filter"), list):
@@ -45,7 +56,11 @@ def unbind_fixed_fields(
                         and filter_item.get("id") == ""
                         and isinstance(filter_item.get("fields"), dict)
                     ):
-                        hit = targets & set(filter_item["fields"])
+                        hit = {
+                            key
+                            for key in targets & set(filter_item["fields"])
+                            if not _is_reference_value(filter_item["fields"][key])
+                        }
                         if hit:
                             for key in hit:
                                 filter_item["fields"].pop(key)
