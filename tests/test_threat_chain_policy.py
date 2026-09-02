@@ -1,0 +1,305 @@
+"""#173 威胁类型链路纯策略测试：触发判定、X 判定、链路构造与值全覆盖校验。"""
+
+from __future__ import annotations
+
+from contracts.planner_models import (
+    EventAnnotationRow,
+    FieldMappingArtifact,
+    FieldMappingRow,
+    StepResult,
+    StepStatus,
+)
+from application.threat_chain_policy import (
+    THREAT_FIELD_ABSENT,
+    THREAT_FIELD_CHAIN,
+    THREAT_FIELD_EXISTING,
+    build_threat_chain_steps,
+    collect_threat_field_pools,
+    determine_source_field,
+    ensure_threat_mapping_coverage,
+    evaluate_chain_trigger,
+    inspect_threat_field_state,
+)
+from agent.shared.event_classify import THREAT_TYPE_FIELD
+
+
+def _mapping_result(annotations) -> StepResult:
+    """构造带事件标注的成功字段映射结果行。"""
+    return StepResult(
+        step_id="mapping",
+        operation_type="field_mapping",
+        status=StepStatus.SUCCESS,
+        artifact=FieldMappingArtifact(
+            item_count=1,
+            mappings=(
+                FieldMappingRow(
+                    **{
+                        "原始字段名": "a",
+                        "系统属性名称": "源地址",
+                        "匹配状态": "匹配成功",
+                    }
+                ),
+            ),
+            event_annotations=tuple(annotations),
+        ),
+        message="ok",
+    )
+
+
+def _annotation(rule_name, event_name="网络攻击", status="judged"):
+    return EventAnnotationRow(
+        rule_name=rule_name, event_name=event_name, status=status
+    )
+
+
+# ---------------------------------------------------------------------------
+# S0 触发判定
+# ---------------------------------------------------------------------------
+
+
+def test触发判定识别威胁子规则并排除待确认():
+    trigger = evaluate_chain_trigger(
+        [
+            _mapping_result(
+                [
+                    _annotation("威胁A"),
+                    _annotation("普通B", event_name="正常通信"),
+                    _annotation("待确认C", status="uncertain"),
+                ]
+            )
+        ]
+    )
+    assert trigger.should_run
+    assert trigger.threat_rule_names == ("威胁A",)
+    assert trigger.uncertain_rule_names == ("待确认C",)
+
+
+def test触发判定全部待确认时只提示不跑():
+    trigger = evaluate_chain_trigger(
+        [_mapping_result([_annotation("x", status="uncertain")])]
+    )
+    assert not trigger.should_run
+    assert trigger.hint_only
+
+
+def test触发判定无字段映射产物时返回None():
+    assert evaluate_chain_trigger([]) is None
+    failed = StepResult(
+        step_id="mapping",
+        operation_type="field_mapping",
+        status=StepStatus.FAILED,
+        error_code="x",
+        message="failed",
+    )
+    assert evaluate_chain_trigger([failed]) is None
+
+
+# ---------------------------------------------------------------------------
+# 字段池
+# ---------------------------------------------------------------------------
+
+
+def _threat_rule(name, indexes):
+    return {
+        "name": name,
+        "normalize": [
+            {"index": idx, "mappings": []} for idx in indexes
+        ],
+    }
+
+
+def test字段池收集剔除元字段():
+    pools = collect_threat_field_pools(
+        [
+            _threat_rule("威胁A", ["original_log", "日志类型", "attack_type", "src_ip"]),
+            _threat_rule("普通B", ["attack_type"]),
+        ],
+        ("威胁A", "普通B不在名单"),
+    )
+    assert pools == {"威胁A": ("attack_type", "src_ip")}
+
+
+# ---------------------------------------------------------------------------
+# S1 X 判定
+# ---------------------------------------------------------------------------
+
+
+POOLS = {"威胁A": ("attack_type", "src_ip"), "威胁B": ("attack_type", "dst_port")}
+
+
+def _table(**field_rows):
+    return {name: [tuple(row) for row in rows] for name, rows in field_rows.items()}
+
+
+def testX判定取相似度最高且覆盖全部威胁子规则():
+    table = _table(
+        attack_type=[(THREAT_TYPE_FIELD, 0.82, "threat_type", "")],
+        src_ip=[(THREAT_TYPE_FIELD, 0.30, "threat_type", "")],
+    )
+    decision = determine_source_field(POOLS, table)
+    assert decision.source_field == "attack_type"
+    assert decision.score == 0.82
+    assert decision.covered_rules == 2
+    assert decision.reason == "similarity"
+
+
+def testX判定覆盖不足的字段不参与():
+    table = _table(src_ip=[(THREAT_TYPE_FIELD, 0.95, "threat_type", "")])
+    decision = determine_source_field(POOLS, table)
+    assert decision.source_field is None
+    assert decision.reason == "degrade_below_threshold"
+
+
+def testX判定无覆盖字段时降级():
+    decision = determine_source_field(
+        {"威胁A": ("a",), "威胁B": ("b",)}, _table(a=[(THREAT_TYPE_FIELD, 0.9, "t", "")])
+    )
+    assert decision.source_field is None
+    assert decision.reason == "degrade_no_coverage"
+
+
+def testX判定低于阈值降级():
+    table = _table(attack_type=[(THREAT_TYPE_FIELD, 0.42, "threat_type", "")])
+    assert determine_source_field(POOLS, table).reason == "degrade_below_threshold"
+
+
+def testX判定会话覆盖优先且不走相似度():
+    decision = determine_source_field(
+        POOLS, {}, override="attack_type"
+    )
+    assert decision.source_field == "attack_type"
+    assert decision.reason == "session_override"
+
+
+def testX判定覆盖不足的会话覆盖值判为无效():
+    decision = determine_source_field(POOLS, {}, override="src_ip")
+    assert decision.source_field is None
+    assert decision.reason == "override_not_covering"
+
+
+# ---------------------------------------------------------------------------
+# 威胁字段现状探测
+# ---------------------------------------------------------------------------
+
+
+def test现状探测三种状态():
+    absent = [_threat_rule("威胁A", ["attack_type"])]
+    assert inspect_threat_field_state(absent, ("威胁A",)) == THREAT_FIELD_ABSENT
+
+    existing = [
+        {
+            "name": "威胁A",
+            "normalize": [{"index": "attack_type"}, {"index": THREAT_TYPE_FIELD}],
+        }
+    ]
+    assert inspect_threat_field_state(existing, ("威胁A",)) == THREAT_FIELD_EXISTING
+
+    chain = [
+        {
+            "name": "威胁A",
+            "normalize": [{"index": THREAT_TYPE_FIELD}],
+            "parser": {
+                "filter": [
+                    {"name": "addFields", "id": "", "fields": {THREAT_TYPE_FIELD: "%{attack_type}"}}
+                ]
+            },
+        }
+    ]
+    assert inspect_threat_field_state(chain, ("威胁A",)) == THREAT_FIELD_CHAIN
+
+
+# ---------------------------------------------------------------------------
+# 链路构造器
+# ---------------------------------------------------------------------------
+
+
+def _chosen(field="attack_type", score=0.82):
+    from application.threat_chain_policy import SourceFieldDecision
+
+    return SourceFieldDecision(field, score, 2, "similarity")
+
+
+def test构造器四步全链():
+    plan = build_threat_chain_steps(_chosen(), config_ref="session.mapped_sub_rules")
+    assert [step.type for step in plan.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "add_fields",
+        "fill",
+    ]
+    add = plan.steps[2]
+    assert add.field_name == THREAT_TYPE_FIELD
+    assert add.field_value == "%{attack_type}"
+    assert add.value_type == "reference"
+    assert add.rule_group == "threat"
+    fill = plan.steps[3]
+    assert fill.fill_kind == "threat"
+    assert fill.target_fields == (THREAT_TYPE_FIELD,)
+    assert fill.source_ref == "step:threat-chain-map"
+    assert not plan.degraded
+
+
+def test构造器链路自产时先删后加整体替换():
+    plan = build_threat_chain_steps(
+        _chosen(),
+        config_ref="session.mapped_sub_rules",
+        threat_field_state=THREAT_FIELD_CHAIN,
+    )
+    assert [step.type for step in plan.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "delete_fields",
+        "add_fields",
+        "fill",
+    ]
+    delete = plan.steps[2]
+    assert delete.fields == (THREAT_TYPE_FIELD,)
+    assert delete.rule_group == "threat"
+
+
+def test构造器存量条目跳过加字段():
+    plan = build_threat_chain_steps(
+        _chosen(),
+        config_ref="session.mapped_sub_rules",
+        threat_field_state=THREAT_FIELD_EXISTING,
+    )
+    assert [step.type for step in plan.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "fill",
+    ]
+    assert "跳过加字段" in plan.skipped_add_reason
+
+
+def test构造器降级单步固定值其他():
+    from application.threat_chain_policy import SourceFieldDecision
+
+    degraded = SourceFieldDecision(None, 0.0, 0, "degrade_below_threshold")
+    plan = build_threat_chain_steps(degraded, config_ref="session.mapped_sub_rules")
+    assert plan.degraded
+    assert len(plan.steps) == 1
+    add = plan.steps[0]
+    assert add.field_value == "其他"
+    assert add.value_type == "fixed"
+
+
+# ---------------------------------------------------------------------------
+# 值全覆盖校验
+# ---------------------------------------------------------------------------
+
+
+def test全覆盖校验为未覆盖值补其他兜底行():
+    rows = [
+        {"mappingType": "REGULAR", "orgValue": "(?i).*暴力破解.*", "mappingValue": "暴力破解"},
+    ]
+    ensured = ensure_threat_mapping_coverage(["暴力破解", "未知告警"], rows)
+    assert len(ensured) == 2
+    appended = ensured[-1]
+    assert appended["mappingValue"] == "其他"
+    assert appended["mappingType"] == "REGULAR"
+
+
+def test全覆盖校验已覆盖值不重复补行():
+    rows = [{"mappingType": "EQUAL", "orgValue": "扫描", "mappingValue": "端口扫描"}]
+    ensured = ensure_threat_mapping_coverage(["扫描", "扫描"], list(rows))
+    assert ensured == rows
