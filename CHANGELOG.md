@@ -50,6 +50,7 @@
 - 死代码清理包（#178）：删除零消费的 `agent/tools/pipeline/models.py` TypedDict 层；`agent/core/tracing.py` 的 `sync_wrapper`/`to_dict`/`TraceContext.set/reset`（保留 span 与 trace_request）；零调用的 `agent/shared/threat_fill.py` 遗留副本（生产链路在 `application/adapters/threat_fill.py`）；`generate_rules` 的 `mode="both"` 死分支与 `file_name` 返回键、`generate_sub_rule` 的 `is_pure_json` 死参、零消费导出 `extract_sub_rule_mapping_info`/`apply_enum_fill_to_sub_rules`；`web/action_callbacks.py` 5 个无按钮构造点的死 callback 及仅被死代码读写的 `batch_mapping_results` 会话字段
 
 ### Fixed
+- 纯 KV 日志分类在 format_info 为空（解析为 None）时抛 UnboundLocalError（#179）：`_classify_kv_features` 的 `body_logs` 改为无条件初始化并回退默认分隔符；塌缩永不可达的防御 try/except；删除 `_classify_json_features` 从未使用的 `format_info` 死参与 4 个传 None 调用点
 - 字段映射来源排除 Excel 列头：有真实日志字段时 `available_fields` 只含日志字段与子规则字段，`decoded_fields` 仅作配置场景回退；数据表 Excel 缺"原始日志"列在上传时拒绝（#78 #81）
 - Planner 两步复合修复："提取枚举值并做威胁类型映射"生成 `enum_extract → threat_mapping` 依赖链，威胁映射使用内置分类表、不依赖枚举映射表（#79 #82）
 - 枚举提取从原始日志行取值，不再依赖已删除的旧结果通道（#70）

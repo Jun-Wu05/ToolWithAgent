@@ -86,7 +86,6 @@ def _classify_json_features(
     format_type: str,
     format_detail: str,
     feature_field: str,
-    format_info: dict | None,
     header_end_marker: str = "",
 ) -> str:
     """统一的 JSON body 特征分类。
@@ -256,17 +255,13 @@ def _classify_kv_features(
         return _build_failed_result(format_type, format_detail, feature_field, "feature_field 为空，Step1 未识别出分类字段")
 
     # 1. 从 format_info 解析 delimit/tab（语义：delimit=字段分隔符，tab=键值分隔符）
+    # format_info 为 None 时无条件回退默认分隔符，body_logs 先按原文初始化（#179）
     field_delimit = " "
     kv_delimit = "="
+    body_logs = logs_str
     if format_info:
-        try:
-            field_delimit = format_info.get("delimit", " ") or " "  # 字段分隔符
-            kv_delimit = format_info.get("tab", "=") or "="          # 键值分隔符
-        except Exception:
-            logger.warning(f"[_classify_kv_features] 解析 format_info 失败，使用默认值")
-            # CHANGED: 如果有日志头，使用 header_end_marker 提取日志体（2026-06-08 修复）
-        # 符合规范 5：数据流向设计（上游数据格式 → 中间处理 → 下游使用）
-        body_logs = logs_str
+        field_delimit = format_info.get("delimit", " ") or " "  # 字段分隔符
+        kv_delimit = format_info.get("tab", "=") or "="          # 键值分隔符
         if header_end_marker:
             # CHANGED (2026-08-07 修复 issue #14): 改用 strip_header_to_body 从左 split(marker, 1)，
             # 与全仓其它 8 处剥头一致。原 rpartition 从右切，当 header_end_marker 与 KV 字段
@@ -316,8 +311,6 @@ def _classify_kv_features(
                 f"成功={extracted_count}/{len(lines)}, "
                 f"日志体示例（前50字符）: {body_logs[:50]}"
             )
-
-
 
     # 2. 使用 KvExtractor 提取 + 聚合（使用新参数名）
     extractor = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
@@ -646,7 +639,6 @@ def _do_classify_log_features(
             format_type=format_type,
             format_detail=format_detail,
             feature_field=feature_field,
-            format_info=None,
             header_end_marker=header_end_marker,
         )
 
@@ -691,7 +683,6 @@ def _do_classify_log_features(
                     format_type=format_type,
                     format_detail=format_detail,
                     feature_field=feature_field,
-                    format_info=None,
                     header_end_marker="",
                 )
 
@@ -840,7 +831,6 @@ def _do_classify_log_features(
                 format_type=format_type,
                 format_detail=format_detail,
                 feature_field=located_field or feature_field,
-                format_info=None,
                 header_end_marker=header_end_marker,
             )
 
@@ -858,7 +848,6 @@ def _do_classify_log_features(
         format_type=format_type,
         format_detail=format_detail,
         feature_field=feature_field,
-        format_info=None,
         header_end_marker=header_end_marker,
     )
 

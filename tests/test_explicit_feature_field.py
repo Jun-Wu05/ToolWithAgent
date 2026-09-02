@@ -73,6 +73,45 @@ def test显式分类特征字段压制定位器修正(monkeypatch):
     assert {detail["logtype"] for detail in result["classification_details"]} == {"attack", "scan"}
 
 
+def test纯KV显式特征字段format_info为空时不抛NameError(monkeypatch):
+    """format_info 空串解析为 None 时，纯 KV 聚合必须回退默认分隔符而非 NameError（#179）。"""
+    monkeypatch.setattr(
+        log_classifier,
+        "_call_llm_direct",
+        lambda *a, **kw: json.dumps(
+            {
+                "status": "SUCCESS",
+                "categorical_features": "category",
+                "Diversion_method": "日志类型",
+                "log_format": "KV",
+                "feature_field": "category",
+                "feature_count": 2,
+                "classification_details": [
+                    {"logtype": "attack", "meaning": "攻击"},
+                    {"logtype": "scan", "meaning": "扫描"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+    )
+    monkeypatch.setattr(knowledge_store, "store_classification_knowledge", lambda *a, **kw: True)
+
+    result = json.loads(
+        classify_log_features_headless(
+            "category=attack src=10.0.0.1\ncategory=scan src=10.0.0.2",
+            "kv",
+            "KV",
+            "category",
+            "",
+            "",
+            feature_field_explicit=True,
+        )
+    )
+
+    assert result["status"] == "SUCCESS"
+    assert {detail["logtype"] for detail in result["classification_details"]} == {"attack", "scan"}
+
+
 def test未显式指定时定位器修正仍然生效(monkeypatch):
     """自动探测模式保持现状：特征键不在行内时定位器修正后按修正字段聚合失败。
 
