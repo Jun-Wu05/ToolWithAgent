@@ -95,6 +95,8 @@ class TestSessionStateContract:
     def test_log_classification_commit_clears_only_mapped_rule_derivatives(self):
         """生产 SessionState 与字典测试接缝共享同一派生状态失效语义。"""
         from application.session_state import SessionState, commit_log_classification
+        from contracts.planner_models import ExportStep
+        from contracts.rule_source import RuleSourceFields
 
         mapped_ref = "session.mapped_sub_rules"
         decoded_ref = "session.decoded_config"
@@ -112,6 +114,14 @@ class TestSessionStateContract:
                 mapped_ref: {"kind"},
                 decoded_ref: {"severity"},
             },
+            rule_source_fields=RuleSourceFields.create(
+                product="旧产品", log_vendor="旧厂商"
+            ),
+            pending_rule_source_step=ExportStep(
+                step_id="old-export",
+                type="export",
+                source_ref="session.log_classification.entry_rules",
+            ),
         )
 
         cleared = commit_log_classification(session, {"types": ["new"]})
@@ -127,3 +137,5 @@ class TestSessionStateContract:
         }
         assert session.stale_enum_config_refs == {decoded_ref}
         assert session.enum_pending_refills == {decoded_ref: {"severity"}}
+        assert session.rule_source_fields is None
+        assert session.pending_rule_source_step is None

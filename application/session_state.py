@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, List, Dict, Set
 
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+from contracts.planner_models import StepSpec
+from contracts.rule_source import RuleSourceFields
 
 
 _MAPPED_SUB_RULE_CONFIG_REF = "session.mapped_sub_rules"
@@ -72,6 +74,8 @@ def commit_log_classification(session: Any, classification: Dict[str, Any]) -> b
         had_mapping_derivatives = True
     _write_state_value(session, "enum_pending_refills", pending_refills)
 
+    _write_state_value(session, "rule_source_fields", None)
+    _write_state_value(session, "pending_rule_source_step", None)
     _write_state_value(session, "log_classification", classification)
     return had_mapping_derivatives
 
@@ -183,6 +187,12 @@ class SessionState:
     log_classification: Optional[Dict[str, Any]] = None
     """日志解析 Pipeline 的分类结果，供规则导出使用"""
 
+    rule_source_fields: Optional[RuleSourceFields] = None
+    """用户显式填写、绑定当前主数据和日志分类的规则来源字段"""
+
+    pending_rule_source_step: Optional[StepSpec] = None
+    """因缺少规则来源字段而等待表单提交的类型化步骤"""
+
     # ---- 标准字段映射结果 ----
     mapped_sub_rules: Optional[List[Dict[str, Any]]] = None
     """映射后的子规则列表，供导出使用"""
@@ -247,6 +257,8 @@ class SessionState:
         self.last_enum_extract_result = None
         self.latest_enum_artifact = None
         self.log_classification = None
+        self.rule_source_fields = None
+        self.pending_rule_source_step = None
         self.mapped_sub_rules = None
         self.sub_rule_mapping_results = None
         self.batch_mapping_results = None

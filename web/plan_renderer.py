@@ -198,6 +198,14 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
         message_kwargs["actions"] = actions
     await cl.Message(**message_kwargs).send()
 
+    if any(
+        result.error_code == "data_source_fields_required"
+        for result in execution_report.results
+    ):
+        from web.rule_source_form import prompt_rule_source_fields
+
+        await prompt_rule_source_fields()
+
     for download_kind, file_name, content in field_mapping_downloads:
         title = (
             "✅ **字段映射已回填到上传配置**"

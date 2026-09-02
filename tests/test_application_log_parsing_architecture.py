@@ -164,6 +164,16 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
             mapped_ref: {"kind"},
             decoded_ref: {"severity"},
         },
+        "rule_source_fields": {
+            "product": "旧产品",
+            "log_vendor": "旧厂商",
+            "data_source": "旧来源",
+        },
+        "pending_rule_source_step": ExportStep(
+            step_id="old-export",
+            type="export",
+            source_ref="session.log_classification.entry_rules",
+        ),
     }
     classification = {
         "classification_details": [{"logtype": "new", "sample": "kind=new src=1"}]
@@ -199,6 +209,8 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
     }
     assert session["stale_enum_config_refs"] == {decoded_ref}
     assert session["enum_pending_refills"] == {decoded_ref: {"severity"}}
+    assert session["rule_source_fields"] is None
+    assert session["pending_rule_source_step"] is None
     assert "⚠️" in result.message
     assert "映射" in result.message
     assert "事件标注" in result.message
@@ -222,7 +234,9 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
     monkeypatch.setattr(
         rule_generator,
         "generate_rules",
-        lambda value, mode: calls.append((value, mode))
+        lambda value, mode, rule_source_fields: calls.append(
+            (value, mode, rule_source_fields)
+        )
         or {"success": True, "rules": [{"name": "new"}]},
     )
     monkeypatch.setattr(rule_generator, "rules_to_base64_text", lambda rules: "new-rules")
@@ -237,9 +251,28 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
             {},
         )
     )
+    assert whiteboard_export.status == StepStatus.NEEDS_INPUT
+    assert whiteboard_export.error_code == "data_source_fields_required"
+    assert calls == []
+
+    from contracts.rule_source import RuleSourceFields
+
+    source_fields = RuleSourceFields.create(product="新产品", log_vendor="新厂商")
+    session["rule_source_fields"] = source_fields
+    whiteboard_export = asyncio.run(
+        ExportAdapter().execute(
+            ExportStep(
+                step_id="export-whiteboard-after-source",
+                type="export",
+                source_ref="session.log_classification.sub_rules",
+            ),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
     assert whiteboard_export.status == StepStatus.SUCCESS
     assert whiteboard_export.artifact.content == "new-rules"
-    assert calls == [(classification, "sub")]
+    assert calls == [(classification, "sub", source_fields)]
 
 
 def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session() -> None:
@@ -452,8 +485,8 @@ def test_default_composition_traces_log_classification_to_rule_export(monkeypatc
     monkeypatch.setattr(
         rule_generator,
         "generate_rules",
-        lambda value, mode: (
-            calls.append(("rules", value, mode)),
+        lambda value, mode, rule_source_fields: (
+            calls.append(("rules", value, mode, rule_source_fields)),
             {"success": True, "rules": generated_rules},
         )[1],
     )
@@ -482,6 +515,10 @@ def test_default_composition_traces_log_classification_to_rule_export(monkeypatc
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
         )
     )
+    from contracts.rule_source import RuleSourceFields
+
+    source_fields = RuleSourceFields.create(product="产品", log_vendor="厂商")
+    session["rule_source_fields"] = source_fields
     export_plan = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -510,5 +547,5 @@ def test_default_composition_traces_log_classification_to_rule_export(monkeypatc
     assert export_report.results[0].artifact.content == encoded
     assert export_report.results[0].artifact.download_kind == "unmappedconfig_subrules"
     assert calls[:3] == ["identify", "classify", "fill"]
-    assert calls[3] == ("rules", classification, "sub")
+    assert calls[3] == ("rules", classification, "sub", source_fields)
     assert calls[4] == ("base64", generated_rules)

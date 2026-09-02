@@ -83,6 +83,8 @@ def clear_session_data(session: Any) -> None:
         "last_enum_extract_result",
         "latest_threat_artifact",
         "latest_enum_artifact",
+        "rule_source_fields",
+        "pending_rule_source_step",
         "mapped_sub_rules",
         "enum_preview",
         "enum_excel_path",

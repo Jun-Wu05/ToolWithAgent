@@ -10,6 +10,7 @@ from application.adapters.shared import (
     _needs_input,
     _read_config,
     _session_get,
+    _session_set,
 )
 from application.execution import ExecutionContext
 from contracts.planner_models import (
@@ -76,12 +77,28 @@ class ExportAdapter:
             classification = _session_get(context.session, "log_classification")
             if not isinstance(classification, dict) or not classification:
                 return _needs_input(step, "log_classification_required", "请先完成日志类型提取")
+            from contracts.rule_source import RuleSourceFields
+
+            rule_source_fields = RuleSourceFields.from_value(
+                _session_get(context.session, "rule_source_fields")
+            )
+            if rule_source_fields is None:
+                _session_set(context.session, "pending_rule_source_step", step)
+                return _needs_input(
+                    step,
+                    "data_source_fields_required",
+                    "请填写数据源产品和数据源厂商后继续；数据源可留空自动生成",
+                )
             export_mode = (
                 "entry"
                 if step.source_ref == "session.log_classification.entry_rules"
                 else "sub"
             )
-            generated_rules = rule_generator.generate_rules(classification, mode=export_mode)
+            generated_rules = rule_generator.generate_rules(
+                classification,
+                mode=export_mode,
+                rule_source_fields=rule_source_fields,
+            )
             if not generated_rules.get("success"):
                 return _failed(step, "rule_export_failed", "规则生成失败")
             rules = generated_rules.get("rules", [])

@@ -346,12 +346,17 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     monkeypatch.setattr(
         rule_generator,
         "generate_sub_rules",
-        lambda classification, all_logs_str: generated_sub_rules,
+        lambda classification, all_logs_str, rule_source_fields: generated_sub_rules,
     )
     monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
     session = {
         "log_classification": {"类型A": {}},
         "raw_log_lines": ["field_0=value"],
+        "rule_source_fields": {
+            "product": "产品",
+            "log_vendor": "厂商",
+            "data_source": "产品(厂商)",
+        },
     }
     member = _MappingMember()
     step = FieldMappingStep(
@@ -389,7 +394,7 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
     monkeypatch.setattr(
         rule_generator,
         "generate_sub_rules",
-        lambda classification, all_logs_str: [
+        lambda classification, all_logs_str, rule_source_fields: [
             {
                 "name": "AUDIT",
                 "normalize": [
@@ -406,6 +411,11 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
         "log_classification": {
             "status": "SUCCESS",
             "classification_details": [{"logtype": "AUDIT"}],
+        },
+        "rule_source_fields": {
+            "product": "产品",
+            "log_vendor": "厂商",
+            "data_source": "产品(厂商)",
         },
     }
     facts = build_session_facts(session)
@@ -884,6 +894,7 @@ def test上传规则全部已映射时直接成功且不调模型():
                 {"index": "beta", "field": "标准_beta"},
             ]
         },
+        "log_classification": {"classification_details": [{"logtype": "旧分类"}]},
     }
     member = _MappingMember()
     adapter = ProfessionalAgentAdapter(
@@ -1448,7 +1459,9 @@ def test入口规则导出按钮与自然语言共用ExportAdapter(monkeypatch):
     monkeypatch.setattr(
         rule_generator,
         "generate_rules",
-        lambda classification, mode: calls.append(mode)
+        lambda classification, mode, rule_source_fields: calls.append(
+            (mode, rule_source_fields)
+        )
         or {"success": True, "rules": [{"name": "entry"}]},
     )
     monkeypatch.setattr(
@@ -1456,7 +1469,13 @@ def test入口规则导出按钮与自然语言共用ExportAdapter(monkeypatch):
         "rules_to_base64_text",
         lambda rules: "encoded-entry-rules",
     )
-    session = {"log_classification": {"类型A": {}}}
+    from contracts.rule_source import RuleSourceFields
+
+    source_fields = RuleSourceFields.create(product="产品", log_vendor="厂商")
+    session = {
+        "log_classification": {"类型A": {}},
+        "rule_source_fields": source_fields,
+    }
     step = ExportStep(
         step_id="export-entry",
         type="export",
@@ -1475,7 +1494,30 @@ def test入口规则导出按钮与自然语言共用ExportAdapter(monkeypatch):
     assert result.artifact.content == "encoded-entry-rules"
     assert result.artifact.item_count == 1
     assert result.artifact.download_kind == "mappedconfig_mainrules"
-    assert calls == ["entry"]
+    assert calls == [("entry", source_fields)]
+
+
+def test日志分类规则导出缺少数据源字段时统一gate并记住步骤():
+    """按钮和自然语言入口必须共享同一 needs_input 与续跑状态。"""
+    session = {"log_classification": {"类型A": {}}}
+    step = ExportStep(
+        step_id="export-entry-missing-source",
+        type="export",
+        source_ref="session.log_classification.entry_rules",
+    )
+
+    result = asyncio.run(
+        ExportAdapter().execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.NEEDS_INPUT
+    assert result.error_code == "data_source_fields_required"
+    assert session["pending_rule_source_step"] is step
+    assert result.artifact is None
 
 
 def test未映射子规则导出保留明确下载语义(monkeypatch):
@@ -1486,7 +1528,9 @@ def test未映射子规则导出保留明确下载语义(monkeypatch):
     monkeypatch.setattr(
         rule_generator,
         "generate_rules",
-        lambda classification, mode: calls.append(mode)
+        lambda classification, mode, rule_source_fields: calls.append(
+            (mode, rule_source_fields)
+        )
         or {"success": True, "rules": [{"name": "sub"}]},
     )
     monkeypatch.setattr(
@@ -1494,7 +1538,13 @@ def test未映射子规则导出保留明确下载语义(monkeypatch):
         "rules_to_base64_text",
         lambda rules: "encoded-sub-rules",
     )
-    session = {"log_classification": {"类型A": {}}}
+    from contracts.rule_source import RuleSourceFields
+
+    source_fields = RuleSourceFields.create(product="产品", log_vendor="厂商")
+    session = {
+        "log_classification": {"类型A": {}},
+        "rule_source_fields": source_fields,
+    }
     step = ExportStep(
         step_id="export-sub",
         type="export",
@@ -1512,7 +1562,38 @@ def test未映射子规则导出保留明确下载语义(monkeypatch):
     assert result.status == StepStatus.SUCCESS
     assert result.artifact.content == "encoded-sub-rules"
     assert result.artifact.download_kind == "unmappedconfig_subrules"
-    assert calls == ["sub"]
+    assert calls == [("sub", source_fields)]
+
+
+def test标准字段映射生成日志子规则前要求数据源字段():
+    """缺值时必须在模型调用前停止，并保存可续跑的原步骤。"""
+    from application.adapters.field_mapping import FieldMappingAdapter
+
+    class NeverRun:
+        async def run(self, *args, **kwargs):
+            raise AssertionError("缺少数据源字段时不应调用字段映射模型")
+
+    session = {
+        "decoded_fields": ["src_ip"],
+        "log_classification": {"classification_details": [{"logtype": "审计"}]},
+    }
+    step = FieldMappingStep(
+        step_id="mapping-missing-source",
+        type="field_mapping",
+        source_ref="session.fields",
+    )
+
+    result = asyncio.run(
+        FieldMappingAdapter(team=None, batch_runner=NeverRun()).execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.NEEDS_INPUT
+    assert result.error_code == "data_source_fields_required"
+    assert session["pending_rule_source_step"] is step
 
 
 def test已有映射结果时白板子规则导出被统一gate拦截(monkeypatch):

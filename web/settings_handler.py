@@ -354,6 +354,11 @@ async def on_settings_update(settings: dict):
     """
     user_session = cl.user_session.get("user_session")
 
+    from web.rule_source_form import handle_rule_source_settings
+
+    if await handle_rule_source_settings(settings, user_session):
+        return
+
     # 获取新的配置（使用 or 确保返回字符串，避免 None.strip() 报错）
     provider = (settings.get("provider") or "").strip()
     model = (settings.get("model_name") or "").strip()

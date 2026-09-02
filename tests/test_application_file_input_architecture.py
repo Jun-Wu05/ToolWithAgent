@@ -74,7 +74,8 @@ def testapplication文件输入原子替换主数据并保留模型配置() -> N
     """成功快照使附件与派生结果失效，但不影响会话级模型配置。"""
     from application.file_input import commit_primary_dataset
     from application.session_state import PrimaryDatasetSnapshot, SessionState
-    from contracts.planner_models import EnumValuesArtifact
+    from contracts.planner_models import EnumValuesArtifact, ExportStep
+    from contracts.rule_source import RuleSourceFields
     from contracts.session_artifacts import EnumArtifactSlot
 
     session = SessionState(
@@ -89,6 +90,14 @@ def testapplication文件输入原子替换主数据并保留模型配置() -> N
         latest_enum_artifact=EnumArtifactSlot(
             artifact=EnumValuesArtifact(values=("old",), item_count=1, field="old"),
             source_field="old",
+        ),
+        rule_source_fields=RuleSourceFields.create(
+            product="旧产品", log_vendor="旧厂商"
+        ),
+        pending_rule_source_step=ExportStep(
+            step_id="old-export",
+            type="export",
+            source_ref="session.log_classification.entry_rules",
         ),
     )
     team = session.team
@@ -110,6 +119,8 @@ def testapplication文件输入原子替换主数据并保留模型配置() -> N
     assert session.enum_preview is None
     assert session.mapped_sub_rules is None
     assert session.latest_enum_artifact is None
+    assert session.rule_source_fields is None
+    assert session.pending_rule_source_step is None
     assert session.team is team
     assert (session.current_provider, session.api_key, session.model_name) == (
         "deepseek",

@@ -74,6 +74,11 @@ def test_body_key分类可由真实导出adapter生成子规则(monkeypatch) -> 
     session = {
         "log_classification": classification,
         "raw_log_lines": [SYSLOG_JSON_LINE],
+        "rule_source_fields": {
+            "product": "测试产品",
+            "log_vendor": "测试厂商",
+            "data_source": "测试产品(测试厂商)",
+        },
     }
     result = asyncio.run(
         ExportAdapter().execute(
@@ -114,6 +119,11 @@ def test_body_key分类可由真实字段映射adapter原子写回(monkeypatch) 
     session = {
         "log_classification": classification,
         "raw_log_lines": [SYSLOG_JSON_LINE],
+        "rule_source_fields": {
+            "product": "测试产品",
+            "log_vendor": "测试厂商",
+            "data_source": "测试产品(测试厂商)",
+        },
     }
     context = ExecutionContext(
         session=session,

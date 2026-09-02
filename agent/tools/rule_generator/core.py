@@ -20,6 +20,8 @@ import json
 import time
 from typing import Any
 
+from contracts.rule_source import RuleSourceFields
+
 from .templates import get_empty_rule_template, get_sub_rule_template
 from .utils import now_ms, new_uuid, escape_delimit
 from .filters import (
@@ -195,6 +197,7 @@ def generate_entry_rule(
     classification: dict[str, Any],
     date_str: str = "",
     uuid_str: str = "",
+    rule_source_fields: RuleSourceFields | None = None,
 ) -> dict[str, Any]:
     """生成一条入口规则。
 
@@ -203,7 +206,13 @@ def generate_entry_rule(
         date_str: YYYYMMDD 日期字符串，默认取当天。
         uuid_str: 可复用 UUID，默认自动生成。
     """
-    rule_name = f"入口规则_{date_str or time.strftime('%Y%m%d')}"
+    resolved_date = date_str or time.strftime("%Y%m%d")
+    rule_name = (
+        f"{rule_source_fields.log_vendor}_{rule_source_fields.product}_通用_"
+        f"入口规则{resolved_date[-4:]}"
+        if rule_source_fields
+        else f"入口规则_{resolved_date}"
+    )
     details: list[dict[str, Any]] = classification.get(
         "classification_details", []
     )
@@ -247,10 +256,19 @@ def generate_entry_rule(
     else:
         _configure_default_parser(rule, logtypes, classification)
 
+    if rule_source_fields:
+        from .source_fields import make_source_fields_filter
+
+        rule["parser"]["filter"].append(make_source_fields_filter(rule_source_fields))
+
     rule["parser"]["subResolver"] = 0
 
     # properties
     rule["properties"] = _make_properties(logtypes, rule_name)
+    if rule_source_fields:
+        from .source_fields import make_source_properties
+
+        rule["properties"].extend(make_source_properties(rule_source_fields))
 
     # normalize — 保持空规则模板的结构，替换 original_log 的 result
     for norm in rule.get("normalize", []):
@@ -262,6 +280,11 @@ def generate_entry_rule(
     # CHANGED: 复用 normalize.make_log_type_normalize_entry，消除内联重复 dict
     if (is_json and not is_syslog_json) or is_pure_kv:
         rule["normalize"].append(make_log_type_normalize_entry(logtypes))
+
+    if rule_source_fields:
+        from .source_fields import make_source_normalize_entries
+
+        rule["normalize"].extend(make_source_normalize_entries(rule_source_fields))
 
     return rule
 
@@ -276,8 +299,16 @@ def _build_sub_rule_name(
     is_json: bool,
     is_kv: bool,
     feature_field: str,
+    rule_source_fields: RuleSourceFields | None = None,
 ) -> str:
     """根据日志格式构建子规则名称。"""
+    if rule_source_fields:
+        prefix = f"{rule_source_fields.log_vendor}_{rule_source_fields.product}_{logtype}"
+        if is_json:
+            return f"{prefix}_json_子规则"
+        if is_kv:
+            return f"{prefix}_kv_子规则"
+        return f"{prefix}_{Diversion_method}_子规则"
     if is_json:
         return f"{logtype}_{feature_field}_json_子规则"
     if is_kv:
@@ -379,6 +410,7 @@ def generate_sub_rule(
     is_pure_json: bool = False,
     is_kv: bool = False,
     feature_field: str = "",
+    rule_source_fields: RuleSourceFields | None = None,
 ) -> dict[str, Any]:
     """为单条 classification_detail 生成一条子规则。
 
@@ -399,7 +431,7 @@ def generate_sub_rule(
 
     # 职责 1：命名
     rule_name = _build_sub_rule_name(
-        logtype, Diversion_method, is_json, is_kv, feature_field
+        logtype, Diversion_method, is_json, is_kv, feature_field, rule_source_fields
     )
 
     # matched_regex 已废弃，改用 real_samples（fill_sample_logs 输出）或 sample 兜底
@@ -452,6 +484,7 @@ def generate_sub_rules(
     classification: dict[str, Any],
     all_logs_str: str = "",
     date_str: str = "",
+    rule_source_fields: RuleSourceFields | None = None,
 ) -> list[dict[str, Any]]:
     """遍历 classification_details 生成所有子规则列表。
 
@@ -491,6 +524,7 @@ def generate_sub_rules(
             is_pure_json=is_pure_json,
             is_kv=is_kv,
             feature_field=feature_field,
+            rule_source_fields=rule_source_fields,
         )
         rules.append(rule)
     return rules
@@ -501,7 +535,9 @@ def generate_sub_rules(
 # ---------------------------------------------------------------------------
 
 def generate_rules(
-    classification: dict[str, Any], mode: str = "both"
+    classification: dict[str, Any],
+    mode: str = "both",
+    rule_source_fields: RuleSourceFields | None = None,
 ) -> dict[str, Any]:
     """根据 mode 生成规则，返回统一的 dict 结构。
 
@@ -518,11 +554,19 @@ def generate_rules(
 
     try:
         if mode in ("entry", "both"):
-            rule = generate_entry_rule(classification, date_str=date_str)
+            rule = generate_entry_rule(
+                classification,
+                date_str=date_str,
+                rule_source_fields=rule_source_fields,
+            )
             rules.append(rule)
 
         if mode in ("sub", "both"):
-            sub_rules = generate_sub_rules(classification, date_str=date_str)
+            sub_rules = generate_sub_rules(
+                classification,
+                date_str=date_str,
+                rule_source_fields=rule_source_fields,
+            )
             rules.extend(sub_rules)
 
         # 生成文件名

@@ -153,6 +153,11 @@ async def on_export_rules(action: cl.Action):
         type="export",
         source_ref="session.log_classification.entry_rules",
     )
+    from web.rule_source_form import get_rule_source_fields, prompt_rule_source_fields
+
+    if user_session.get("log_classification") and not get_rule_source_fields(user_session):
+        await prompt_rule_source_fields(user_session, pending_step=step)
+        return
     await execute_deterministic_plan(
         user_session=user_session,
         team=user_session.get("team"),
@@ -173,6 +178,15 @@ async def on_export_sub_rules(action: cl.Action):
         type="export",
         source_ref="session.log_classification.sub_rules",
     )
+    from web.rule_source_form import get_rule_source_fields, prompt_rule_source_fields
+
+    if (
+        user_session.get("log_classification")
+        and not user_session.get("mapped_sub_rules")
+        and not get_rule_source_fields(user_session)
+    ):
+        await prompt_rule_source_fields(user_session, pending_step=step)
+        return
     await execute_deterministic_plan(
         user_session=user_session,
         team=user_session.get("team"),
@@ -198,6 +212,11 @@ async def on_apply_field_mapping(action: cl.Action):
         type="field_mapping",
         source_ref="session.fields",
     )
+    from web.rule_source_form import get_rule_source_fields, prompt_rule_source_fields
+
+    if user_session.get("log_classification") and not get_rule_source_fields(user_session):
+        await prompt_rule_source_fields(user_session, pending_step=step)
+        return
     await execute_deterministic_plan(
         user_session=user_session,
         team=user_session.get("team"),

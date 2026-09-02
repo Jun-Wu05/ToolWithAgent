@@ -11,7 +11,7 @@ from agent.shared.logger import get_logger
 from application.adapters.shared import (
     REPO_ROOT, _build_config_artifact, _count_tagged_normalize, _failed,
     _is_retriable_model_error, _publish_progress, _retry_delay_seconds,
-    _session_get, _session_set, _success,
+    _needs_input, _session_get, _session_set, _success,
 )
 from application.execution import ExecutionContext
 from application.field_mapping_batch import (
@@ -67,6 +67,8 @@ class FieldMappingAdapter:
         self, step: FieldMappingStep, context: ExecutionContext
     ) -> StepResult:
         """运行批处理，验证完整结果，再计算产物并一次性提交 Session。"""
+        classification = _session_get(context.session, "log_classification")
+        rule_source_fields = None
         mappable_fields = list(context.session_facts.mappable_fields)
         if (
             not mappable_fields
@@ -84,6 +86,19 @@ class FieldMappingAdapter:
                     f"跳过已映射 {skipped_count} 个（保留原映射）"
                 ),
             )
+        if isinstance(classification, dict) and classification:
+            from contracts.rule_source import RuleSourceFields
+
+            rule_source_fields = RuleSourceFields.from_value(
+                _session_get(context.session, "rule_source_fields")
+            )
+            if rule_source_fields is None:
+                _session_set(context.session, "pending_rule_source_step", step)
+                return _needs_input(
+                    step,
+                    "data_source_fields_required",
+                    "请填写数据源产品和数据源厂商后继续；数据源可留空自动生成",
+                )
         simplified_data = _session_get(context.session, "simplified_data", {}) or {}
         original_log_sample = (
             simplified_data.get("original_log_sample", "")
@@ -140,12 +155,13 @@ class FieldMappingAdapter:
         had_existing_mapped_rules = bool(_session_get(context.session, "mapped_sub_rules"))
         sub_rules = copy.deepcopy(_session_get(context.session, "mapped_sub_rules") or [])
         if not sub_rules:
-            classification = _session_get(context.session, "log_classification")
             raw_log_lines = _session_get(context.session, "raw_log_lines", []) or []
             if isinstance(classification, dict) and classification:
                 from agent.tools.rule_generator import generate_sub_rules
                 sub_rules = generate_sub_rules(
-                    classification, all_logs_str="\n".join(str(line) for line in raw_log_lines)
+                    classification,
+                    all_logs_str="\n".join(str(line) for line in raw_log_lines),
+                    rule_source_fields=rule_source_fields,
                 )
         if sub_rules:
             from agent.tools import load_object_mapping
