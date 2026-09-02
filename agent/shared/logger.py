@@ -63,8 +63,9 @@ def setup_logger(name: str = "agent", level: int = logging.DEBUG) -> logging.Log
     log_dir = Path(__file__).parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
 
-    # 只在第一次时创建日志文件
-    if _shared_log_file is None:
+    # 只在第一次时创建日志文件；每进程至多进入一次该分支
+    first_shared_file = _shared_log_file is None
+    if first_shared_file:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         _shared_log_file = log_dir / f"app_{timestamp}.log"
         _shared_error_file = log_dir / f"app_errors_{timestamp}.log"
@@ -85,7 +86,14 @@ def setup_logger(name: str = "agent", level: int = logging.DEBUG) -> logging.Log
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(error_formatter)
     logger.addHandler(error_handler)
-    
+
+    if first_shared_file:
+        # 首个日志文件建立后立即清理旧日志（#176）：任何产生日志的进程
+        # （pytest/子进程/CLI/应用/热重载）创建日志文件时都会经过此分支，
+        # 不再依赖应用启动入口。FileHandler 已建立即文件在磁盘上、被 glob
+        # 计入总数；清理失败只告警，不影响日志初始化。
+        initialize_log_retention()
+
     # 如果是第一个创建的 logger，输出初始化信息
     if len(_loggers) == 0:
         logger.info(f"日志文件: {_shared_log_file}")
@@ -100,13 +108,14 @@ def cleanup_old_logs(log_dir: Path, prefix: str = "app", keep_count: int = 3):
     主日志（app_时间戳.log）与错误日志（app_errors_时间戳.log）分别匹配：
     prefix="app" 只匹配 ``app_<数字>.log``，不匹配 ``app_errors_*.log``。
 
-    当前正在写入的活动文件永不进入删除集合。
+    总数语义（#176）：每前缀保留 **总数 = keep_count** 个文件，活动文件计入
+    保留额度且永不进入删除集合——稳态为「当前 + 上一次」而非 keep_count+1。
     文件被占用或删除失败时只记录告警，不抛出异常（WinError 32 降级）。
 
     Args:
         log_dir: 日志目录
         prefix: 日志文件前缀（"app" 主日志 / "app_errors" 错误日志）
-        keep_count: 保留最近N个文件
+        keep_count: 每前缀保留的文件总数（含活动文件）
     """
     if not log_dir.exists():
         return
@@ -115,12 +124,13 @@ def cleanup_old_logs(log_dir: Path, prefix: str = "app", keep_count: int = 3):
     pattern = f"{prefix}_[0-9]*.log"
     log_files = sorted(log_dir.glob(pattern), key=lambda f: f.stat().st_mtime, reverse=True)
 
-    # 排除当前正在写入的活动文件（绝不删除打开中的文件）
+    # 排除当前正在写入的活动文件（绝不删除打开中的文件），但其数量占用保留额度
     active_files = {_shared_log_file, _shared_error_file}
+    active_count = sum(1 for f in log_files if f in active_files)
     candidates = [f for f in log_files if f not in active_files]
 
     # 删除多余的文件（删除失败只告警，不中断业务）
-    for old_file in candidates[keep_count:]:
+    for old_file in candidates[max(0, keep_count - active_count):]:
         try:
             old_file.unlink(missing_ok=True)
         except (PermissionError, OSError) as e:
@@ -133,8 +143,9 @@ def cleanup_old_logs(log_dir: Path, prefix: str = "app", keep_count: int = 3):
 def get_logger(name: str = "agent") -> logging.Logger:
     """获取已配置的日志记录器（单例模式）
 
-    注意：本函数不触发日志清理。清理只在应用启动时由
-    ``initialize_log_retention()`` 显式执行一次（#25）。
+    每进程首次创建共享日志文件时自动执行一次保留清理（#176）；
+    同进程后续 get_logger 不重复清理。应用入口仍可显式调用
+    ``initialize_log_retention()``（幂等）。
     """
     if name in _loggers:
         return _loggers[name]
