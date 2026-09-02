@@ -636,7 +636,7 @@ def _log_retrieve_trace(
     field_name: str,
     i: int,
     similarity_matrix: np.ndarray,
-    candidates_tmp: list[tuple[str, str, float]],
+    candidates_tmp: list[tuple],
     candidates: list[str],
     records: list[dict],
     elapsed_seconds: float,
@@ -651,7 +651,7 @@ def _log_retrieve_trace(
     记录字段名、候选标准字段名与相似度分数，供字段映射优化分析；这里不接触日志原值。
     """
     stage1 = _format_top_n(similarity_matrix[i], records)
-    stage2 = " | ".join(fmt for fmt, _, _ in candidates_tmp) or "(空)"
+    stage2 = " | ".join(item[0] for item in candidates_tmp) or "(空)"
     stage3 = " | ".join(candidates) or "(空-被阈值过滤/重排序丢弃)"
     logger.debug(
         "[RETRIEVE_TRACE] field=%s elapsed_seconds=%.3f\n"
@@ -696,25 +696,42 @@ def _apply_mapping_exclusions(
     return filtered_embeddings, filtered_records
 
 
-def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str:
+CandidateRow = tuple[str, float, str, str]
+"""单条候选：(系统属性名称, 相似度, 字段英文名, by_stripped 变体名；非变体候选为空串)。"""
+
+CandidateTable = dict[str, list[CandidateRow]]
+"""结构化候选出口：原始字段名 → token 重排序后的候选行列表（#180）。"""
+
+
+def _format_candidate(row: CandidateRow) -> str:
+    """把结构化候选行渲染为紧凑展示串（与既有 markdown 输出逐字节一致）。"""
+    name, score, english, variant = row
+    suffix = f", by_stripped={variant}" if variant else ""
+    return f"{name}({score:.2f}, {english}{suffix})"
+
+
+def batch_retrieve_candidates_table(
+    raw_field_names: list[str], top_k: int = 6
+) -> CandidateTable:
     """
-    对一批原始字段名执行语义检索，返回紧凑格式的候选列表。
+    对一批原始字段名执行语义检索，返回结构化候选表（#180 结构化出口）。
 
     整体链路：
     1. 加载磁盘缓存（若不存在则自动初始化）
     2. 对 raw_field_names 批量调用 Embedding API
     3. 矩阵乘法计算余弦相似度：[N_fields, N_records]
-    4. 每个字段取 top_k，返回紧凑文本
+    4. 每个字段取 top_k，token 重排序后输出结构化行
 
     Args:
         raw_field_names: 原始字段名列表
         top_k: 每个字段返回的候选数（默认 6，调用方常用 5）
 
     Returns:
-        紧凑格式字符串，无候选时返回空字符串
+        {原始字段名: [(系统属性名称, 相似度, 字段英文名, by_stripped变体)]}；
+        无候选的字段不出现（与 markdown 出口只输出非空行一致）。
     """
     if not raw_field_names:
-        return ""
+        return {}
 
     # 加载缓存，不存在则自动初始化；随后按映射目标黑名单剔除固定字段行
     embeddings, records = _load_cache()
@@ -722,10 +739,10 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         logger.info("[RETRIEVE] 缓存不存在，尝试自动初始化")
         if not init_field_cache():
             logger.warning("[RETRIEVE] 缓存初始化失败，返回空候选")
-            return ""
+            return {}
         embeddings, records = _load_cache()
         if embeddings is None or records is None:
-            return ""
+            return {}
     embeddings, records = _apply_mapping_exclusions(embeddings, records)
 
     # 批量嵌入用户字段名 — 按 EMBEDDING_BATCH_SIZE 分批，防止 413 Request Entity Too Large
@@ -795,7 +812,7 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
             logger.warning(f"[RETRIEVE] 去前缀变体嵌入失败，跳过: {e}")
             stripped_variants.clear()
 
-    lines: list[str] = []
+    table: CandidateTable = {}
     for i, field_name in enumerate(raw_field_names):
         field_started_at = time.monotonic()
         sims = similarity_matrix[i]
@@ -808,8 +825,8 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
             partitioned = np.argpartition(sims, -top_k)[-top_k:]
             top_indices = partitioned[np.argsort(sims[partitioned])[::-1]]
 
-        # 收集候选（相似度 >= 阈值）— 暂存为 (formatted_str, field_name, sim_score) 元组
-        candidates_tmp: list[tuple[str, str, float]] = []
+        # 收集候选（相似度 >= 阈值）— 暂存为 (formatted_str, field_name, sim_score, row) 元组
+        candidates_tmp: list[tuple[str, str, float, CandidateRow]] = []
         seen_field_keys: set[str] = set()  # 防止精确匹配和语义检索重复
 
         # Layer 1: 精确名称匹配兜底（置顶）— 先试原始字段名
@@ -822,7 +839,12 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
             rec = records[exact_idx]
             rfn = rec.get('字段名称', '')
             candidates_tmp.append(
-                (f"{rec.get('系统属性名称', '')}(1.00, {rfn})", rfn, 1.0)
+                (
+                    f"{rec.get('系统属性名称', '')}(1.00, {rfn})",
+                    rfn,
+                    1.0,
+                    (rec.get('系统属性名称', ''), 1.0, rfn, ""),
+                )
             )
             seen_field_keys.add(rfn)
 
@@ -836,7 +858,12 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
                     v_key_name = v_rec.get('字段名称', '')
                     if v_key_name not in seen_field_keys:
                         candidates_tmp.append(
-                            (f"{v_rec.get('系统属性名称', '')}(1.00, {v_key_name}, by_stripped={variant})", v_key_name, 1.0)
+                            (
+                                f"{v_rec.get('系统属性名称', '')}(1.00, {v_key_name}, by_stripped={variant})",
+                                v_key_name,
+                                1.0,
+                                (v_rec.get('系统属性名称', ''), 1.0, v_key_name, variant),
+                            )
                         )
                         seen_field_keys.add(v_key_name)
 
@@ -851,7 +878,12 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
             if sim < SIMILARITY_THRESHOLD:
                 continue
             candidates_tmp.append(
-                (f"{rec.get('系统属性名称', '')}({sim:.2f}, {rec_field_name})", rec_field_name, sim)
+                (
+                    f"{rec.get('系统属性名称', '')}({sim:.2f}, {rec_field_name})",
+                    rec_field_name,
+                    sim,
+                    (rec.get('系统属性名称', ''), sim, rec_field_name, ""),
+                )
             )
             seen_field_keys.add(rec_field_name)
 
@@ -876,20 +908,25 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
                         continue
                     variant_name = stripped_variants[v_idx]
                     candidates_tmp.append(
-                        (f"{v_rec.get('系统属性名称', '')}({v_sim:.2f}, {v_rfn}, by_stripped={variant_name})", v_rfn, v_sim)
+                        (
+                            f"{v_rec.get('系统属性名称', '')}({v_sim:.2f}, {v_rfn}, by_stripped={variant_name})",
+                            v_rfn,
+                            v_sim,
+                            (v_rec.get('系统属性名称', ''), v_sim, v_rfn, variant_name),
+                        )
                     )
                     seen_field_keys.add(v_rfn)
 
         # Token 重叠重排序：精确匹配优先，其次按展开 token 重叠数降序，再按相似度降序
         source_tokens = _get_field_name_tokens(field_name)
-        reranked_rows: list[tuple[int, int, float, str]] = []
-        for fmt_str, cand_field, sim in candidates_tmp:
+        reranked_rows: list[tuple[int, int, float, str, CandidateRow]] = []
+        for fmt_str, cand_field, sim, candidate_row in candidates_tmp:
             cand_tokens = _get_field_name_tokens(cand_field)
             overlap = len(source_tokens & cand_tokens)
             tier = 0 if sim >= 0.999 else 1
-            reranked_rows.append((tier, -overlap, -sim, fmt_str))
+            reranked_rows.append((tier, -overlap, -sim, fmt_str, candidate_row))
         reranked_rows.sort()
-        candidates = [row[3] for row in reranked_rows]
+        candidates = [row[4] for row in reranked_rows]
 
         # 检索诊断：追踪候选在「纯向量 → 候选收集 → token 重排序」各阶段的排名与相似度。
         if RETRIEVE_DEBUG_TRACE and logger.isEnabledFor(logging.DEBUG):
@@ -898,19 +935,31 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
                 i,
                 similarity_matrix,
                 candidates_tmp,
-                candidates,
+                [_format_candidate(row) for row in candidates],
                 records,
                 elapsed_seconds=time.monotonic() - field_started_at,
             )
 
         if candidates:
-            lines.append(f"{field_name} → {' | '.join(candidates)}")
+            table[field_name] = candidates
 
+    return table
+
+
+def render_candidates_markdown(table: CandidateTable, top_k: int) -> str:
+    """把结构化候选表渲染为紧凑 markdown（与历史 batch_retrieve_candidates 输出逐字节一致）。"""
+    lines = [
+        f"{field_name} → {' | '.join(_format_candidate(row) for row in rows)}"
+        for field_name, rows in table.items()
+    ]
     if not lines:
         return ""
 
-    header = f"## 标准字段候选（语义检索 top-{top_k}，按相似度降序）："
-    raw_output = header + "\n" + "\n".join(lines)
+    raw_output = (
+        f"## 标准字段候选（语义检索 top-{top_k}，按相似度降序）："
+        + "\n"
+        + "\n".join(lines)
+    )
 
     # 转义特殊字符防止污染提示词格式（冒号、方括号、花括号不会破坏 Markdown 但做保守转义）
     for old, new in [
@@ -922,6 +971,29 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
         raw_output = raw_output.replace(old, new)
 
     return raw_output
+
+
+def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str:
+    """
+    对一批原始字段名执行语义检索，返回紧凑格式的候选列表（markdown 展示串）。
+
+    内部分工为「batch_retrieve_candidates_table 取结构化 →
+    render_candidates_markdown 渲染」；本函数签名与返回字节保持历史兼容
+    （tests/test_standard_field_catalog_characterization.py 表征锁定）。
+
+    Args:
+        raw_field_names: 原始字段名列表
+        top_k: 每个字段返回的候选数（默认 6，调用方常用 5）
+
+    Returns:
+        紧凑格式字符串，无候选时返回空字符串
+    """
+    if not raw_field_names:
+        return ""
+
+    return render_candidates_markdown(
+        batch_retrieve_candidates_table(raw_field_names, top_k=top_k), top_k=top_k
+    )
 
 
 def _debug_lookup(keyword: str, top_k: int = 6) -> str:

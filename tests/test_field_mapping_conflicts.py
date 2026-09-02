@@ -11,12 +11,13 @@ def _row(original: str, standard: str = "源IP") -> dict[str, str]:
     }
 
 
-def _candidates(*lines: str):
+def _candidates(**rows: tuple):
+    """构造结构化候选检索假件（#180 候选表：字段 → [(标准名, 得分, 英文名, 变体)]）。"""
     calls: list[tuple[str, ...]] = []
 
     def retrieve(fields):
         calls.append(tuple(fields))
-        return "## 标准字段候选（语义检索 top-5，按相似度降序）：\n" + "\n".join(lines)
+        return {field: list(items) for field, items in rows.items()}
 
     retrieve.calls = calls
     return retrieve
@@ -26,8 +27,8 @@ def test精确命中优先于普通相似度() -> None:
     from application.field_mapping_conflicts import resolve_field_mapping_conflicts
 
     retriever = _candidates(
-        "src → 源IP(0.96, source_ip)",
-        "client → 源IP(1.00, client)",
+        src=[("源IP", 0.96, "source_ip", "")],
+        client=[("源IP", 1.00, "client", "")],
     )
 
     outcome = resolve_field_mapping_conflicts(
@@ -44,8 +45,8 @@ def test目标候选相似度高者优先() -> None:
     from application.field_mapping_conflicts import resolve_field_mapping_conflicts
 
     retriever = _candidates(
-        "src → 源IP(0.72, source_ip)",
-        "client → 源IP(0.88, client_address)",
+        src=[("源IP", 0.72, "source_ip", "")],
+        client=[("源IP", 0.88, "client_address", "")],
     )
 
     outcome = resolve_field_mapping_conflicts(
@@ -61,9 +62,9 @@ def test同分时按原行序且三行只保留一个() -> None:
     from application.field_mapping_conflicts import resolve_field_mapping_conflicts
 
     retriever = _candidates(
-        "first → 源IP(0.80, first_ip)",
-        "second → 源IP(0.80, second_ip)",
-        "third → 源IP(0.80, third_ip)",
+        first=[("源IP", 0.80, "first_ip", "")],
+        second=[("源IP", 0.80, "second_ip", "")],
+        third=[("源IP", 0.80, "third_ip", "")],
     )
 
     outcome = resolve_field_mapping_conflicts(
@@ -127,7 +128,9 @@ def test上传配置既有映射占用时新行落选() -> None:
     outcome = resolve_field_mapping_conflicts(
         [_row("client_ip")],
         decoded_data=decoded_data,
-        candidate_retriever=lambda fields: "client_ip → 源IP(1.00, client_ip)",
+        candidate_retriever=lambda fields: {
+            "client_ip": [("源IP", 1.00, "client_ip", "")]
+        },
     )
 
     assert outcome.rows[0]["匹配状态"] == "未匹配"
