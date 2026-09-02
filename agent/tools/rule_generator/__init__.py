@@ -14,7 +14,7 @@
 
 Typical usage:
     from agent.tools.rule_generator import generate_rules, rules_to_base64_text
-    rules = generate_rules(classification, mode="both")
+    rules = generate_rules(classification, mode="entry")
     txt = rules_to_base64_text(rules["rules"])
 """
 
@@ -26,9 +26,7 @@ from .core import (
     rules_to_base64_text,
 )
 from .field_mapping import (
-    extract_sub_rule_mapping_info,
     apply_field_mapping_to_sub_rules,
-    apply_enum_fill_to_sub_rules,
 )
 
 __all__ = [
@@ -39,7 +37,5 @@ __all__ = [
     "generate_sub_rules",
     "rules_to_base64_text",
     # 标准字段映射
-    "extract_sub_rule_mapping_info",
     "apply_field_mapping_to_sub_rules",
-    "apply_enum_fill_to_sub_rules",
 ]
