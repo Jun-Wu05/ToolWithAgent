@@ -3,7 +3,11 @@
 from collections.abc import Mapping
 from typing import Any
 
-from agent.shared.event_classify import EVENT_NAME_LEVEL_BINDING, read_entity_event_name
+from agent.shared.event_classify import (
+    EVENT_NAME_LEVEL_BINDING,
+    THREAT_TYPE_FIELD,
+    read_entity_event_name,
+)
 from application.artifact_targets import resolve_standard_target
 from contracts.planner_models import ConfigRef
 from contracts.session_artifacts import (
@@ -154,6 +158,7 @@ def _read_config(session: Any, config_ref: ConfigRef) -> Any:
 def _target_bindings(
     session: Any, source_field: str | None, config_refs: tuple[ConfigRef, ...]
 ) -> tuple[ArtifactTargetBinding, ...]:
+    """枚举产物的填充目标仍按 source_field 血缘解析（多目标合法）。"""
     if not source_field:
         return ()
     bindings: list[ArtifactTargetBinding] = []
@@ -162,6 +167,46 @@ def _target_bindings(
         if target:
             bindings.append(ArtifactTargetBinding(config_ref=config_ref, target_field=target))
     return tuple(bindings)
+
+
+def _has_threat_type_entry(config: Any) -> bool:
+    """判断配置中是否存在威胁类型条目（index 或 field 命中，含未映射条目）。
+
+    递归遍历与 apply_fill_to_config 同构：兼容 dict（单配置对象）与
+    list（规则列表）两种形态。
+    """
+    if isinstance(config, dict):
+        normalize = config.get("normalize")
+        if isinstance(normalize, list):
+            for entry in normalize:
+                if not isinstance(entry, dict):
+                    continue
+                if (
+                    entry.get("index") == THREAT_TYPE_FIELD
+                    or entry.get("field") == THREAT_TYPE_FIELD
+                ):
+                    return True
+        return any(
+            _has_threat_type_entry(value) for value in config.values()
+        )
+    if isinstance(config, list):
+        return any(_has_threat_type_entry(item) for item in config)
+    return False
+
+
+def _threat_target_bindings(
+    session: Any, config_refs: tuple[ConfigRef, ...]
+) -> tuple[ArtifactTargetBinding, ...]:
+    """威胁产物填充目标固定为「威胁类型」（#173 修复 1），不再按血缘推导。
+
+    仅当配置已含威胁类型条目（通常由威胁链路自动添加）时发布绑定，
+    保持「绑定 = 当前可操作」的目录语义。
+    """
+    return tuple(
+        ArtifactTargetBinding(config_ref=config_ref, target_field=THREAT_TYPE_FIELD)
+        for config_ref in config_refs
+        if _has_threat_type_entry(_read_config(session, config_ref))
+    )
 
 
 def _referenceable_artifacts(
@@ -193,7 +238,7 @@ def _referenceable_artifacts(
             artifact_type="threat_mapping",
             source_field=threat_slot.source_field,
             item_count=threat_slot.artifact.item_count,
-            target_bindings=_target_bindings(session, threat_slot.source_field, config_refs),
+            target_bindings=_threat_target_bindings(session, config_refs),
         ))
     return tuple(facts)
 

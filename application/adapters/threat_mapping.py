@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from agent.shared.logger import get_logger
 from application.adapters.shared import (
     _failed,
     _needs_input,
@@ -16,6 +17,7 @@ from application.adapters.shared import (
 )
 from application.execution import ExecutionContext
 from application.parsing import parse_json_threat_result
+from application.threat_chain_policy import ensure_threat_mapping_coverage
 from contracts.planner_models import (
     EnumValuesArtifact,
     StepResult,
@@ -25,6 +27,8 @@ from contracts.planner_models import (
     ThreatMappingStep,
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+
+logger = get_logger("execution_adapters")
 
 
 class ThreatMappingAdapter:
@@ -76,6 +80,20 @@ class ThreatMappingAdapter:
         mapping_rows = parse_json_threat_result(content)
         if not mapping_rows:
             return _failed(step, "threat_mapping_empty", "威胁映射未生成有效结果")
+        # 值全覆盖兜底（#173 决策 5）：未被任何映射行覆盖的提取值确定性补
+        # 「其他」兜底行，不依赖提示词自觉；跨轮/手输路径同样受益。
+        rows_before = len(mapping_rows)
+        mapping_rows = ensure_threat_mapping_coverage(values, mapping_rows)
+        appended = len(mapping_rows) - rows_before
+        if appended:
+            logger.info(
+                "[THREAT_MAPPING] 全覆盖兜底补行: value_count=%s "
+                "row_count=%s->%s appended=%s",
+                len(values),
+                rows_before,
+                len(mapping_rows),
+                appended,
+            )
 
         typed_mappings = tuple(ThreatMappingRow.model_validate(row) for row in mapping_rows)
         artifact = ThreatMappingArtifact(

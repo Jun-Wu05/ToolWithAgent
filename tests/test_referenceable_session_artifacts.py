@@ -119,7 +119,7 @@ def test新source_ref强制与直接值和步骤依赖互斥():
         )
 
 
-def testSessionFacts只暴露安全产物目录和唯一目标绑定():
+def testSessionFacts只暴露安全产物目录和固定威胁绑定():
     """Planner 输入包含字段血缘但不得包含真实枚举值或威胁映射行。"""
     session = {
         "decoded_data": {
@@ -151,9 +151,18 @@ def testSessionFacts只暴露安全产物目录和唯一目标绑定():
         "session.artifacts.enum_values",
         "session.artifacts.threat_mapping",
     ]
-    threat_fact = facts.referenceable_artifacts[1]
-    assert threat_fact.target_bindings[0].config_ref == "session.decoded_config"
-    assert threat_fact.target_bindings[0].target_field == "event_name"
+    enum_fact, threat_fact = facts.referenceable_artifacts
+    # 枚举产物仍按 source_field 血缘解析绑定（多目标合法）
+    assert enum_fact.target_bindings[0].target_field == "event_name"
+    # 威胁产物填充目标固定为「威胁类型」（#173 修复 1）；配置无该条目时不发布绑定
+    assert threat_fact.target_bindings == ()
+
+    session["decoded_data"]["normalize"].append({"index": "威胁类型", "mappings": []})
+    facts_with_entry = build_session_facts(session)
+    threat_bindings = facts_with_entry.referenceable_artifacts[1].target_bindings
+    assert [(b.config_ref, b.target_field) for b in threat_bindings] == [
+        ("session.decoded_config", "威胁类型")
+    ]
     planner_input = build_planner_input("填充回去", [], facts)
     assert "敏感枚举值" not in planner_input
     assert "敏感原值" not in planner_input
@@ -294,59 +303,45 @@ def _execute_cross_turn_fill(session: dict, target_field: str) -> StepResult:
     return report.results[0]
 
 
-def test上轮威胁产物只能填回来源字段对应标准字段():
-    """绑定 B→event_name 后可填回 event_name，指定 C 时在执行前拒绝。"""
+def test上轮威胁产物只能填回固定目标威胁类型():
+    """威胁填充目标固定为威胁类型（#173），点名其他字段在执行前拒绝。"""
     session = {
         "decoded_data": {
             "normalize": [
-                {"index": "alarm_name", "field": "event_name", "mappings": []},
+                {"index": "attack_type", "mappings": []},
+                {"index": "威胁类型", "mappings": []},
                 {"index": "other", "field": "other_standard", "mappings": []},
             ]
         },
-        "latest_threat_artifact": _threat_slot("alarm_name"),
+        "latest_threat_artifact": _threat_slot("attack_type"),
     }
     mismatch = _execute_cross_turn_fill(session, "other_standard")
     assert mismatch.status == StepStatus.NEEDS_INPUT
-    assert mismatch.error_code == "artifact_target_mismatch"
-    assert session["decoded_data"]["normalize"][0]["mappings"] == []
+    assert mismatch.error_code == "threat_fill_target_fixed"
+    assert session["decoded_data"]["normalize"][1]["mappings"] == []
 
-    success = _execute_cross_turn_fill(session, "event_name")
+    success = _execute_cross_turn_fill(session, "威胁类型")
     assert success.status == StepStatus.SUCCESS
     assert success.changed_count == 1
 
-    missing_target_session = {
-        "decoded_data": {
-            "normalize": [
-                {"index": "other", "field": "other_standard", "mappings": []}
-            ]
-        },
-        "latest_threat_artifact": _threat_slot("alarm_name"),
-    }
-    unavailable = _execute_cross_turn_fill(missing_target_session, "other_standard")
-    assert unavailable.status == StepStatus.NEEDS_INPUT
-    assert unavailable.error_code == "artifact_target_unavailable"
 
-
-def test直接值威胁产物允许显式绑定合法标准字段():
-    """无来源字段时由当前明确目标建立绑定，但目标必须真实存在于配置。"""
+def test直接值威胁产物同样受固定目标约束():
+    """无来源字段（user.values）的威胁产物也只能填威胁类型。"""
     session = {
         "decoded_data": {
-            "normalize": [{"index": "raw_event", "field": "event_name", "mappings": []}]
+            "normalize": [
+                {"index": "raw_event", "field": "event_name", "mappings": []},
+                {"index": "威胁类型", "mappings": []},
+            ]
         },
         "latest_threat_artifact": _threat_slot(None),
     }
-    success = _execute_cross_turn_fill(session, "event_name")
-    assert success.status == StepStatus.SUCCESS
+    rejected = _execute_cross_turn_fill(session, "event_name")
+    assert rejected.status == StepStatus.NEEDS_INPUT
+    assert rejected.error_code == "threat_fill_target_fixed"
 
-    invalid_session = {
-        "decoded_data": {
-            "normalize": [{"index": "raw_event", "field": "event_name", "mappings": []}]
-        },
-        "latest_threat_artifact": _threat_slot(None),
-    }
-    invalid = _execute_cross_turn_fill(invalid_session, "missing_field")
-    assert invalid.status == StepStatus.NEEDS_INPUT
-    assert invalid.error_code == "artifact_target_unavailable"
+    success = _execute_cross_turn_fill(session, "威胁类型")
+    assert success.status == StepStatus.SUCCESS
 
 
 def test产物被清除或执行期类型错配时安全停止():
@@ -372,8 +367,9 @@ def test产物被清除或执行期类型错配时安全停止():
     assert wrong_type.error_code == "artifact_source_unavailable"
 
 
-def test多字段同轮选择B后下一轮仍按B血缘填充():
-    """即使最近枚举槽为 C，本轮依赖 B 的产物也必须把威胁血缘保存为 B。"""
+def test多字段同轮选择B后血缘仍记录但填充目标固定():
+    """即使最近枚举槽为 C，本轮依赖 B 的产物也必须把威胁血缘保存为 B；
+    跨轮填充目标固定为威胁类型（#173），血缘只作展示与追溯。"""
     member = _ThreatMember(
         json.dumps(
             [{"mappingType": "EQUAL", "orgValue": "b-value", "mappingValue": "恶意活动"}],
@@ -406,7 +402,10 @@ def test多字段同轮选择B后下一轮仍按B血缘填充():
     assert session["latest_threat_artifact"].source_field == "B"
 
     session["decoded_data"] = {
-        "normalize": [{"index": "B", "field": "standard_b", "mappings": []}]
+        "normalize": [
+            {"index": "B", "field": "standard_b", "mappings": []},
+            {"index": "威胁类型", "mappings": []},
+        ]
     }
-    fill = _execute_cross_turn_fill(session, "standard_b")
+    fill = _execute_cross_turn_fill(session, "威胁类型")
     assert fill.status == StepStatus.SUCCESS

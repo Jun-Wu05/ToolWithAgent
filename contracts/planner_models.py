@@ -15,6 +15,12 @@ class StrictContract(BaseModel):
 
 
 ConfigRef = Literal["session.decoded_config", "session.mapped_sub_rules"]
+THREAT_TYPE_FIELD = "威胁类型"
+"""威胁类型链路独占产出的系统固定字段（#173）：填充目标固定、映射目标黑名单成员。
+
+契约层单一来源：执行器/适配器（application）不得依赖 agent 层取此常量；
+agent.shared.event_classify 反向 re-export 保持既有导入路径不变。
+"""
 SessionEnumArtifactRef = Literal["session.artifacts.enum_values"]
 SessionThreatArtifactRef = Literal["session.artifacts.threat_mapping"]
 SessionArtifactRef = Union[SessionEnumArtifactRef, SessionThreatArtifactRef]

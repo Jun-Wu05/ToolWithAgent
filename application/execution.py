@@ -18,6 +18,7 @@ from contracts.planner_models import (
     StepResult,
     StepSpec,
     StepStatus,
+    THREAT_TYPE_FIELD,
     ThreatMappingStep,
 )
 from application.progress import NullProgressSink
@@ -405,27 +406,14 @@ class PlanExecutor:
                         "artifact_source_unavailable",
                         "最近威胁映射产物不可用，请重新执行威胁映射",
                     )
-                if threat_fact.source_field:
-                    binding = next(
-                        (
-                            item
-                            for item in threat_fact.target_bindings
-                            if item.config_ref == step.config_ref
-                        ),
-                        None,
+                # 威胁映射填充目标固定为「威胁类型」（#173 修复 1）：
+                # 不再按 source_field 血缘推导（字段映射改判会使目标静默漂移）。
+                if step.target_fields != (THREAT_TYPE_FIELD,):
+                    return self._needs_input_result(
+                        step,
+                        "threat_fill_target_fixed",
+                        f"威胁映射只能填充到固定目标字段「{THREAT_TYPE_FIELD}」",
                     )
-                    if binding is None:
-                        return self._needs_input_result(
-                            step,
-                            "artifact_target_unavailable",
-                            "最近威胁映射的来源字段没有唯一可填充标准字段",
-                        )
-                    if step.target_fields != (binding.target_field,):
-                        return self._needs_input_result(
-                            step,
-                            "artifact_target_mismatch",
-                            f"最近威胁映射只能填回标准字段: {binding.target_field}",
-                        )
         return None
 
     def _validate_result(self, step: StepSpec, result: StepResult) -> StepResult:

@@ -19,6 +19,7 @@ from typing import Any
 
 from agent.prompts import load_event_classify_prompt
 from agent.shared.logger import get_logger
+from contracts.planner_models import THREAT_TYPE_FIELD
 
 logger = get_logger("event_classify")
 
@@ -66,8 +67,8 @@ EVENT_NAME_LEVEL_BINDING: dict[str, str] = {
 
 EVENT_NAME_FIELD = "事件名称"
 EVENT_LEVEL_FIELD = "事件级别"
-THREAT_TYPE_FIELD = "威胁类型"
-"""系统固定字段名单一来源：威胁类型链路独占产出的第 4 个固定枚举字段（#173）。"""
+# 威胁类型字段名单一来源在 contracts（application 核心层不得依赖 agent）；
+# 此处 re-export 保持既有导入路径不变。
 
 ALL_EVENT_NAMES = frozenset(EVENT_NAME_LEVEL_BINDING)
 
