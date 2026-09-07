@@ -53,6 +53,7 @@
 
 ### Fixed
 - 日志保留策略未按设计生效（#176）：`agent/logs` 无限累积（清理只在应用启动触发，pytest/子进程/CLI 等非应用进程不经过）且稳态每类实为 3 份而非 2；清理改挂 `setup_logger` 首次创建共享日志文件分支（每进程至多一次，任何产生日志的进程都会触发），`cleanup_old_logs` 改为每前缀总数 = keep_count（活动文件计入额度且永不删除），稳态回到「当前 + 上一次」2 份/类
+- 导出字段携带错误对象（#177）：事件固定字段 entity 由「日志」改为目录规定的「事件」（目标平台不再显示 event_name日志）；标准字段目录成为名称/对象 SSOT——apply 写入与 validator 校验均按目录确定性解析（英文字段名/前后空白等变体规范化为目录规范名，目录外名称降级未匹配，对象取目录对象列首个，多值逗号分隔与 对象.xlsx 历史语义一致）；退役 对象.xlsx 回填与 object_map_loader 接缝（加载失败静默空表、未知名称默认「事件」两缺陷一并消除）；上传配置既有非法组合只诊断不改写（find_non_catalog_field_entities 报告来源与数量）
 - 纯 KV 日志分类在 format_info 为空（解析为 None）时抛 UnboundLocalError（#179）：`_classify_kv_features` 的 `body_logs` 改为无条件初始化并回退默认分隔符；塌缩永不可达的防御 try/except；删除 `_classify_json_features` 从未使用的 `format_info` 死参与 4 个传 None 调用点
 - 字段映射来源排除 Excel 列头：有真实日志字段时 `available_fields` 只含日志字段与子规则字段，`decoded_fields` 仅作配置场景回退；数据表 Excel 缺"原始日志"列在上传时拒绝（#78 #81）
 - Planner 两步复合修复："提取枚举值并做威胁类型映射"生成 `enum_extract → threat_mapping` 依赖链，威胁映射使用内置分类表、不依赖枚举映射表（#79 #82）

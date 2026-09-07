@@ -29,7 +29,6 @@ class ProfessionalAgentAdapter:
         team: Any,
         mapping_policy: FieldMappingExecutionPolicy | None = None,
         candidate_retriever: Any | None = None,
-        object_map_loader: Any | None = None,
         event_classifier: Any | None = None,
     ) -> None:
         """创建日志、枚举、字段与威胁适配器并保存 Team。"""
@@ -41,7 +40,6 @@ class ProfessionalAgentAdapter:
             team,
             mapping_policy,
             candidate_retriever=candidate_retriever,
-            object_map_loader=object_map_loader,
             event_classifier=event_classifier,
         )
 

@@ -263,14 +263,18 @@ async def _run_in_executor(func: Any, *args: Any) -> Any:
 
 
 def make_event_name_normalize_entry(event_name: str) -> dict[str, Any]:
-    """构建【事件名称】normalize 条目（仿 make_log_type_entry 形态）。"""
+    """构建【事件名称】normalize 条目（仿 make_log_type_entry 形态）。
+
+    对象归属「事件」（#177）：标准字段目录中 event_name/event_level 的对象
+    均为「事件」；此前的「日志」是与目录冲突的过时决策，目标平台无法解析。
+    """
     return {
         "mappings": [],
         "field": "event_name",
         "sim": True,
         "result": [event_name],
         "info": None,
-        "entity": "日志",
+        "entity": "事件",
         "required": False,
         "core": False,
         "value": "",
@@ -279,14 +283,14 @@ def make_event_name_normalize_entry(event_name: str) -> dict[str, Any]:
 
 
 def make_event_level_normalize_entry(event_level: str) -> dict[str, Any]:
-    """构建【事件级别】normalize 条目（仿 make_log_type_entry 形态）。"""
+    """构建【事件级别】normalize 条目（对象归属「事件」，#177）。"""
     return {
         "mappings": [],
         "field": "event_level",
         "sim": True,
         "result": [event_level],
         "info": None,
-        "entity": "日志",
+        "entity": "事件",
         "required": False,
         "core": False,
         "value": "",

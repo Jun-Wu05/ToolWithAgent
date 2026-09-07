@@ -277,8 +277,27 @@ class _Team:
     """提供测试用专业 Agent 成员列表。"""
 
     def __init__(self, member):
-        """保存单个字段映射成员。"""
+        """返回单个字段映射成员。"""
         self.members = [member]
+
+
+def _permissive_standard_catalog(monkeypatch) -> None:
+    """机制类测试放开目录解析（#177）：任意非空名称视为合法（对象=事件）。
+
+    批处理/回写/裁决等机制断言不关心目录成员关系——目录语义由
+    test_field_mapping_apply / test_standard_field_entity_validation 锁定。
+    """
+    import agent.tools.rule_generator.field_mapping as rule_field_mapping
+
+    monkeypatch.setattr(
+        rule_field_mapping,
+        "resolve_standard_field",
+        lambda name: (
+            SimpleNamespace(system_property_name=name, objects="事件")
+            if isinstance(name, str) and name.strip()
+            else None
+        ),
+    )
 
 
 def test字段映射批次只消费原始字段候选池():
@@ -331,6 +350,8 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     import agent.tools.standard_mapper as standard_mapper
     import application.field_source as field_source
 
+    _permissive_standard_catalog(monkeypatch)
+
     fields = tuple(f"field_{index}" for index in range(26))
     generated_sub_rules = [
         {
@@ -348,7 +369,6 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
         "generate_sub_rules",
         lambda classification, all_logs_str, rule_source_fields: generated_sub_rules,
     )
-    monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
     session = {
         "log_classification": {"类型A": {}},
         "raw_log_lines": ["field_0=value"],
@@ -386,6 +406,7 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
     import agent.tools.standard_mapper as standard_mapper
     import application.field_source as field_source
 
+    _permissive_standard_catalog(monkeypatch)
     monkeypatch.setattr(
         field_source,
         "extract_log_fields_for_mapping",
@@ -782,9 +803,7 @@ def test字段映射重复字段去重后不失败(monkeypatch):
 
 def test字段映射回填解码配置并产出下载(monkeypatch):
     """有真实 decoded_config 时，字段映射回填配置并标记为 mapped_config（回归 #51）。"""
-    import agent.tools.standard_mapper as standard_mapper
-
-    monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
+    _permissive_standard_catalog(monkeypatch)
     session = {
         "decoded_fields": ["alpha", "beta"],
         # simple_decode 的真实 decoded_json 根对象是规则列表，而不是包装字典。
@@ -831,8 +850,9 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     assert downloaded == session["decoded_data"]
 
 
-def test上传规则字段映射仅处理未映射字段并报告差分():
+def test上传规则字段映射仅处理未映射字段并报告差分(monkeypatch):
     """纯上传路径的 LLM 输入、写回与用户消息共用同一语义。"""
+    _permissive_standard_catalog(monkeypatch)
     session = {
         "decoded_fields": ["alpha", "beta"],
         "decoded_data": [
@@ -855,7 +875,6 @@ def test上传规则字段映射仅处理未映射字段并报告差分():
     adapter = ProfessionalAgentAdapter(
         _Team(member),
         candidate_retriever=lambda fields: {},
-        object_map_loader=lambda path: {},
     )
 
     result = asyncio.run(
@@ -900,7 +919,6 @@ def test上传规则全部已映射时直接成功且不调模型():
     adapter = ProfessionalAgentAdapter(
         _Team(member),
         candidate_retriever=lambda fields: {},
-        object_map_loader=lambda path: {},
     )
     decision = PlanDecision.model_validate(
         {
@@ -929,8 +947,10 @@ def test上传规则全部已映射时直接成功且不调模型():
     assert "所有字段均已映射，无需再次执行" in (report.results[0].message or "")
 
 
-def test字段映射一对一冲突裁决后仅写回保留者():
+def test字段映射一对一冲突裁决后仅写回保留者(monkeypatch):
     """Adapter 在任何 apply 前裁决，并让 Session、Artifact 与消息保持一致。"""
+    _permissive_standard_catalog(monkeypatch)
+
     class CollisionMember:
         name = "FieldMappingAgent"
 
@@ -967,7 +987,6 @@ def test字段映射一对一冲突裁决后仅写回保留者():
         ProfessionalAgentAdapter(
             _Team(member),
             candidate_retriever=retrieve,
-            object_map_loader=lambda _path: {},
         ).execute(
             FieldMappingStep(
                 step_id="mapping-conflict", type="field_mapping", source_ref="session.fields"
@@ -992,9 +1011,11 @@ def test字段映射一对一冲突裁决后仅写回保留者():
     assert "源IP：保留 client；落选 src；依据：精确命中（1.00）" in (result.message or "")
 
 
-def test字段映射新行撞上传配置既有标准字段时落选():
+def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch):
     """#163 跳过的既有映射是只读占用方，新行即使精确命中也不能覆盖或撞入。"""
     from application.adapters.field_mapping import FieldMappingAdapter
+
+    _permissive_standard_catalog(monkeypatch)
 
     class ExistingCollisionRunner:
         async def run(self, fields, **_kwargs):
@@ -1029,7 +1050,6 @@ def test字段映射新行撞上传配置既有标准字段时落选():
             candidate_retriever=lambda fields: {
                 "client_ip": [("源IP", 1.00, "client_ip", "")]
             },
-            object_map_loader=lambda _path: {},
         ).execute(
             FieldMappingStep(
                 step_id="mapping-existing-conflict",

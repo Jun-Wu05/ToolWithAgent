@@ -133,7 +133,6 @@ def test_body_key分类可由真实字段映射adapter原子写回(monkeypatch) 
         FieldMappingAdapter(
             team=None,
             batch_runner=MappingRunner(),
-            object_map_loader=lambda _: {},
             event_classifier=lambda _: json.dumps({"results": []}),
         ).execute(
             FieldMappingStep(

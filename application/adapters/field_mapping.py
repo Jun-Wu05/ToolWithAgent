@@ -33,7 +33,6 @@ class FieldMappingAdapter:
         team: Any,
         mapping_policy: FieldMappingExecutionPolicy | None = None,
         candidate_retriever: Any | None = None,
-        object_map_loader: Any | None = None,
         event_classifier: Any | None = None,
         batch_runner: Any | None = None,
     ) -> None:
@@ -41,11 +40,11 @@ class FieldMappingAdapter:
 
         candidate_retriever 为结构化候选检索器（返回 #180 候选表），
         供冲突裁决直接消费；批处理 prompt 需要的 markdown 文本在
-        _build_prompt_prequery 注入边界处渲染。
+        _build_prompt_prequery 注入边界处渲染。对象归属由标准字段目录
+        确定性解析（#177），不再有对象表装载接缝。
         """
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
         self._candidate_retriever = candidate_retriever
-        self._object_map_loader = object_map_loader
         self._event_classifier = event_classifier
         self._batch_runner = (
             batch_runner
@@ -190,8 +189,9 @@ class FieldMappingAdapter:
                     rule_source_fields=rule_source_fields,
                 )
         if sub_rules:
-            from agent.tools import load_object_mapping
-            from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_sub_rules
+            from agent.tools.rule_generator.field_mapping import (
+                apply_field_mapping_to_sub_rules,
+            )
 
             staged_sub_rule_results = []
             for sub_rule in sub_rules:
@@ -207,10 +207,11 @@ class FieldMappingAdapter:
                         if str(row.get("原始字段名", "")) in rule_fields
                     ],
                 })
-            object_loader = self._object_map_loader or load_object_mapping
-            object_entity_map = object_loader(str(REPO_ROOT / "config" / "对象.xlsx"))
+            # #177：标准字段目录是对象归属 SSOT（名称/对象由目录确定性解析），
+            # 不再加载 对象.xlsx（加载失败静默空表 + 未知名称默认「事件」的
+            # 两个缺陷由此一并消除）。
             staged_mapped_sub_rules = apply_field_mapping_to_sub_rules(
-                sub_rules, staged_sub_rule_results, object_entity_map
+                sub_rules, staged_sub_rule_results
             )
             annotation_outcome = await self._annotate_event_names(
                 step, context, staged_mapped_sub_rules
@@ -226,13 +227,22 @@ class FieldMappingAdapter:
         download_content = None
         has_decoded_config = "session.decoded_config" in context.session_facts.available_config_refs
         if has_decoded_config and isinstance(decoded_data, (dict, list)) and decoded_data:
-            from agent.tools import load_object_mapping
-            from agent.tools.rule_generator.field_mapping import apply_field_mapping_to_config
+            from agent.tools.rule_generator.field_mapping import (
+                apply_field_mapping_to_config,
+                find_non_catalog_field_entities,
+            )
 
-            object_loader = self._object_map_loader or load_object_mapping
-            object_entity_map = object_loader(str(REPO_ROOT / "config" / "对象.xlsx"))
+            # 上传配置既有非法组合只诊断不改写（原样保留语义，#177）
+            illegal = find_non_catalog_field_entities(decoded_data)
+            if illegal:
+                logger.warning(
+                    "[FIELD_MAPPING] 上传配置存在非目录字段/对象组合（原样保留，仅诊断）: "
+                    "count=%s samples=%s",
+                    len(illegal),
+                    [f"{index}:{field}/{entity}" for index, field, entity in illegal[:5]],
+                )
             staged_decoded_data = apply_field_mapping_to_config(
-                copy.deepcopy(decoded_data), mapping_rows, object_entity_map
+                copy.deepcopy(decoded_data), mapping_rows
             )
             download_kind = "mapped_config"
             download_content = _build_config_artifact(

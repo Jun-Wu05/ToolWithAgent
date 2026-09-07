@@ -16,44 +16,23 @@ from agent.shared.logger import get_logger
 
 logger = get_logger("standard_mapper")
 
-# ===== 标准字段名白名单（惰性加载，首次调用时从 标准字段.txt 构建） =====
-_valid_field_names: Optional[set] = None
-
-
-def _get_valid_field_names() -> set:
-    """
-    从标准字段表加载所有合法的「系统属性名称」集合。
-
-    构建一次后缓存，避免每次映射都读文件解析。
-    """
-    global _valid_field_names
-    if _valid_field_names is None:
-        try:
-            names = {
-                field.system_property_name
-                for field in get_standard_field_catalog().fields
-                if field.system_property_name
-            }
-            _valid_field_names = names
-            logger.info(f"[VALIDATOR] 标准字段白名单已加载：{len(names)} 个合法系统属性名称")
-        except Exception as e:
-            logger.warning(f"[VALIDATOR] 加载标准字段白名单失败: {e}，跳过校验")
-            _valid_field_names = set()  # 空集合 = 跳过校验
-    return _valid_field_names
-
 
 def _validate_and_correct_mapping(mapping: dict) -> dict:
     """
-    校验单条映射的「系统属性名称」是否在标准字段表中。
+    校验单条映射的「系统属性名称」并规范化为标准字段目录规范名称（#177）。
 
     - 若"未匹配"则跳过校验（合法状态）
     - 若匹配成功但名称在映射目标黑名单（系统固定字段）中 → 强制改为"未匹配"并记录警告
-    - 若匹配成功但名称不在白名单中 → 强制改为"未匹配"并记录警告
+    - 若名称可经目录唯一规范化（前后空白/英文字段名/变体）→ 改写为目录规范系统属性名称
+    - 若名称不在目录中 → 强制改为"未匹配"并记录警告
 
     Returns:
         校验/修正后的映射 dict（可能是原始引用或新 dict）
     """
-    from agent.tools.rule_generator.field_mapping import MAPPING_EXCLUDED_STANDARD_FIELDS
+    from agent.tools.rule_generator.field_mapping import (
+        MAPPING_EXCLUDED_STANDARD_FIELDS,
+        resolve_standard_field,
+    )
 
     system_property = mapping.get("系统属性名称", "")
     match_status = mapping.get("匹配状态", "")
@@ -62,7 +41,7 @@ def _validate_and_correct_mapping(mapping: dict) -> dict:
     if system_property == "未匹配":
         return mapping
 
-    # 系统固定字段（事件名称/事件级别/日志类型等）由固定机制独占，不允许映射占用（issue #125）
+    # 系统固定字段（事件名称/事件级别/日志类型/威胁类型）由固定机制独占，不允许映射占用（issue #125/#173）
     if system_property in MAPPING_EXCLUDED_STANDARD_FIELDS:
         logger.warning(
             f"[VALIDATOR] 系统固定字段 → 强制降级为未匹配: "
@@ -78,12 +57,8 @@ def _validate_and_correct_mapping(mapping: dict) -> dict:
             ),
         }
 
-    valid_names = _get_valid_field_names()
-    if not valid_names:
-        # 白名单为空（加载失败），跳过校验
-        return mapping
-
-    if system_property not in valid_names:
+    record = resolve_standard_field(system_property)
+    if record is None:
         logger.warning(
             f"[VALIDATOR] 非法字段名 → 强制降级为未匹配: "
             f"原始字段={mapping.get('原始字段名', '?')}, "
@@ -95,6 +70,21 @@ def _validate_and_correct_mapping(mapping: dict) -> dict:
             "系统属性名称": "未匹配",
             "匹配状态": "未匹配",
             "_校正原因": f"LLM 输出了不在标准字段表中的名称 '{system_property}'",
+        }
+
+    if record.system_property_name != system_property:
+        logger.info(
+            f"[VALIDATOR] 变体名称规范化: '{system_property}' -> "
+            f"'{record.system_property_name}'"
+        )
+        return {
+            "原始字段名": mapping.get("原始字段名", ""),
+            "系统属性名称": record.system_property_name,
+            "匹配状态": match_status or "匹配成功",
+            "_校正原因": (
+                f"'{system_property}' 已规范化为标准字段表规范名称 "
+                f"'{record.system_property_name}'"
+            ),
         }
 
     return mapping

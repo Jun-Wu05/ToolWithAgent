@@ -246,7 +246,7 @@ def test写入filter与normalize结构并与日志类型同构():
         "sim": True,
         "result": ["网络攻击"],
         "info": None,
-        "entity": "日志",
+        "entity": "事件",
         "required": False,
         "core": False,
         "value": "",
@@ -255,6 +255,7 @@ def test写入filter与normalize结构并与日志类型同构():
     assert level_entry["field"] == "event_level"
     assert level_entry["index"] == "事件级别"
     assert level_entry["result"] == ["提醒"]
+    assert level_entry["entity"] == "事件"  # 目录对象（#177，原「日志」非法）
     # 未判定的子规则不动
     assert out[1]["parser"]["filter"] == []
     assert [e["index"] for e in out[1]["normalize"]] == ["user", "日志类型"]

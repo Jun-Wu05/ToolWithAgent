@@ -29,17 +29,71 @@ MAPPING_EXCLUDED_STANDARD_FIELDS = frozenset(
 )
 
 
+def resolve_standard_field(system_name: Any):
+    """把模型返回的标准字段名确定性解析为标准字段目录记录（#177）。
+
+    前后空白、英文字段名与规范化变体在目录可唯一定位时接受并返回该记录；
+    目录外名称返回 None，由调用方降级为未匹配——对象不再默认「事件」。
+
+    Returns:
+        命中的 catalog.StandardField；无法解析时 None。
+    """
+    from agent.core.standard_field_catalog import get_standard_field_catalog
+
+    if not isinstance(system_name, str) or not system_name.strip():
+        return None
+    return get_standard_field_catalog().lookup(system_name.strip())
+
+
+def canonical_field_entity(record) -> str:
+    """取目录记录「对象」列首个对象（多值逗号分隔，与 对象.xlsx 历史语义一致）。"""
+    return record.objects.split(",")[0].strip()
+
+
+def find_non_catalog_field_entities(config: Any) -> list[tuple[str, str, str]]:
+    """扫描既有配置中非目录的 (index, field, entity) 组合（#177 诊断，不改写）。
+
+    仅诊断 field 非空的条目：field 无法在目录解析、或 entity 与目录首个对象
+    不一致即非目录组合。用于上传配置的「原样保留 + 只报告来源与数量」语义。
+    """
+    illegal: list[tuple[str, str, str]] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for entry in normalize:
+                    if not isinstance(entry, dict):
+                        continue
+                    index = str(entry.get("index") or "")
+                    field_name = str(entry.get("field") or "").strip()
+                    entity = str(entry.get("entity") or "").strip()
+                    if not field_name:
+                        continue
+                    record = resolve_standard_field(field_name)
+                    if record is None or canonical_field_entity(record) != entity:
+                        illegal.append((index, field_name, entity))
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(config)
+    return illegal
+
+
 def apply_field_mapping_to_sub_rules(
     sub_rules: list[dict[str, Any]],
     mapping_results: list[dict[str, Any]],
-    object_entity_map: dict[str, str] | None = None,
     corrections: dict[str, dict] | None = None,
 ) -> list[dict[str, Any]]:
     """将标准字段映射结果应用到子规则的 normalize 条目上。
 
-    遍历每条子规则的 normalize 条目，对匹配成功的 index 设置
-    field（标准字段名）、entity（对象）、sim（True）、core（False）；显式未匹配行
-    恢复为 field/entity/sim/core=None，避免重新映射时残留旧映射。
+    遍历每条子规则的 normalize 条目，对匹配成功的 index 写入目录规范名称
+    field + 目录对象 entity（#177：标准字段目录是对象归属 SSOT）；目录外
+    名称与显式未匹配行一律降级清空（field/entity/sim/core=None），避免
+    重新映射时残留旧映射或写入非法组合。
 
     Args:
         sub_rules: 子规则列表（会被深拷贝，不修改原始数据）。
@@ -47,16 +101,12 @@ def apply_field_mapping_to_sub_rules(
             [{"rule_name": str, "mappings": [
                 {"原始字段名": str, "系统属性名称": str, "匹配状态": str}
             ]}]
-        object_entity_map: 系统属性名称→对象 的映射（从 对象.xlsx 读取）。
-            若为 None，entity 默认设为 "事件"。
         corrections: 🔮 预留扩展点 — 用户手动修正映射。
-            格式: {rule_name: {原始字段名: {"系统属性名称": str, "对象": str}}}
+            格式: {rule_name: {原始字段名: {"系统属性名称": str}}}
 
     Returns:
         修改后的子规则列表（深拷贝）。
     """
-    if object_entity_map is None:
-        object_entity_map = {}
 
     # 构建 rule_name → {原始字段名: mapping_dict} 的查找表
     rule_mappings: dict[str, dict[str, dict]] = {}
@@ -98,9 +148,12 @@ def apply_field_mapping_to_sub_rules(
             match_status = mapping.get("匹配状态", "")
             system_prop = mapping.get("系统属性名称", "")
 
+            record = None
             if "匹配成功" in match_status and system_prop and system_prop != "未匹配":
-                entry["field"] = system_prop
-                entry["entity"] = object_entity_map.get(system_prop, "事件")
+                record = resolve_standard_field(system_prop)
+            if record is not None:
+                entry["field"] = record.system_property_name
+                entry["entity"] = canonical_field_entity(record)
                 entry["sim"] = True
                 entry["core"] = False
             else:
@@ -115,18 +168,15 @@ def apply_field_mapping_to_sub_rules(
 def apply_field_mapping_to_config(
     config: Any,
     mappings: list[dict[str, Any]],
-    object_entity_map: dict[str, str] | None = None,
 ) -> Any:
     """把字段映射结果递归应用到配置的所有 normalize 条目。
 
     遍历范围与 _extract_normalize_indexes 一致（递归 dict/list），对匹配 index 且
-    「匹配成功」且原 field 为空的条目设置 field（标准字段名）、entity（对象）、
-    sim=True、core=False。已有非空 field 的外部映射、未匹配、未匹配状态，以及
-    EXCLUDED_FIELD_INDICES 中的元字段保持不变。不修改原对象。
+    「匹配成功」且原 field 为空的条目写入目录规范名称 field + 目录对象 entity
+    （#177）；目录外名称不写入（条目保持原样，field 仍为空）。已有非空 field
+    的外部映射、未匹配、未匹配状态，以及 EXCLUDED_FIELD_INDICES 中的元字段
+    保持不变（上传规则保留语义）。不修改原对象。
     """
-    if object_entity_map is None:
-        object_entity_map = {}
-
     field_map: dict[str, dict] = {
         m.get("原始字段名", ""): m for m in mappings if m.get("原始字段名", "")
     }
@@ -149,9 +199,12 @@ def apply_field_mapping_to_config(
                         continue
                     match_status = mapping.get("匹配状态", "")
                     system_prop = mapping.get("系统属性名称", "")
+                    record = None
                     if "匹配成功" in match_status and system_prop and system_prop != "未匹配":
-                        entry["field"] = system_prop
-                        entry["entity"] = object_entity_map.get(system_prop, "事件")
+                        record = resolve_standard_field(system_prop)
+                    if record is not None:
+                        entry["field"] = record.system_property_name
+                        entry["entity"] = canonical_field_entity(record)
                         entry["sim"] = True
                         entry["core"] = False
             for value in obj.values():
