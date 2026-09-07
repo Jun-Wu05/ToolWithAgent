@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.core.model_config import model_runtime_scope
 from agent.core.planner import PlannerService
 from agent.shared.logger import get_logger
 from application.adapters.composition import create_default_adapters
 from application.execution import ExecutionContext
 from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
+from application.model_runtime import resolve_session_config
 from application.session_projection import build_session_facts
 from application.threat_chain import run_threat_chain_after_mapping
 from contracts.planner_models import ExecutionReport, PlanDecision
@@ -104,7 +106,32 @@ async def run_user_request(
     progress_plan_id: str,
     planner: PlannerService | Any | None = None,
 ) -> PlanDecision | ExecutionReport:
-    """规划并按决策执行一次自然语言请求，不包含界面渲染。"""
+    """规划并按决策执行一次自然语言请求，不包含界面渲染。
+
+    整条链（Planner、执行器、威胁链续跑、直连 LLM）绑定请求启动时的
+    会话配置快照；执行期间的同会话设置修改从下一次请求生效（#192）。
+    """
+    with model_runtime_scope(resolve_session_config(session)):
+        return await _run_user_request_scoped(
+            session=session,
+            team=team,
+            user_text=user_text,
+            progress_sink=progress_sink,
+            progress_plan_id=progress_plan_id,
+            planner=planner,
+        )
+
+
+async def _run_user_request_scoped(
+    *,
+    session: Any,
+    team: Any,
+    user_text: str,
+    progress_sink: ProgressSink,
+    progress_plan_id: str,
+    planner: PlannerService | Any | None = None,
+) -> PlanDecision | ExecutionReport:
+    """会话作用域内的实际规划与执行链（入口见 run_user_request）。"""
     logger.info(
         "[USER_INPUT] 收到用户指令: user_text=%s character_count=%s",
         user_text,
@@ -196,7 +223,24 @@ async def run_deterministic_plan(
     plan: PlanDecision,
     progress_sink: ProgressSink,
 ) -> ExecutionReport:
-    """执行入口已提供全部参数的类型化确定性计划。"""
+    """执行入口已提供全部参数的类型化确定性计划（同样绑定会话配置快照）。"""
+    with model_runtime_scope(resolve_session_config(session)):
+        return await _run_deterministic_plan_scoped(
+            session=session,
+            team=team,
+            plan=plan,
+            progress_sink=progress_sink,
+        )
+
+
+async def _run_deterministic_plan_scoped(
+    *,
+    session: Any,
+    team: Any,
+    plan: PlanDecision,
+    progress_sink: ProgressSink,
+) -> ExecutionReport:
+    """会话作用域内的确定性计划执行链（入口见 run_deterministic_plan）。"""
     session_facts = build_session_facts(session)
     report = await create_plan_executor(create_default_adapters(team)).execute(
         plan,

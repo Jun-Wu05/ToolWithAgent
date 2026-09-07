@@ -21,7 +21,6 @@ __all__ = [
     # Agent 工具函数
     # Team
     "create_data_mapping_team",
-    "get_team_instance",
     "create_field_mapping_agent",
     "create_threat_agent",
     "create_enum_agent",
@@ -30,8 +29,6 @@ __all__ = [
 # 子模块名 → 实际定义所在模块的映射（延迟导入用）。
 _LAZY_MODULES = {
     "create_data_mapping_team": "agent.core.team",
-    "get_team_instance": "agent.core.team",
-    "reset_team_instance": "agent.core.team",
     "create_field_mapping_agent": "agent.core.team",
     "create_threat_agent": "agent.core.team",
     "create_enum_agent": "agent.core.team",

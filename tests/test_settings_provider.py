@@ -9,12 +9,10 @@ from types import SimpleNamespace
 
 import agent.core.model_config as model_config
 import web.settings_handler as settings_handler
-from agent.core.model_config import ModelConfig
 
 
 def _clean_env(monkeypatch):
-    """清空运行时配置与提供商/密钥变量，回到可控基线。"""
-    ModelConfig.clear_runtime_config()
+    """清空提供商/密钥环境变量，回到可控基线。"""
     for var in (
         "AGNO_MODEL_PROVIDER",
         "DEEPSEEK_API_KEY",
@@ -327,22 +325,17 @@ def test设置保存按最终解析结果校验并放行环境变量密钥(monke
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
     )
-    from agent.core.team import reset_team_instance
 
-    try:
-        asyncio.run(
-            settings_handler.on_settings_update(
-                {"provider": "deepseek", "model_name": "", "api_key": ""}
-            )
+    asyncio.run(
+        settings_handler.on_settings_update(
+            {"provider": "deepseek", "model_name": "", "api_key": ""}
         )
+    )
 
-        assert tested == ["env-key"]
-        assert ModelConfig.get_provider() == "deepseek"
-        assert session.team is not None
-        assert any("✅" in item for item in sent)
-    finally:
-        ModelConfig.clear_runtime_config()
-        reset_team_instance()
+    assert tested == ["env-key"]
+    assert session.current_provider == "deepseek"
+    assert session.team is not None
+    assert any("✅" in item for item in sent)
 
 
 def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
@@ -378,22 +371,19 @@ def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
 
     monkeypatch.setattr(settings_handler, "apply_model_settings", _apply_model_settings)
 
-    try:
-        asyncio.run(
-            settings_handler.on_settings_update(
-                {
-                    "provider": "deepseek",
-                    "model_name": placeholder,
-                    "api_key": "",
-                }
-            )
+    asyncio.run(
+        settings_handler.on_settings_update(
+            {
+                "provider": "deepseek",
+                "model_name": placeholder,
+                "api_key": "",
+            }
         )
+    )
 
-        assert tested_models == [""]
-        assert session.model_name is None
-        assert session.team is team
-    finally:
-        ModelConfig.clear_runtime_config()
+    assert tested_models == [""]
+    assert session.model_name is None
+    assert session.team is team
 
 
 def test设置保存密钥解析为空时拦截并提示变量名(monkeypatch):
@@ -454,39 +444,26 @@ def test环境变量密钥就绪时消息到达自动创建Team(monkeypatch):
     """Team 未初始化且配置可解析时自动懒创建，不再拒绝消息。"""
     _clean_env(monkeypatch)
     monkeypatch.setenv("SILICONFLOW_API_KEY", "sf-key")
-    from agent.core.team import reset_team_instance
-
-    reset_team_instance()
     session = SimpleNamespace(team=None)
     handled = []
     router, sent = _install_router_fakes(monkeypatch, session, handled)
 
-    try:
-        message = SimpleNamespace(elements=[], content="日志类型提取")
-        asyncio.run(router.on_message(message))
+    message = SimpleNamespace(elements=[], content="日志类型提取")
+    asyncio.run(router.on_message(message))
 
-        assert handled and handled[0][1] is not None
-        assert session.team is not None
-    finally:
-        reset_team_instance()
-        ModelConfig.clear_runtime_config()
+    assert handled and handled[0][1] is not None
+    assert session.team is not None
 
 
 def test密钥缺失时消息到达提示应设置变量名(monkeypatch):
     """配置解析不出密钥时返回包含变量名的明确提示，取代死路文案。"""
     _clean_env(monkeypatch)
-    from agent.core.team import reset_team_instance
-
-    reset_team_instance()
     session = SimpleNamespace(team=None)
     handled = []
     router, sent = _install_router_fakes(monkeypatch, session, handled)
 
-    try:
-        message = SimpleNamespace(elements=[], content="日志类型提取")
-        asyncio.run(router.on_message(message))
+    message = SimpleNamespace(elements=[], content="日志类型提取")
+    asyncio.run(router.on_message(message))
 
-        assert handled == []
-        assert any("SILICONFLOW_API_KEY" in item for item in sent)
-    finally:
-        reset_team_instance()
+    assert handled == []
+    assert any("SILICONFLOW_API_KEY" in item for item in sent)

@@ -9,7 +9,7 @@ import json
 
 import agent.core.model_config as model_config
 import agent.tools.pipeline.llm_client as llm_client
-from agent.core.model_config import ModelConfig
+from agent.core.model_config import model_runtime_scope, resolve_effective_config
 
 
 class _FakeResponse:
@@ -44,8 +44,7 @@ def _install_httpx_mock(monkeypatch):
 
 
 def _clean_env(monkeypatch):
-    """清空运行时配置与全部密钥/提供商变量（回到硅基流动默认），避免真实 .env 干扰。"""
-    ModelConfig.clear_runtime_config()
+    """清空全部密钥/提供商变量（回到硅基流动默认），避免真实 .env 干扰。"""
     for var in (
         "AGNO_MODEL_PROVIDER",
         "DEEPSEEK_API_KEY",
@@ -76,11 +75,10 @@ def test运行时切换提供商后端点密钥能力随切换刷新(monkeypatch
     response = _install_httpx_mock(monkeypatch)
 
     llm_client._call_llm_direct("第一句", model_id="Qwen/Qwen2.5-7B-Instruct")
-    ModelConfig.set_runtime_config(provider="deepseek", api_key="ds-key")
-    try:
+    with model_runtime_scope(
+        resolve_effective_config(provider="deepseek", api_key="ds-key")
+    ):
         llm_client._call_llm_direct("第二句", model_id="deepseek-chat")
-    finally:
-        ModelConfig.clear_runtime_config()
 
     assert response.calls[0]["url"] == "https://api.siliconflow.cn/v1/chat/completions"
     assert response.calls[1]["url"] == "https://api.deepseek.com/v1/chat/completions"
@@ -93,11 +91,10 @@ def testDeepSeek直连端点尊重BASE_URL环境变量(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://deepseek-proxy.example.com")
     response = _install_httpx_mock(monkeypatch)
 
-    ModelConfig.set_runtime_config(provider="deepseek", api_key="ds-key")
-    try:
+    with model_runtime_scope(
+        resolve_effective_config(provider="deepseek", api_key="ds-key")
+    ):
         llm_client._call_llm_direct("提示", model_id="deepseek-chat")
-    finally:
-        ModelConfig.clear_runtime_config()
 
     assert (
         response.calls[0]["url"]
