@@ -10,6 +10,7 @@ from application.execution import ExecutionContext, PlanExecutor, StepAdapter
 from application.field_source import extract_log_body_keys
 from contracts.planner_models import (
     AddFieldsStep,
+    EnumExtractStep,
     LogParseStep,
     PlanDecision,
     StepResult,
@@ -43,7 +44,7 @@ def _needs_input(step: StepSpec, error_code: str, message: str) -> StepResult:
 
 
 class DefaultExecutionPolicy:
-    """集中事件名称与显式分类特征字段的计划级守卫。"""
+    """集中事件名称与显式点名字段的计划级守卫。"""
 
     def validate_plan(
         self, plan: PlanDecision, context: ExecutionContext
@@ -77,7 +78,11 @@ class DefaultExecutionPolicy:
         context: ExecutionContext,
         ledger: Mapping[str, StepResult],
     ) -> StepResult | None:
-        """显式分类特征字段不存在时停下追问，不代用户猜测。"""
+        """显式点名字段不存在时停下追问，不代用户猜测。"""
+        if isinstance(step, EnumExtractStep):
+            enum_result = self._validate_enum_target_field(step, context)
+            if enum_result is not None:
+                return enum_result
         if not (isinstance(step, LogParseStep) and step.feature_field):
             return None
         session = context.session
@@ -116,6 +121,39 @@ class DefaultExecutionPolicy:
                 f"{hint}{ambiguity}。"
                 f"日志中可用的字段：{'、'.join(available_keys)}。"
                 "请回复要作为日志类型的字段名，或直接说“日志类型提取”由系统自动探测。"
+            ),
+        )
+
+    def _validate_enum_target_field(
+        self, step: EnumExtractStep, context: ExecutionContext
+    ) -> StepResult | None:
+        """枚举目标字段不在日志体键与映射投影的并集时停下追问（#196）。
+
+        放行集取并集而非仅 available_fields：enum 适配器消费原始日志，
+        只查映射投影会误拦未映射的原始字段（#66/#70 教训）；并集为空
+        视为无词典可校验，放行保持旧行为。大小写差异不改写目标字段
+        （链路来源字段逐字契约），只提示最接近字段。
+        """
+        session = context.session
+        log_lines = session.get("raw_log_lines") or session.get("original_log") or []
+        known_fields = sorted(
+            {*extract_log_body_keys(log_lines), *context.session_facts.available_fields}
+        )
+        if not known_fields or step.target_field in known_fields:
+            return None
+        case_matches = [
+            field for field in known_fields if field.lower() == step.target_field.lower()
+        ]
+        hint = (
+            f"（与「{step.target_field}」最接近：{case_matches[0]}）" if case_matches else ""
+        )
+        return _needs_input(
+            step,
+            "enum_target_field_not_found",
+            (
+                f"枚举提取未执行：当前会话不存在字段「{step.target_field}」{hint}。"
+                f"可用的字段：{'、'.join(known_fields)}。"
+                "请回复要提取枚举值的字段名。"
             ),
         )
 

@@ -121,6 +121,10 @@ def test提示词声明威胁链路四步指令与换来源话术():
     assert "换链路来源" in PROMPT
     assert "重新执行字段映射会自动重建该字段" in PROMPT
     assert "未点名威胁类型为目标字段）保持两步" in PROMPT
+    # 链路指令与换来源话术的字段守卫对称：来源不存在时 Clarification 列出可用字段（#196）。
+    assert (
+        "不在 `session_facts.available_fields` 时 Clarification 并列出可用字段" in PROMPT
+    )
 
 
 def test提示词包含合并与提取的单操作化规则():
