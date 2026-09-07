@@ -563,6 +563,82 @@ def test日志类型提取恢复真实分类详情样本和规则动作(monkeypa
     ]
 
 
+def test表格块与步骤bullet之间用空行分隔(monkeypatch):
+    """#195：markdown 表格/详情块前后补空行，GFM 不再把表格压成 bullet 的 lazy continuation。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import (
+        ConfigExportArtifact,
+        EventAnnotationRow,
+        ExecutionReport,
+        FieldMappingArtifact,
+        FieldMappingRow,
+        LogClassificationArtifact,
+        StepResult,
+        StepStatus,
+    )
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 8, 18, 10, 6)),
+    )
+    report = ExecutionReport(
+        plan_id="plan-spacing",
+        results=(
+            StepResult(
+                step_id="fm-1",
+                operation_type="field_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=FieldMappingArtifact(
+                    item_count=1,
+                    mappings=(
+                        FieldMappingRow(
+                            original_field="src_ip",
+                            standard_field="源IP",
+                            match_status="匹配成功",
+                        ),
+                    ),
+                    event_annotations=(
+                        EventAnnotationRow(
+                            rule_name="r1", event_name="网络攻击", event_level="提醒"
+                        ),
+                    ),
+                ),
+                message="字段映射完成",
+            ),
+            StepResult(
+                step_id="log-1",
+                operation_type="log_parse",
+                status=StepStatus.SUCCESS,
+                artifact=LogClassificationArtifact(
+                    item_count=1,
+                    classification={"status": "SUCCESS"},
+                ),
+                message="步骤执行成功",
+            ),
+            StepResult(
+                step_id="exp-1",
+                operation_type="export",
+                status=StepStatus.SUCCESS,
+                artifact=ConfigExportArtifact(item_count=1, content="config-text"),
+                message="步骤执行成功",
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert len(captured["messages"]) == 1
+    content = captured["messages"][0]["content"]
+    # 标注表格块与其前面的 bullet 之间有空行
+    assert "（field_mapping）：字段映射完成\n\n🏷️" in content
+    # 表格块与其后继 bullet 之间有空行（表格不被吞进列表项）
+    assert "| r1 | 网络攻击 | 提醒 |\n\n- ✅ `log-1`" in content
+    # 日志分类详情块首行与其前面的 bullet 之间有空行
+    assert "（log_parse）：步骤执行成功\n\n## 🔍 日志解析结果" in content
+
+
 def test多产物复合计划渲染为单条汇总(monkeypatch):
     """复合计划多个产物类型全部进入同一条汇总消息的 elements（回归 #32）。"""
     import web.plan_renderer as renderer

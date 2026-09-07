@@ -34,6 +34,18 @@ def _render_event_annotation_block(annotations) -> str:
     return "\n".join(rows)
 
 
+def _append_markdown_block(lines: list[str], block: str) -> None:
+    """markdown 表格/详情块前后补空行（#195）。
+
+    GFM 中表格不能中断段落：与相邻步骤 bullet 之间缺空行时，
+    表格行成为列表项的 lazy continuation，整段被压成一行。
+    """
+    if lines:
+        lines.append("")
+    lines.append(block)
+    lines.append("")
+
+
 def _download_filename(kind: str, timestamp: str) -> str:
     """按产物语义生成用户可见下载名。"""
     names = {
@@ -134,7 +146,9 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             elements.extend(create_dataframe_elements(rows))
             # 标注明细以内容块渲染，位于表格元素上方（#126 展示分离）
             if artifact.event_annotations:
-                lines.append(_render_event_annotation_block(artifact.event_annotations))
+                _append_markdown_block(
+                    lines, _render_event_annotation_block(artifact.event_annotations)
+                )
             if artifact.download_kind and artifact.download_content:
                 field_mapping_downloads.append(
                     (
@@ -178,7 +192,9 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 )
             )
         elif artifact.artifact_type == "log_classification":
-            lines.append(render_log_parser_result(artifact.classification, None))
+            _append_markdown_block(
+                lines, render_log_parser_result(artifact.classification, None)
+            )
             elements.append(
                 cl.File(
                     name=_download_filename("log_classification", timestamp),
