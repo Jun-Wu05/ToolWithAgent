@@ -32,7 +32,7 @@ def _execute(decision, adapters, facts=None):
     return asyncio.run(
         create_plan_executor(adapters).execute(
             decision,
-            ExecutionContext(session=object(), session_facts=facts or SessionFacts()),
+            ExecutionContext(session={}, session_facts=facts or SessionFacts()),
         )
     )
 
@@ -66,11 +66,13 @@ def _success_log_result():
     )
 
 
-def _execute_with_session(decision, adapters, session):
+def _execute_with_session(decision, adapters, session, facts=None):
     return asyncio.run(
         create_plan_executor(adapters).execute(
             decision,
-            ExecutionContext(session=session, session_facts=SessionFacts(has_logs=True)),
+            ExecutionContext(
+                session=session, session_facts=facts or SessionFacts(has_logs=True)
+            ),
         )
     )
 
@@ -275,35 +277,160 @@ def test三步计划只消费本次显式依赖的产物():
     assert fill_adapter.calls[0][1] == {"threat": report.results[1]}
 
 
-def test枚举提取目标字段未出现在字段映射列表时仍进入适配器():
-    """枚举提取消费原始日志，不应复用字段映射的 available_fields 门槛。"""
-    decision = PlanDecision.model_validate(
+def _enum_decision(target_field, plan_id="plan-field"):
+    """构造单步 enum_extract 决策。"""
+    return PlanDecision.model_validate(
         {
             "decision": "execute",
-            "plan_id": "plan-field",
-            "steps": [{"step_id": "extract", "type": "enum_extract", "target_field": "missing"}],
+            "plan_id": plan_id,
+            "steps": [
+                {"step_id": "extract", "type": "enum_extract", "target_field": target_field}
+            ],
         }
     )
-    adapter = RecordingAdapter(
-        [
-            StepResult(
-                step_id="extract",
-                operation_type="enum_extract",
-                status=StepStatus.SUCCESS,
-                artifact=EnumValuesArtifact(item_count=1, values=("value",)),
-            )
-        ]
+
+
+def _success_enum_result():
+    return StepResult(
+        step_id="extract",
+        operation_type="enum_extract",
+        status=StepStatus.SUCCESS,
+        artifact=EnumValuesArtifact(item_count=1, values=("value",)),
     )
 
-    report = _execute(
-        decision,
+
+def test枚举提取目标字段在原始日志键中时放行进适配器():
+    """目标字段存在于日志体键（未进映射投影）时放行（回归 #66/#70 语义）。"""
+    session = {
+        "raw_log_lines": [
+            "event_name=attack src=10.0.0.1",
+            "event_name=scan src=10.0.0.2",
+        ]
+    }
+    adapter = RecordingAdapter([_success_enum_result()])
+
+    report = _execute_with_session(
+        _enum_decision("event_name"),
         {"enum_extract": adapter},
-        SessionFacts(has_logs=True, available_fields=("event_type3",)),
+        session,
+        SessionFacts(has_logs=True, available_fields=("发生时间", "原始日志")),
     )
 
     assert report.results[0].status == StepStatus.SUCCESS
     assert report.results[0].artifact.values == ("value",)
     assert len(adapter.calls) == 1
+
+
+def test枚举提取词典为空时放行保持旧行为():
+    """日志体键与映射投影都提不出词典（如分隔符语料未分类）时不拦截（回归 #70）。"""
+    session = {"raw_log_lines": ["aaa,bbb,ccc", "ddd,eee,fff"]}
+    adapter = RecordingAdapter([_success_enum_result()])
+
+    report = _execute_with_session(
+        _enum_decision("ghost"), {"enum_extract": adapter}, session
+    )
+
+    assert report.results[0].status == StepStatus.SUCCESS
+    assert len(adapter.calls) == 1
+
+
+def test枚举提取目标字段不在任何词典时在适配器前拦截():
+    """目标既不在日志体键也不在 available_fields 时 NEEDS_INPUT 列出可用字段（#196）。"""
+    adapter = RecordingAdapter([])
+
+    report = _execute_with_session(
+        _enum_decision("ghost"),
+        {"enum_extract": adapter},
+        KV_SESSION,
+        SessionFacts(has_logs=True, available_fields=("event_type3",)),
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "enum_target_field_not_found"
+    assert adapter.calls == []
+    message = report.results[0].message or ""
+    assert "ghost" in message
+    assert "可用的字段" in message
+    assert "category" in message
+    assert "src" in message
+    assert "event_type3" in message
+
+
+def test枚举提取目标字段大小写不同时不代改写并提示最接近():
+    """与日志键仅大小写不同时不改写目标字段（链路字段逐字契约），拦截并提示最接近。"""
+    adapter = RecordingAdapter([])
+
+    report = _execute_with_session(
+        _enum_decision("Category"), {"enum_extract": adapter}, KV_SESSION
+    )
+
+    assert report.results[0].status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "enum_target_field_not_found"
+    message = report.results[0].message or ""
+    assert "与「Category」最接近：category" in message
+    assert adapter.calls == []
+
+
+def test威胁链路四步计划来源字段不存在时首步追问且后续不执行():
+    """链路 enum 步来源字段不存在时 💡 NEEDS_INPUT，后续威胁步骤零调用（#196）。"""
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-threat-chain-abc",
+            "steps": [
+                {"step_id": "enum-1", "type": "enum_extract", "target_field": "abc"},
+                {
+                    "step_id": "threat-1",
+                    "type": "threat_mapping",
+                    "source_ref": "step:enum-1",
+                    "depends_on": ["enum-1"],
+                },
+                {
+                    "step_id": "add-1",
+                    "type": "add_fields",
+                    "field_name": "威胁类型",
+                    "field_value": "%{abc}",
+                    "value_type": "reference",
+                    "rule_group": "threat",
+                    "config_ref": "session.mapped_sub_rules",
+                    "depends_on": ["threat-1"],
+                },
+                {
+                    "step_id": "fill-1",
+                    "type": "fill",
+                    "fill_kind": "threat",
+                    "target_fields": ["威胁类型"],
+                    "source_ref": "step:threat-1",
+                    "config_ref": "session.mapped_sub_rules",
+                    "depends_on": ["threat-1"],
+                },
+            ],
+        }
+    )
+    adapters = {
+        "enum_extract": RecordingAdapter([]),
+        "threat_mapping": RecordingAdapter([]),
+        "add_fields": RecordingAdapter([]),
+        "fill": RecordingAdapter([]),
+    }
+
+    report = _execute_with_session(
+        decision,
+        adapters,
+        KV_SESSION,
+        SessionFacts(
+            has_logs=True,
+            available_fields=("attack_name",),
+            has_mapped_sub_rules=True,
+            available_config_refs=("session.mapped_sub_rules",),
+        ),
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert len(report.results) == 1
+    assert report.results[0].step_id == "enum-1"
+    assert report.results[0].error_code == "enum_target_field_not_found"
+    assert all(adapter.calls == [] for adapter in adapters.values())
 
 
 def test字段映射无原始字段候选时在适配器前拦截():
