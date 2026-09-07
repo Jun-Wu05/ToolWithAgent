@@ -32,13 +32,14 @@ export default function RuleSourceDialog() {
     setValues((current) => ({ ...current, [key]: value }));
   };
 
-  const finish = async (name, payload) => {
+  const finish = async (name, payload, closeImmediately = false) => {
     if (submitting) return;
     setSubmitting(true);
     try {
+      if (closeImmediately) await deleteElement();
       const result = await callAction({ name, payload });
       if (!result?.success) throw new Error("action failed");
-      await deleteElement();
+      if (!closeImmediately) await deleteElement();
     } catch {
       setSubmitting(false);
       toast.error("操作提交失败，请重试");
@@ -50,11 +51,15 @@ export default function RuleSourceDialog() {
 
   const submit = () => {
     if (!valid) return;
-    return finish("submit_rule_source_fields", {
-      rule_source_product: values.rule_source_product.trim(),
-      rule_source_log_vendor: values.rule_source_log_vendor.trim(),
-      rule_source_data_source: values.rule_source_data_source.trim(),
-    });
+    return finish(
+      "submit_rule_source_fields",
+      {
+        rule_source_product: values.rule_source_product.trim(),
+        rule_source_log_vendor: values.rule_source_log_vendor.trim(),
+        rule_source_data_source: values.rule_source_data_source.trim(),
+      },
+      true,
+    );
   };
 
   useEffect(() => {
