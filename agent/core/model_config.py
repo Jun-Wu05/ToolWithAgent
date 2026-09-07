@@ -8,8 +8,10 @@
 嵌入向量密钥固定硅基流动，与聊天所选提供商无关（见 CONTEXT.md）。
 """
 
+import contextvars
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -225,52 +227,80 @@ def get_chat_completions_url(provider: Optional[str] = None) -> str:
     return spec.chat_completions_url
 
 
+@dataclass(frozen=True)
+class EffectiveModelConfig:
+    """一次请求的不可变有效模型配置快照（ADR-0007 优先级解析结果）。"""
+
+    provider: str
+    model_id: str
+    api_key: str
+
+
+def resolve_effective_config(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> EffectiveModelConfig:
+    """把会话覆盖与环境变量/注册表默认解析为单一快照（#192）。
+
+    优先级与 ADR-0007 一致：会话覆盖 > 家环境变量 > 注册表默认值；
+    密钥缺省回退 FALLBACK_API_KEY。空覆盖项不生效，全部为 None 时
+    即进程环境默认配置。
+    """
+    resolved_provider = (
+        provider or os.getenv("AGNO_MODEL_PROVIDER", "siliconflow")
+    ).lower().strip()
+    spec = get_provider_spec(resolved_provider)
+    resolved_key = (
+        api_key or os.getenv(spec.api_key_env, "") or os.getenv("FALLBACK_API_KEY", "")
+    )
+    resolved_model = model or os.getenv(spec.model_id_env, "") or spec.default_model_id
+    return EffectiveModelConfig(
+        provider=resolved_provider, model_id=resolved_model, api_key=resolved_key
+    )
+
+
+_effective_config_var: contextvars.ContextVar[Optional[EffectiveModelConfig]] = (
+    contextvars.ContextVar("effective_model_config", default=None)
+)
+
+
+def current_effective_config() -> Optional[EffectiveModelConfig]:
+    """返回当前请求的有效配置快照；无绑定时为 None（走环境默认）。"""
+    return _effective_config_var.get()
+
+
+@contextmanager
+def model_runtime_scope(config: EffectiveModelConfig):
+    """绑定一次请求的有效配置；token 在 finally 恢复，嵌套与异常不泄漏。"""
+    token = _effective_config_var.set(config)
+    try:
+        yield config
+    finally:
+        _effective_config_var.reset(token)
+
+
 class ModelConfig:
-    """多模型 / 多提供商配置（查注册表，环境变量优先、界面为会话级覆盖）。"""
-
-    # ===== 运行时配置（会话级别） =====
-    _runtime_provider: Optional[str] = None
-    _runtime_api_key: Optional[str] = None
-    _runtime_model: Optional[str] = None
-
-    @classmethod
-    def set_runtime_config(
-        cls,
-        provider: str = None,
-        api_key: str = None,
-        model: str = None
-    ):
-        """设置运行时配置（会话级覆盖）。"""
-        if provider:
-            cls._runtime_provider = provider.lower().strip()
-        if api_key:
-            cls._runtime_api_key = api_key
-        if model:
-            cls._runtime_model = model
-
-    @classmethod
-    def clear_runtime_config(cls):
-        """清除运行时配置，回退到环境变量。"""
-        cls._runtime_provider = None
-        cls._runtime_api_key = None
-        cls._runtime_model = None
+    """多模型 / 多提供商配置（查注册表，环境变量优先、会话覆盖经请求快照生效）。"""
 
     @staticmethod
     def get_provider() -> str:
-        """获取当前供应商：运行时配置 > 环境变量（每次读取，不快照）。"""
-        if ModelConfig._runtime_provider:
-            return ModelConfig._runtime_provider
+        """获取当前供应商：请求快照 > 环境变量。"""
+        snapshot = current_effective_config()
+        if snapshot:
+            return snapshot.provider
         return os.getenv("AGNO_MODEL_PROVIDER", "siliconflow").lower().strip()
 
     @staticmethod
     def get_api_key(provider: Optional[str] = None) -> str:
-        """获取聊天 API Key：运行时配置 > 指定（或当前）家环境变量 > FALLBACK_API_KEY。
+        """获取聊天 API Key：请求快照 > 指定（或当前）家环境变量 > FALLBACK_API_KEY。
 
         provider 参数供设置保存等已知目标家的场景按表单所选家解析；
         缺省按当前供应商解析。
         """
-        if ModelConfig._runtime_api_key:
-            return ModelConfig._runtime_api_key
+        snapshot = current_effective_config()
+        if snapshot and snapshot.api_key:
+            return snapshot.api_key
         spec = get_provider_spec(provider or ModelConfig.get_provider())
         primary = os.getenv(spec.api_key_env, "")
         if primary:
@@ -300,17 +330,18 @@ class ModelConfig:
 
     @staticmethod
     def get_main_model():
-        """获取主模型：运行时配置 > 当前家环境变量 > 规格默认值。"""
+        """获取主模型：按当前请求快照（或环境默认）解析的模型 ID 构建。"""
         return ModelConfig._build_model(ModelConfig.get_model_id())
 
     @staticmethod
     def get_model_id() -> str:
-        """获取当前模型 ID 字符串：运行时配置 > 当前家环境变量 > 规格默认值。
+        """获取当前模型 ID 字符串：请求快照 > 当前家环境变量 > 规格默认值。
 
         供需要模型 ID 字符串（非模型实例）的代码使用，
         如 Pipeline 直调 LLM、日志标签等。
         """
-        if ModelConfig._runtime_model:
-            return ModelConfig._runtime_model
+        snapshot = current_effective_config()
+        if snapshot:
+            return snapshot.model_id
         spec = get_provider_spec(ModelConfig.get_provider())
         return os.getenv(spec.model_id_env, "") or spec.default_model_id

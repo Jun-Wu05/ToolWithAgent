@@ -241,23 +241,3 @@ def create_data_mapping_team() -> ProfessionalAgentRegistry:
             create_log_parser_agent(),
         )
     )
-
-
-# ============= 专业 Agent 注册表缓存 =============
-
-_team_instance: Optional[ProfessionalAgentRegistry] = None
-"""模块级注册表缓存，避免每次请求重建专业 Agent。"""
-
-
-def get_team_instance() -> ProfessionalAgentRegistry:
-    """获取专业 Agent 注册表单例，首次调用时延迟创建。"""
-    global _team_instance
-    if _team_instance is None:
-        _team_instance = create_data_mapping_team()
-    return _team_instance
-
-
-def reset_team_instance() -> None:
-    """清空专业 Agent 注册表缓存，使模型配置变更在下次创建时生效。"""
-    global _team_instance
-    _team_instance = None

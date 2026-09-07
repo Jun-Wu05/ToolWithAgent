@@ -6,7 +6,11 @@
 
 import pytest
 
-from agent.core.model_config import ModelConfig
+from agent.core.model_config import (
+    ModelConfig,
+    model_runtime_scope,
+    resolve_effective_config,
+)
 
 
 def test注册表声明现有两家提供商规格():
@@ -49,23 +53,25 @@ def test按规格构造DeepSeek与Siliconflow模型():
     assert isinstance(siliconflow_model, Siliconflow)
 
 
-def test密钥解析运行时优先于环境变量(monkeypatch):
-    """密钥链：运行时会话配置 > 当前家环境变量 > FALLBACK_API_KEY。"""
+def test密钥解析请求快照优先于环境变量(monkeypatch):
+    """密钥链：请求快照 > 当前家环境变量 > FALLBACK_API_KEY。"""
+    monkeypatch.setenv("AGNO_MODEL_PROVIDER", "deepseek")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
-    try:
-        ModelConfig.set_runtime_config(api_key="runtime-key")
-        assert ModelConfig.get_api_key() == "runtime-key"
-        ModelConfig.clear_runtime_config()
-        assert ModelConfig.get_api_key() == "env-key"
-    finally:
-        ModelConfig.clear_runtime_config()
+
+    assert ModelConfig.get_api_key() == "env-key"
+    with model_runtime_scope(
+        resolve_effective_config(
+            provider="deepseek", model="deepseek-chat", api_key="snapshot-key"
+        )
+    ):
+        assert ModelConfig.get_api_key() == "snapshot-key"
+    assert ModelConfig.get_api_key() == "env-key"
 
 
 def test密钥缺失时报错包含具体环境变量名(monkeypatch):
     """各家缺失口径一致：构造时抛出带具体变量名的错误。"""
     for var in ("DEEPSEEK_API_KEY", "SILICONFLOW_API_KEY", "FALLBACK_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    ModelConfig.clear_runtime_config()
 
     with pytest.raises(ValueError) as excinfo:
         ModelConfig._build_model("deepseek-chat", provider="deepseek")
@@ -87,14 +93,11 @@ def test团队构造在密钥缺失时统一抛出带变量名的错误(monkeypa
 
     for var in ("DEEPSEEK_API_KEY", "SILICONFLOW_API_KEY", "FALLBACK_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    ModelConfig.clear_runtime_config()
-    ModelConfig.set_runtime_config(provider="siliconflow")
-    try:
+
+    with model_runtime_scope(resolve_effective_config(provider="siliconflow")):
         with pytest.raises(ValueError) as excinfo:
             team_module.create_data_mapping_team()
         assert "SILICONFLOW_API_KEY" in str(excinfo.value)
-    finally:
-        ModelConfig.clear_runtime_config()
 
 
 def test注册表新增智谱OpenAI与OpenRouter三家规格():
@@ -152,7 +155,6 @@ def test三家密钥缺失时报错含各自变量名(monkeypatch):
         "FALLBACK_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
-    ModelConfig.clear_runtime_config()
 
     for provider, env_name in (
         ("zhipu", "ZHIPU_API_KEY"),
