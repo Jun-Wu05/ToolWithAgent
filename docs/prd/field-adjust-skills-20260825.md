@@ -70,7 +70,13 @@ US-12：作为维护者，我想要以后新增/删除一个字段操作技能�
 
 ### 事件名称写入子规则（filter addFields + normalize 条目）
 
-确定性写入函数对每条子规则：parser.filter 末尾追加 `{"fields": {"事件名称": <分类名>, "事件级别": <提醒|信息>}, "name": "addFields", "id": ""}`（与现有【日志类型】addFields 同构）；normalize 末尾追加两条目（field 分别为 event_name/event_level、sim=True、entity=日志、core=False、index 分别为 事件名称/事件级别）。全部格式（纯 JSON、syslog+JSON、KV）的子规则均写入；入口规则不动。重新执行字段映射时子规则全新生成并重判，天然幂等。
+确定性写入函数对每条子规则：parser.filter 末尾追加 `{"fields": {"事件名称": <分类名>, "事件级别": <提醒|信息>}, "name": "addFields", "id": ""}`（与现有【日志类型】addFields 同构）；normalize 末尾追加两条目（field 分别为 event_name/event_level、sim=True、entity=事件、core=False、index 分别为 事件名称/事件级别）。全部格式（纯 JSON、syslog+JSON、KV）的子规则均写入；入口规则不动。重新执行字段映射时子规则全新生成并重判，天然幂等。
+
+> **2026-09-03 修订（#177）**：原文的 `entity=日志` 是与标准字段目录冲突的过时决策——
+> 目录中 event_name/event_level 的对象均为「事件」（log_type 的对象才是「日志」），
+> 目标平台对 `event_name日志` 组合无法解析。且标准字段目录（系统属性名称/字段名称/对象）
+> 是对象归属的 SSOT：字段映射写入的 field/entity 一律由目录确定性解析，目录外名称降级
+> 为未匹配，不再从 对象.xlsx 回填或默认「事件」。
 
 ### 标准字段映射链路挂接
 

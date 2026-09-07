@@ -130,10 +130,9 @@ def test_remaining_consumers_delegate_to_catalog_and_keep_prompt_policy(monkeypa
     fake = FakeCatalog()
     monkeypatch.setattr(standard_mapper, "get_standard_field_catalog", lambda: fake)
     monkeypatch.setattr(prompts, "get_standard_field_catalog", lambda: fake)
-    monkeypatch.setattr(standard_mapper, "_valid_field_names", None)
     monkeypatch.setattr(standard_mapper, "_synonyms_cache", None)
 
-    assert standard_mapper._get_valid_field_names() == {"源地址"}
+    # #177：白名单集合已由目录解析（resolve_standard_field）取代
     assert standard_mapper._load_standard_fields_list() == fake.records()
     assert standard_mapper._load_synonyms() is fake.synonyms
     assert prompts.load_standard_fields() == fake.standard_fields_text
