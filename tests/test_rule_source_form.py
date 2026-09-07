@@ -311,6 +311,7 @@ def test_source_dialog_is_isolated_from_model_settings_callback() -> None:
 
 
 def test_custom_element_contract_is_non_blocking_and_supports_actions() -> None:
+    import re
     from pathlib import Path
 
     source = (
@@ -318,8 +319,8 @@ def test_custom_element_contract_is_non_blocking_and_supports_actions() -> None:
     ).read_text(encoding="utf-8")
 
     assert "<Dialog open" in source
-    assert 'finish("submit_rule_source_fields"' in source
-    assert 'finish("cancel_rule_source_fields"' in source
+    assert re.search(r'finish\(\s*"submit_rule_source_fields"', source)
+    assert 'finish("cancel_rule_source_fields", { reason })' in source
     assert "callAction" in source
     assert "deleteElement" in source
     assert "submitElement" not in source
@@ -327,3 +328,24 @@ def test_custom_element_contract_is_non_blocking_and_supports_actions() -> None:
     assert 'id="rule-source-product"' in source
     assert 'id="rule-source-vendor"' in source
     assert 'id="rule-source-name"' in source
+
+
+def test_submit_closes_dialog_immediately_without_awaiting_callback() -> None:
+    """#194：提交路径乐观关闭——弹窗关闭不得等待服务端回调（续跑计划）完成。"""
+    import re
+    from pathlib import Path
+
+    source = (
+        Path(__file__).parents[1] / "public" / "elements" / "RuleSourceDialog.jsx"
+    ).read_text(encoding="utf-8")
+
+    # 乐观关闭分支位于等待 callAction 之前
+    assert source.index("if (closeImmediately) await deleteElement();") < source.index(
+        "await callAction"
+    )
+    # 提交调用点显式开启乐观关闭
+    assert re.search(
+        r'finish\(\s*"submit_rule_source_fields",\s*\{[^}]*\},\s*true,', source
+    )
+    # 取消/超时路径保持默认：等服务端确认后才关闭
+    assert 'finish("cancel_rule_source_fields", { reason })' in source
