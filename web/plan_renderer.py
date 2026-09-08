@@ -114,14 +114,14 @@ async def render_decision(decision: PlanDecision) -> None:
 
 
 async def render_execution_report(execution_report: ExecutionReport) -> None:
-    """发送一次步骤汇总；七类产物按类型附表格或下载，复合计划全部进同一条汇总。"""
+    """先发送步骤汇总，再按顺序纵向发送表格和下载。"""
     status_icon = {
         StepStatus.SUCCESS: "✅",
         StepStatus.NEEDS_INPUT: "💡",
         StepStatus.FAILED: "❌",
     }
     lines = []
-    elements = []
+    dataframe_elements, download_elements = [], []
     actions = _build_result_actions(execution_report)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     field_mapping_downloads: list[tuple[str, str, bytes]] = []
@@ -133,7 +133,7 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             continue
         if artifact.artifact_type == "config_export":
             content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
-            elements.append(
+            download_elements.append(
                 cl.File(
                     name=_download_filename(artifact.download_kind, timestamp),
                     content=content,
@@ -143,12 +143,10 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
         elif artifact.artifact_type == "field_mapping":
             # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
-            elements.extend(create_dataframe_elements(rows))
+            dataframe_elements.extend(create_dataframe_elements(rows))
             # 标注明细以内容块渲染，位于表格元素上方（#126 展示分离）
             if artifact.event_annotations:
-                _append_markdown_block(
-                    lines, _render_event_annotation_block(artifact.event_annotations)
-                )
+                _append_markdown_block(lines, _render_event_annotation_block(artifact.event_annotations))
             if artifact.download_kind and artifact.download_content:
                 field_mapping_downloads.append(
                     (
@@ -159,12 +157,12 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 )
         elif artifact.artifact_type == "threat_mapping":
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
-            elements.extend(create_dataframe_elements(rows))
+            dataframe_elements.extend(create_dataframe_elements(rows))
             dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
-            elements.append(
+            download_elements.append(
                 cl.File(
                     name=_download_filename("threat_mapping", timestamp),
                     content=output.getvalue(),
@@ -174,8 +172,8 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
         elif artifact.artifact_type == "enum_values":
             # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
             rows = [{"枚举值": value} for value in artifact.values]
-            elements.extend(create_dataframe_elements(rows))
-            elements.append(
+            dataframe_elements.extend(create_dataframe_elements(rows))
+            download_elements.append(
                 cl.File(
                     name=_download_filename("enum_values", timestamp),
                     content=json.dumps(
@@ -192,10 +190,8 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 )
             )
         elif artifact.artifact_type == "log_classification":
-            _append_markdown_block(
-                lines, render_log_parser_result(artifact.classification, None)
-            )
-            elements.append(
+            _append_markdown_block(lines, render_log_parser_result(artifact.classification, None))
+            download_elements.append(
                 cl.File(
                     name=_download_filename("log_classification", timestamp),
                     content=json.dumps(
@@ -208,11 +204,15 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             )
     message_kwargs = {
         "content": f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
-        "elements": elements,
+        "elements": [],
     }
     if actions:
         message_kwargs["actions"] = actions
     await cl.Message(**message_kwargs).send()
+
+    for element_group in (dataframe_elements, download_elements):
+        for element in element_group:
+            await cl.Message(content="", elements=[element]).send()
 
     if any(
         result.error_code == "data_source_fields_required"

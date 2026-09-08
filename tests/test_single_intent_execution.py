@@ -689,7 +689,8 @@ def test成功填充报告输出下载文件(monkeypatch):
 
     asyncio.run(renderer.render_execution_report(report))
 
-    assert len(sent_messages) == 1
-    assert len(sent_messages[0].elements) == 1
-    assert sent_messages[0].elements[0].content == b"encoded-config"
-    assert sent_messages[0].elements[0].name == "enummapping_config_20260818_1006.txt"
+    assert len(sent_messages) == 2
+    assert sent_messages[0].elements == []
+    assert len(sent_messages[1].elements) == 1
+    assert sent_messages[1].elements[0].content == b"encoded-config"
+    assert sent_messages[1].elements[0].name == "enummapping_config_20260818_1006.txt"
