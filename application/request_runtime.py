@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from agent.core.model_config import model_runtime_scope
 from agent.core.planner import PlannerService
@@ -259,6 +259,7 @@ async def run_deterministic_plan(
     team: Any,
     plan: PlanDecision,
     progress_sink: ProgressSink,
+    on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None = None,
 ) -> ExecutionReport:
     """执行入口已提供全部参数的类型化确定性计划（同样绑定会话配置快照）。"""
     with model_runtime_scope(resolve_session_config(session)):
@@ -267,6 +268,7 @@ async def run_deterministic_plan(
             team=team,
             plan=plan,
             progress_sink=progress_sink,
+            on_primary_report=on_primary_report,
         )
 
 
@@ -276,6 +278,7 @@ async def _run_deterministic_plan_scoped(
     team: Any,
     plan: PlanDecision,
     progress_sink: ProgressSink,
+    on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None,
 ) -> ExecutionReport:
     """会话作用域内的确定性计划执行链（入口见 run_deterministic_plan）。"""
     report = await _execute_plan_with_threat_transaction(
@@ -284,6 +287,8 @@ async def _run_deterministic_plan_scoped(
         plan=plan,
         progress_sink=progress_sink,
     )
+    if on_primary_report is not None:
+        await on_primary_report(report)
     # 执行后确定性续跑（#173）：按钮/确定性入口的字段映射同样触发威胁链路
     return await run_threat_chain_after_mapping(
         report=report,
