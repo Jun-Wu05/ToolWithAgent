@@ -20,6 +20,7 @@ export default function RuleSourceDialog() {
   });
   const [timeLeft, setTimeLeft] = useState(props.timeout_seconds || 300);
   const [submitting, setSubmitting] = useState(false);
+  const [open, setOpen] = useState(true);
 
   const valid = useMemo(
     () =>
@@ -36,7 +37,10 @@ export default function RuleSourceDialog() {
     if (submitting) return;
     setSubmitting(true);
     try {
-      if (closeImmediately) await deleteElement();
+      if (closeImmediately) {
+        setOpen(false);
+        await deleteElement();
+      }
       const result = await callAction({ name, payload });
       if (!result?.success) throw new Error("action failed");
       if (!closeImmediately) await deleteElement();
@@ -75,7 +79,7 @@ export default function RuleSourceDialog() {
   }, [timeLeft]);
 
   return (
-    <Dialog open onOpenChange={(open) => !open && cancel()}>
+    <Dialog open={open} onOpenChange={(open) => !open && cancel()}>
       <DialogContent id="rule-source-dialog" className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>填写数据源信息</DialogTitle>
