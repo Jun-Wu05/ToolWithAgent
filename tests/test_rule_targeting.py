@@ -443,7 +443,7 @@ def _fm_step():
 
 
 def test渲染标注明细块():
-    """标注块含表头、judged 行与待确认行。"""
+    """标注块固定输出五列表头、judged 行与待确认行。"""
     from web.plan_renderer import _render_event_annotation_block
 
     block = _render_event_annotation_block([
@@ -451,6 +451,41 @@ def test渲染标注明细块():
         EventAnnotationRow(rule_name="r2", status="uncertain"),
     ])
     assert "事件名称标注" in block
-    assert "| 子规则 | 事件名称 | 事件级别 |" in block
-    assert "| r1 | 网络攻击 | 提醒 |" in block
-    assert "| r2 | ⚠️ 待人工确认 | — |" in block
+    assert "| 子规则 | 事件名称 | 事件级别 | 威胁来源字段 | 威胁类型 |" in block
+    assert "| r1 | 网络攻击 | 提醒 | — | — |" in block
+    assert "| r2 | ⚠️ 待人工确认 | — | — | — |" in block
+
+
+def test标注明细按事件组稳定排序并转义动态单元格():
+    """威胁/普通/未知分组稳定，字段内容不能破坏 Markdown 表格。"""
+    from contracts.planner_models import EventAnnotationRow
+    from web.plan_renderer import _render_event_annotation_block
+
+    block = _render_event_annotation_block(
+        [
+            EventAnnotationRow(rule_name="normal|1", event_name="登录事件", event_level="信息"),
+            EventAnnotationRow(rule_name="unknown", status="uncertain"),
+            EventAnnotationRow(
+                rule_name=r"threat\1",
+                event_name="网络攻击",
+                event_level="提醒",
+                threat_source_field="attack|type",
+                threat_types=("暴力|破解", "端口\n扫描"),
+            ),
+            EventAnnotationRow(rule_name="normal-2", event_name="审计事件", event_level="信息"),
+            EventAnnotationRow(
+                rule_name="threat-2",
+                event_name="病毒检测",
+                event_level="提醒",
+                threat_source_field="—（固定值）",
+                threat_types=("其他",),
+            ),
+        ]
+    )
+
+    assert block.index(r"threat\\1") < block.index("threat-2")
+    assert block.index("threat-2") < block.index(r"normal\|1")
+    assert block.index(r"normal\|1") < block.index("normal-2")
+    assert block.index("normal-2") < block.index("unknown")
+    assert r"attack\|type" in block
+    assert r"暴力\|破解、端口<br>扫描" in block

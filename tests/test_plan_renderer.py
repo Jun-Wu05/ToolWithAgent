@@ -663,7 +663,7 @@ def test表格块与步骤bullet之间用空行分隔(monkeypatch):
     # 标注表格块与其前面的 bullet 之间有空行
     assert "（field_mapping）：字段映射完成\n\n🏷️" in content
     # 表格块与其后继 bullet 之间有空行（表格不被吞进列表项）
-    assert "| r1 | 网络攻击 | 提醒 |\n\n- ✅ `log-1`" in content
+    assert "| r1 | 网络攻击 | 提醒 | — | — |\n\n- ✅ `log-1`" in content
     # 日志分类详情块首行与其前面的 bullet 之间有空行
     assert "（log_parse）：步骤执行成功\n\n## 🔍 日志解析结果" in content
 

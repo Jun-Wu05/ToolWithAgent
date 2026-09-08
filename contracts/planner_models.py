@@ -401,11 +401,13 @@ class FieldMappingRow(StrictContract):
 
 
 class EventAnnotationRow(StrictContract):
-    """一条子规则的事件名称标注明细（待人工确认行 event_name 为空）。"""
+    """一条子规则的事件标注及最终威胁链报告明细。"""
 
     rule_name: str = Field(min_length=1)
     event_name: str = ""
     event_level: str = ""
+    threat_source_field: str = ""
+    threat_types: tuple[str, ...] = ()
     status: Literal["judged", "uncertain"] = "judged"
 
 

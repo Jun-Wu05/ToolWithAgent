@@ -35,6 +35,7 @@ from application.threat_chain_policy import (
     evaluate_chain_trigger,
     inspect_threat_field_state,
 )
+from application.threat_report import refresh_report_event_annotations
 from contracts.planner_models import (
     AddFieldsStep,
     ExecutionReport,
@@ -286,6 +287,11 @@ async def _run_chain(
         list(trigger.uncertain_rule_names),
     )
     if trigger.hint_only:
+        report = refresh_report_event_annotations(
+            report,
+            _session_get(session, "mapped_sub_rules"),
+            chain_succeeded=False,
+        )
         return _extended_report(
             report,
             (
@@ -303,8 +309,11 @@ async def _run_chain(
             "[THREAT_CHAIN] S0 威胁子规则未在 mapped_sub_rules 中找到: rules=%s",
             list(trigger.threat_rule_names),
         )
+        refreshed = refresh_report_event_annotations(
+            report, mapped_rules, chain_succeeded=False
+        )
         return _extended_report(
-            report,
+            refreshed,
             (_summary_result("⚠️ 威胁类型链路未执行：威胁子规则状态异常（mapped_sub_rules 缺失）"),),
         )
 
@@ -351,8 +360,11 @@ async def _run_chain(
                 type(error).__name__,
                 CHAIN_PLAN_ID,
             )
+            refreshed = refresh_report_event_annotations(
+                report, mapped_rules, chain_succeeded=False
+            )
             return _extended_report(
-                report,
+                refreshed,
                 (
                     _summary_result(
                         f"⚠️ 威胁类型链路执行异常（{type(error).__name__}），"
@@ -363,6 +375,11 @@ async def _run_chain(
 
     if chain_report.status == StepStatus.SUCCESS:
         commit_threat_chain_session(staged_session, session)
+    report = refresh_report_event_annotations(
+        report,
+        _session_get(session, "mapped_sub_rules"),
+        chain_succeeded=chain_report.status == StepStatus.SUCCESS,
+    )
 
     # S6 汇总：只追加成功步骤行（失败不降级主报告状态），汇总行说明全貌
     elapsed = time.monotonic() - started
