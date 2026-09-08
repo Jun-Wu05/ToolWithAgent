@@ -107,8 +107,11 @@ def test字段映射产物渲染为映射表且导出仍附下载(monkeypatch):
         "fieldmapped_config_20260818_1006.txt",
         "current_config_20260818_1006.txt",
     }
-    assert len(captured["messages"]) == 2
-    download_message = captured["messages"][1]
+    assert len(captured["messages"]) == 4
+    assert captured["messages"][0]["elements"] == []
+    assert len(captured["messages"][1]["elements"]) == 1
+    assert len(captured["messages"][2]["elements"]) == 1
+    download_message = captured["messages"][3]
     assert "已回填" in download_message["content"]
     assert "点击下载" in download_message["content"]
     assert "fieldmapped_config_20260818_1006.txt" in download_message["content"]
@@ -158,7 +161,9 @@ def test日志分类结果恢复规则生成与字段映射动作(monkeypatch):
 
     asyncio.run(renderer.render_execution_report(report))
 
-    assert len(captured["messages"]) == 1
+    assert len(captured["messages"]) == 2
+    assert captured["messages"][0].elements == []
+    assert len(captured["messages"][1].elements) == 1
     assert [action.name for action in captured["messages"][0].actions] == [
         "apply_field_mapping",
         "export_rules",
@@ -214,10 +219,16 @@ def _mount_chainlit_captures(monkeypatch, renderer):
 
     monkeypatch.setattr(renderer.cl, "Message", _Message)
     monkeypatch.setattr(
-        renderer.cl, "Dataframe", lambda **kw: captured["dataframes"].append(kw) or SimpleNamespace()
+        renderer.cl,
+        "Dataframe",
+        lambda **kw: captured["dataframes"].append(kw)
+        or SimpleNamespace(element_type="dataframe", **kw),
     )
     monkeypatch.setattr(
-        renderer.cl, "File", lambda **kw: captured["files"].append(kw) or SimpleNamespace()
+        renderer.cl,
+        "File",
+        lambda **kw: captured["files"].append(kw)
+        or SimpleNamespace(element_type="file", **kw),
     )
     return captured
 
@@ -314,9 +325,9 @@ def test字段映射后的解析子规则使用明确文件名和说明(monkeypa
     file_names = {file["name"] for file in captured["files"]}
     assert "fieldmapped_subrules_20260818_1006.txt" in file_names
     assert "button-field-mapping_mapped_sub_rules.txt" not in file_names
-    assert len(captured["messages"]) == 2
-    assert "已写入解析子规则" in captured["messages"][1]["content"]
-    assert "fieldmapped_subrules_20260818_1006.txt" in captured["messages"][1]["content"]
+    assert len(captured["messages"]) == 3
+    assert "已写入解析子规则" in captured["messages"][2]["content"]
+    assert "fieldmapped_subrules_20260818_1006.txt" in captured["messages"][2]["content"]
 
 
 def test字段映射无可下载产物时不发送下载消息(monkeypatch):
@@ -357,7 +368,9 @@ def test字段映射无可下载产物时不发送下载消息(monkeypatch):
 
     assert len(captured["dataframes"]) == 1
     assert captured["files"] == []
-    assert len(captured["messages"]) == 1
+    assert len(captured["messages"]) == 2
+    assert captured["messages"][0]["elements"] == []
+    assert len(captured["messages"][1]["elements"]) == 1
     assert "点击下载" not in captured["messages"][0]["content"]
 
 
@@ -399,7 +412,10 @@ def test威胁映射产物渲染为表格(monkeypatch):
 
     asyncio.run(renderer.render_execution_report(report))
 
-    assert len(captured["messages"]) == 1
+    assert len(captured["messages"]) == 3
+    assert captured["messages"][0]["elements"] == []
+    assert len(captured["messages"][1]["elements"]) == 1
+    assert len(captured["messages"][2]["elements"]) == 1
     assert len(captured["dataframes"]) == 1
     table = captured["dataframes"][0]["data"]
     assert list(table.columns) == ["mappingType", "orgValue", "mappingValue"]
@@ -458,7 +474,10 @@ def test枚举提取产物渲染为列表并附下载(monkeypatch):
 
     asyncio.run(renderer.render_execution_report(report))
 
-    assert len(captured["messages"]) == 1
+    assert len(captured["messages"]) == 3
+    assert captured["messages"][0]["elements"] == []
+    assert len(captured["messages"][1]["elements"]) == 1
+    assert len(captured["messages"][2]["elements"]) == 1
     assert len(captured["dataframes"]) == 1
     assert set(captured["dataframes"][0]["data"]["枚举值"]) == {"attack", "scan"}
     file_names = {f["name"] for f in captured["files"]}
@@ -532,7 +551,9 @@ def test日志类型提取恢复真实分类详情样本和规则动作(monkeypa
 
     asyncio.run(renderer.render_execution_report(report))
 
-    assert len(captured["messages"]) == 1
+    assert len(captured["messages"]) == 2
+    assert captured["messages"][0]["elements"] == []
+    assert len(captured["messages"][1]["elements"]) == 1
     assert len(captured["dataframes"]) == 0
     content = captured["messages"][0]["content"]
     assert "### 📊 分类详情" in content
@@ -629,7 +650,15 @@ def test表格块与步骤bullet之间用空行分隔(monkeypatch):
 
     asyncio.run(renderer.render_execution_report(report))
 
-    assert len(captured["messages"]) == 1
+    assert len(captured["messages"]) == 4
+    assert captured["messages"][0]["elements"] == []
+    assert [element.element_type for element in captured["messages"][1]["elements"]] == [
+        "dataframe"
+    ]
+    assert all(
+        [element.element_type for element in message["elements"]] == ["file"]
+        for message in captured["messages"][2:]
+    )
     content = captured["messages"][0]["content"]
     # 标注表格块与其前面的 bullet 之间有空行
     assert "（field_mapping）：字段映射完成\n\n🏷️" in content
@@ -639,8 +668,8 @@ def test表格块与步骤bullet之间用空行分隔(monkeypatch):
     assert "（log_parse）：步骤执行成功\n\n## 🔍 日志解析结果" in content
 
 
-def test多产物复合计划渲染为单条汇总(monkeypatch):
-    """复合计划多个产物类型全部进入同一条汇总消息的 elements（回归 #32）。"""
+def test多产物复合计划按汇总表格下载纵向发送(monkeypatch):
+    """#195：汇总先发、表格逐条纵向展示，下载文件随后独立发送。"""
     import web.plan_renderer as renderer
     from contracts.planner_models import (
         ConfigExportArtifact,
@@ -695,8 +724,13 @@ def test多产物复合计划渲染为单条汇总(monkeypatch):
 
     asyncio.run(renderer.render_execution_report(report))
 
-    # 一条汇总消息，含两张表（枚举/威胁）+ 一个配置下载文件。
-    assert len(captured["messages"]) == 1
+    element_types = [
+        [element.element_type for element in message["elements"]]
+        for message in captured["messages"]
+    ]
+    assert element_types == [[], ["dataframe"], ["dataframe"], ["file"], ["file"], ["file"]]
+    assert "plan-compound" in captured["messages"][0]["content"]
+    assert all(types.count("dataframe") <= 1 for types in element_types)
     assert len(captured["dataframes"]) == 2
     file_names = {f["name"] for f in captured["files"]}
     assert file_names == {
@@ -704,6 +738,31 @@ def test多产物复合计划渲染为单条汇总(monkeypatch):
         "enumvalues_20260818_1006.json",
         "threatmapping_20260818_1006.xlsx",
     }
+
+
+def test无产物报告只发送汇总消息(monkeypatch):
+    """#195：没有表格或下载产物时，不生成空的附加消息。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import ExecutionReport, StepResult, StepStatus
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-no-artifact",
+        results=(
+            StepResult(
+                step_id="blocked-1",
+                operation_type="field_mapping",
+                status=StepStatus.NEEDS_INPUT,
+                message="请先上传主数据",
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert len(captured["messages"]) == 1
+    assert captured["messages"][0]["elements"] == []
+    assert "blocked-1" in captured["messages"][0]["content"]
 
 
 def test信息型作答渲染为guidance答案而非能力说明(monkeypatch):

@@ -1218,7 +1218,7 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     mappings = session["decoded_data"][0]["normalize"][0]["mappings"]
     assert {mapping["orgValue"] for mapping in mappings} == {"attack", "scan"}
 
-    # 渲染：复合计划的全部产物进入同一条汇总消息（无字段映射回填的第二条消息）。
+    # 渲染：汇总先发，枚举/威胁表格逐条展示，下载文件随后独立发送。
     sent_messages = []
     dataframe_count = {"count": 0}
 
@@ -1248,10 +1248,16 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     )
     asyncio.run(renderer.render_execution_report(report))
 
-    # 一条汇总消息；枚举值/威胁映射落表，配置导出附下载文件。
-    assert len(sent_messages) == 1
+    assert len(sent_messages) == 6
+    assert sent_messages[0].elements == []
+    assert all(len(message.elements) == 1 for message in sent_messages[1:])
     assert dataframe_count["count"] == 2
-    file_names = {element.name for element in sent_messages[0].elements if hasattr(element, "name")}
+    file_names = {
+        element.name
+        for message in sent_messages
+        for element in message.elements
+        if hasattr(element, "name")
+    }
     assert file_names == {
         "enumvalues_20260818_1006.json",
         "threatmapping_20260818_1006.xlsx",
