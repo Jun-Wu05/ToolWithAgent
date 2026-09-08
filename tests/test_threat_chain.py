@@ -199,8 +199,8 @@ def test自动链路全链成功并追加汇总行(monkeypatch):
 
     extended = _run(report, session, _Team(_ThreatMember(_FULL_MAPPING)))
 
-    # 主报告结果保持不变，末尾追加链路成功步骤 + 🔗 汇总
-    assert extended.results[0] is report.results[0]
+    # 主报告映射内容保持不变，标注行用最终配置刷新；末尾追加链路成功步骤 + 🔗 汇总
+    assert extended.results[0].artifact.mappings == report.results[0].artifact.mappings
     summary = extended.results[-1]
     assert summary.step_id == "threat-chain"
     assert summary.message.startswith("🔗 威胁类型链路已自动完成")
@@ -217,6 +217,27 @@ def test自动链路全链成功并追加汇总行(monkeypatch):
         assert _threat_binding(rule) == "%{attack_type}"
 
 
+def test成功链路用提交后的最终配置刷新事件标注行(monkeypatch):
+    """字段映射 artifact 不得继续携带链路前缺少威胁结果的旧行。"""
+    _mock_retrieval(monkeypatch)
+    _mock_enum_llm(monkeypatch)
+    session = _chain_session()
+    session["mapped_sub_rules"][0]["normalize"][0]["result"] = ["暴力破解"]
+    session["mapped_sub_rules"][1]["normalize"][0]["result"] = ["端口扫描"]
+
+    extended = _run(_mapping_report(), session, _Team(_ThreatMember(_FULL_MAPPING)))
+
+    artifact = extended.results[0].artifact
+    assert [row.threat_source_field for row in artifact.event_annotations] == [
+        "attack_type",
+        "attack_type",
+    ]
+    assert [row.threat_types for row in artifact.event_annotations] == [
+        ("暴力破解",),
+        ("端口扫描",),
+    ]
+
+
 def test链路失败不阻塞字段映射成功报告(monkeypatch):
     """枚举正则生成失败 → 链路 ⚠️，主报告结果与状态不变。"""
     _mock_retrieval(monkeypatch)
@@ -230,6 +251,11 @@ def test链路失败不阻塞字段映射成功报告(monkeypatch):
     summary = extended.results[-1]
     assert summary.message.startswith("⚠️ 威胁类型链路未完全成功")
     assert "字段映射结果不受影响" in summary.message
+    annotations = extended.results[0].artifact.event_annotations
+    assert [row.threat_types for row in annotations] == [
+        ("⚠️ 未生成",),
+        ("⚠️ 未生成",),
+    ]
 
 
 def test全部待确认时只提示不跑链路():
@@ -342,6 +368,12 @@ def test已有引用链路降级时整体替换为唯一固定值(monkeypatch):
     degraded = _run(_mapping_report(), session, team)
 
     assert degraded.results[-1].message.startswith("🔗")
+    annotations = degraded.results[0].artifact.event_annotations
+    assert [row.threat_source_field for row in annotations] == [
+        "—（固定值）",
+        "—（固定值）",
+    ]
+    assert [row.threat_types for row in annotations] == [("其他",), ("其他",)]
     for rule in session["mapped_sub_rules"]:
         assert _all_threat_bindings(rule) == ["其他"]
         generated = [

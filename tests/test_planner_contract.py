@@ -469,3 +469,22 @@ def test_coerce透传已解析的PlanDecision():
 
     original = PlanDecision.model_validate(_execute_payload())
     assert _coerce_plan_decision(original) is original
+
+
+def test事件标注行携带威胁来源与有序最终类型():
+    """报告契约扩展不得破坏旧构造，并保留每条规则实际命中值的顺序。"""
+    from contracts.planner_models import EventAnnotationRow
+
+    legacy = EventAnnotationRow(rule_name="普通规则", event_name="登录事件")
+    assert legacy.threat_source_field == ""
+    assert legacy.threat_types == ()
+
+    enriched = EventAnnotationRow(
+        rule_name="威胁规则",
+        event_name="网络攻击",
+        event_level="提醒",
+        threat_source_field="attack_type",
+        threat_types=("暴力破解", "端口扫描"),
+    )
+    assert enriched.threat_source_field == "attack_type"
+    assert enriched.threat_types == ("暴力破解", "端口扫描")

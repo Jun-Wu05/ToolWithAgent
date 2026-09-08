@@ -390,6 +390,18 @@ def _row_covers_value(row: Mapping[str, Any], value: str) -> bool:
     return org_value == value
 
 
+def resolve_threat_mapping_value(
+    value: str, rows: Iterable[Mapping[str, Any]]
+) -> str | None:
+    """按运行时 REGULAR/EQUAL 语义返回首个实际命中的威胁类型。"""
+    for row in rows:
+        if not _row_covers_value(row, value):
+            continue
+        mapped_value = str(row.get("mappingValue") or "").strip()
+        return mapped_value or None
+    return None
+
+
 def ensure_threat_mapping_coverage(
     values: Iterable[str], rows: list[Mapping[str, Any]]
 ) -> list[Mapping[str, Any]]:
@@ -432,4 +444,5 @@ __all__ = [
     "evaluate_chain_trigger",
     "inspect_threat_field_state",
     "read_entity_event_name",
+    "resolve_threat_mapping_value",
 ]

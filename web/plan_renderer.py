@@ -9,6 +9,7 @@ from datetime import datetime
 import chainlit as cl
 import pandas as pd
 
+from agent.shared.event_classify import THREAT_EVENT_NAMES
 from agent.shared.logger import get_logger
 from web.parsers import create_dataframe_elements
 from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
@@ -18,19 +19,50 @@ from web.utils import render_log_parser_result
 logger = get_logger("plan_renderer")
 
 
+def _escape_markdown_cell(value: object) -> str:
+    """转义 GFM 表格动态单元格，并将换行保留为单元格内换行。"""
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", "<br>")
+    )
+
+
+def _annotation_group(row) -> int:
+    """威胁事件优先、普通事件随后、待确认状态最后。"""
+    if row.status == "uncertain":
+        return 2
+    return 0 if row.event_name in THREAT_EVENT_NAMES else 1
+
+
 def _render_event_annotation_block(annotations) -> str:
     """事件名称标注明细（#126）：以 Markdown 块渲染，位于映射表格上方。"""
     rows = [
         "🏷️ **事件名称标注**（自动写入，事件级别按绑定联动）",
         "",
-        "| 子规则 | 事件名称 | 事件级别 |",
-        "| --- | --- | --- |",
+        "| 子规则 | 事件名称 | 事件级别 | 威胁来源字段 | 威胁类型 |",
+        "| --- | --- | --- | --- | --- |",
     ]
-    for item in annotations:
+    for item in sorted(annotations, key=_annotation_group):
         if item.status == "judged":
-            rows.append(f"| {item.rule_name} | {item.event_name} | {item.event_level} |")
+            event_name = item.event_name or "—"
+            event_level = item.event_level or "—"
         else:
-            rows.append(f"| {item.rule_name} | ⚠️ 待人工确认 | — |")
+            event_name = "⚠️ 待人工确认"
+            event_level = "—"
+        source_field = item.threat_source_field or "—"
+        threat_types = "、".join(item.threat_types) or "—"
+        cells = (
+            item.rule_name,
+            event_name,
+            event_level,
+            source_field,
+            threat_types,
+        )
+        rows.append("| " + " | ".join(_escape_markdown_cell(cell) for cell in cells) + " |")
     return "\n".join(rows)
 
 
