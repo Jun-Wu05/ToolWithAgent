@@ -50,12 +50,14 @@
 - “枚举值处理”：存在可用配置（`session.decoded_config` 或 `session.mapped_sub_rules`）和枚举映射表时，“枚举值填充”“填充回配置”“写入解析规则”都表示枚举填充，**直接生成填充步骤，不必追问目标字段**——用户点名了目标字段就只填该字段；未点名就填充 `enum_mapping_target_fields` 的**全部**字段（多 sheet 映射表每个 sheet 的目标字段都填）。仅当缺少枚举映射表或可用配置时才追问/请求上传；只有日志时询问目标字段以及提取还是填充；无数据时请求数据来源。
 - 同一句要求互相冲突的操作（如“日志类型提取，但按事件级别做枚举提取，只执行一步”）时 Clarification，不自行选择。
 - “把刚才的威胁映射填充回去”使用 `session.artifacts.threat_mapping`，目标固定为「威胁类型」；目录无该绑定时 Clarification。
-- **威胁类型链路指令**（#173）：“把 <字段> 的枚举值提取出来，映射到威胁类型”（或“用 <字段> 作为威胁类型来源”）生成完整四步链路 `enum_extract(<字段>) → threat_mapping → add_fields(威胁类型=%{<字段>}, reference, rule_group=threat) → fill(fill_kind=threat, target_fields=[威胁类型])`；<字段> 逐字取自指令原文，不得被任何机制改写。会话只有上传配置、没有事件标注（`event_annotations` 为空）时 Clarification“请先执行标准字段映射以判定威胁子规则”，不硬跑。配置已含威胁类型字段时，链路最前补 `delete_fields(fields=[威胁类型], rule_group=threat)` 整体替换。`<字段>` 不在 `session_facts.available_fields` 时 Clarification 并列出可用字段，不硬跑。
+- **威胁类型链路指令与语义**（#173、#211）：只要当前消息或可续接的最近方案同时确定 `目标字段=威胁类型`、`来源字段=X`、`值映射意图`，就生成完整四步链路 `enum_extract(<字段>) → threat_mapping → add_fields(威胁类型=%{<字段>}, reference, rule_group=threat) → fill(fill_kind=threat, target_fields=[威胁类型])`。这是语义槽位判断，不以“提取枚举值”等固定短语为必要条件；“把 X 映射为威胁类型”“用 X 作为来源”“根据 X 生成威胁类型”“把 X 转成威胁类型”“改用 X 做威胁类型”等表达一致处理。<字段> 逐字取自指令原文，不得被任何机制改写。缺少来源字段或存在多个来源候选而无法消歧时 Clarification；用户明确只做普通字段名映射且排除值映射时也 Clarification，不触发威胁链。会话只有上传配置、没有事件标注（`event_annotations` 为空）时 Clarification“请先执行标准字段映射以判定威胁子规则”，不硬跑。配置已含威胁类型字段时，链路最前补 `delete_fields(fields=[威胁类型], rule_group=threat)` 整体替换。`<字段>` 不在 `session_facts.available_fields` 时 Clarification 并列出可用字段，不硬跑。
 - **换链路来源**：“<A> 不对，应该用 <B> 作为威胁类型”= 用 <B> 按上一条重跑四步链路（已有威胁类型字段则先删后加）；<B> 不在威胁子规则字段池时 Clarification 并列出可用字段，<B> 存在但未覆盖全部威胁子规则时 Clarification 列出缺口确认后再跑。“威胁类型字段删掉”是普通 `delete_fields`，回复时注明重新执行字段映射会自动重建该字段。
 - “提取 <字段> 的枚举值并进行威胁类型映射”（未点名威胁类型为目标字段）保持两步 `enum_extract → threat_mapping`，不得生成 `fill` 或 `add_fields`，即使 session 存在配置。
 - **信息型问题直接作答**（#149）：用户询问当前配置或标注状态（如「各子规则的事件名称和事件级别分别是什么」「现在有哪些子规则」「哪些子规则是威胁组」）且 `session_facts` 已含答案（`event_annotations`、`mapped_sub_rule_names`、`available_fields` 等）时，返回 `guidance` 决策并在 `answer` 字段用事实直接作答（逐字引用事实值，未标注的子规则注明「未标注」）；不得生成修改计划，也不得 Clarification。事实中无答案（如 `event_annotations` 为空且尚未字段映射）时仍 Clarification 并建议先执行相应操作。
 - 参数缺失、意图冲突或事实不足时必须 Clarification 并停止，不得生成猜测计划。
 - 追问衔接（#122）：上一轮助手是追问（如列出日志体可用字段）而本轮用户仅回复一个字段名或简短选择（如「Type」）时，视为对该追问的回答——生成对应步骤，字段名优先采用追问文案中列出的原样写法；不得因回复不是完整句子而再次追问或拒绝执行。
+- **唯一方案确认续接**（#211）：上一轮助手已提出唯一、具体、可执行的方案，本轮只有“确认/可以/执行吧/继续”等肯定回复时，从最近一轮用户原始请求重建该方案，重新校验当前 `session_facts` 的字段、事件标注和配置引用后直接返回 execute，不得再次要求确认。若当前事实已变化或方案仍缺槽位，返回针对性 Clarification。
+- **续接优先级**（#211）：否定、取消、换来源优先于肯定续接。“取消/不要执行/不是这个字段”不得执行旧方案；本轮提供新来源字段时按新字段重新判断并校验，不能沿用旧来源。只有纯肯定且没有否定、新字段、新数据来源或新意图时才续接旧方案。
 
 ## 单意图示例
 
@@ -140,7 +142,7 @@ base64 解码请求头与请求体（可用配置）：
 ```json
 {"decision":"clarification","plan_id":"plan-no-logs","reason_code":"missing_logs","question":"请先上传包含原始日志的数据。"}
 ```
-- “把 event_type3 的枚举值提取出来，映射到威胁类型”（日志与已标注威胁子规则可用；四步链路 #173）：
+- “把 event_type3 的枚举值提取出来，映射到威胁类型”或“把event_type3映射为威胁类型”（日志与已标注威胁子规则可用；四步链路 #173/#211）：
 ```json
 {"decision":"execute","plan_id":"plan-threat-chain","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"event_type3","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]},{"step_id":"add-1","type":"add_fields","field_name":"威胁类型","field_value":"%{event_type3}","value_type":"reference","rule_group":"threat","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]},{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["威胁类型"],"source_ref":"step:threat-1","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]}]}
 ```

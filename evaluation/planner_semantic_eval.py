@@ -16,7 +16,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from agent.core.planner import PlannerService, create_planner_agent
-from contracts.planner_models import PlanDecision
+from contracts.planner_models import ConversationTurn, PlanDecision
 from contracts.session_facts import SessionFacts
 
 
@@ -28,6 +28,7 @@ class SemanticCase:
     user_text: str
     facts: SessionFacts
     validate: Callable[[PlanDecision], bool]
+    conversation_history: tuple[ConversationTurn, ...] = ()
 
 
 def _step_types(decision: PlanDecision) -> tuple[str, ...]:
@@ -42,6 +43,18 @@ def _single_step(expected_type: str) -> Callable[[PlanDecision], bool]:
     )
 
 
+def _threat_chain(source_field: str) -> Callable[[PlanDecision], bool]:
+    """断言完整威胁链及逐字来源字段。"""
+    return lambda decision: (
+        decision.decision == "execute"
+        and _step_types(decision)
+        == ("enum_extract", "threat_mapping", "add_fields", "fill")
+        and getattr(decision.steps[0], "target_field", None) == source_field
+        and getattr(decision.steps[2], "field_value", None) == f"%{{{source_field}}}"
+        and tuple(getattr(decision.steps[3], "target_fields", ())) == ("威胁类型",)
+    )
+
+
 MAPPED_FACTS = SessionFacts(
     has_decoded_config=True,
     has_mapped_sub_rules=True,
@@ -50,6 +63,26 @@ MAPPED_FACTS = SessionFacts(
     enum_mapping_target_fields=("事件级别",),
     enum_mapping_row_count=2,
     mapped_sub_rule_count=1,
+)
+
+THREAT_CHAIN_FACTS = SessionFacts(
+    has_logs=True,
+    has_mapped_sub_rules=True,
+    available_config_refs=("session.mapped_sub_rules",),
+    available_fields=("event_str", "alt_field"),
+    mapped_sub_rule_count=1,
+    mapped_sub_rule_names=("threat-rule",),
+    event_annotations=(
+        {"rule_name": "threat-rule", "event_name": "网络攻击", "event_level": "提醒"},
+    ),
+)
+
+THREAT_PROPOSAL_HISTORY = (
+    ConversationTurn(role="user", content="把event_str映射为威胁类型"),
+    ConversationTurn(
+        role="assistant",
+        content="将提取 event_str 的值并映射、填充到威胁类型，是否执行？ 可选：确认执行；取消",
+    ),
 )
 
 CASES = (
@@ -148,6 +181,75 @@ CASES = (
         and getattr(d.steps[0], "target_field", None) == "category"
         and getattr(d.steps[1], "feature_field", None) == "category",
     ),
+    SemanticCase(
+        "threat_target_compact",
+        "把event_str映射为威胁类型",
+        THREAT_CHAIN_FACTS,
+        _threat_chain("event_str"),
+    ),
+    SemanticCase(
+        "threat_target_as_source",
+        "用 event_str 作为威胁类型来源",
+        THREAT_CHAIN_FACTS,
+        _threat_chain("event_str"),
+    ),
+    SemanticCase(
+        "threat_target_based_on",
+        "根据 event_str 生成 threat type",
+        THREAT_CHAIN_FACTS,
+        _threat_chain("event_str"),
+    ),
+    SemanticCase(
+        "threat_target_convert",
+        "将event_str的值转成威胁类型",
+        THREAT_CHAIN_FACTS,
+        _threat_chain("event_str"),
+    ),
+    SemanticCase(
+        "threat_target_missing_source",
+        "把字段值映射为威胁类型",
+        THREAT_CHAIN_FACTS,
+        lambda d: d.decision == "clarification" and not d.steps,
+    ),
+    SemanticCase(
+        "threat_target_unknown_source",
+        "把 missing_field 映射为威胁类型",
+        THREAT_CHAIN_FACTS,
+        lambda d: d.decision == "clarification" and not d.steps,
+    ),
+    SemanticCase(
+        "threat_target_ambiguous_source",
+        "根据 event_str 或 alt_field 生成威胁类型",
+        THREAT_CHAIN_FACTS,
+        lambda d: d.decision == "clarification" and not d.steps,
+    ),
+    SemanticCase(
+        "threat_target_name_mapping_only",
+        "只做普通字段名映射，把 event_str 映射到威胁类型，不要做值映射",
+        THREAT_CHAIN_FACTS,
+        lambda d: d.decision == "clarification" and not d.steps,
+    ),
+    SemanticCase(
+        "threat_confirm_history",
+        "确认",
+        THREAT_CHAIN_FACTS,
+        _threat_chain("event_str"),
+        THREAT_PROPOSAL_HISTORY,
+    ),
+    SemanticCase(
+        "threat_cancel_history",
+        "取消，不要执行",
+        THREAT_CHAIN_FACTS,
+        lambda d: d.decision != "execute" and not d.steps,
+        THREAT_PROPOSAL_HISTORY,
+    ),
+    SemanticCase(
+        "threat_change_source_history",
+        "不是 event_str，改用 alt_field 作为威胁类型来源",
+        THREAT_CHAIN_FACTS,
+        _threat_chain("alt_field"),
+        THREAT_PROPOSAL_HISTORY,
+    ),
 )
 
 
@@ -178,7 +280,7 @@ async def run_evaluation(runs: int, selected_case: str | None = None) -> list[di
             started_at = time.monotonic()
             decision = await PlannerService(runner=runner, timeout_seconds=90).plan(
                 user_text=case.user_text,
-                conversation_history=[],
+                conversation_history=case.conversation_history,
                 session_facts=case.facts,
                 progress_plan_id=f"eval-{case.name}-{run_number}",
             )

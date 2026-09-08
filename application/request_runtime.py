@@ -89,12 +89,37 @@ _OPERATION_LABELS = {
     "regex_extract": "正则提取字段",
 }
 
+_STEP_STATUS_LABELS = {
+    StepStatus.SUCCESS: "成功",
+    StepStatus.NEEDS_INPUT: "待补充",
+    StepStatus.FAILED: "失败",
+}
+
 
 def _operation_label(step: Any) -> str:
     """返回不含字段值等参数的中文业务操作名。"""
     if step.type == "fill":
         return "枚举填充" if step.fill_kind == "enum" else "威胁类型填充"
     return _OPERATION_LABELS.get(step.type, "未知操作")
+
+
+def _assistant_history_content(result: PlanDecision | ExecutionReport) -> str:
+    """生成供下一轮 Planner 续接的紧凑助手语义，不保存产物内容。"""
+    if isinstance(result, PlanDecision):
+        if result.decision == "clarification":
+            choices = f" 可选：{'；'.join(result.choices)}" if result.choices else ""
+            return f"{result.question}{choices}"
+        if result.answer:
+            return result.answer
+        return "已提供使用引导。"
+
+    outcomes = []
+    for item in result.results:
+        fallback = "填充" if item.operation_type == "fill" else item.operation_type
+        operation = _OPERATION_LABELS.get(item.operation_type, fallback)
+        status = _STEP_STATUS_LABELS[item.status]
+        outcomes.append(f"{operation}（{status}）")
+    return f"已执行：{'；'.join(outcomes)}。"
 
 
 def is_explicit_clear_command(user_text: str) -> bool:
@@ -235,6 +260,7 @@ async def _run_user_request_scoped(
             len(step.depends_on),
         )
     if decision.decision != "execute":
+        append_history(session, "assistant", _assistant_history_content(decision))
         return decision
     report = await _execute_plan_with_threat_transaction(
         session=session,
@@ -244,13 +270,15 @@ async def _run_user_request_scoped(
         session_facts=session_facts,
     )
     # 执行后确定性续跑（#173）：字段映射判出威胁子规则时自动补全威胁类型链路
-    return await run_threat_chain_after_mapping(
+    final_report = await run_threat_chain_after_mapping(
         report=report,
         plan_steps=decision.steps,
         session=session,
         team=team,
         progress_sink=progress_sink,
     )
+    append_history(session, "assistant", _assistant_history_content(final_report))
+    return final_report
 
 
 async def run_deterministic_plan(
