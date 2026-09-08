@@ -29,6 +29,7 @@ from contracts.planner_models import (
     RegexExtractStep,
     StepResult,
     StepSpec,
+    THREAT_TYPE_FIELD,
 )
 from application.adapters.shared import (
     REPO_ROOT,
@@ -389,12 +390,22 @@ class FieldSkillAdapter:
             if guard is not None:
                 return guard
 
+        add_kwargs = {
+            "target_names": targets,
+            "skip_existing": step.skip_existing,
+        }
+        if step.field_name == THREAT_TYPE_FIELD:
+            add_kwargs["normalize_metadata"] = {
+                "field": "threat_type",
+                "entity": "威胁",
+                "sim": True,
+                "core": False,
+            }
         result = self._skill_runner("add_fields")(
             config,
             step.field_name,
             field_value,
-            target_names=targets,
-            skip_existing=step.skip_existing,
+            **add_kwargs,
         )
         if result.get("status") != "success":
             return self._skill_error(step, result)

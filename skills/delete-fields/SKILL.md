@@ -35,11 +35,12 @@ metadata:
 对每个 entity 执行：
 
 1. **验证保留字段**：要删除字段命中保留字段集合时整体拒绝
-2. **添加 removeFields filter**：已有 removeFields 则合并字段名，否则在 parser.filter 追加（filter 为 null 的入口规则先初始化为空数组）：
+2. **清理 addFields 绑定**：同步删除同名 addFields 键；该过滤器还有其他键时保留，fields 清空时删除整个空过滤器
+3. **添加 removeFields filter**：已有 removeFields 则合并字段名，否则在 parser.filter 追加（filter 为 null 的入口规则先初始化为空数组）：
    ```json
    {"name": "removeFields", "id": "", "fields": ["<field1>", "<field2>"]}
    ```
-3. **移除 normalize 条目**：从 normalize 数组中移除 index 匹配的条目
+4. **移除 normalize 条目**：从 normalize 数组中移除 index 匹配的条目
 
 操作应用到每一个 entity；无 normalize 的 entity 被跳过且计数如实报告；不存在的字段在结果消息中列明。
 

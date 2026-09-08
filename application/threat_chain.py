@@ -12,6 +12,7 @@ application 请求运行时层后置检查标注结果，构造确定性四步�
 
 from __future__ import annotations
 
+import copy
 import time
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -37,6 +38,7 @@ from application.threat_chain_policy import (
 from contracts.planner_models import (
     AddFieldsStep,
     ExecutionReport,
+    FillStep,
     PlanDecision,
     StepResult,
     StepStatus,
@@ -58,6 +60,47 @@ SESSION_OVERRIDE_KEY = "threat_source_field_override"
 
 CHAIN_CONFIG_REF = "session.mapped_sub_rules"
 """自动链路的目标配置：事件标注所在处（mapped_sub_rules）。"""
+
+_CHAIN_COMMIT_KEYS = (
+    "mapped_sub_rules",
+    "last_enum_extract_result",
+    "latest_enum_artifact",
+    "last_threat_data",
+    "latest_threat_artifact",
+)
+"""威胁链成功后才从配置副本会话提交的领域产物。"""
+
+
+def stage_threat_chain_session(session: Any) -> Any:
+    """为威胁链构造隔离会话，其他输入只读共享、目标配置深拷贝。"""
+    staged = dict(session) if isinstance(session, dict) else copy.copy(session)
+    _session_set(
+        staged,
+        "mapped_sub_rules",
+        copy.deepcopy(_session_get(session, "mapped_sub_rules")),
+    )
+    return staged
+
+
+def commit_threat_chain_session(staged: Any, session: Any) -> None:
+    """整条链成功后一次性提交配置与可引用产物。"""
+    for key in _CHAIN_COMMIT_KEYS:
+        _session_set(session, key, _session_get(staged, key))
+
+
+def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
+    """识别同时包含生成字段与威胁填充的显式威胁全链。"""
+    has_generated_field = any(
+        isinstance(step, AddFieldsStep) and step.field_name == THREAT_TYPE_FIELD
+        for step in plan_steps
+    )
+    has_threat_fill = any(
+        isinstance(step, FillStep)
+        and step.fill_kind == "threat"
+        and step.target_fields == (THREAT_TYPE_FIELD,)
+        for step in plan_steps
+    )
+    return has_generated_field and has_threat_fill
 
 
 @contextmanager
@@ -97,6 +140,8 @@ def record_explicit_source_override(
     检测形态：计划含 add_fields(威胁类型, reference %{B}) 且该步成功。
     自动链路自身产出的 add_fields 不在本函数扫描范围（只扫主计划步骤）。
     """
+    if report.status != StepStatus.SUCCESS:
+        return None
     for step in plan_steps:
         if not isinstance(step, AddFieldsStep):
             continue
@@ -287,6 +332,7 @@ async def _run_chain(
         plan_id=CHAIN_PLAN_ID,
         steps=plan.steps,
     )
+    staged_session = stage_threat_chain_session(session)
     with _stage_span("threat_chain_s2_s5_execute"):
         try:
             chain_report = await create_plan_executor(
@@ -294,8 +340,8 @@ async def _run_chain(
             ).execute(
                 chain_decision,
                 ExecutionContext(
-                    session=session,
-                    session_facts=build_session_facts(session),
+                    session=staged_session,
+                    session_facts=build_session_facts(staged_session),
                     progress_sink=progress_sink or NullProgressSink(),
                 ),
             )
@@ -314,6 +360,9 @@ async def _run_chain(
                     ),
                 ),
             )
+
+    if chain_report.status == StepStatus.SUCCESS:
+        commit_threat_chain_session(staged_session, session)
 
     # S6 汇总：只追加成功步骤行（失败不降级主报告状态），汇总行说明全貌
     elapsed = time.monotonic() - started

@@ -17,7 +17,7 @@ import 用法:
 import json
 import sys
 import copy
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional
 
 
 def add_field(
@@ -26,6 +26,7 @@ def add_field(
     field_value: Optional[str] = None,
     target_names: Optional[List[str]] = None,
     skip_existing: bool = False,
+    normalize_metadata: Optional[Mapping[str, Any]] = None,
 ) -> dict:
     """
     对 mapping entity 列表执行字段添加
@@ -41,6 +42,8 @@ def add_field(
         target_names: 目标 entity 名单（按 name 精确匹配，#126）；
                       None 表示全部 entity。名单外的 entity 原样透传。
         skip_existing: 已有同名字段的 entity 跳过而不是整体失败（#126）。
+        normalize_metadata: 受控链路为生成字段提供的标准元数据；
+                            普通字段添加默认为 None。
 
     Returns:
         {"status": "success"|"error", "data": [...], "message": "..."}
@@ -118,6 +121,9 @@ def add_field(
             "value": None,
             "index": field_name,
         }
+        for metadata_key in ("field", "entity", "sim", "core"):
+            if normalize_metadata is not None and metadata_key in normalize_metadata:
+                normalize_entry[metadata_key] = normalize_metadata[metadata_key]
         normalize.append(normalize_entry)
         entity["normalize"] = normalize
 

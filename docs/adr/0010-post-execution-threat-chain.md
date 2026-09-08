@@ -15,7 +15,8 @@
 返回 `ExecutionReport` 后，`application/threat_chain.py` 检查报告中的字段映射产物
 标注（S0 触发判定），满足条件时构造确定性四步计划（enum_extract → threat_mapping
 → [delete_fields] → add_fields → fill，纯函数构造于 `threat_chain_policy.py`），
-经统一 `PlanExecutor` 续跑（S2-S5），汇总追加回主报告（S6）。
+经统一 `PlanExecutor` 在会话配置副本上续跑（S2-S5）。整条链成功后才
+一次性提交 `mapped_sub_rules` 与链路产物，然后将汇总追加回主报告（S6）。
 
 新计划产生源由此增加为三类：Planner 规划、Web 确定性按钮、**执行后确定性续跑**。
 
@@ -28,7 +29,8 @@
 
 ## 关键语义
 
-- 失败隔离：链路任何失败/异常都不降级主报告状态，仅追加成功步骤行与 🔗/⚠️ 汇总行。
+- 失败隔离：链路任何失败/异常都不降级主报告状态，仅追加成功步骤行与 🔗/⚠️ 汇总行；配置副本不提交，会话保留替换前有效配置。
+- 整体替换：换源时只清理目标威胁子规则中链路自产的「威胁类型」 normalize 及全部同名 addFields 键，保留原始来源字段、非威胁子规则和其他 addFields 键；新生成条目固定为 `field=threat_type`、`entity=威胁`、`sim=true`、`core=false`。
 - 会话级来源覆盖（#129 临时字段模式）：显式指令链路成功后记录，自动入口优先使用，
   新上传主数据/重新日志类型提取时清除。
 - 威胁映射产物填充目标固定为「威胁类型」（修复跨轮血缘漂移）。

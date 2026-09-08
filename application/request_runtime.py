@@ -13,9 +13,15 @@ from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
 from application.model_runtime import resolve_session_config
 from application.session_projection import build_session_facts
-from application.threat_chain import run_threat_chain_after_mapping
-from contracts.planner_models import ExecutionReport, PlanDecision
+from application.threat_chain import (
+    commit_threat_chain_session,
+    is_threat_type_replacement_plan,
+    run_threat_chain_after_mapping,
+    stage_threat_chain_session,
+)
+from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressSink, ProgressStatus
+from contracts.session_facts import SessionFacts
 
 logger = get_logger("user_message_handlers")
 
@@ -30,6 +36,38 @@ _CLEAR_COMMANDS = {
     "clear",
     "reset",
 }
+
+
+async def _execute_plan_with_threat_transaction(
+    *,
+    session: Any,
+    team: Any,
+    plan: PlanDecision,
+    progress_sink: ProgressSink,
+    session_facts: SessionFacts | None = None,
+) -> ExecutionReport:
+    """显式威胁全链在配置副本上执行，整计划成功后才提交。"""
+    transactional = is_threat_type_replacement_plan(plan.steps)
+    execution_session = (
+        stage_threat_chain_session(session) if transactional else session
+    )
+    execution_facts = (
+        build_session_facts(execution_session)
+        if transactional or session_facts is None
+        else session_facts
+    )
+    report = await create_plan_executor(create_default_adapters(team)).execute(
+        plan,
+        ExecutionContext(
+            session=execution_session,
+            session_facts=execution_facts,
+            progress_sink=progress_sink,
+        ),
+    )
+    if transactional and report.status == StepStatus.SUCCESS:
+        commit_threat_chain_session(execution_session, session)
+    return report
+
 
 _DECISION_LABELS = {
     "execute": "执行计划",
@@ -198,13 +236,12 @@ async def _run_user_request_scoped(
         )
     if decision.decision != "execute":
         return decision
-    report = await create_plan_executor(create_default_adapters(team)).execute(
-        decision,
-        ExecutionContext(
-            session=session,
-            session_facts=session_facts,
-            progress_sink=progress_sink,
-        ),
+    report = await _execute_plan_with_threat_transaction(
+        session=session,
+        team=team,
+        plan=decision,
+        progress_sink=progress_sink,
+        session_facts=session_facts,
     )
     # 执行后确定性续跑（#173）：字段映射判出威胁子规则时自动补全威胁类型链路
     return await run_threat_chain_after_mapping(
@@ -241,14 +278,11 @@ async def _run_deterministic_plan_scoped(
     progress_sink: ProgressSink,
 ) -> ExecutionReport:
     """会话作用域内的确定性计划执行链（入口见 run_deterministic_plan）。"""
-    session_facts = build_session_facts(session)
-    report = await create_plan_executor(create_default_adapters(team)).execute(
-        plan,
-        ExecutionContext(
-            session=session,
-            session_facts=session_facts,
-            progress_sink=progress_sink,
-        ),
+    report = await _execute_plan_with_threat_transaction(
+        session=session,
+        team=team,
+        plan=plan,
+        progress_sink=progress_sink,
     )
     # 执行后确定性续跑（#173）：按钮/确定性入口的字段映射同样触发威胁链路
     return await run_threat_chain_after_mapping(

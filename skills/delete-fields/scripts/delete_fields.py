@@ -103,6 +103,25 @@ def delete_field(
         # 入口规则模板的 filter 可能为 null，初始化为空数组再追加
         filters = parser.get("filter") or []
 
+        # 删除字段时同步清理同名 addFields 绑定，避免旧绑定在后续
+        # 重新添加字段后继续生效。过滤器还有其他键时只删目标键；
+        # fields 清空时删除整个空 addFields 过滤器。
+        cleaned_filters = []
+        for filter_item in filters:
+            if filter_item.get("name") == "addFields" and isinstance(
+                filter_item.get("fields"), dict
+            ):
+                remaining_fields = {
+                    key: value
+                    for key, value in filter_item["fields"].items()
+                    if key not in deletable
+                }
+                if not remaining_fields:
+                    continue
+                filter_item["fields"] = remaining_fields
+            cleaned_filters.append(filter_item)
+        filters = cleaned_filters
+
         # 检查是否已存在 removeFields filter，有则合并
         existing_remove = None
         for i, f in enumerate(filters):
