@@ -241,12 +241,7 @@ def inspect_threat_field_state(
                     continue
                 fields = filter_item.get("fields")
                 if isinstance(fields, dict):
-                    value = fields.get(THREAT_TYPE_FIELD)
-                    if (
-                        isinstance(value, str)
-                        and value.startswith("%{")
-                        and value.endswith("}")
-                    ):
+                    if THREAT_TYPE_FIELD in fields:
                         return THREAT_FIELD_CHAIN
     return THREAT_FIELD_EXISTING if has_entry else THREAT_FIELD_ABSENT
 
@@ -278,18 +273,34 @@ def build_threat_chain_steps(
         threat_field_state: inspect_threat_field_state 的输出，决定加字段分支。
     """
     if source_decision.source_field is None:
-        return ThreatChainPlan(
-            steps=(
-                AddFieldsStep(
-                    step_id=ADD_STEP_ID,
-                    type="add_fields",
-                    field_name=THREAT_TYPE_FIELD,
-                    field_value=DEGRADED_THREAT_VALUE,
-                    value_type="fixed",
+        degraded_steps: list[StepSpec] = []
+        if threat_field_state == THREAT_FIELD_CHAIN:
+            degraded_steps.append(
+                DeleteFieldsStep(
+                    step_id=REPLACE_STEP_ID,
+                    type="delete_fields",
+                    fields=(THREAT_TYPE_FIELD,),
                     rule_group="threat",
                     config_ref=config_ref,
-                ),
-            ),
+                )
+            )
+        add_dependencies = (
+            (REPLACE_STEP_ID,) if threat_field_state == THREAT_FIELD_CHAIN else ()
+        )
+        degraded_steps.append(
+            AddFieldsStep(
+                step_id=ADD_STEP_ID,
+                type="add_fields",
+                field_name=THREAT_TYPE_FIELD,
+                field_value=DEGRADED_THREAT_VALUE,
+                value_type="fixed",
+                rule_group="threat",
+                config_ref=config_ref,
+                depends_on=add_dependencies,
+            )
+        )
+        return ThreatChainPlan(
+            steps=tuple(degraded_steps),
             degraded=True,
             summary_parts=(
                 f"来源字段判不出（{source_decision.reason}），已降级固定值"

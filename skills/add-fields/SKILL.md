@@ -46,6 +46,10 @@ metadata:
    {"mappings": [], "field": null, "sim": null, "result": ["<field_value>"], "info": null, "entity": null, "required": false, "core": null, "value": null, "index": "<field_name>"}
    ```
 
+普通字段保持上述默认元数据。受控 Application 链路可通过
+`normalize_metadata` 为系统生成字段注入标准元数据；威胁类型链路固定使用
+`field=threat_type`、`entity=威胁`、`sim=true`、`core=false`。
+
 操作应用到每一个 entity（入口规则与子规则混合数据同样处理）；无 normalize 的 entity 被跳过且计数如实报告。
 
 ## 【事件名称】绑定规则

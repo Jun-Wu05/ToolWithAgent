@@ -39,7 +39,7 @@
 
 ### 字段调整（Field Adjust）
 
-对解析规则（用户上传的 Base64 配置或映射生成的子规则）执行的字段级操作：**添加**（固定值或 `%{index}` 引用，双写 filter 的 addFields + normalize 条目）、**删除**（removeFields + normalize 移除，保留字段 original_log / rule_name_list / 日志类型 拦截）、**合并**（merger filter + normalize 预览条目）、**base64 解码**（解码 addFields 写运行时 OGNL，原地覆盖已有字段值，不新增字段）、**正则提取**（customFunction 过滤器 + normalize 双写；正则由执行器按样本 LLM 生成并强制 re.fullmatch 全匹配校验，Planner 不编造正则；「原始日志里的 X」指 original_log、「请求头里的 X」指 req_header）。全部经类型化步骤由 Field Skill Adapter 调用 skills/ 目录脚本（单一事实源）执行，结果写回原配置来源（config_ref），两类配置并存时优先 mapped_sub_rules。
+对解析规则（用户上传的 Base64 配置或映射生成的子规则）执行的字段级操作：**添加**（固定值或 `%{index}` 引用，双写 filter 的 addFields + normalize 条目）、**删除**（清理同名 addFields 绑定并删除空过滤器，再写 removeFields + 移除 normalize；保留字段 original_log / rule_name_list / 日志类型 拦截）、**合并**（merger filter + normalize 预览条目）、**base64 解码**（解码 addFields 写运行时 OGNL，原地覆盖已有字段值，不新增字段）、**正则提取**（customFunction 过滤器 + normalize 双写；正则由执行器按样本 LLM 生成并强制 re.fullmatch 全匹配校验，Planner 不编造正则；「原始日志里的 X」指 original_log、「请求头里的 X」指 req_header）。全部经类型化步骤由 Field Skill Adapter 调用 skills/ 目录脚本（单一事实源）执行，结果写回原配置来源（config_ref），两类配置并存时优先 mapped_sub_rules。
 
 - 消歧边界：「删除字段 X」是字段调整（移除整个字段）；「取消/删除 X 的映射」是取消映射（只清 mappings，字段保留）。两者不可互换。
 - 手动添加【事件名称】时受绑定守卫约束：值必须在 21 个合法分类名内，事件级别自动联动写入（skip_existing 模式下已有字段的子规则跳过而非失败）。
@@ -67,7 +67,7 @@
 - **值兜底**：提取值映射不到标准分类时落「其他」，且映射结果经确定性全覆盖校验补行，不依赖提示词自觉。
 - **会话级来源覆盖**：用户显式纠正过 X（「A 不对，应该用 B」）后会话记住来源字段 = B，自动入口直接使用；新上传主数据或重新日志类型提取时清除。
 - **固定填充目标**：威胁映射产物的填充目标恒为「威胁类型」，不随字段映射血缘漂移；点名其他字段时 Planner 澄清。
-- **幂等**：重新字段映射自动重跑链路；威胁类型字段已存在时先删后加整体替换、mappings 全量重建；同轮删除不补（重新映射会重建，报告注明）。
+- **幂等与原子替换**：重新字段映射自动重跑链路；威胁类型字段已存在时，在配置副本上清理链路自产 normalize 与全部旧 addFields 绑定，写入唯一新绑定和 `field=threat_type/entity=威胁/sim=true/core=false` 生成条目，mappings 全量重建；整链成功后才一次提交，任一步失败保留替换前配置。同轮删除不补（重新映射会重建，报告注明）。
 - 链路失败不阻塞字段映射的成功报告，单独 ⚠️ 汇总并可用显式指令重试。
 - 避免：不要叫"威胁标注"（那是事件名称标注的分组概念）或"威胁自动化"。
 
