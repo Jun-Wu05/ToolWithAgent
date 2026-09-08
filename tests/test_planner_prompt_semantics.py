@@ -135,6 +135,8 @@ def test提示词按语义槽位识别威胁类型完整链路():
         assert synonym in PROMPT
     assert "不以“提取枚举值”等固定短语为必要条件" in PROMPT
     assert "明确只做普通字段名映射且排除值映射" in PROMPT
+    assert "首次链路的来源存在性只检查 `available_fields`" in PROMPT
+    assert "不得臆造“威胁子规则字段池”门槛" in PROMPT
 
 
 def test提示词定义唯一方案的多轮确认与优先级():
