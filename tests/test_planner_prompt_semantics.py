@@ -127,6 +127,25 @@ def test提示词声明威胁链路四步指令与换来源话术():
     )
 
 
+def test提示词按语义槽位识别威胁类型完整链路():
+    """完整链路由来源、目标和值映射意图决定，不以固定措辞为门槛（#211）。"""
+    for semantic_slot in ("`目标字段=威胁类型`", "`来源字段=X`", "`值映射意图`"):
+        assert semantic_slot in PROMPT
+    for synonym in ("映射为", "作为来源", "根据", "转成", "改用"):
+        assert synonym in PROMPT
+    assert "不以“提取枚举值”等固定短语为必要条件" in PROMPT
+    assert "明确只做普通字段名映射且排除值映射" in PROMPT
+
+
+def test提示词定义唯一方案的多轮确认与优先级():
+    """肯定回复可续接唯一方案，但否定、取消和换来源必须优先（#211）。"""
+    assert "确认/可以/执行吧/继续" in PROMPT
+    assert "重新校验当前 `session_facts`" in PROMPT
+    assert "不得再次要求确认" in PROMPT
+    assert "否定、取消、换来源优先于肯定续接" in PROMPT
+    assert "从最近一轮用户原始请求重建" in PROMPT
+
+
 def test提示词包含合并与提取的单操作化规则():
     """「添加X+合并/提取」不得拆成 add+操作 两步（#146 线上报错回归）。"""
     assert "单操作化" in PROMPT
