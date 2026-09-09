@@ -668,6 +668,50 @@ def test表格块与步骤bullet之间用空行分隔(monkeypatch):
     assert "（log_parse）：步骤执行成功\n\n## 🔍 日志解析结果" in content
 
 
+def test威胁链等待期间只把空白威胁列显示为生成中():
+    from web.plan_renderer import build_execution_report_content
+    from contracts.planner_models import (
+        EventAnnotationRow,
+        ExecutionReport,
+        FieldMappingArtifact,
+        StepResult,
+        StepStatus,
+    )
+
+    report = ExecutionReport(
+        plan_id="pending-threat-report",
+        results=(
+            StepResult(
+                step_id="field-mapping",
+                operation_type="field_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=FieldMappingArtifact(
+                    item_count=0,
+                    mappings=(),
+                    event_annotations=(
+                        EventAnnotationRow(
+                            rule_name="threat-rule",
+                            event_name="网络攻击",
+                            event_level="提醒",
+                        ),
+                        EventAnnotationRow(
+                            rule_name="normal-rule",
+                            event_name="审计事件",
+                            event_level="信息",
+                        ),
+                    ),
+                ),
+                message="字段映射完成",
+            ),
+        ),
+    )
+
+    content = build_execution_report_content(report, threat_pending=True)
+
+    assert "| threat-rule | 网络攻击 | 提醒 | ⏳ 生成中 | ⏳ 生成中 |" in content
+    assert "| normal-rule | 审计事件 | 信息 | — | — |" in content
+
+
 def test多产物复合计划按汇总表格下载纵向发送(monkeypatch):
     """#195：汇总先发、表格逐条纵向展示，下载文件随后独立发送。"""
     import web.plan_renderer as renderer

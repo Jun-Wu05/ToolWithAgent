@@ -38,7 +38,7 @@ def _annotation_group(row) -> int:
     return 0 if row.event_name in THREAT_EVENT_NAMES else 1
 
 
-def _render_event_annotation_block(annotations) -> str:
+def _render_event_annotation_block(annotations, *, threat_pending: bool = False) -> str:
     """事件名称标注明细（#126）：以 Markdown 块渲染，位于映射表格上方。"""
     rows = [
         "🏷️ **事件名称标注**（自动写入，事件级别按绑定联动）",
@@ -53,8 +53,19 @@ def _render_event_annotation_block(annotations) -> str:
         else:
             event_name = "⚠️ 待人工确认"
             event_level = "—"
-        source_field = item.threat_source_field or "—"
-        threat_types = "、".join(item.threat_types) or "—"
+        threat_is_pending = (
+            threat_pending
+            and item.status == "judged"
+            and item.event_name in THREAT_EVENT_NAMES
+            and not item.threat_source_field
+            and not item.threat_types
+        )
+        source_field = (
+            "⏳ 生成中" if threat_is_pending else item.threat_source_field or "—"
+        )
+        threat_types = (
+            "⏳ 生成中" if threat_is_pending else "、".join(item.threat_types) or "—"
+        )
         cells = (
             item.rule_name,
             event_name,
@@ -145,21 +156,51 @@ async def render_decision(decision: PlanDecision) -> None:
     raise ValueError("执行决策不能直接渲染")
 
 
-async def render_execution_report(execution_report: ExecutionReport) -> None:
-    """先发送步骤汇总，再按顺序纵向发送表格和下载。"""
+def build_execution_report_content(
+    execution_report: ExecutionReport, *, threat_pending: bool = False
+) -> str:
+    """构造可原地刷新的报告正文，不创建表格、下载或动作元素。"""
     status_icon = {
         StepStatus.SUCCESS: "✅",
         StepStatus.NEEDS_INPUT: "💡",
         StepStatus.FAILED: "❌",
     }
     lines = []
+    for result in execution_report.results:
+        detail = result.message or result.error_code or result.status.value
+        lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
+        artifact = result.artifact
+        if artifact is None:
+            continue
+        if artifact.artifact_type == "field_mapping" and artifact.event_annotations:
+            _append_markdown_block(
+                lines,
+                _render_event_annotation_block(
+                    artifact.event_annotations, threat_pending=threat_pending
+                ),
+            )
+        elif artifact.artifact_type == "log_classification":
+            _append_markdown_block(
+                lines, render_log_parser_result(artifact.classification, None)
+            )
+    return f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines)
+
+
+async def update_execution_report_message(message, execution_report: ExecutionReport) -> None:
+    """仅用最终报告更新既有主消息，避免重复创建任何附件元素。"""
+    message.content = build_execution_report_content(execution_report)
+    await message.update()
+
+
+async def render_execution_report(
+    execution_report: ExecutionReport, *, threat_pending: bool = False
+):
+    """先发送步骤汇总，再按顺序纵向发送表格和下载，并返回主消息句柄。"""
     dataframe_elements, download_elements = [], []
     actions = _build_result_actions(execution_report)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     field_mapping_downloads: list[tuple[str, str, bytes]] = []
     for result in execution_report.results:
-        detail = result.message or result.error_code or result.status.value
-        lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
         artifact = result.artifact
         if artifact is None:
             continue
@@ -176,9 +217,6 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             dataframe_elements.extend(create_dataframe_elements(rows))
-            # 标注明细以内容块渲染，位于表格元素上方（#126 展示分离）
-            if artifact.event_annotations:
-                _append_markdown_block(lines, _render_event_annotation_block(artifact.event_annotations))
             if artifact.download_kind and artifact.download_content:
                 field_mapping_downloads.append(
                     (
@@ -222,7 +260,6 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 )
             )
         elif artifact.artifact_type == "log_classification":
-            _append_markdown_block(lines, render_log_parser_result(artifact.classification, None))
             download_elements.append(
                 cl.File(
                     name=_download_filename("log_classification", timestamp),
@@ -235,12 +272,15 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 )
             )
     message_kwargs = {
-        "content": f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
+        "content": build_execution_report_content(
+            execution_report, threat_pending=threat_pending
+        ),
         "elements": [],
     }
     if actions:
         message_kwargs["actions"] = actions
-    await cl.Message(**message_kwargs).send()
+    main_message = cl.Message(**message_kwargs)
+    await main_message.send()
 
     for element_group in (dataframe_elements, download_elements):
         for element in element_group:
@@ -289,3 +329,4 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             download_kind,
             file_name,
         )
+    return main_message
