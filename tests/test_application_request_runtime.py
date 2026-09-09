@@ -123,3 +123,119 @@ def test上一轮助手方案进入下一次planner历史() -> None:
             ),
         },
     ]
+
+
+def test显式威胁来源计划按当前配置编译为原子替换链(monkeypatch) -> None:
+    """Planner 只给语义四步时，运行时按已有威胁类型确定性补删除步骤。"""
+    from application import request_runtime
+    from application.session_state import SessionState
+    from contracts.planner_models import ExecutionReport, PlanDecision
+
+    class Planner:
+        async def plan(self, **_kwargs):
+            return PlanDecision.model_validate(
+                {
+                    "decision": "execute",
+                    "plan_id": "explicit-alarm-name",
+                    "steps": [
+                        {
+                            "step_id": "enum-1",
+                            "type": "enum_extract",
+                            "target_field": "alarm_name",
+                            "source_ref": "session.logs",
+                        },
+                        {
+                            "step_id": "threat-1",
+                            "type": "threat_mapping",
+                            "source_ref": "step:enum-1",
+                            "depends_on": ["enum-1"],
+                        },
+                        {
+                            "step_id": "add-1",
+                            "type": "add_fields",
+                            "field_name": "威胁类型",
+                            "field_value": "%{alarm_name}",
+                            "value_type": "reference",
+                            "rule_group": "threat",
+                            "config_ref": "session.mapped_sub_rules",
+                            "depends_on": ["threat-1"],
+                        },
+                        {
+                            "step_id": "fill-1",
+                            "type": "fill",
+                            "fill_kind": "threat",
+                            "target_fields": ["威胁类型"],
+                            "source_ref": "step:threat-1",
+                            "config_ref": "session.mapped_sub_rules",
+                            "depends_on": ["threat-1"],
+                        },
+                    ],
+                }
+            )
+
+    class Sink:
+        async def publish(self, _event):
+            pass
+
+    captured = {}
+
+    async def capture_execution(*, plan, **_kwargs):
+        captured["plan"] = plan
+        return ExecutionReport(plan_id=plan.plan_id, results=())
+
+    async def no_follow_up(*, report, **_kwargs):
+        return report
+
+    monkeypatch.setattr(
+        request_runtime, "_execute_plan_with_threat_transaction", capture_execution
+    )
+    monkeypatch.setattr(
+        request_runtime, "run_threat_chain_after_mapping", no_follow_up
+    )
+    session = SessionState(
+        raw_log_lines=["alarm_name=scan"],
+        mapped_sub_rules=[
+            {
+                "name": "threat-rule",
+                "normalize": [
+                    {"index": "alarm_name", "result": ["scan"]},
+                    {"index": "威胁类型", "mappings": []},
+                ],
+                "parser": {
+                    "filter": [
+                        {
+                            "name": "addFields",
+                            "id": "",
+                            "fields": {
+                                "事件名称": "网络攻击",
+                                "事件级别": "提醒",
+                                "威胁类型": "其他",
+                            },
+                        }
+                    ]
+                },
+            }
+        ],
+    )
+
+    asyncio.run(
+        request_runtime.run_user_request(
+            session=session,
+            team=None,
+            user_text="把 alarm_name 映射为威胁类型",
+            progress_sink=Sink(),
+            progress_plan_id="explicit-alarm-name",
+            planner=Planner(),
+        )
+    )
+
+    plan = captured["plan"]
+    assert [step.type for step in plan.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "delete_fields",
+        "add_fields",
+        "fill",
+    ]
+    assert plan.steps[0].target_field == "alarm_name"
+    assert plan.steps[3].field_value == "%{alarm_name}"

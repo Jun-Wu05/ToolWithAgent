@@ -11,6 +11,7 @@ import numpy as np
 
 from agent.core import field_retriever
 from application.threat_chain import (
+    compile_explicit_threat_plan,
     SESSION_OVERRIDE_KEY,
     run_threat_chain_after_mapping,
 )
@@ -614,6 +615,60 @@ def test显式指令全链成功后一次提交新配置(monkeypatch):
     assert session[SESSION_OVERRIDE_KEY] == "src_ip"
     for rule in session["mapped_sub_rules"]:
         assert _all_threat_bindings(rule) == ["%{src_ip}"]
+
+
+def test显式来源首次建链保持四步且不插入删除():
+    session = _chain_session()
+    skeleton = build_threat_chain_steps(
+        SourceFieldDecision("attack_type", 1.0, 2, "explicit"),
+        config_ref="session.mapped_sub_rules",
+    )
+
+    compiled = compile_explicit_threat_plan(
+        PlanDecision(
+            decision="execute",
+            plan_id="explicit-first-chain",
+            steps=skeleton.steps,
+        ),
+        session,
+    )
+
+    assert [step.type for step in compiled.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "add_fields",
+        "fill",
+    ]
+
+
+def test显式来源已有删除步骤时重新编译但不重复删除():
+    session = _chain_session()
+    for rule in session["mapped_sub_rules"]:
+        rule["normalize"].append({"index": "威胁类型", "mappings": []})
+        rule["parser"]["filter"][0]["fields"]["威胁类型"] = "其他"
+    skeleton = build_threat_chain_steps(
+        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        config_ref="session.mapped_sub_rules",
+        threat_field_state=THREAT_FIELD_CHAIN,
+    )
+
+    compiled = compile_explicit_threat_plan(
+        PlanDecision(
+            decision="execute",
+            plan_id="explicit-already-replace",
+            steps=skeleton.steps,
+        ),
+        session,
+    )
+
+    assert [step.type for step in compiled.steps].count("delete_fields") == 1
+    assert [step.type for step in compiled.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "delete_fields",
+        "add_fields",
+        "fill",
+    ]
 
 
 def test显式来源覆盖在指令链路成功后记录():

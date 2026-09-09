@@ -19,6 +19,7 @@ from typing import Any, Iterator
 
 from agent.core.field_retriever import batch_retrieve_candidates_table
 from agent.core.tracing import TraceContext
+from agent.shared.event_classify import THREAT_EVENT_NAMES
 from agent.shared.logger import get_logger
 from application.adapters.composition import create_default_adapters
 from application.adapters.shared import _session_get, _session_set
@@ -28,6 +29,7 @@ from application.progress import NullProgressSink
 from application.session_projection import build_session_facts
 from application.threat_chain_policy import (
     ChainTrigger,
+    SourceFieldDecision,
     ThreatChainPlan,
     build_threat_chain_steps,
     collect_threat_field_pools,
@@ -38,12 +40,15 @@ from application.threat_chain_policy import (
 from application.threat_report import refresh_report_event_annotations
 from contracts.planner_models import (
     AddFieldsStep,
+    DeleteFieldsStep,
+    EnumExtractStep,
     ExecutionReport,
     FillStep,
     PlanDecision,
     StepResult,
     StepStatus,
     StepSpec,
+    ThreatMappingStep,
     THREAT_TYPE_FIELD,
 )
 from contracts.progress import ProgressSink
@@ -102,6 +107,85 @@ def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
         for step in plan_steps
     )
     return has_generated_field and has_threat_fill
+
+
+def compile_explicit_threat_plan(plan: PlanDecision, session: Any) -> PlanDecision:
+    """把 Planner 的威胁来源语义骨架编译为匹配当前配置的确定性链路。"""
+    if plan.decision != "execute":
+        return plan
+    allowed = (
+        EnumExtractStep,
+        ThreatMappingStep,
+        DeleteFieldsStep,
+        AddFieldsStep,
+        FillStep,
+    )
+    if not plan.steps or any(not isinstance(step, allowed) for step in plan.steps):
+        return plan
+
+    enum_steps = [step for step in plan.steps if isinstance(step, EnumExtractStep)]
+    mapping_steps = [step for step in plan.steps if isinstance(step, ThreatMappingStep)]
+    add_steps = [
+        step
+        for step in plan.steps
+        if isinstance(step, AddFieldsStep)
+        and step.field_name == THREAT_TYPE_FIELD
+        and step.value_type == "reference"
+        and step.rule_group == "threat"
+    ]
+    fill_steps = [
+        step
+        for step in plan.steps
+        if isinstance(step, FillStep)
+        and step.fill_kind == "threat"
+        and step.target_fields == (THREAT_TYPE_FIELD,)
+    ]
+    delete_steps = [step for step in plan.steps if isinstance(step, DeleteFieldsStep)]
+    if not (
+        len(enum_steps) == len(mapping_steps) == len(add_steps) == len(fill_steps) == 1
+        and len(delete_steps) <= 1
+        and len(plan.steps) == 4 + len(delete_steps)
+    ):
+        return plan
+
+    enum_step, mapping_step = enum_steps[0], mapping_steps[0]
+    add_step, fill_step = add_steps[0], fill_steps[0]
+    if not (
+        mapping_step.source_ref == f"step:{enum_step.step_id}"
+        and add_step.field_value == f"%{{{enum_step.target_field}}}"
+        and fill_step.source_ref == f"step:{mapping_step.step_id}"
+        and add_step.config_ref == fill_step.config_ref == CHAIN_CONFIG_REF
+    ):
+        return plan
+
+    facts = build_session_facts(session)
+    threat_rule_names = tuple(
+        item.rule_name
+        for item in facts.event_annotations
+        if item.event_name in THREAT_EVENT_NAMES
+    )
+    if not threat_rule_names:
+        return plan
+    field_state = inspect_threat_field_state(
+        _session_get(session, "mapped_sub_rules"), threat_rule_names
+    )
+    compiled = build_threat_chain_steps(
+        SourceFieldDecision(
+            enum_step.target_field,
+            1.0,
+            len(threat_rule_names),
+            "explicit",
+        ),
+        config_ref=CHAIN_CONFIG_REF,
+        threat_field_state=field_state,
+    )
+    logger.info(
+        "[THREAT_CHAIN] 显式来源计划已编译: source=%s field_state=%s steps=%s",
+        enum_step.target_field,
+        field_state,
+        [step.type for step in compiled.steps],
+    )
+    return plan.model_copy(update={"steps": compiled.steps})
 
 
 @contextmanager
