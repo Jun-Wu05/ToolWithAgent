@@ -14,6 +14,7 @@ from application.history import append_history, typed_conversation_history
 from application.model_runtime import resolve_session_config
 from application.session_projection import build_session_facts
 from application.threat_chain import (
+    compile_explicit_threat_plan,
     commit_threat_chain_session,
     is_threat_type_replacement_plan,
     run_threat_chain_after_mapping,
@@ -233,6 +234,7 @@ async def _run_user_request_scoped(
         progress_sink=progress_sink,
         progress_plan_id=progress_plan_id,
     )
+    decision = compile_explicit_threat_plan(decision, session)
     logger.info(
         "[PLANNER] 决策完成: plan_id=%s decision=%s step_count=%s operations=%s",
         decision.plan_id,
