@@ -294,6 +294,24 @@ def _guard_cross_turn_threat_target(
     return decision
 
 
+def _normalize_threat_source_clarification(
+    decision: PlanDecision, session_facts: SessionFacts
+) -> PlanDecision:
+    """来源候选只取确定性会话事实，不展示模型生成的字段名。"""
+    if (
+        decision.decision != "clarification"
+        or decision.reason_code != "threat_source_required"
+    ):
+        return decision
+    candidates = session_facts.threat_source_fields
+    question = (
+        "请选择用于威胁类型映射的来源字段。"
+        if candidates
+        else "当前威胁子规则没有共同可用的来源字段，请先检查字段映射结果。"
+    )
+    return decision.model_copy(update={"question": question, "choices": candidates})
+
+
 class PlannerService:
     """封装 Planner 调用与失败关闭策略，任何异常都只返回安全追问。"""
 
@@ -396,6 +414,9 @@ class PlannerService:
                 session_facts,
             )
             decision = _guard_explicit_feature_field(user_text, decision)
+            decision = _normalize_threat_source_clarification(
+                decision, session_facts
+            )
             elapsed_seconds = time.monotonic() - started_at
             logger.info(
                 "[MODEL_CALL_END] Planner 模型调用完成: plan_id=%s provider=%s model=%s "

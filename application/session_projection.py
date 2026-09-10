@@ -5,6 +5,7 @@ from typing import Any
 
 from agent.shared.event_classify import (
     EVENT_NAME_LEVEL_BINDING,
+    THREAT_EVENT_NAMES,
     THREAT_TYPE_FIELD,
     read_entity_event_name,
 )
@@ -278,6 +279,23 @@ def _collect_event_annotations(config: Any) -> tuple[EventAnnotationFact, ...]:
     return tuple(facts)
 
 
+def _collect_threat_source_fields(
+    mapped_sub_rules: Any, annotations: tuple[EventAnnotationFact, ...]
+) -> tuple[str, ...]:
+    """返回覆盖所有威胁子规则的原始字段，保持首条规则中的字段顺序。"""
+    from application.threat_chain_policy import collect_threat_field_pools
+
+    threat_names = tuple(
+        item.rule_name for item in annotations if item.event_name in THREAT_EVENT_NAMES
+    )
+    pools = collect_threat_field_pools(mapped_sub_rules, threat_names)
+    if not threat_names or len(pools) != len(threat_names):
+        return ()
+    first = pools[threat_names[0]]
+    shared = set(first).intersection(*(set(pools[name]) for name in threat_names[1:]))
+    return tuple(field for field in first if field in shared and field != THREAT_TYPE_FIELD)
+
+
 def build_session_facts(session: Any) -> SessionFacts:
     """把会话状态投影为不可变安全快照；缺失状态按不可用处理。"""
     enum_preview = _read_session_value(session, "enum_preview", []) or []
@@ -289,6 +307,7 @@ def build_session_facts(session: Any) -> SessionFacts:
     available_fields, mappable_fields = _collect_field_pools(
         session, decoded_mapped_indices
     )
+    event_annotations = _collect_event_annotations(mapped_sub_rules)
     config_refs: tuple[ConfigRef, ...] = tuple(
         ref
         for ref, config in (
@@ -305,6 +324,9 @@ def build_session_facts(session: Any) -> SessionFacts:
         available_config_refs=config_refs,
         available_fields=available_fields,
         mappable_fields=mappable_fields,
+        threat_source_fields=_collect_threat_source_fields(
+            mapped_sub_rules, event_annotations
+        ),
         decoded_mapped_field_count=decoded_mapped_count,
         decoded_unmapped_field_count=decoded_unmapped_count,
         enum_mapping_target_fields=_collect_enum_target_fields(enum_preview),
@@ -314,6 +336,6 @@ def build_session_facts(session: Any) -> SessionFacts:
         mapped_sub_rule_count=len(mapped_sub_rules),
         mapped_sub_rule_names=_collect_rule_names(mapped_sub_rules),
         decoded_config_rule_names=_collect_rule_names(decoded_data),
-        event_annotations=_collect_event_annotations(mapped_sub_rules),
+        event_annotations=event_annotations,
         referenceable_artifacts=_referenceable_artifacts(session, config_refs),
     )

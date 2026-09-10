@@ -131,6 +131,8 @@ def test提示词按语义槽位识别威胁类型完整链路():
     """完整链路由来源、目标和值映射意图决定，不以固定措辞为门槛（#211）。"""
     for semantic_slot in ("`目标字段=威胁类型`", "`来源字段=X`", "`值映射意图`"):
         assert semantic_slot in PROMPT
+    assert "reason_code=threat_source_required" in PROMPT
+    assert "session_facts.threat_source_fields" in PROMPT
     for synonym in ("映射为", "作为来源", "根据", "转成", "改用"):
         assert synonym in PROMPT
     assert "不以“提取枚举值”等固定短语为必要条件" in PROMPT
