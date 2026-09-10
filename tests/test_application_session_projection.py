@@ -127,3 +127,34 @@ def test上传规则投影仅把未映射字段放入映射池() -> None:
     assert facts.mappable_fields == ("event_type", "threat_code")
     assert facts.decoded_mapped_field_count == 1
     assert facts.decoded_unmapped_field_count == 2
+
+
+def test威胁来源候选只来自所有威胁子规则共有的真实原始字段() -> None:
+    from application.session_projection import build_session_facts
+
+    def rule(name: str, event_name: str, indexes: list[str]) -> dict:
+        return {
+            "name": name,
+            "normalize": [{"index": index, "field": ""} for index in indexes],
+            "parser": {
+                "filter": [
+                    {
+                        "name": "addFields",
+                        "id": "",
+                        "fields": {"事件名称": event_name},
+                    }
+                ]
+            },
+        }
+
+    facts = build_session_facts(
+        {
+            "mapped_sub_rules": [
+                rule("threat-a", "网络攻击", ["alarm_name", "only_a", "威胁类型"]),
+                rule("normal", "审计事件", ["event_str"]),
+                rule("threat-b", "网络攻击", ["alarm_name", "only_b"]),
+            ]
+        }
+    )
+
+    assert facts.threat_source_fields == ("alarm_name",)

@@ -321,3 +321,56 @@ def test非执行决策也记录中文决策摘要(monkeypatch, caplog):
 
     assert "decision_cn=需要澄清 operations_cn=[]" in caplog.text
     assert "decision_cn=使用引导 operations_cn=[]" in caplog.text
+
+
+def test后续威胁链报告先刷新原主报告再渲染链路结果(monkeypatch):
+    """跨轮成功链必须更新既有五列表格，不新建第二张主报告。"""
+    import web.user_message_handlers as handlers
+
+    report = ExecutionReport(
+        plan_id="explicit-alarm-source",
+        results=(
+            StepResult(
+                step_id="threat-chain-fill",
+                operation_type="fill",
+                status="success",
+                changed_count=1,
+            ),
+        ),
+    )
+    events = []
+
+    class Ledger:
+        def begin_request(self):
+            return object()
+
+        async def finish_request(self, _sink):
+            events.append("finish")
+
+    async def run_request(**_kwargs):
+        return report
+
+    async def refresh_anchor(result, final_config):
+        events.append(("refresh", result, final_config))
+
+    async def render_report(result):
+        events.append(("render", result))
+
+    session = {"mapped_sub_rules": [{"name": "threat-rule"}]}
+    monkeypatch.setattr(handlers, "get_session_progress_sink", lambda: Ledger())
+    monkeypatch.setattr(handlers, "run_user_request", run_request)
+    monkeypatch.setattr(
+        handlers,
+        "refresh_primary_report_anchor",
+        refresh_anchor,
+        raising=False,
+    )
+    monkeypatch.setattr(handlers, "render_execution_report", render_report)
+
+    asyncio.run(handlers.handle_user_message(session, object(), "把 alarm_name 映射为威胁类型"))
+
+    assert events == [
+        ("refresh", report, session["mapped_sub_rules"]),
+        ("render", report),
+        "finish",
+    ]

@@ -6,7 +6,11 @@ from typing import Any, Sequence
 
 from web.chainlit_progress import get_session_progress_sink
 from application.request_runtime import run_deterministic_plan
-from web.plan_renderer import render_execution_report
+from web.plan_renderer import (
+    remember_primary_report,
+    render_execution_report,
+    update_execution_report_message,
+)
 from contracts.planner_models import ExecutionReport, PlanDecision, StepSpec
 
 
@@ -21,12 +25,13 @@ async def execute_deterministic_plan(
     progress_ledger = get_session_progress_sink()
     progress_sink = progress_ledger.begin_request()
     primary_result_count = 0
+    primary_message = None
 
     async def render_primary(report: ExecutionReport) -> None:
         """在威胁链续跑前渲染主报告并记录其结果边界。"""
-        nonlocal primary_result_count
+        nonlocal primary_result_count, primary_message
         primary_result_count = len(report.results)
-        await render_execution_report(report)
+        primary_message = await render_execution_report(report, threat_pending=True)
 
     try:
         report = await run_deterministic_plan(
@@ -36,6 +41,13 @@ async def execute_deterministic_plan(
             progress_sink=progress_sink,
             on_primary_report=render_primary,
         )
+        final_primary = ExecutionReport(
+            plan_id=report.plan_id,
+            results=report.results[:primary_result_count],
+        )
+        if primary_message is not None:
+            await update_execution_report_message(primary_message, final_primary)
+            remember_primary_report(primary_message, final_primary)
         follow_up_results = report.results[primary_result_count:]
         if follow_up_results:
             await render_execution_report(

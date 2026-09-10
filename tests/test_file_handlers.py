@@ -55,6 +55,7 @@ def _mount_message_capture(monkeypatch, captured):
             captured.append(self.content)
 
     monkeypatch.setattr(file_handlers.cl, "Message", _FakeMessage)
+    monkeypatch.setattr(file_handlers, "clear_primary_report_anchor", lambda: None)
 
 
 def _write_enum_workbook(path, sheets):
@@ -100,6 +101,10 @@ def test数据表格含原始日志列时正常提取日志行(monkeypatch):
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
+    cleared = []
+    monkeypatch.setattr(
+        file_handlers, "clear_primary_report_anchor", lambda: cleared.append(True)
+    )
     monkeypatch.setattr(
         pd,
         "read_excel",
@@ -120,6 +125,7 @@ def test数据表格含原始日志列时正常提取日志行(monkeypatch):
     assert session["raw_log_lines"] == ['<1>AUDIT: alarm_name="login"']
     assert session["decoded_fields"] == ["发生时间", "原始日志", "设备"]
     assert session["original_log"]
+    assert cleared == [True]
 
 
 def test有效配置上传原子替换旧日志数据集状态(monkeypatch):

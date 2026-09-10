@@ -13,12 +13,14 @@ application 请求运行时层后置检查标注结果，构造确定性四步�
 from __future__ import annotations
 
 import copy
+import re
 import time
 from contextlib import contextmanager
 from typing import Any, Iterator
 
 from agent.core.field_retriever import batch_retrieve_candidates_table
 from agent.core.tracing import TraceContext
+from agent.shared.event_classify import THREAT_EVENT_NAMES
 from agent.shared.logger import get_logger
 from application.adapters.composition import create_default_adapters
 from application.adapters.shared import _session_get, _session_set
@@ -28,6 +30,7 @@ from application.progress import NullProgressSink
 from application.session_projection import build_session_facts
 from application.threat_chain_policy import (
     ChainTrigger,
+    SourceFieldDecision,
     ThreatChainPlan,
     build_threat_chain_steps,
     collect_threat_field_pools,
@@ -35,14 +38,18 @@ from application.threat_chain_policy import (
     evaluate_chain_trigger,
     inspect_threat_field_state,
 )
+from application.threat_report import refresh_report_event_annotations
 from contracts.planner_models import (
     AddFieldsStep,
+    DeleteFieldsStep,
+    EnumExtractStep,
     ExecutionReport,
     FillStep,
     PlanDecision,
     StepResult,
     StepStatus,
     StepSpec,
+    ThreatMappingStep,
     THREAT_TYPE_FIELD,
 )
 from contracts.progress import ProgressSink
@@ -88,6 +95,11 @@ def commit_threat_chain_session(staged: Any, session: Any) -> None:
         _session_set(session, key, _session_get(staged, key))
 
 
+def set_threat_source_override(session: Any, source_field: str) -> None:
+    """记录已成功验证的威胁来源，供本会话后续自动链复用。"""
+    _session_set(session, SESSION_OVERRIDE_KEY, source_field)
+
+
 def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
     """识别同时包含生成字段与威胁填充的显式威胁全链。"""
     has_generated_field = any(
@@ -101,6 +113,91 @@ def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
         for step in plan_steps
     )
     return has_generated_field and has_threat_fill
+
+
+def compile_explicit_threat_plan(plan: PlanDecision, session: Any) -> PlanDecision:
+    """把 Planner 的威胁来源语义骨架编译为匹配当前配置的确定性链路。"""
+    if plan.decision not in {"execute", "proposal"}:
+        return plan
+    allowed = (
+        EnumExtractStep,
+        ThreatMappingStep,
+        DeleteFieldsStep,
+        AddFieldsStep,
+        FillStep,
+    )
+    if not plan.steps or any(not isinstance(step, allowed) for step in plan.steps):
+        return plan
+
+    enum_steps = [step for step in plan.steps if isinstance(step, EnumExtractStep)]
+    mapping_steps = [step for step in plan.steps if isinstance(step, ThreatMappingStep)]
+    add_steps = [
+        step
+        for step in plan.steps
+        if isinstance(step, AddFieldsStep)
+        and step.field_name == THREAT_TYPE_FIELD
+        and step.value_type == "reference"
+        and step.rule_group == "threat"
+    ]
+    fill_steps = [
+        step
+        for step in plan.steps
+        if isinstance(step, FillStep)
+        and step.fill_kind == "threat"
+        and step.target_fields == (THREAT_TYPE_FIELD,)
+    ]
+    delete_steps = [step for step in plan.steps if isinstance(step, DeleteFieldsStep)]
+    if not (
+        len(enum_steps) == len(mapping_steps) == len(add_steps) == len(fill_steps) == 1
+        and len(delete_steps) <= 1
+        and len(plan.steps) == 4 + len(delete_steps)
+    ):
+        return plan
+
+    enum_step, mapping_step = enum_steps[0], mapping_steps[0]
+    add_step, fill_step = add_steps[0], fill_steps[0]
+    if not (
+        mapping_step.source_ref == f"step:{enum_step.step_id}"
+        and add_step.field_value == f"%{{{enum_step.target_field}}}"
+        and fill_step.source_ref == f"step:{mapping_step.step_id}"
+        and add_step.config_ref == fill_step.config_ref == CHAIN_CONFIG_REF
+    ):
+        return plan
+
+    compiled = build_threat_source_plan(
+        session, enum_step.target_field, plan_id=plan.plan_id
+    )
+    if compiled is None:
+        return plan
+    logger.info(
+        "[THREAT_CHAIN] 显式来源计划已编译: source=%s steps=%s",
+        enum_step.target_field,
+        [step.type for step in compiled.steps],
+    )
+    return plan.model_copy(update={"steps": compiled.steps})
+
+
+def build_threat_source_plan(
+    session: Any, source_field: str, *, plan_id: str
+) -> PlanDecision | None:
+    """按当前真实配置为一个明确来源构造原子威胁类型链路。"""
+    facts = build_session_facts(session)
+    threat_rule_names = tuple(
+        item.rule_name
+        for item in facts.event_annotations
+        if item.event_name in THREAT_EVENT_NAMES
+    )
+    if not threat_rule_names:
+        return None
+    field_state = inspect_threat_field_state(
+        _session_get(session, "mapped_sub_rules"), threat_rule_names
+    )
+    chain = build_threat_chain_steps(
+        SourceFieldDecision(source_field, 1.0, len(threat_rule_names), "explicit"),
+        config_ref=CHAIN_CONFIG_REF,
+        threat_field_state=field_state,
+    )
+    return PlanDecision(decision="execute", plan_id=plan_id, steps=chain.steps)
 
 
 @contextmanager
@@ -155,7 +252,7 @@ def record_explicit_source_override(
             for result in report.results
         )
         if succeeded:
-            _session_set(session, SESSION_OVERRIDE_KEY, referenced)
+            set_threat_source_override(session, referenced)
             logger.info(
                 "[THREAT_CHAIN] S0 会话来源覆盖已记录: override=%s step_id=%s",
                 referenced,
@@ -168,6 +265,39 @@ def record_explicit_source_override(
 def _retrieve_source_candidates(fields: list[str]) -> dict[str, list[tuple[str, float, str, str]]]:
     """对字段池全量字段检索威胁类型候选（黑名单记录按需包含，#173 X 判定）。"""
     return batch_retrieve_candidates_table(fields, include_mapping_excluded=True)
+
+
+def rank_threat_source_candidates(
+    fields: tuple[str, ...], *, limit: int = 3
+) -> tuple[str, ...]:
+    """从真实共有字段中选最多三个候选，语义分优先、字段名只作破平。"""
+    ordered = tuple(dict.fromkeys(fields))
+    try:
+        table = _retrieve_source_candidates(list(ordered))
+    except Exception as error:  # noqa: BLE001 - 检索失败仍可用字段名稳定破平
+        logger.warning("[THREAT_CHAIN] 自动来源候选检索失败: %s", type(error).__name__)
+        table = {}
+    positive = {"alarm": 2, "name": 2, "event": 1, "attack": 1, "threat": 1, "type": 1}
+    negative = {"id", "ip", "port", "time", "timestamp", "count", "mac", "addr", "address"}
+
+    def score(item: tuple[int, str]) -> tuple[float, int, int]:
+        """返回语义、描述性和原始顺序组成的稳定降序键。"""
+        position, field = item
+        semantic = max(
+            (row[1] for row in table.get(field, ()) if row[0] == THREAT_TYPE_FIELD),
+            default=0.0,
+        )
+        tokens = {
+            re.sub(r"\d+$", "", token)
+            for token in re.split(r"[^a-z0-9]+", field.lower())
+            if token
+        }
+        lexical = sum(positive.get(token, 0) for token in tokens) - 2 * len(tokens & negative)
+        # ponytail: 字段名只用于零分破平；三次保险试跑不足时再引入值画像。
+        return semantic, lexical, -position
+
+    ranked = sorted(enumerate(ordered), key=score, reverse=True)
+    return tuple(field for _, field in ranked[:limit])
 
 
 def _determine_source(
@@ -286,6 +416,11 @@ async def _run_chain(
         list(trigger.uncertain_rule_names),
     )
     if trigger.hint_only:
+        report = refresh_report_event_annotations(
+            report,
+            _session_get(session, "mapped_sub_rules"),
+            chain_succeeded=False,
+        )
         return _extended_report(
             report,
             (
@@ -303,8 +438,11 @@ async def _run_chain(
             "[THREAT_CHAIN] S0 威胁子规则未在 mapped_sub_rules 中找到: rules=%s",
             list(trigger.threat_rule_names),
         )
+        refreshed = refresh_report_event_annotations(
+            report, mapped_rules, chain_succeeded=False
+        )
         return _extended_report(
-            report,
+            refreshed,
             (_summary_result("⚠️ 威胁类型链路未执行：威胁子规则状态异常（mapped_sub_rules 缺失）"),),
         )
 
@@ -351,8 +489,11 @@ async def _run_chain(
                 type(error).__name__,
                 CHAIN_PLAN_ID,
             )
+            refreshed = refresh_report_event_annotations(
+                report, mapped_rules, chain_succeeded=False
+            )
             return _extended_report(
-                report,
+                refreshed,
                 (
                     _summary_result(
                         f"⚠️ 威胁类型链路执行异常（{type(error).__name__}），"
@@ -363,6 +504,11 @@ async def _run_chain(
 
     if chain_report.status == StepStatus.SUCCESS:
         commit_threat_chain_session(staged_session, session)
+    report = refresh_report_event_annotations(
+        report,
+        _session_get(session, "mapped_sub_rules"),
+        chain_succeeded=chain_report.status == StepStatus.SUCCESS,
+    )
 
     # S6 汇总：只追加成功步骤行（失败不降级主报告状态），汇总行说明全貌
     elapsed = time.monotonic() - started

@@ -339,10 +339,16 @@ def test_submit_closes_dialog_immediately_without_awaiting_callback() -> None:
         Path(__file__).parents[1] / "public" / "elements" / "RuleSourceDialog.jsx"
     ).read_text(encoding="utf-8")
 
-    # 乐观关闭分支位于等待 callAction 之前
-    assert source.index("if (closeImmediately) await deleteElement();") < source.index(
-        "await callAction"
-    )
+    # React 本地状态保证下一次渲染先隐藏，不依赖宿主 deleteElement 完成。
+    assert "const [open, setOpen] = useState(true);" in source
+    assert "<Dialog open={open}" in source
+    close_index = source.index("setOpen(false);")
+    assert source.index("setSubmitting(true);") < close_index
+    assert close_index < source.index("await deleteElement();")
+    assert close_index < source.index("await callAction")
+    assert "if (submitting) return;" in source
+    assert "disabled={!valid || submitting}" in source
+    assert "setOpen(true)" not in source
     # 提交调用点显式开启乐观关闭
     assert re.search(
         r'finish\(\s*"submit_rule_source_fields",\s*\{[^}]*\},\s*true,', source

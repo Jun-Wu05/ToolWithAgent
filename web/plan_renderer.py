@@ -9,7 +9,9 @@ from datetime import datetime
 import chainlit as cl
 import pandas as pd
 
+from agent.shared.event_classify import THREAT_EVENT_NAMES
 from agent.shared.logger import get_logger
+from application.threat_report import refresh_report_event_annotations
 from web.parsers import create_dataframe_elements
 from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
 from web.utils import render_log_parser_result
@@ -17,20 +19,67 @@ from web.utils import render_log_parser_result
 
 logger = get_logger("plan_renderer")
 
+_THREAT_ENUM_STEP = "threat-chain-enum"
+_THREAT_MAPPING_STEP = "threat-chain-map"
+_THREAT_FILL_STEP = "threat-chain-fill"
+_PRIMARY_REPORT_ANCHOR_KEY = "primary_field_mapping_report"
 
-def _render_event_annotation_block(annotations) -> str:
+
+def _escape_markdown_cell(value: object) -> str:
+    """转义 GFM 表格动态单元格，并将换行保留为单元格内换行。"""
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", "<br>")
+    )
+
+
+def _annotation_group(row) -> int:
+    """威胁事件优先、普通事件随后、待确认状态最后。"""
+    if row.status == "uncertain":
+        return 2
+    return 0 if row.event_name in THREAT_EVENT_NAMES else 1
+
+
+def _render_event_annotation_block(annotations, *, threat_pending: bool = False) -> str:
     """事件名称标注明细（#126）：以 Markdown 块渲染，位于映射表格上方。"""
     rows = [
         "🏷️ **事件名称标注**（自动写入，事件级别按绑定联动）",
         "",
-        "| 子规则 | 事件名称 | 事件级别 |",
-        "| --- | --- | --- |",
+        "| 子规则 | 事件名称 | 事件级别 | 威胁来源字段 | 威胁类型 |",
+        "| --- | --- | --- | --- | --- |",
     ]
-    for item in annotations:
+    for item in sorted(annotations, key=_annotation_group):
         if item.status == "judged":
-            rows.append(f"| {item.rule_name} | {item.event_name} | {item.event_level} |")
+            event_name = item.event_name or "—"
+            event_level = item.event_level or "—"
         else:
-            rows.append(f"| {item.rule_name} | ⚠️ 待人工确认 | — |")
+            event_name = "⚠️ 待人工确认"
+            event_level = "—"
+        threat_is_pending = (
+            threat_pending
+            and item.status == "judged"
+            and item.event_name in THREAT_EVENT_NAMES
+            and not item.threat_source_field
+            and not item.threat_types
+        )
+        source_field = (
+            "⏳ 生成中" if threat_is_pending else item.threat_source_field or "—"
+        )
+        threat_types = (
+            "⏳ 生成中" if threat_is_pending else "、".join(item.threat_types) or "—"
+        )
+        cells = (
+            item.rule_name,
+            event_name,
+            event_level,
+            source_field,
+            threat_types,
+        )
+        rows.append("| " + " | ".join(_escape_markdown_cell(cell) for cell in cells) + " |")
     return "\n".join(rows)
 
 
@@ -68,6 +117,19 @@ def _download_filename(kind: str, timestamp: str) -> str:
     raise ValueError(f"不支持的下载产物类型: {kind}")
 
 
+def _threat_chain_download_step_ids(
+    execution_report: ExecutionReport,
+) -> set[str] | None:
+    """完整威胁链只公开映射表和最终配置；非该链路保持原下载策略。"""
+    result_by_id = {result.step_id: result for result in execution_report.results}
+    if not ({_THREAT_ENUM_STEP, _THREAT_MAPPING_STEP} & result_by_id.keys()):
+        return None
+    final = result_by_id.get(_THREAT_FILL_STEP)
+    if final is None or final.status != StepStatus.SUCCESS:
+        return set()
+    return {_THREAT_MAPPING_STEP, _THREAT_FILL_STEP}
+
+
 def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
     """根据成功产物挂载既有类型化动作，不在渲染器内执行领域逻辑。"""
     action_specs: list[tuple[str, str, str]] = []
@@ -97,6 +159,18 @@ def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
 
 async def render_decision(decision: PlanDecision) -> None:
     """渲染澄清或帮助决策；执行决策必须交给 PlanExecutor。"""
+    if decision.decision == "proposal":
+        steps = "\n".join(
+            f"{position}. `{step.type}`" for position, step in enumerate(decision.steps, 1)
+        )
+        choices = "\n".join(f"- {choice}" for choice in decision.choices)
+        await cl.Message(
+            content=(
+                f"📋 {decision.question}\n\n计划步骤：\n{steps}"
+                f"\n\n可选：\n{choices}"
+            )
+        ).send()
+        return
     if decision.decision == "clarification":
         choices = "\n".join(f"- {choice}" for choice in decision.choices)
         suffix = f"\n\n可选：\n{choices}" if choices else ""
@@ -110,28 +184,98 @@ async def render_decision(decision: PlanDecision) -> None:
             return
         await cl.Message(content="我可以处理日志类型提取、字段映射、枚举提取、威胁映射、填充、取消映射和导出。请说明目标与数据来源。").send()
         return
-    raise ValueError("执行决策不能直接渲染")
+    raise ValueError("执行或控制决策不能直接渲染")
 
 
-async def render_execution_report(execution_report: ExecutionReport) -> None:
-    """先发送步骤汇总，再按顺序纵向发送表格和下载。"""
+def build_execution_report_content(
+    execution_report: ExecutionReport, *, threat_pending: bool = False
+) -> str:
+    """构造可原地刷新的报告正文，不创建表格、下载或动作元素。"""
     status_icon = {
         StepStatus.SUCCESS: "✅",
         StepStatus.NEEDS_INPUT: "💡",
         StepStatus.FAILED: "❌",
     }
     lines = []
-    dataframe_elements, download_elements = [], []
-    actions = _build_result_actions(execution_report)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    field_mapping_downloads: list[tuple[str, str, bytes]] = []
     for result in execution_report.results:
         detail = result.message or result.error_code or result.status.value
         lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
         artifact = result.artifact
         if artifact is None:
             continue
+        if artifact.artifact_type == "field_mapping" and artifact.event_annotations:
+            _append_markdown_block(
+                lines,
+                _render_event_annotation_block(
+                    artifact.event_annotations, threat_pending=threat_pending
+                ),
+            )
+        elif artifact.artifact_type == "log_classification":
+            _append_markdown_block(
+                lines, render_log_parser_result(artifact.classification, None)
+            )
+    return f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines)
+
+
+async def update_execution_report_message(message, execution_report: ExecutionReport) -> None:
+    """仅用最终报告更新既有主消息，避免重复创建任何附件元素。"""
+    message.content = build_execution_report_content(execution_report)
+    await message.update()
+
+
+def remember_primary_report(message, execution_report: ExecutionReport) -> None:
+    """在当前 Chainlit 会话保存可跨轮更新的字段映射主报告。"""
+    cl.user_session.set(_PRIMARY_REPORT_ANCHOR_KEY, (message, execution_report))
+
+
+def clear_primary_report_anchor() -> None:
+    """主数据切换或清空时废弃旧报告锚点。"""
+    cl.user_session.set(_PRIMARY_REPORT_ANCHOR_KEY, None)
+
+
+async def refresh_primary_report_anchor(
+    execution_report: ExecutionReport, final_config
+) -> bool:
+    """威胁类型链路成功后用最终配置原地更新既有五列表格。"""
+    fill_succeeded = any(
+        result.step_id == _THREAT_FILL_STEP and result.status == StepStatus.SUCCESS
+        for result in execution_report.results
+    )
+    if not fill_succeeded:
+        return False
+    anchor = cl.user_session.get(_PRIMARY_REPORT_ANCHOR_KEY)
+    if not anchor:
+        return False
+    message, primary_report = anchor
+    refreshed = refresh_report_event_annotations(
+        primary_report,
+        final_config,
+        chain_succeeded=True,
+    )
+    await update_execution_report_message(message, refreshed)
+    remember_primary_report(message, refreshed)
+    return True
+
+
+async def render_execution_report(
+    execution_report: ExecutionReport, *, threat_pending: bool = False
+):
+    """先发送步骤汇总，再按顺序纵向发送表格和下载，并返回主消息句柄。"""
+    dataframe_elements, download_elements = [], []
+    actions = _build_result_actions(execution_report)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    field_mapping_downloads: list[tuple[str, str, bytes]] = []
+    threat_download_steps = _threat_chain_download_step_ids(execution_report)
+    for result in execution_report.results:
+        artifact = result.artifact
+        if artifact is None:
+            continue
+        download_allowed = (
+            threat_download_steps is None or result.step_id in threat_download_steps
+        )
         if artifact.artifact_type == "config_export":
+            if not download_allowed:
+                continue
             content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
             download_elements.append(
                 cl.File(
@@ -144,9 +288,6 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             dataframe_elements.extend(create_dataframe_elements(rows))
-            # 标注明细以内容块渲染，位于表格元素上方（#126 展示分离）
-            if artifact.event_annotations:
-                _append_markdown_block(lines, _render_event_annotation_block(artifact.event_annotations))
             if artifact.download_kind and artifact.download_content:
                 field_mapping_downloads.append(
                     (
@@ -158,39 +299,40 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
         elif artifact.artifact_type == "threat_mapping":
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             dataframe_elements.extend(create_dataframe_elements(rows))
-            dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
-            download_elements.append(
-                cl.File(
-                    name=_download_filename("threat_mapping", timestamp),
-                    content=output.getvalue(),
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            if download_allowed:
+                dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
+                download_elements.append(
+                    cl.File(
+                        name=_download_filename("threat_mapping", timestamp),
+                        content=output.getvalue(),
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
                 )
-            )
         elif artifact.artifact_type == "enum_values":
             # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
             rows = [{"枚举值": value} for value in artifact.values]
             dataframe_elements.extend(create_dataframe_elements(rows))
-            download_elements.append(
-                cl.File(
-                    name=_download_filename("enum_values", timestamp),
-                    content=json.dumps(
-                        {
-                            "field": artifact.field,
-                            "regex": artifact.regex,
-                            "original_log": list(artifact.original_log),
-                            "value": list(artifact.values),
-                        },
-                        ensure_ascii=False,
-                        indent=4,
-                    ).encode("utf-8"),
-                    mime="application/json",
+            if download_allowed:
+                download_elements.append(
+                    cl.File(
+                        name=_download_filename("enum_values", timestamp),
+                        content=json.dumps(
+                            {
+                                "field": artifact.field,
+                                "regex": artifact.regex,
+                                "original_log": list(artifact.original_log),
+                                "value": list(artifact.values),
+                            },
+                            ensure_ascii=False,
+                            indent=4,
+                        ).encode("utf-8"),
+                        mime="application/json",
+                    )
                 )
-            )
         elif artifact.artifact_type == "log_classification":
-            _append_markdown_block(lines, render_log_parser_result(artifact.classification, None))
             download_elements.append(
                 cl.File(
                     name=_download_filename("log_classification", timestamp),
@@ -203,12 +345,15 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
                 )
             )
     message_kwargs = {
-        "content": f"计划 `{execution_report.plan_id}` 执行结果：\n\n" + "\n".join(lines),
+        "content": build_execution_report_content(
+            execution_report, threat_pending=threat_pending
+        ),
         "elements": [],
     }
     if actions:
         message_kwargs["actions"] = actions
-    await cl.Message(**message_kwargs).send()
+    main_message = cl.Message(**message_kwargs)
+    await main_message.send()
 
     for element_group in (dataframe_elements, download_elements):
         for element in element_group:
@@ -257,3 +402,4 @@ async def render_execution_report(execution_report: ExecutionReport) -> None:
             download_kind,
             file_name,
         )
+    return main_message

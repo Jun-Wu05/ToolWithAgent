@@ -308,11 +308,19 @@ StepSpec = Annotated[
 
 
 class PlanDecision(StrictContract):
-    """表达 Planner 唯一允许返回的执行、澄清或帮助决策。"""
+    """表达 Planner 唯一允许返回的执行、授权控制、澄清或帮助决策。"""
 
-    decision: Literal["execute", "clarification", "guidance"]
+    decision: Literal[
+        "execute",
+        "proposal",
+        "confirm",
+        "cancel",
+        "clarification",
+        "guidance",
+    ]
     plan_id: str = Field(default="pending", min_length=1)
     steps: tuple[StepSpec, ...] = ()
+    pending_plan_id: str | None = Field(default=None, min_length=1)
     reason_code: str | None = None
     question: str | None = None
     choices: tuple[str, ...] = ()
@@ -326,12 +334,40 @@ class PlanDecision(StrictContract):
         if self.decision == "execute":
             if not self.steps:
                 raise ValueError("执行决策至少需要一个步骤")
-            if self.question or self.guidance_code or self.answer:
+            if self.pending_plan_id or self.question or self.guidance_code or self.answer:
                 raise ValueError("执行决策不能同时携带澄清、帮助或作答字段")
+        elif self.decision == "proposal":
+            if (
+                not self.steps
+                or not self.reason_code
+                or not self.question
+                or not self.choices
+                or self.pending_plan_id
+                or self.guidance_code
+                or self.answer
+            ):
+                raise ValueError("提案必须包含步骤、原因、问题和选项，且不能引用待执行计划")
+        elif self.decision in {"confirm", "cancel"}:
+            if (
+                not self.pending_plan_id
+                or self.steps
+                or self.reason_code
+                or self.question
+                or self.choices
+                or self.guidance_code
+                or self.answer
+            ):
+                raise ValueError("确认或取消只能引用待执行计划，不能携带计划或展示字段")
         elif self.decision == "clarification":
-            if self.steps or self.answer or not self.question or not self.reason_code:
+            if (
+                self.steps
+                or self.pending_plan_id
+                or self.answer
+                or not self.question
+                or not self.reason_code
+            ):
                 raise ValueError("澄清决策必须包含原因和问题，且不能包含步骤或作答")
-        elif self.steps or not (self.guidance_code or self.answer):
+        elif self.steps or self.pending_plan_id or not (self.guidance_code or self.answer):
             raise ValueError("帮助决策必须包含 guidance_code 或 answer，且不能包含步骤")
 
         seen_step_ids: set[str] = set()
@@ -346,6 +382,18 @@ class PlanDecision(StrictContract):
                 )
             seen_step_ids.add(step.step_id)
         return self
+
+
+class PendingPlan(StrictContract):
+    """保存等待用户确认的一次性类型化计划及其事实版本。"""
+
+    plan_id: str = Field(min_length=1)
+    steps: tuple[StepSpec, ...] = Field(min_length=1)
+    session_facts_digest: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
 class StepStatus(str, Enum):
@@ -401,11 +449,13 @@ class FieldMappingRow(StrictContract):
 
 
 class EventAnnotationRow(StrictContract):
-    """一条子规则的事件名称标注明细（待人工确认行 event_name 为空）。"""
+    """一条子规则的事件标注及最终威胁链报告明细。"""
 
     rule_name: str = Field(min_length=1)
     event_name: str = ""
     event_level: str = ""
+    threat_source_field: str = ""
+    threat_types: tuple[str, ...] = ()
     status: Literal["judged", "uncertain"] = "judged"
 
 

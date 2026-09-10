@@ -11,6 +11,8 @@ import numpy as np
 
 from agent.core import field_retriever
 from application.threat_chain import (
+    compile_explicit_threat_plan,
+    rank_threat_source_candidates,
     SESSION_OVERRIDE_KEY,
     run_threat_chain_after_mapping,
 )
@@ -115,6 +117,30 @@ _FULL_MAPPING = json.dumps(
 )
 
 
+def test自动来源候选复用检索并优先描述字段(monkeypatch):
+    """高相似数字类型可先试，但描述型 alarm_name 必须进入三候选。"""
+    monkeypatch.setattr(
+        "application.threat_chain._retrieve_source_candidates",
+        lambda fields: {
+            field: [
+                (
+                    "威胁类型",
+                    1.0 if field == "threat_type" else 0.0,
+                    "threat_type",
+                    "",
+                )
+            ]
+            for field in fields
+        },
+    )
+
+    ranked = rank_threat_source_candidates(
+        ("accuracy", "action", "alarm_name", "event_type1", "threat_type", "src_ip")
+    )
+
+    assert ranked == ("threat_type", "alarm_name", "event_type1")
+
+
 def _mock_retrieval(monkeypatch) -> None:
     """候选检索假件：攻击字段与威胁类型记录同向（高分命中）。"""
     records = [{"系统属性名称": "威胁类型", "字段名称": "threat_type"}]
@@ -199,8 +225,8 @@ def test自动链路全链成功并追加汇总行(monkeypatch):
 
     extended = _run(report, session, _Team(_ThreatMember(_FULL_MAPPING)))
 
-    # 主报告结果保持不变，末尾追加链路成功步骤 + 🔗 汇总
-    assert extended.results[0] is report.results[0]
+    # 主报告映射内容保持不变，标注行用最终配置刷新；末尾追加链路成功步骤 + 🔗 汇总
+    assert extended.results[0].artifact.mappings == report.results[0].artifact.mappings
     summary = extended.results[-1]
     assert summary.step_id == "threat-chain"
     assert summary.message.startswith("🔗 威胁类型链路已自动完成")
@@ -217,6 +243,27 @@ def test自动链路全链成功并追加汇总行(monkeypatch):
         assert _threat_binding(rule) == "%{attack_type}"
 
 
+def test成功链路用提交后的最终配置刷新事件标注行(monkeypatch):
+    """字段映射 artifact 不得继续携带链路前缺少威胁结果的旧行。"""
+    _mock_retrieval(monkeypatch)
+    _mock_enum_llm(monkeypatch)
+    session = _chain_session()
+    session["mapped_sub_rules"][0]["normalize"][0]["result"] = ["暴力破解"]
+    session["mapped_sub_rules"][1]["normalize"][0]["result"] = ["端口扫描"]
+
+    extended = _run(_mapping_report(), session, _Team(_ThreatMember(_FULL_MAPPING)))
+
+    artifact = extended.results[0].artifact
+    assert [row.threat_source_field for row in artifact.event_annotations] == [
+        "attack_type",
+        "attack_type",
+    ]
+    assert [row.threat_types for row in artifact.event_annotations] == [
+        ("暴力破解",),
+        ("端口扫描",),
+    ]
+
+
 def test链路失败不阻塞字段映射成功报告(monkeypatch):
     """枚举正则生成失败 → 链路 ⚠️，主报告结果与状态不变。"""
     _mock_retrieval(monkeypatch)
@@ -230,6 +277,11 @@ def test链路失败不阻塞字段映射成功报告(monkeypatch):
     summary = extended.results[-1]
     assert summary.message.startswith("⚠️ 威胁类型链路未完全成功")
     assert "字段映射结果不受影响" in summary.message
+    annotations = extended.results[0].artifact.event_annotations
+    assert [row.threat_types for row in annotations] == [
+        ("⚠️ 未生成",),
+        ("⚠️ 未生成",),
+    ]
 
 
 def test全部待确认时只提示不跑链路():
@@ -342,6 +394,12 @@ def test已有引用链路降级时整体替换为唯一固定值(monkeypatch):
     degraded = _run(_mapping_report(), session, team)
 
     assert degraded.results[-1].message.startswith("🔗")
+    annotations = degraded.results[0].artifact.event_annotations
+    assert [row.threat_source_field for row in annotations] == [
+        "—（固定值）",
+        "—（固定值）",
+    ]
+    assert [row.threat_types for row in annotations] == [("其他",), ("其他",)]
     for rule in session["mapped_sub_rules"]:
         assert _all_threat_bindings(rule) == ["其他"]
         generated = [
@@ -582,6 +640,93 @@ def test显式指令全链成功后一次提交新配置(monkeypatch):
     assert session[SESSION_OVERRIDE_KEY] == "src_ip"
     for rule in session["mapped_sub_rules"]:
         assert _all_threat_bindings(rule) == ["%{src_ip}"]
+        for filter_item in rule["parser"]["filter"]:
+            if filter_item.get("name") == "removeFields":
+                assert "威胁类型" not in filter_item.get("fields", [])
+
+
+def test显式来源首次建链保持四步且不插入删除():
+    session = _chain_session()
+    skeleton = build_threat_chain_steps(
+        SourceFieldDecision("attack_type", 1.0, 2, "explicit"),
+        config_ref="session.mapped_sub_rules",
+    )
+
+    compiled = compile_explicit_threat_plan(
+        PlanDecision(
+            decision="execute",
+            plan_id="explicit-first-chain",
+            steps=skeleton.steps,
+        ),
+        session,
+    )
+
+    assert [step.type for step in compiled.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "add_fields",
+        "fill",
+    ]
+
+
+def test显式来源已有删除步骤时重新编译但不重复删除():
+    session = _chain_session()
+    for rule in session["mapped_sub_rules"]:
+        rule["normalize"].append({"index": "威胁类型", "mappings": []})
+        rule["parser"]["filter"][0]["fields"]["威胁类型"] = "其他"
+    skeleton = build_threat_chain_steps(
+        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        config_ref="session.mapped_sub_rules",
+        threat_field_state=THREAT_FIELD_CHAIN,
+    )
+
+    compiled = compile_explicit_threat_plan(
+        PlanDecision(
+            decision="execute",
+            plan_id="explicit-already-replace",
+            steps=skeleton.steps,
+        ),
+        session,
+    )
+
+    assert [step.type for step in compiled.steps].count("delete_fields") == 1
+    assert [step.type for step in compiled.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "delete_fields",
+        "add_fields",
+        "fill",
+    ]
+
+
+def test待确认威胁提案在保存前完成相同编译():
+    session = _chain_session()
+    for rule in session["mapped_sub_rules"]:
+        rule["normalize"].append({"index": "威胁类型", "mappings": []})
+        rule["parser"]["filter"][0]["fields"]["威胁类型"] = "其他"
+    skeleton = build_threat_chain_steps(
+        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        config_ref="session.mapped_sub_rules",
+    )
+    proposal = PlanDecision(
+        decision="proposal",
+        plan_id="proposal-replace",
+        reason_code="confirmation_required",
+        question="是否执行？",
+        choices=("确认执行", "取消"),
+        steps=skeleton.steps,
+    )
+
+    compiled = compile_explicit_threat_plan(proposal, session)
+
+    assert compiled.decision == "proposal"
+    assert [step.type for step in compiled.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "delete_fields",
+        "add_fields",
+        "fill",
+    ]
 
 
 def test显式来源覆盖在指令链路成功后记录():

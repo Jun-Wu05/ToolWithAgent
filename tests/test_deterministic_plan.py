@@ -31,7 +31,7 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
             assert finished_sink is request_sink
             lifecycle.append("finish")
 
-    async def capture_render(report):
+    async def capture_render(report, *, threat_pending=False):
         """记录交给渲染器的执行报告。"""
         captured["report"] = report
         captured["render_count"] = captured.get("render_count", 0) + 1
@@ -164,10 +164,17 @@ def test应用入口在慢速威胁链前发布主报告且保持合并返回(mo
 
 
 def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
-    """#213：慢速续跑不阻塞主报告，最终渲染不重复字段映射结果。"""
+    """#213/#210：慢速续跑后原地刷新主报告且不重复字段映射产物。"""
     import application.request_runtime as runtime
     import web.deterministic_plan as deterministic_plan
-    from contracts.planner_models import ExecutionReport, FieldMappingStep, StepResult
+    from contracts.planner_models import (
+        EventAnnotationRow,
+        ExecutionReport,
+        FieldMappingArtifact,
+        FieldMappingRow,
+        FieldMappingStep,
+        StepResult,
+    )
 
     primary = ExecutionReport(
         plan_id="det-web-primary-first",
@@ -177,8 +184,42 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
                 operation_type="field_mapping",
                 status=StepStatus.SUCCESS,
                 message="字段映射完成",
+                artifact=FieldMappingArtifact(
+                    item_count=1,
+                    mappings=(
+                        FieldMappingRow(
+                            original_field="alarm_name",
+                            standard_field="设备名称",
+                            match_status="匹配成功",
+                        ),
+                    ),
+                    event_annotations=(
+                        EventAnnotationRow(
+                            rule_name="threat-rule",
+                            event_name="网络攻击",
+                            event_level="提醒",
+                        ),
+                    ),
+                ),
             ),
         ),
+    )
+    refreshed_primary = primary.results[0].model_copy(
+        update={
+            "artifact": primary.results[0].artifact.model_copy(
+                update={
+                    "event_annotations": (
+                        EventAnnotationRow(
+                            rule_name="threat-rule",
+                            event_name="网络攻击",
+                            event_level="提醒",
+                            threat_source_field="—（固定值）",
+                            threat_types=("其他",),
+                        ),
+                    )
+                }
+            )
+        }
     )
     follow_up = StepResult(
         step_id="threat-chain",
@@ -190,6 +231,8 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
     allow_chain_finish = asyncio.Event()
     execution_count = 0
     rendered = []
+    updated = []
+    anchored = []
     lifecycle = []
 
     class _FakeLedger:
@@ -208,15 +251,38 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
     async def fake_chain(*, report, **_kwargs):
         chain_started.set()
         await allow_chain_finish.wait()
-        return ExecutionReport(plan_id=report.plan_id, results=report.results + (follow_up,))
+        return ExecutionReport(
+            plan_id=report.plan_id, results=(refreshed_primary, follow_up)
+        )
 
-    async def capture_render(report):
-        rendered.append(report)
+    message_handle = object()
+
+    async def capture_render(report, *, threat_pending=False):
+        rendered.append((report, threat_pending))
+        return message_handle
+
+    async def capture_update(message, report):
+        updated.append((message, report))
+
+    def capture_anchor(message, report):
+        anchored.append((message, report))
 
     monkeypatch.setattr(runtime, "_execute_plan_with_threat_transaction", fake_execute)
     monkeypatch.setattr(runtime, "run_threat_chain_after_mapping", fake_chain)
     monkeypatch.setattr(deterministic_plan, "get_session_progress_sink", lambda: _FakeLedger())
     monkeypatch.setattr(deterministic_plan, "render_execution_report", capture_render)
+    monkeypatch.setattr(
+        deterministic_plan,
+        "update_execution_report_message",
+        capture_update,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        deterministic_plan,
+        "remember_primary_report",
+        capture_anchor,
+        raising=False,
+    )
     step = FieldMappingStep(
         step_id="field-mapping",
         type="field_mapping",
@@ -231,12 +297,22 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
         )
         await asyncio.wait_for(chain_started.wait(), timeout=1)
         assert execution_count == 1
-        assert rendered == [primary]
+        assert rendered == [(primary, True)]
         assert not task.done()
         allow_chain_finish.set()
         await task
 
     asyncio.run(scenario())
 
-    assert [report.results for report in rendered] == [primary.results, (follow_up,)]
+    assert updated == [
+        (
+            message_handle,
+            ExecutionReport(plan_id=primary.plan_id, results=(refreshed_primary,)),
+        )
+    ]
+    assert rendered == [
+        (primary, True),
+        (ExecutionReport(plan_id=primary.plan_id, results=(follow_up,)), False),
+    ]
     assert lifecycle == ["begin", "finish"]
+    assert anchored == updated

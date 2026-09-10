@@ -17,7 +17,13 @@ from pydantic import ValidationError
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_planner_prompt
 from agent.shared.logger import get_logger
-from contracts.planner_models import ConversationTurn, FillStep, LogParseStep, PlanDecision
+from contracts.planner_models import (
+    ConversationTurn,
+    FillStep,
+    LogParseStep,
+    PendingPlan,
+    PlanDecision,
+)
 from application.progress import NullProgressSink
 from contracts.progress import (
     ProgressEvent,
@@ -60,12 +66,21 @@ def build_planner_input(
     user_text: str,
     conversation_history: Sequence[ConversationTurn],
     session_facts: SessionFacts,
+    pending_plan: PendingPlan | None = None,
 ) -> str:
     """构建仅含用户原文、有限历史和安全事实的 Planner 输入。"""
     payload = {
         "user_text": user_text,
         "conversation_history": _limited_history(conversation_history),
         "session_facts": session_facts.model_dump(mode="json"),
+        "pending_plan": (
+            {
+                "plan_id": pending_plan.plan_id,
+                "operations": [step.type for step in pending_plan.steps],
+            }
+            if pending_plan
+            else None
+        ),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -114,6 +129,7 @@ _PLAN_DECISION_KEYS = frozenset(
         "decision",
         "plan_id",
         "steps",
+        "pending_plan_id",
         "reason_code",
         "question",
         "choices",
@@ -209,7 +225,7 @@ def _guard_explicit_feature_field(user_text: str, decision: PlanDecision) -> Pla
     只判短语族存在与参数缺席的矛盾组合，不从中文文本抽取字段名；
     字段识别始终是 Planner 模型的职责（PRD #110「显式意图确定性守卫」）。
     """
-    if decision.decision != "execute":
+    if decision.decision not in {"execute", "proposal"}:
         return decision
     if not _EXPLICIT_FEATURE_FIELD_PHRASE_RE.search(user_text):
         return decision
@@ -237,7 +253,7 @@ def _guard_cross_turn_threat_target(
     session_facts: SessionFacts,
 ) -> PlanDecision:
     """阻止 Planner 把用户点名的冲突字段静默改写为产物绑定字段。"""
-    if decision.decision != "execute":
+    if decision.decision not in {"execute", "proposal"}:
         return decision
     threat_fact = next(
         (
@@ -294,6 +310,47 @@ def _guard_cross_turn_threat_target(
     return decision
 
 
+_AUTO_THREAT_SOURCE_RE = re.compile(
+    r"(?:选择|挑选|推荐)[^，。;；]{0,20}(?:合适|最佳|适合)[^，。;；]{0,20}字段"
+)
+
+
+def _normalize_threat_source_clarification(
+    user_text: str, decision: PlanDecision, session_facts: SessionFacts
+) -> PlanDecision:
+    """统一威胁来源提示，禁止把完整字段池作为推荐列表展示。"""
+    if decision.decision != "clarification":
+        return decision
+    auto_requested = decision.reason_code == "threat_source_auto_requested" or (
+        decision.reason_code == "threat_source_required"
+        and _AUTO_THREAT_SOURCE_RE.search(user_text)
+    )
+    if auto_requested:
+        return decision.model_copy(
+            update={
+                "reason_code": "threat_source_auto_requested",
+                "question": "正在从真实字段中自动选择威胁类型来源。",
+                "choices": (),
+            }
+        )
+    if decision.reason_code == "threat_source_not_found":
+        requested = decision.parameters.get("requested_field", "").replace("`", "").strip()
+        question = (
+            f"字段 `{requested}` 不存在于当前威胁子规则，未执行。"
+            if requested
+            else "指定字段不存在于当前威胁子规则，未执行。"
+        )
+        return decision.model_copy(update={"question": question, "choices": ()})
+    if decision.reason_code != "threat_source_required":
+        return decision
+    question = (
+        "请明确用于威胁类型映射的来源字段。"
+        if session_facts.threat_source_fields
+        else "当前威胁子规则没有共同可用的来源字段，请先检查字段映射结果。"
+    )
+    return decision.model_copy(update={"question": question, "choices": ()})
+
+
 class PlannerService:
     """封装 Planner 调用与失败关闭策略，任何异常都只返回安全追问。"""
 
@@ -320,11 +377,17 @@ class PlannerService:
         user_text: str,
         conversation_history: Sequence[ConversationTurn],
         session_facts: SessionFacts,
+        pending_plan: PendingPlan | None = None,
         progress_sink: ProgressSink | None = None,
         progress_plan_id: str = "planning",
     ) -> PlanDecision:
         """调用 Planner 一次；服务或结构失败时拒绝执行并返回明确追问。"""
-        planner_input = build_planner_input(user_text, conversation_history, session_facts)
+        planner_input = build_planner_input(
+            user_text,
+            conversation_history,
+            session_facts,
+            pending_plan,
+        )
         runner = self._get_runner()
         sink = progress_sink or NullProgressSink()
         started_at = time.monotonic()
@@ -396,6 +459,9 @@ class PlannerService:
                 session_facts,
             )
             decision = _guard_explicit_feature_field(user_text, decision)
+            decision = _normalize_threat_source_clarification(
+                user_text, decision, session_facts
+            )
             elapsed_seconds = time.monotonic() - started_at
             logger.info(
                 "[MODEL_CALL_END] Planner 模型调用完成: plan_id=%s provider=%s model=%s "

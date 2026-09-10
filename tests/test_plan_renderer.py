@@ -198,6 +198,41 @@ def test帮助决策渲染能力说明(monkeypatch):
     assert "字段映射" in sent[0]
 
 
+def test提案只渲染只读步骤和确认选项(monkeypatch):
+    import web.plan_renderer as renderer
+    from contracts.planner_models import PlanDecision
+
+    sent = []
+
+    class _Message:
+        def __init__(self, content, elements=None):
+            self.content = content
+            self.elements = elements or []
+
+        async def send(self):
+            sent.append((self.content, self.elements))
+
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+    proposal = PlanDecision.model_validate(
+        {
+            "decision": "proposal",
+            "plan_id": "proposal-log",
+            "reason_code": "confirmation_required",
+            "question": "将识别日志类型，是否执行？",
+            "choices": ["确认执行", "取消"],
+            "steps": [{"step_id": "log-1", "type": "log_parse"}],
+        }
+    )
+
+    asyncio.run(renderer.render_decision(proposal))
+
+    assert len(sent) == 1
+    assert "计划步骤" in sent[0][0]
+    assert "`log_parse`" in sent[0][0]
+    assert "确认执行" in sent[0][0]
+    assert sent[0][1] == []
+
+
 def _mount_chainlit_captures(monkeypatch, renderer):
     """挂载 Chainlit 消息/表格/文件捕获桩，返回 captured 字典。"""
     captured = {"dataframes": [], "files": [], "messages": []}
@@ -663,9 +698,53 @@ def test表格块与步骤bullet之间用空行分隔(monkeypatch):
     # 标注表格块与其前面的 bullet 之间有空行
     assert "（field_mapping）：字段映射完成\n\n🏷️" in content
     # 表格块与其后继 bullet 之间有空行（表格不被吞进列表项）
-    assert "| r1 | 网络攻击 | 提醒 |\n\n- ✅ `log-1`" in content
+    assert "| r1 | 网络攻击 | 提醒 | — | — |\n\n- ✅ `log-1`" in content
     # 日志分类详情块首行与其前面的 bullet 之间有空行
     assert "（log_parse）：步骤执行成功\n\n## 🔍 日志解析结果" in content
+
+
+def test威胁链等待期间只把空白威胁列显示为生成中():
+    from web.plan_renderer import build_execution_report_content
+    from contracts.planner_models import (
+        EventAnnotationRow,
+        ExecutionReport,
+        FieldMappingArtifact,
+        StepResult,
+        StepStatus,
+    )
+
+    report = ExecutionReport(
+        plan_id="pending-threat-report",
+        results=(
+            StepResult(
+                step_id="field-mapping",
+                operation_type="field_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=FieldMappingArtifact(
+                    item_count=0,
+                    mappings=(),
+                    event_annotations=(
+                        EventAnnotationRow(
+                            rule_name="threat-rule",
+                            event_name="网络攻击",
+                            event_level="提醒",
+                        ),
+                        EventAnnotationRow(
+                            rule_name="normal-rule",
+                            event_name="审计事件",
+                            event_level="信息",
+                        ),
+                    ),
+                ),
+                message="字段映射完成",
+            ),
+        ),
+    )
+
+    content = build_execution_report_content(report, threat_pending=True)
+
+    assert "| threat-rule | 网络攻击 | 提醒 | ⏳ 生成中 | ⏳ 生成中 |" in content
+    assert "| normal-rule | 审计事件 | 信息 | — | — |" in content
 
 
 def test多产物复合计划按汇总表格下载纵向发送(monkeypatch):
@@ -740,6 +819,118 @@ def test多产物复合计划按汇总表格下载纵向发送(monkeypatch):
     }
 
 
+def test完整威胁链成功后只下载映射表和最终配置(monkeypatch):
+    import web.plan_renderer as renderer
+    from contracts.planner_models import (
+        ConfigExportArtifact,
+        EnumValuesArtifact,
+        ExecutionReport,
+        StepResult,
+        StepStatus,
+        ThreatMappingArtifact,
+        ThreatMappingRow,
+    )
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 9, 10, 9, 30)),
+    )
+
+    def config_result(step_id: str, operation_type: str, content: str, kind: str):
+        return StepResult(
+            step_id=step_id,
+            operation_type=operation_type,
+            status=StepStatus.SUCCESS,
+            artifact=ConfigExportArtifact(
+                item_count=1, content=content, download_kind=kind
+            ),
+            message="步骤执行成功",
+        )
+
+    report = ExecutionReport(
+        plan_id="plan-threat-chain",
+        results=(
+            StepResult(
+                step_id="threat-chain-enum",
+                operation_type="enum_extract",
+                status=StepStatus.SUCCESS,
+                artifact=EnumValuesArtifact(item_count=1, values=("scan",)),
+                message="步骤执行成功",
+            ),
+            StepResult(
+                step_id="threat-chain-map",
+                operation_type="threat_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=ThreatMappingArtifact(
+                    item_count=1,
+                    mappings=(
+                        ThreatMappingRow(
+                            mappingType="EQUAL",
+                            orgValue="scan",
+                            mappingValue="扫描",
+                        ),
+                    ),
+                ),
+                message="步骤执行成功",
+            ),
+            config_result(
+                "threat-chain-replace", "delete_fields", "after-delete", "field_adjusted_config"
+            ),
+            config_result(
+                "threat-chain-add", "add_fields", "after-add", "field_adjusted_config"
+            ),
+            config_result(
+                "threat-chain-fill", "fill", "final-config", "threatmapping_config"
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert {item["name"] for item in captured["files"]} == {
+        "threatmapping_20260910_0930.xlsx",
+        "threatmapping_config_20260910_0930.txt",
+    }
+
+
+def test威胁链失败时不下载已产生的中间文件(monkeypatch):
+    import web.plan_renderer as renderer
+    from contracts.planner_models import (
+        EnumValuesArtifact,
+        ExecutionReport,
+        StepResult,
+        StepStatus,
+    )
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-threat-chain-failed",
+        results=(
+            StepResult(
+                step_id="threat-chain-enum",
+                operation_type="enum_extract",
+                status=StepStatus.SUCCESS,
+                artifact=EnumValuesArtifact(item_count=1, values=("scan",)),
+                message="步骤执行成功",
+            ),
+            StepResult(
+                step_id="threat-chain-map",
+                operation_type="threat_mapping",
+                status=StepStatus.FAILED,
+                error_code="threat_mapping_failed",
+                message="映射失败",
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert captured["files"] == []
+    assert len(captured["dataframes"]) == 1
+
+
 def test无产物报告只发送汇总消息(monkeypatch):
     """#195：没有表格或下载产物时，不生成空的附加消息。"""
     import web.plan_renderer as renderer
@@ -799,3 +990,86 @@ def test信息型作答渲染为guidance答案而非能力说明(monkeypatch):
     assert captured["messages"][0].startswith("📖 当前子规则事件标注")
     assert "AUDIT_kv_子规则=审计事件（信息）" in captured["messages"][0]
     assert "我可以处理" in captured["messages"][1]
+
+
+def test跨轮报告锚点更新同一消息且保存最终表(monkeypatch):
+    """成功威胁填充只更新原消息，供下一轮继续复用同一锚点。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import (
+        EventAnnotationRow,
+        ExecutionReport,
+        FieldMappingArtifact,
+        StepResult,
+        StepStatus,
+    )
+
+    store = {}
+
+    class UserSession:
+        def get(self, key):
+            return store.get(key)
+
+        def set(self, key, value):
+            store[key] = value
+
+    class Message:
+        content = ""
+        updates = 0
+
+        async def update(self):
+            self.updates += 1
+
+    monkeypatch.setattr(renderer.cl, "user_session", UserSession())
+    primary = ExecutionReport(
+        plan_id="field-mapping",
+        results=(
+            StepResult(
+                step_id="field-mapping",
+                operation_type="field_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=FieldMappingArtifact(
+                    item_count=0,
+                    mappings=(),
+                    event_annotations=(
+                        EventAnnotationRow(
+                            rule_name="threat-rule",
+                            event_name="网络攻击",
+                            event_level="提醒",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    chain = ExecutionReport(
+        plan_id="explicit-threat",
+        results=(
+            StepResult(
+                step_id="threat-chain-fill",
+                operation_type="fill",
+                status=StepStatus.SUCCESS,
+                changed_count=1,
+            ),
+        ),
+    )
+    final_config = [
+        {
+            "name": "threat-rule",
+            "normalize": [{"index": "威胁类型", "mappings": []}],
+            "parser": {
+                "filter": [
+                    {"name": "addFields", "fields": {"威胁类型": "其他"}}
+                ]
+            },
+        }
+    ]
+    message = Message()
+    renderer.remember_primary_report(message, primary)
+
+    updated = asyncio.run(renderer.refresh_primary_report_anchor(chain, final_config))
+
+    assert updated is True
+    assert message.updates == 1
+    assert "—（固定值）" in message.content
+    assert "其他" in message.content
+    assert store[renderer._PRIMARY_REPORT_ANCHOR_KEY][0] is message

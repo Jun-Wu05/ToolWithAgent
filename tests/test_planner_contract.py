@@ -126,6 +126,85 @@ def test执行决策不能没有步骤():
         PlanDecision.model_validate({"decision": "execute", "plan_id": "p", "steps": []})
 
 
+def test提案决策携带步骤但不是执行授权():
+    from contracts.planner_models import PlanDecision
+
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "proposal",
+            "plan_id": "proposal-1",
+            "reason_code": "confirmation_required",
+            "question": "将导出当前配置，是否执行？",
+            "choices": ["确认执行", "取消"],
+            "steps": [
+                {
+                    "step_id": "export-1",
+                    "type": "export",
+                    "source_ref": "session.decoded_config",
+                }
+            ],
+        }
+    )
+
+    assert decision.decision == "proposal"
+    assert decision.steps[0].type == "export"
+
+    with pytest.raises(ValidationError):
+        PlanDecision(
+            decision="proposal",
+            plan_id="empty-proposal",
+            reason_code="confirmation_required",
+            question="是否执行？",
+            choices=("确认执行", "取消"),
+        )
+
+
+@pytest.mark.parametrize("decision", ("confirm", "cancel"))
+def test确认与取消只引用待执行计划(decision: str):
+    from contracts.planner_models import PlanDecision
+
+    control = PlanDecision(
+        decision=decision,
+        plan_id=f"{decision}-1",
+        pending_plan_id="proposal-1",
+    )
+    assert control.steps == ()
+
+    with pytest.raises(ValidationError):
+        PlanDecision(decision=decision, plan_id=f"{decision}-missing")
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": decision,
+                "plan_id": f"{decision}-steps",
+                "pending_plan_id": "proposal-1",
+                "steps": [{"step_id": "log-1", "type": "log_parse"}],
+            }
+        )
+
+
+def test待确认计划要求固定长度事实摘要():
+    from contracts.planner_models import PendingPlan
+
+    pending = PendingPlan.model_validate(
+        {
+            "plan_id": "proposal-1",
+            "session_facts_digest": "a" * 64,
+            "steps": [{"step_id": "log-1", "type": "log_parse"}],
+        }
+    )
+    assert pending.plan_id == "proposal-1"
+
+    with pytest.raises(ValidationError):
+        PendingPlan.model_validate(
+            {
+                "plan_id": "proposal-1",
+                "session_facts_digest": "short",
+                "steps": [{"step_id": "log-1", "type": "log_parse"}],
+            }
+        )
+
+
 def test帮助决策必须含guidance_code或answer且不含步骤():
     """guidance 携带 guidance_code 或 answer 之一；不能包含步骤（回归 #42，#149 放宽）。"""
     from contracts.planner_models import PlanDecision
@@ -469,3 +548,22 @@ def test_coerce透传已解析的PlanDecision():
 
     original = PlanDecision.model_validate(_execute_payload())
     assert _coerce_plan_decision(original) is original
+
+
+def test事件标注行携带威胁来源与有序最终类型():
+    """报告契约扩展不得破坏旧构造，并保留每条规则实际命中值的顺序。"""
+    from contracts.planner_models import EventAnnotationRow
+
+    legacy = EventAnnotationRow(rule_name="普通规则", event_name="登录事件")
+    assert legacy.threat_source_field == ""
+    assert legacy.threat_types == ()
+
+    enriched = EventAnnotationRow(
+        rule_name="威胁规则",
+        event_name="网络攻击",
+        event_level="提醒",
+        threat_source_field="attack_type",
+        threat_types=("暴力破解", "端口扫描"),
+    )
+    assert enriched.threat_source_field == "attack_type"
+    assert enriched.threat_types == ("暴力破解", "端口扫描")

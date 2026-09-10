@@ -118,6 +118,32 @@ def test添加字段在入口规则filter为null时初始化并追加(add_module
     assert entry["normalize"][-1]["result"] == ["1.1.1.1"]
 
 
+def test添加字段撤销同名删除标记并保留其他删除字段(add_module):
+    entities = _sample_entities()
+    entities[0]["parser"]["filter"] = [
+        {
+            "name": "removeFields",
+            "id": "",
+            "fields": ["威胁类型", "旧字段"],
+        }
+    ]
+    entities[1]["parser"]["filter"] = [
+        {"name": "removeFields", "id": "", "fields": ["威胁类型"]}
+    ]
+
+    result = add_module.add_field(entities, "威胁类型", "%{alarm_name}")
+
+    assert result["status"] == "success"
+    first_filters = result["data"][0]["parser"]["filter"]
+    second_filters = result["data"][1]["parser"]["filter"]
+    assert first_filters[0] == {
+        "name": "removeFields",
+        "id": "",
+        "fields": ["旧字段"],
+    }
+    assert all(item.get("name") != "removeFields" for item in second_filters)
+
+
 def test添加字段引用型值原样保留(add_module):
     """%{index} 引用值不做替换，原样存储由运行时解析。"""
     result = add_module.add_field(_sample_entities(), "请求头", "%{a}")
