@@ -96,6 +96,23 @@ def add_field(
         # 入口规则模板的 filter 可能为 null，初始化为空数组再追加
         filters = parser.get("filter") or []
 
+        # 删除后重新添加同名字段时，撤销对应 removeFields 标记；否则最终
+        # 配置会同时声明“删除”和“添加”同一字段。其他删除项保持不变。
+        retained_filters = []
+        for filter_item in filters:
+            if filter_item.get("name") != "removeFields" or not isinstance(
+                filter_item.get("fields"), list
+            ):
+                retained_filters.append(filter_item)
+                continue
+            remaining_fields = [
+                item for item in filter_item["fields"] if item != field_name
+            ]
+            if remaining_fields:
+                filter_item["fields"] = remaining_fields
+                retained_filters.append(filter_item)
+        filters = retained_filters
+
         addfields_entry = {
             "name": "addFields",
             "id": "",

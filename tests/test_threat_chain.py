@@ -615,6 +615,9 @@ def test显式指令全链成功后一次提交新配置(monkeypatch):
     assert session[SESSION_OVERRIDE_KEY] == "src_ip"
     for rule in session["mapped_sub_rules"]:
         assert _all_threat_bindings(rule) == ["%{src_ip}"]
+        for filter_item in rule["parser"]["filter"]:
+            if filter_item.get("name") == "removeFields":
+                assert "威胁类型" not in filter_item.get("fields", [])
 
 
 def test显式来源首次建链保持四步且不插入删除():

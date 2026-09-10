@@ -2,7 +2,7 @@
 
 import asyncio
 
-from contracts.planner_models import PlanDecision
+from contracts.planner_models import ConversationTurn, PlanDecision
 from contracts.session_artifacts import ArtifactTargetBinding, ReferenceableArtifactFact
 from contracts.session_facts import SessionFacts
 
@@ -94,6 +94,34 @@ def test自然语言恰好调用planner一次且返回前不执行业务():
     assert len(calls) == 1
     assert decision.decision == "execute"
     assert decision.steps[0].type == "fill"
+
+
+def test威胁来源澄清丢弃模型候选并只展示真实共同字段():
+    from agent.core.planner import PlannerService
+
+    async def hallucinating_runner(_planner_input: str):
+        return PlanDecision(
+            decision="clarification",
+            plan_id="plan-threat-source",
+            reason_code="threat_source_required",
+            question="当前可用字段包括 alarm_name、event_str、threat_type。",
+            choices=("alarm_name", "event_str", "threat_type"),
+        )
+
+    decision = asyncio.run(
+        PlannerService(runner=hallucinating_runner).plan(
+            user_text="请为威胁类型选择合适的来源字段",
+            conversation_history=(
+                ConversationTurn(role="user", content="用 event_str 作为威胁类型来源"),
+            ),
+            session_facts=SessionFacts(
+                threat_source_fields=("alarm_name", "event_type1")
+            ),
+        )
+    )
+
+    assert decision.question == "请选择用于威胁类型映射的来源字段。"
+    assert decision.choices == ("alarm_name", "event_type1")
 
 
 def test跨轮威胁填充不能静默改写用户明确指定的冲突目标():
