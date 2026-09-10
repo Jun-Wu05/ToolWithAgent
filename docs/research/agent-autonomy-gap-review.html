@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ToolWithAgent 自主性差距报告 · 2026-09-09</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#eef2ff', primaryBorderColor: '#6366f1', primaryTextColor: '#1e293b',
+      lineColor: '#94a3b8', fontSize: '13px', fontFamily: 'system-ui, sans-serif'
+    },
+    flowchart: { curve: 'basis' }
+  });
+</script>
+<style>
+  .diff-add { color: #15803d; background: #f0fdf4; display: block; padding-left: 1rem; }
+  .diff-del { color: #b91c1c; background: #fef2f2; display: block; padding-left: 1rem; }
+  .diff-ctx { color: #475569; display: block; padding-left: 1rem; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .card-anim { transition: box-shadow .2s ease, transform .2s ease; }
+  .card-anim:hover { box-shadow: 0 12px 32px -8px rgba(2,6,23,.18); transform: translateY(-2px); }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+
+<!-- ================= Header ================= -->
+<header class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white">
+  <div class="max-w-6xl mx-auto px-6 py-14">
+    <p class="text-indigo-300 text-sm mb-2 mono">docs/research · 研究稿 · 待拷问收口</p>
+    <h1 class="text-3xl md:text-4xl font-bold tracking-tight">ToolWithAgent 自主性差距报告</h1>
+    <p class="mt-3 text-slate-300 max-w-3xl">从固定流水线到渐进式半自主 Agent —— 现状画像 · 业界对照 · 12 项摩擦点 · 8 张候选改造卡片 · Phase 0-4 路线图</p>
+    <div class="mt-6 flex flex-wrap gap-3 text-sm">
+      <span class="bg-white/10 rounded-full px-4 py-1.5">正文版：docs/research/agent-autonomy-gap-review.md</span>
+      <span class="bg-white/10 rounded-full px-4 py-1.5">PRD 草案：docs/prd/agent-autonomy-evolution.md</span>
+      <span class="bg-white/10 rounded-full px-4 py-1.5">证据：file:line 可点击核对</span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-6 py-12 space-y-16">
+
+<!-- ================= TL;DR ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">01</span>TL;DR</h2>
+  <div class="grid md:grid-cols-2 gap-5">
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="text-indigo-600 font-semibold mb-2">现状定位</div>
+      <p class="text-sm leading-relaxed">按 Anthropic《Building Effective Agents》分类，这是<b>教科书级的 workflow（固定编排），不是 agent</b>：LLM 只在一次规划调用产出静态 PlanDecision（planner.py:45 <code class="mono text-xs bg-slate-100 px-1 rounded">tools=[]</code>），之后控制流全在 Python for 循环（execution.py:162）。这是有意识的工程立场（ADR-0005 失败关闭），<b>不是落后</b>。</p>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="text-rose-600 font-semibold mb-2">「不智能」的两个根因</div>
+      <p class="text-sm leading-relaxed"><b>失败点奇怪</b>：正则守卫在中文表层模式开火（10 个填充动词表、短语正则、字段白名单），且失败零重试。<b>回答机械</b>：追问是 message_code 模板；Planner 只见 SessionFacts 目录不见值，无米下锅说人话。</p>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="text-emerald-600 font-semibold mb-2">能否变自主：能，不必推翻现有架构</div>
+      <p class="text-sm leading-relaxed">演进缝已被 ADR-0010 威胁链验证（执行结果 → 构造新计划 → 再走 PlanExecutor）。推荐<b>渐进式半自主</b>（L1→L2→评估门禁后选择性 L3），每阶段用评估门禁决定是否继续放开。</p>
+    </div>
+    <div class="bg-indigo-600 text-white rounded-2xl p-6 card-anim">
+      <div class="font-semibold mb-2">首选切片（已确认）</div>
+      <p class="text-sm leading-relaxed">失败自恢复层 RecoveryOrchestrator + 执行反馈回喂 + 追问生成化：把「失败即停问人」变成「有界自恢复 ≤N 次，穷尽预算或不可逆操作才问人，且问得有人话味」。预算设 0 即回到现状，<b>演进完全可逆</b>。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 现状架构 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">02</span>现状架构：一次规划 · 顺序执行 · 失败即停</h2>
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 overflow-x-auto">
+    <pre class="mermaid">
+flowchart TB
+  U["用户输入（Chainlit）"] --> RT["request_runtime.run_user_request"]
+  RT --> PL["PlannerService.plan<br/>一次 LLM 调用 · tools=[] · temp=0<br/>失败/超时 → 追问，零重试"]
+  PL -- "PlanDecision（静态计划）" --> EX["PlanExecutor.execute<br/>for step in steps 严格顺序"]
+  EX --> AD["适配器注册表<br/>12 个字符串键硬分派"]
+  AD --> OK["SUCCESS → 渲染报告"]
+  AD -- "非 SUCCESS 立即 break" --> ASK["模板追问（message_code）<br/>交还人类"]
+  EX -. "唯一例外：威胁链 ADR-0010<br/>纯 Python 构造 4 步续跑" .-> EX
+  style PL fill:#eef2ff,stroke:#6366f1
+  style ASK fill:#fef2f2,stroke:#ef4444
+  style EX fill:#fffbeb,stroke:#f59e0b
+    </pre>
+  </div>
+  <div class="mt-4 grid md:grid-cols-3 gap-4 text-sm">
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4"><b class="text-amber-700">决策时零工具</b><br/>Planner <code class="mono text-xs">tools=[]</code>；能力面 = 12 个冻结 StepSpec；候选由系统预注入而非检索调用（team.py:47-49）</div>
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4"><b class="text-amber-700">无观察反馈回路</b><br/>执行结果永不回喂规划（威胁链除外）；depends_on 只校验不调度</div>
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4"><b class="text-amber-700">双份维护同一语义</b><br/>planner.md 169 行 ≈40 条规则 ↔ Python 正则守卫（planner.py:86-108 填充动词表、:200 短语正则）——每条对应一个曾经的线上 bug</div>
+  </div>
+  <div class="mt-4 bg-slate-900 text-slate-200 rounded-xl p-4 text-sm">
+    <b class="text-slate-400">遗骸清单（名为 agent 的层大半是遗骸）：</b>
+    EnumAgent / LogParserAgent 构造后从未被调用（team.py:156-214）· resilience.py 熔断零引用（README 宣称与实际不符）· confirmation_tool 从未挂载 · Team 只是注册表（自认「不提供自主路由」）
+  </div>
+</section>
+
+<!-- ================= 自主性阶梯 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">03</span>自主性阶梯：你在 L1，目标 L2 → 选择性 L3</h2>
+  <div class="bg-white rounded-2xl border border-slate-200 p-6">
+    <div class="space-y-3">
+      <div class="flex items-center gap-4">
+        <div class="w-16 text-center text-xs text-slate-400 mono shrink-0">L0</div>
+        <div class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-4 py-2.5 text-sm">单次调用：LLM + 检索 + few-shot，无编排</div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="w-16 text-center text-xs font-bold text-amber-600 mono shrink-0">L1 ★现状</div>
+        <div class="flex-1 bg-amber-50 border-2 border-amber-400 rounded-lg px-4 py-2.5 text-sm"><b>Workflow：代码预定义路径，LLM 只做节点内工作</b> —— ToolWithAgent 现状（含局部 L2 元素：威胁链、批并发、clarification 判别）</div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="w-16 text-center text-xs font-bold text-indigo-600 mono shrink-0">L2 →目标</div>
+        <div class="flex-1 bg-indigo-50 border-2 border-indigo-400 rounded-lg px-4 py-2.5 text-sm"><b>半动态：orchestrator-workers / evaluator-optimizer</b> —— 有界循环 + 执行反馈 + 自恢复（Phase 1 落点）</div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="w-16 text-center text-xs text-slate-400 mono shrink-0">L3</div>
+        <div class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-4 py-2.5 text-sm">自主 Agent：LLM 在循环中自掌方向（Phase 4 评估门禁后再议，暂缓）</div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="w-16 text-center text-xs text-slate-400 mono shrink-0">L4</div>
+        <div class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-4 py-2.5 text-sm">多 Agent 组织 —— <b>明确不采用</b>（Cognition《Don't Build Multi-Agents》：规则抽取需要一致性，单线程线性 agent 优先）</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 根因解剖 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">04</span>根因解剖：「失败的点很奇怪 · 回答很机械」</h2>
+  <div class="grid md:grid-cols-2 gap-5">
+    <div class="bg-white rounded-2xl border border-rose-200 p-6">
+      <h3 class="font-bold text-rose-700 mb-3">为什么失败点奇怪</h3>
+      <ul class="text-sm space-y-2.5 leading-relaxed list-disc pl-5">
+        <li>失败发生在<b>表层模式匹配</b>而非语义理解：10 个填充动词表（planner.py:86-108）——换个说法如「设置到」就绕过或误触发</li>
+        <li>字段白名单守卫（execution_policy.py:127-158）只有两个出口：<b>硬跑失败或问人</b>——没有第三个出口「agent 先自查再决定」</li>
+        <li>计划级预拦截（execution.py:142, #148）让用户看到「计划被拒」而非「哪一步可以修」</li>
+        <li>Planner 零重试（不变量）——网络抖动也变成一次追问</li>
+        <li>本质：每条守卫都是某个线上 bug 的创可贴，累积后失败位置由正则覆盖面决定，与用户语义无关</li>
+      </ul>
+    </div>
+    <div class="bg-white rounded-2xl border border-rose-200 p-6">
+      <h3 class="font-bold text-rose-700 mb-3">为什么回答机械</h3>
+      <ul class="text-sm space-y-2.5 leading-relaxed list-disc pl-5">
+        <li>追问文案是 <b>message_code 模板</b>渲染（plan_renderer.py:100-103），不携带会话上下文</li>
+        <li>Planner <b>只见目录不见值</b>（session_facts.py:18-42；ADR-0006 仅 2 个产物槽位）——不是不会说人话，是没有素材</li>
+        <li>历史窗口仅 <b>6 条 × 2000 字符</b>（planner.py:52-57），多轮来龙去脉被截断</li>
+        <li>13 种产物名映射硬编码（plan_renderer.py:49-68）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 业界对照 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">05</span>业界对照：生产级自主 Agent 的机制清单</h2>
+  <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100 text-left">
+          <tr><th class="px-4 py-3">机制</th><th class="px-4 py-3">案例做法</th><th class="px-4 py-3">本仓落点</th></tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">执行循环</td><td class="px-4 py-3">Anthropic：LLM 在循环中基于环境反馈用工具；Claude Code「收集上下文→行动→验证→重复」</td><td class="px-4 py-3">有界循环包裹 PlanExecutor（确定性骨架保留）</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">错误即反馈</td><td class="px-4 py-3">Manus：「<b>错误纠正机制本身是 agent 区别于 workflow 的本质</b>」，失败调用保留在上下文</td><td class="px-4 py-3">ExecutionReport 回喂恢复决策器（而非丢弃）</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">自我验证</td><td class="px-4 py-3">Devin：跑测试→读报错→自改；72% 通过案例耗时 &gt;10 分钟，迭代即成功来源</td><td class="px-4 py-3">失败后先自查会话事实/可用字段/知识库再决定</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">任务分解外化</td><td class="px-4 py-3">Claude Code TodoWrite / Manus todo.md「复诵」，计划对用户可见可纠偏</td><td class="px-4 py-3">PlanDecision 已是类型化 todo，补可展示+可修订</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">工具接口（ACI）</td><td class="px-4 py-3">SWE-agent：文件窗口 100 行最优、搜索只回文件名、edit 内置 linter；「工具接口质量与 prompt 同量级」</td><td class="px-4 py-3">知识数据化后按 ACI 原则设计查询工具</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">上下文管理</td><td class="px-4 py-3">Claude Code compaction；Manus KV-cache 纪律（前缀稳定、append-only、mask 不删）</td><td class="px-4 py-3">SessionFacts 受控扩容（目录+受控值+执行账本摘要）</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">HITL 门控</td><td class="px-4 py-3">Claude Code 权限分级 default→acceptEdits→plan→bypass；harness 强制而非模型自觉</td><td class="px-4 py-3">只读自恢复自动 / 写库导出需确认</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">终止条件</td><td class="px-4 py-3">Anthropic 迭代上限；Devin 45 分钟硬上限；Manus 均值约 50 次工具调用</td><td class="px-4 py-3">恢复预算 ≤N + 验证通过即正常终止</td></tr>
+          <tr><td class="px-4 py-3 font-medium whitespace-nowrap">主动求澄清</td><td class="px-4 py-3">Anthropic 实证（数百万交互）：方案选择 35% / 诊断信息 21% / 澄清模糊 13% —— agent 主动澄清是最重要的监督形式</td><td class="px-4 py-3">追问生成化：LLM 基于 facts 生成，带建议选项</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="mt-4 grid md:grid-cols-2 gap-4 text-sm">
+    <div class="bg-white border-l-4 border-amber-400 rounded-r-xl p-4"><b>警示一：多 agent 慎用</b>（Cognition）——「动作携带隐式决策，冲突的决策导致坏结果」；需要一致性的流水线用单线程线性 agent。本仓规则抽取正是此类，<b>不走向多 agent</b>。</div>
+    <div class="bg-white border-l-4 border-amber-400 rounded-r-xl p-4"><b>警示二：「less structure, more intelligence」有前提</b>（Manus）——结构性管道是弥补模型能力不足的拐杖，仅在前沿模型上可整体删除。本仓接 deepseek/siliconflow 等多提供商，<b>保留骨架 + 局部自主</b>更稳。Anthropic 同向：复杂度只在可度量改善时增加。</div>
+  </div>
+</section>
+
+<!-- ================= 目标架构 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">06</span>终极实现形态：确定性骨架 + LLM 掌控的有界循环</h2>
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 overflow-x-auto">
+    <pre class="mermaid">
+flowchart TB
+  U["用户输入"] --> PL["Planner（一次调用不变量 · ADR-0005 保留）<br/>话语 → 初始 PlanDecision"]
+  PL --> LOOP
+  subgraph LOOP["Agent 有界循环 · 恢复预算 ≤N"]
+    EX["PlanExecutor + 12 类型化步骤<br/>= agent 的工具集"] --> OB["ObservationBuilder<br/>ExecutionReport → 受控摘要入 facts"]
+    OB --> JD{"终止判定"}
+    JD -- "计划全部 SUCCESS" --> DONE["正常终止"]
+    JD -- "failed / needs_input" --> RC["RecoveryOrchestrator（ADR-0011）<br/>入：类型化失败步骤+error_code+facts，不见用户原文<br/>出：受限修订枚举 retry / restructure / rederive / escalate<br/>①②确定性，仅③调 LLM；不碰用户点名参数"]
+    RC -- "修订案合法" --> EX
+    RC -- "预算穷尽 / 不可逆操作 / 连续非法" --> HITL["HITL：ClarificationComposer<br/>LLM 生成追问（卡在哪·试了什么·建议选哪个）"]
+  end
+  style PL fill:#eef2ff,stroke:#6366f1
+  style RC fill:#f0fdf4,stroke:#22c55e
+  style HITL fill:#fef2f2,stroke:#ef4444
+  style LOOP fill:#fafafa,stroke:#cbd5e1,stroke-dasharray: 6 4
+    </pre>
+  </div>
+  <div class="mt-4 bg-slate-900 rounded-xl p-5 overflow-x-auto">
+    <pre class="mono text-xs leading-relaxed"><span class="diff-ctx"> Planner（一次不变量）                ← 保留：话语→初始计划</span><span class="diff-add">+ RecoveryOrchestrator（恢复决策器）  ← 新增独立类型化 LLM 调用点</span><span class="diff-add">+ ObservationBuilder（观察回喂）      ← 账本受控摘要入 SessionFacts</span><span class="diff-add">+ RecoveryBudget（≤N，预算 0 = 完全回到现状）</span><span class="diff-add">+ ClarificationComposer（追问生成化） ← choices 仍确定性供给，话术生成</span><span class="diff-ctx"> PlanExecutor + 12 类型化步骤        ← 保留，升级为 agent 工具集</span><span class="diff-ctx"> SessionFacts                        ← 扩容：目录+受控值+最近执行摘要</span><span class="diff-del">- 遗骸：EnumAgent/LogParserAgent/resilience/confirmation_tool ← 清理</span><span class="diff-ctx"> 保障层：Pydantic/白名单/原子写回/审计账本/HITL 兜底 ← 全保留</span></pre>
+  </div>
+</section>
+
+<!-- ================= 候选卡片 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">07</span>候选改造卡片（8 张）</h2>
+  <div class="grid lg:grid-cols-2 gap-6">
+
+    <!-- Card 1 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">① 失败自恢复层 RecoveryOrchestrator</h3>
+        <span class="shrink-0 ml-3 bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">Strong</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">application/execution.py · 新增 application/recovery.py</div>
+      <p class="text-sm mb-3"><b>问题：</b>needs_input/failed 一律立即交还人类；多数失败原因（字段名差一个字、依赖顺序错）在会话事实里就有答案，只是没人去看。</p>
+      <p class="text-sm mb-3"><b>方案（拷问定稿，ADR-0011）：</b>失败时先有界自恢复（每计划 ≤2 次）：决策器只见类型化失败步骤 + error_code + facts，<b>不见用户原文</b>；输出受限修订枚举而非自由计划。合法动作仅三类：①瞬时重试 ②结构修正（均为确定性）③系统推导参数重推导（唯一 LLM，≤1 次）。<b>用户点名参数一律不碰</b>；会覆盖用户手动产物 → 直接升级追问。</p>
+      <div class="bg-slate-50 rounded-lg p-3 mono text-xs leading-relaxed overflow-x-auto"><span class="diff-ctx">  for step in plan.steps:</span><span class="diff-ctx">      result = adapter.execute(step, ctx, deps)</span><span class="diff-del">      if result.status != SUCCESS: break   # 失败即停→模板追问</span><span class="diff-add">      if result.status != SUCCESS:</span><span class="diff-add">          revision = orchestrator.decide(     # 不见原文；①②确定性，③才调LLM</span><span class="diff-add">              failed_step, error_code, facts, budget)</span><span class="diff-add">          if revision is ESCALATE: break      # 超出动作集/不可逆/预算尽</span><span class="diff-add">          plan = apply(plan, revision)        # 仍是类型化计划，照过 policy</span><span class="diff-add">          continue outer_loop</span></div>
+      <p class="text-xs text-slate-500 mt-3">收益：一个接缝覆盖 12 类步骤失败恢复；policy 校验资产全复用。<b>不违反 ADR-0005</b>（初始规划仍一次成型）→ 已定稿 ADR-0011。</p>
+    </div>
+
+    <!-- Card 2 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">② ExecutionReport 回喂通道</h3>
+        <span class="shrink-0 ml-3 bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">Strong</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">contracts/session_facts.py · application/execution.py</div>
+      <p class="text-sm mb-3"><b>问题：</b>执行账本生成后只用于渲染，规划侧永远看不到「刚才发生了什么」。</p>
+      <p class="text-sm mb-3"><b>方案：</b>账本受控摘要（每步 status/error_code/产出计数）扩入 SessionFacts 新字段 <code class="mono text-xs bg-slate-100 px-1 rounded">recent_execution</code>；守卫保持「值不外泄」，只暴露目录与状态。</p>
+      <div class="grid grid-cols-2 gap-3 mt-4">
+        <div class="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs"><b class="text-rose-600">Before</b><br/>执行账本 → 仅渲染 → 丢弃；下一轮规划对上轮执行一无所知</div>
+        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs"><b class="text-emerald-600">After</b><br/>执行账本 → 受控摘要 → facts → 恢复决策器/后续规划可依据事实；威胁链从特例变为第一个内建用户</div>
+      </div>
+      <p class="text-xs text-slate-500 mt-3">①的使能器；延伸 ADR-0006（产物槽位 → 受控执行摘要）。</p>
+    </div>
+
+    <!-- Card 3 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">③ 追问生成化 ClarificationComposer</h3>
+        <span class="shrink-0 ml-3 bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">Strong</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">web/plan_renderer.py · agent/prompts/（新增）</div>
+      <p class="text-sm mb-3"><b>问题：</b>「回答很机械」的直接来源——message_code 模板追问，无上下文无建议。</p>
+      <p class="text-sm mb-3"><b>方案：</b>文案由 LLM 基于 SessionFacts（含最近执行摘要）+ 失败原因生成（卡在哪/试了什么/建议选哪个）；<b>与 Planner 同视野，不见任何业务值</b>（拷问定稿）；<b>choices 选项仍由确定性代码供给</b>，生成文案过渲染校验，杜绝幻觉选项。</p>
+      <div class="bg-slate-50 rounded-lg p-3 text-xs mt-2">
+        <div class="text-slate-400 mb-1">Before / After</div>
+        <div class="text-rose-600 mb-1">💡 枚举目标字段不存在，请回复字段名。可用字段：…</div>
+        <div class="text-emerald-700">刚才第 2 步枚举提取想写入 <code>event_type</code>，但日志体里没有这个键。你上传的数据里与「事件类型」最接近的是 <code>eventType</code>（第 3 列）——要改用它吗？还是想先看全部 14 个可用字段？</div>
+      </div>
+      <p class="text-xs text-slate-500 mt-3">纯 UX 杠杆，不动执行语义；Anthropic 实证：agent 主动澄清是最重要的监督形式。</p>
+    </div>
+
+    <!-- Card 4 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">④ 遗骸清理 + README 对齐</h3>
+        <span class="shrink-0 ml-3 bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">Strong</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">agent/core/team.py · agent/core/resilience.py · agent/tools/confirmation_tool.py · README.md</div>
+      <p class="text-sm mb-3"><b>问题：</b>未接线模块误导维护与 AI 导航；README 宣称「含熔断」与实际不符。</p>
+      <p class="text-sm mb-3"><b>方案：</b>逐项做删除测试（删除后复杂性集中而非移出到 N 个调用者 → 删）：EnumAgent/LogParserAgent、resilience.py、confirmation_tool.py、multi-step-plan 遗物；README 修正。</p>
+      <div class="bg-slate-50 rounded-lg p-3 mono text-xs leading-relaxed mt-2"><span class="diff-del">- agent/core/team.py: EnumAgent (3 tools, 从未调用)</span><span class="diff-del">- agent/core/team.py: LogParserAgent (2 tools, 从未调用)</span><span class="diff-del">- agent/core/resilience.py (零生产引用)</span><span class="diff-del">- agent/tools/confirmation_tool.py (从未挂载)</span><span class="diff-ctx">  README: 「含 CircuitBreaker 熔断」→ 修正为实际架构</span></div>
+      <p class="text-xs text-slate-500 mt-3">零风险（82 个离线测试保障），建议最先做（Phase 0）。</p>
+    </div>
+
+    <!-- Card 5 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">⑤ 威胁/事件知识数据化出 prompt</h3>
+        <span class="shrink-0 ml-3 bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full">Worth exploring</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">agent/prompts/threat_type.md · agent/shared/event_classify.py · config/</div>
+      <p class="text-sm mb-3"><b>问题：</b>约 130 个威胁类内嵌 prompt 长列表（threat_type.md:26）——每次调用全量注入 token，无法单独更新/审计/检索；21 事件名硬编码在代码里。</p>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs"><b class="text-rose-600">Before</b><br/>知识 = prompt 文本（每次全量注入、改知识=改 prompt、不可检索）</div>
+        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs"><b class="text-emerald-600">After</b><br/>知识 = config 数据 + 按需注入 top-N 候选；与知识治理台同构（Phase 2）</div>
+      </div>
+      <p class="text-xs text-slate-500 mt-3">收益：token 下降、知识可治理、为检索工具铺路。</p>
+    </div>
+
+    <!-- Card 6 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">⑥ 字段候选：预注入 → 检索工具</h3>
+        <span class="shrink-0 ml-3 bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full">Worth exploring</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">agent/core/field_retriever.py · agent/core/team.py:47-49</div>
+      <p class="text-sm mb-3"><b>问题：</b>候选由系统预检索注入 prompt，模型被禁止调查询工具——换字段/换策略都要再走一轮。</p>
+      <p class="text-sm mb-3"><b>方案（谨慎）：</b>Phase 2 先离线评估「预注入 vs 检索工具」在 planner_eval 基线上的准确率/调用次数/成本。<b>批处理经济学可能证明现状更优</b>（批 25/并发 3 是精心调过的）——评估达标才动。</p>
+      <p class="text-xs text-slate-500 mt-3">与 application-runtime-extraction 的调用冻结不冲突（冻结范围仅限该重构）。</p>
+    </div>
+
+    <!-- Card 7 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">⑦ 日志知识库读回路</h3>
+        <span class="shrink-0 ml-3 bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full">Worth exploring</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">agent/tools/log_pattern_store.py · application/adapters/log_parse.py · 依赖 #190/#191</div>
+      <p class="text-sm mb-3"><b>问题：</b>知识库只写不读（PRD 自述）；同类日志每次从零解析，无跨会话学习。</p>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs"><b class="text-rose-600">Before</b><br/>同类日志 → 每次完整 LLM 解析（延迟+成本+结果漂移）</div>
+        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs"><b class="text-emerald-600">After</b><br/>结构 hash + Jaccard 命中 → 确定性回放校验 → 直出结果（Phase 3）</div>
+      </div>
+      <p class="text-xs text-slate-500 mt-3">按已提交 shared-log-knowledge-review PRD 实施（不用 embedding，与该决策一致）。</p>
+    </div>
+
+    <!-- Card 8 -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 card-anim opacity-90">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-bold text-lg">⑧ 全面 agent loop（L3）</h3>
+        <span class="shrink-0 ml-3 bg-slate-200 text-slate-600 text-xs font-bold px-2.5 py-1 rounded-full">Speculative · 暂缓</span>
+      </div>
+      <div class="text-xs text-slate-500 mono mb-3">agent/core/planner.py · application/*（全局）</div>
+      <p class="text-sm mb-3"><b>方案：</b>Planner 变成持续 function-calling 循环，LLM 逐步决定调哪个工具、何时结束。</p>
+      <p class="text-sm mb-3"><b>暂缓理由：</b>① 需 Phase 1-3 evals 先证明可度量收益（Anthropic：复杂度只在 demonstrably 改善产出时增加）；② Cognition 单线程建议——本仓需要一致性，自由循环错误复合风险高；③ Manus「less structure」前提是前沿模型，本仓多提供商接入不满足。Phase 4 评估门禁后再议。</p>
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">⚠️ 与 ADR-0005 冲突（需推翻一次规划不变量）——只在 Phase 1-3 门禁全部达标后才值得重开讨论</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 路线图 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="text-indigo-500 mono">08</span>演进路线图：每阶段一道评估门禁</h2>
+  <div class="bg-white rounded-2xl border border-slate-200 p-6">
+    <div class="space-y-0">
+      <div class="flex gap-4">
+        <div class="flex flex-col items-center">
+          <div class="w-9 h-9 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold shrink-0">0</div>
+          <div class="w-px flex-1 bg-slate-200 my-1"></div>
+        </div>
+        <div class="pb-8">
+          <h4 class="font-bold">遗骸清理 + README 对齐 <span class="text-xs font-normal text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded ml-1">零风险 · 立刻做</span></h4>
+          <p class="text-sm text-slate-500">卡片④；验收 = 全量 pytest 绿</p>
+        </div>
+      </div>
+      <div class="flex gap-4">
+        <div class="flex flex-col items-center">
+          <div class="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shrink-0">1</div>
+          <div class="w-px flex-1 bg-slate-200 my-1"></div>
+        </div>
+        <div class="pb-8">
+          <h4 class="font-bold">失败自恢复 MVP <span class="text-xs font-normal text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded ml-1">首个垂直切片（卡片①②③）</span></h4>
+          <p class="text-sm text-slate-500">RecoveryOrchestrator + ObservationBuilder + ClarificationComposer + RecoveryBudget（预算 0 = 现状，可逆）</p>
+          <p class="text-sm text-slate-500 mt-1"><b class="text-slate-700">门禁：</b>追问率↓ · 任务完成率↑ · 修订案被 policy 拒绝率 ≤ 阈值 · 恢复调用成本占比可控 · 现有测试全绿无回归</p>
+        </div>
+      </div>
+      <div class="flex gap-4">
+        <div class="flex flex-col items-center">
+          <div class="w-9 h-9 rounded-full bg-indigo-400 text-white flex items-center justify-center text-sm font-bold shrink-0">2</div>
+          <div class="w-px flex-1 bg-slate-200 my-1"></div>
+        </div>
+        <div class="pb-8">
+          <h4 class="font-bold">知识数据化与工具面评估（卡片⑤，⑥评估后定）</h4>
+          <p class="text-sm text-slate-500">威胁表/事件名出 prompt；字段候选预注入 vs 检索工具离线对比。<b class="text-slate-700">门禁：</b>token/准确率评估达标</p>
+        </div>
+      </div>
+      <div class="flex gap-4">
+        <div class="flex flex-col items-center">
+          <div class="w-9 h-9 rounded-full bg-indigo-400 text-white flex items-center justify-center text-sm font-bold shrink-0">3</div>
+          <div class="w-px flex-1 bg-slate-200 my-1"></div>
+        </div>
+        <div class="pb-8">
+          <h4 class="font-bold">日志知识库读回路（卡片⑦）<span class="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded ml-1">依赖 #190/#191</span></h4>
+          <p class="text-sm text-slate-500">hash + Jaccard 命中 → 确定性回放校验 → 直出。<b class="text-slate-700">门禁：</b>命中率 + 回放校验通过率</p>
+        </div>
+      </div>
+      <div class="flex gap-4">
+        <div class="flex flex-col items-center">
+          <div class="w-9 h-9 rounded-full bg-slate-300 text-white flex items-center justify-center text-sm font-bold shrink-0">4</div>
+        </div>
+        <div>
+          <h4 class="font-bold">评估门禁 → 决定是否进一步放开（卡片⑧）</h4>
+          <p class="text-sm text-slate-500">汇总 Phase 1-3 指标；达标才议 L3，不达标停在当前层级</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 首选推荐 ================= -->
+<section>
+  <div class="bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-2xl p-8">
+    <h2 class="text-2xl font-bold mb-4 flex items-center gap-3"><span class="text-white/60 mono">09</span>首选推荐</h2>
+    <p class="text-lg font-semibold mb-3">先做 Phase 0（清理，零风险）+ Phase 1（失败自恢复 + 回喂 + 追问生成化）</p>
+    <ul class="space-y-2 text-sm text-indigo-100 list-disc pl-5">
+      <li>直击已确认的最痛体感（失败点奇怪 + 回答机械）</li>
+      <li>全部候选中杠杆/风险比最高：一个接缝覆盖 12 类步骤的失败处理，复用全部现有确定性资产（policy 校验、类型化计划、原子写回、审计账本）</li>
+      <li>ADR-0010 威胁链已验证这条缝——Phase 1 是把特例泛化为机制</li>
+      <li>不动初始规划不变量（ADR-0005 保持成立）；预算设 0 即回到现状，演进完全可逆</li>
+    </ul>
+    <p class="mt-5 text-sm text-indigo-200">下一步：审完本报告 → grill-with-docs 拷问收口（恢复预算 N、禁止自恢复清单、追问安全边界、facts 扩容程度、知识库信任门槛、ADR-0011 措辞）→ PRD 定稿 → to-issues 拆解 → 按 issue SOP（worktree + 全量 pytest + PR）逐 Phase 实施。</p>
+  </div>
+</section>
+
+<!-- ================= 来源 ================= -->
+<section>
+  <h2 class="text-2xl font-bold mb-4 flex items-center gap-3"><span class="text-indigo-500 mono">10</span>来源</h2>
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 text-sm text-slate-500 columns-1 md:columns-2 gap-8">
+    <ul class="space-y-1.5 break-inside-avoid">
+      <li>Anthropic — <a class="text-indigo-600 underline" href="https://www.anthropic.com/engineering/building-effective-agents">Building Effective Agents</a> · <a class="text-indigo-600 underline" href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Context Engineering</a> · <a class="text-indigo-600 underline" href="https://www.anthropic.com/research/measuring-agent-autonomy">Measuring Agent Autonomy</a></li>
+      <li>Claude Code — <a class="text-indigo-600 underline" href="https://code.claude.com/docs/en/best-practices">Best Practices</a> · <a class="text-indigo-600 underline" href="https://code.claude.com/docs/en/sub-agents">Sub-agents</a> · <a class="text-indigo-600 underline" href="https://code.claude.com/docs/en/permissions">Permissions</a></li>
+      <li>OpenAI — <a class="text-indigo-600 underline" href="https://openai.github.io/openai-agents-python/">Agents SDK</a>（run loop / handoffs / guardrails / sessions）</li>
+      <li>LangGraph — <a class="text-indigo-600 underline" href="https://docs.langchain.com/oss/python/langgraph/overview">条件边 / interrupts / checkpointing</a></li>
+      <li>HuggingFace — <a class="text-indigo-600 underline" href="https://huggingface.co/blog/smolagents">smolagents（code-as-action）</a></li>
+      <li>OpenHands — <a class="text-indigo-600 underline" href="https://arxiv.org/abs/2407.16741">论文</a> · <a class="text-indigo-600 underline" href="https://docs.openhands.dev/sdk/arch/condenser">Condenser 架构</a></li>
+      <li>SWE-agent — <a class="text-indigo-600 underline" href="https://arxiv.org/abs/2405.15793">论文</a> · <a class="text-indigo-600 underline" href="https://github.com/SWE-agent/SWE-agent/blob/main/docs/background/aci.md">ACI 文档</a></li>
+      <li>Manus — <a class="text-indigo-600 underline" href="https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus">Context Engineering for AI Agents</a></li>
+      <li>Cognition — <a class="text-indigo-600 underline" href="https://cognition.com/blog/introducing-devin">Introducing Devin</a> · <a class="text-indigo-600 underline" href="https://cognition.com/blog/dont-build-multi-agents">Don't Build Multi-Agents</a> · <a class="text-indigo-600 underline" href="https://cognition.com/blog/swe-bench-technical-report">SWE-bench Report</a></li>
+      <li>Levels of AGI — <a class="text-indigo-600 underline" href="https://arxiv.org/abs/2311.02462">arXiv:2311.02462</a>（自主性 L0-L5 分级）</li>
+      <li>CrewAI / AutoGen / MetaGPT — 多 agent 协作路线与适用边界（本仓明确不采用）</li>
+    </ul>
+  </div>
+  <p class="text-center text-xs text-slate-400 mt-8">ToolWithAgent · 自主性差距报告 · 2026-09-09 · 由 ZCode 生成，证据均以 file:line 标注可核对</p>
+</section>
+
+</main>
+</body>
+</html>
