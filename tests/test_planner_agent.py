@@ -1,7 +1,11 @@
 """独立 PlannerAgent 的离线行为测试。"""
 
 import asyncio
+import json
 
+import pytest
+
+from application.threat_chain_policy import SourceFieldDecision, build_threat_chain_steps
 from contracts.planner_models import ConversationTurn, PlanDecision
 from contracts.session_artifacts import ArtifactTargetBinding, ReferenceableArtifactFact
 from contracts.session_facts import SessionFacts
@@ -56,6 +60,48 @@ def _cross_turn_threat_facts(
     )
 
 
+async def _threat_chain_runner(_planner_input: str):
+    """模拟模型把任意输入都错误规划为完整威胁类型链。"""
+    plan = build_threat_chain_steps(
+        SourceFieldDecision("alarm_name", 1.0, 1, "test"),
+        config_ref="session.mapped_sub_rules",
+    )
+    return PlanDecision(
+        decision="execute",
+        plan_id="plan-threat-chain-alarm",
+        steps=plan.steps,
+    )
+
+
+async def _threat_intent_runner(planner_input: str):
+    """模拟 Agent 对三类威胁意图返回结构化决策。"""
+    user_text = json.loads(planner_input)["user_text"]
+    if user_text == "把字段值映射为威胁类型":
+        return PlanDecision(
+            decision="clarification",
+            plan_id="missing-source",
+            reason_code="threat_source_required",
+            question="请明确用于威胁类型映射的来源字段。",
+        )
+    if user_text.startswith("只做普通字段名映射"):
+        return PlanDecision(
+            decision="clarification",
+            plan_id="excluded-value-mapping",
+            reason_code="threat_value_mapping_excluded",
+            question="是否执行整批标准字段映射？",
+            choices=("执行标准字段映射", "取消"),
+        )
+    proposal = await _threat_chain_runner(planner_input)
+    return proposal.model_copy(
+        update={
+            "decision": "proposal",
+            "reason_code": "confirmation_required",
+            "question": "将从 alarm_name 提取枚举值并映射、填充威胁类型，是否执行？",
+            "choices": ("确认执行", "取消"),
+        }
+    )
+
+
 def test自然语言恰好调用planner一次且返回前不执行业务():
     from agent.core.planner import PlannerService
 
@@ -94,6 +140,35 @@ def test自然语言恰好调用planner一次且返回前不执行业务():
     assert len(calls) == 1
     assert decision.decision == "execute"
     assert decision.steps[0].type == "fill"
+
+
+def testPlanner输入只暴露待确认计划摘要():
+    from agent.core.planner import build_planner_input
+    from contracts.planner_models import PendingPlan
+
+    pending = PendingPlan.model_validate(
+        {
+            "plan_id": "proposal-secret",
+            "session_facts_digest": "a" * 64,
+            "steps": [
+                {
+                    "step_id": "add-1",
+                    "type": "add_fields",
+                    "field_name": "token",
+                    "field_value": "sensitive-value",
+                    "config_ref": "session.decoded_config",
+                }
+            ],
+        }
+    )
+
+    payload = json.loads(build_planner_input("确认", (), SessionFacts(), pending))
+
+    assert payload["pending_plan"] == {
+        "plan_id": "proposal-secret",
+        "operations": ["add_fields"],
+    }
+    assert "sensitive-value" not in json.dumps(payload)
 
 
 def test威胁来源澄清丢弃模型候选且不倾倒字段池():
@@ -177,6 +252,72 @@ def test不存在的显式威胁来源返回定向错误() -> None:
     assert decision.reason_code == "threat_source_not_found"
     assert decision.question == "字段 `event_str` 不存在于当前威胁子规则，未执行。"
     assert decision.choices == ()
+
+
+@pytest.mark.parametrize(
+    ("user_text", "expected_decision", "reason_code"),
+    (
+        ("把字段值映射为威胁类型", "clarification", "threat_source_required"),
+        (
+            "只做普通字段名映射，把 alarm_name 映射到威胁类型，不要做值映射",
+            "clarification",
+            "threat_value_mapping_excluded",
+        ),
+        (
+            "请先给出把 alarm_name 映射为威胁类型的唯一执行方案，等我确认后再执行",
+            "proposal",
+            "confirmation_required",
+        ),
+    ),
+)
+def testAgent判定威胁指令授权边界(
+    user_text: str, expected_decision: str, reason_code: str
+) -> None:
+    """PlannerService透传Agent的结构化澄清或提案决策。"""
+    from agent.core.planner import PlannerService
+
+    facts = SessionFacts(
+        has_logs=True,
+        available_fields=("alarm_name", "event_type1"),
+        threat_source_fields=("alarm_name", "event_type1"),
+    )
+    decision = asyncio.run(
+        PlannerService(runner=_threat_intent_runner).plan(
+            user_text=user_text,
+            conversation_history=(),
+            session_facts=facts,
+        )
+    )
+    assert decision.decision == expected_decision
+    assert decision.reason_code == reason_code
+    assert bool(decision.steps) is (expected_decision == "proposal")
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    (
+        "把 alarm_name 映射为威胁类型",
+        "根据 alarm_name 生成 threat type",
+        "将 alarm_name 的值转成威胁类型",
+    ),
+)
+def test威胁指令边界放行明确的值映射请求(user_text: str) -> None:
+    """合法来源与值映射意图齐备时不得误拦截。"""
+    from agent.core.planner import PlannerService
+
+    facts = SessionFacts(
+        has_logs=True,
+        available_fields=("alarm_name", "event_type1"),
+        threat_source_fields=("alarm_name", "event_type1"),
+    )
+    decision = asyncio.run(
+        PlannerService(runner=_threat_chain_runner).plan(
+            user_text=user_text,
+            conversation_history=(),
+            session_facts=facts,
+        )
+    )
+    assert decision.decision == "execute"
 
 
 def test跨轮威胁填充不能静默改写用户明确指定的冲突目标():

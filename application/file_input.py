@@ -211,6 +211,7 @@ _PRIMARY_DATASET_STATE_KEYS = (
     "log_classification",
     "rule_source_fields",
     "pending_rule_source_step",
+    "pending_plan",
     "threat_source_field_override",
     "mapped_sub_rules",
     "sub_rule_mapping_results",

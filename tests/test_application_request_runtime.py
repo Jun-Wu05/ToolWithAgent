@@ -354,3 +354,167 @@ def test自动选择跳过无有效映射并只提交成功候选(monkeypatch) -
     assert result.status == StepStatus.SUCCESS
     assert session.mapped_sub_rules[0]["selected"] == "alarm_name"
     assert session.threat_source_field_override == "alarm_name"
+
+
+def _export_proposal():
+    from contracts.planner_models import PlanDecision
+
+    return PlanDecision.model_validate(
+        {
+            "decision": "proposal",
+            "plan_id": "proposal-export",
+            "reason_code": "confirmation_required",
+            "question": "将导出当前配置，是否执行？",
+            "choices": ["确认执行", "取消"],
+            "steps": [
+                {
+                    "step_id": "export-1",
+                    "type": "export",
+                    "source_ref": "session.decoded_config",
+                }
+            ],
+        }
+    )
+
+
+def test提案保存后确认同一计划且只能执行一次(monkeypatch) -> None:
+    from application import request_runtime
+    from application.session_state import SessionState
+    from contracts.planner_models import ExecutionReport, PlanDecision
+
+    class Planner:
+        def __init__(self):
+            self.calls = 0
+
+        async def plan(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                assert kwargs["pending_plan"] is None
+                return _export_proposal()
+            pending = kwargs["pending_plan"]
+            return PlanDecision(
+                decision="confirm",
+                plan_id=f"confirm-{self.calls}",
+                pending_plan_id=(pending.plan_id if pending else "proposal-export"),
+            )
+
+    class Sink:
+        async def publish(self, _event):
+            pass
+
+    executed = []
+
+    async def capture_execution(*, plan, **_kwargs):
+        executed.append(plan)
+        return ExecutionReport(plan_id=plan.plan_id, results=())
+
+    async def no_follow_up(*, report, **_kwargs):
+        return report
+
+    monkeypatch.setattr(
+        request_runtime, "_execute_plan_with_threat_transaction", capture_execution
+    )
+    monkeypatch.setattr(request_runtime, "run_threat_chain_after_mapping", no_follow_up)
+    planner = Planner()
+    session = SessionState(decoded_data={"normalize": []})
+
+    proposal = asyncio.run(
+        request_runtime.run_user_request(
+            session=session,
+            team=None,
+            user_text="先给方案",
+            progress_sink=Sink(),
+            progress_plan_id="proposal",
+            planner=planner,
+        )
+    )
+    confirmed = asyncio.run(
+        request_runtime.run_user_request(
+            session=session,
+            team=None,
+            user_text="确认执行",
+            progress_sink=Sink(),
+            progress_plan_id="confirm",
+            planner=planner,
+        )
+    )
+    repeated = asyncio.run(
+        request_runtime.run_user_request(
+            session=session,
+            team=None,
+            user_text="再次确认",
+            progress_sink=Sink(),
+            progress_plan_id="confirm-again",
+            planner=planner,
+        )
+    )
+
+    assert proposal.decision == "proposal"
+    assert confirmed.plan_id == "proposal-export"
+    assert [plan.plan_id for plan in executed] == ["proposal-export"]
+    assert repeated.reason_code == "pending_plan_not_found"
+    assert session.pending_plan is None
+
+
+def test取消和事实变化均不执行待确认计划(monkeypatch) -> None:
+    from application import request_runtime
+    from application.session_state import SessionState
+    from contracts.planner_models import PlanDecision
+
+    class Sink:
+        async def publish(self, _event):
+            pass
+
+    async def should_not_execute(**_kwargs):
+        raise AssertionError("待确认计划不得执行")
+
+    monkeypatch.setattr(
+        request_runtime, "_execute_plan_with_threat_transaction", should_not_execute
+    )
+
+    async def run_case(control: str, mutate: bool = False):
+        calls = 0
+
+        class Planner:
+            async def plan(self, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return _export_proposal()
+                return PlanDecision(
+                    decision=control,
+                    plan_id=f"{control}-export",
+                    pending_plan_id=kwargs["pending_plan"].plan_id,
+                )
+
+        session = SessionState(decoded_data={"normalize": []})
+        planner = Planner()
+        await request_runtime.run_user_request(
+            session=session,
+            team=None,
+            user_text="先给方案",
+            progress_sink=Sink(),
+            progress_plan_id="proposal",
+            planner=planner,
+        )
+        if mutate:
+            session.decoded_data["normalize"].append(
+                {"index": "src", "field": "源IP", "mappings": []}
+            )
+        result = await request_runtime.run_user_request(
+            session=session,
+            team=None,
+            user_text=control,
+            progress_sink=Sink(),
+            progress_plan_id=control,
+            planner=planner,
+        )
+        return result, session
+
+    cancelled, cancelled_session = asyncio.run(run_case("cancel"))
+    stale, stale_session = asyncio.run(run_case("confirm", mutate=True))
+
+    assert cancelled.guidance_code == "pending_plan_cancelled"
+    assert cancelled_session.pending_plan is None
+    assert stale.reason_code == "pending_plan_stale"
+    assert stale_session.pending_plan is None

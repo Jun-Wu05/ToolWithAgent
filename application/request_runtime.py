@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Mapping
 from typing import Any, Awaitable, Callable
 
 from agent.core.model_config import model_runtime_scope
@@ -26,6 +28,7 @@ from application.threat_chain import (
 )
 from contracts.planner_models import (
     ExecutionReport,
+    PendingPlan,
     PlanDecision,
     StepStatus,
     ThreatMappingArtifact,
@@ -159,6 +162,9 @@ async def _run_auto_threat_source_selection(
 
 _DECISION_LABELS = {
     "execute": "执行计划",
+    "proposal": "待确认方案",
+    "confirm": "确认方案",
+    "cancel": "取消方案",
     "clarification": "需要澄清",
     "guidance": "使用引导",
 }
@@ -194,7 +200,7 @@ def _operation_label(step: Any) -> str:
 def _assistant_history_content(result: PlanDecision | ExecutionReport) -> str:
     """生成供下一轮 Planner 续接的紧凑助手语义，不保存产物内容。"""
     if isinstance(result, PlanDecision):
-        if result.decision == "clarification":
+        if result.decision in {"clarification", "proposal"}:
             choices = f" 可选：{'；'.join(result.choices)}" if result.choices else ""
             return f"{result.question}{choices}"
         if result.answer:
@@ -208,6 +214,49 @@ def _assistant_history_content(result: PlanDecision | ExecutionReport) -> str:
         status = _STEP_STATUS_LABELS[item.status]
         outcomes.append(f"{operation}（{status}）")
     return f"已执行：{'；'.join(outcomes)}。"
+
+
+def _session_get(session: Any, key: str, default: Any = None) -> Any:
+    """兼容类型化会话与测试字典。"""
+    if isinstance(session, Mapping):
+        return session.get(key, default)
+    return getattr(session, key, default)
+
+
+def _session_set(session: Any, key: str, value: Any) -> None:
+    """兼容类型化会话与测试字典。"""
+    if isinstance(session, dict):
+        session[key] = value
+        return
+    setattr(session, key, value)
+
+
+def _read_pending_plan(session: Any) -> PendingPlan | None:
+    """读取类型化待确认计划；损坏状态按不存在处理。"""
+    value = _session_get(session, "pending_plan")
+    if value is None:
+        return None
+    try:
+        return value if isinstance(value, PendingPlan) else PendingPlan.model_validate(value)
+    except (TypeError, ValueError):
+        _session_set(session, "pending_plan", None)
+        return None
+
+
+def _session_facts_digest(session_facts: SessionFacts) -> str:
+    """生成稳定事实摘要，确认时拒绝执行基于旧状态的计划。"""
+    payload = session_facts.model_dump_json().encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _pending_plan_error(plan_id: str, reason_code: str, question: str) -> PlanDecision:
+    """构造不泄露计划内容的通用待确认状态错误。"""
+    return PlanDecision(
+        decision="clarification",
+        plan_id=plan_id,
+        reason_code=reason_code,
+        question=question,
+    )
 
 
 def is_explicit_clear_command(user_text: str) -> bool:
@@ -239,6 +288,7 @@ def clear_session_data(session: Any) -> None:
         "latest_enum_artifact",
         "rule_source_fields",
         "pending_rule_source_step",
+        "pending_plan",
         "threat_source_field_override",
         "mapped_sub_rules",
         "enum_preview",
@@ -300,6 +350,7 @@ async def _run_user_request_scoped(
     history_before_request = typed_conversation_history(session)
     append_history(session, "user", user_text)
     session_facts = build_session_facts(session)
+    pending_plan = _read_pending_plan(session)
     logger.info(
         "[SESSION_FACTS] 指令执行前状态: has_logs=%s has_log_classification=%s "
         "available_field_count=%s mappable_field_count=%s enum_mapping_row_count=%s "
@@ -318,6 +369,7 @@ async def _run_user_request_scoped(
         user_text=user_text,
         conversation_history=history_before_request,
         session_facts=session_facts,
+        pending_plan=pending_plan,
         progress_sink=progress_sink,
         progress_plan_id=progress_plan_id,
     )
@@ -349,6 +401,7 @@ async def _run_user_request_scoped(
             len(step.depends_on),
         )
     if decision.reason_code == "threat_source_auto_requested":
+        _session_set(session, "pending_plan", None)
         auto_result = await _run_auto_threat_source_selection(
             session=session,
             team=team,
@@ -356,9 +409,58 @@ async def _run_user_request_scoped(
         )
         append_history(session, "assistant", _assistant_history_content(auto_result))
         return auto_result
-    if decision.decision != "execute":
+    if decision.decision == "proposal":
+        _session_set(
+            session,
+            "pending_plan",
+            PendingPlan(
+                plan_id=decision.plan_id,
+                steps=decision.steps,
+                session_facts_digest=_session_facts_digest(session_facts),
+            ),
+        )
         append_history(session, "assistant", _assistant_history_content(decision))
         return decision
+    if decision.decision in {"confirm", "cancel"}:
+        if pending_plan is None or decision.pending_plan_id != pending_plan.plan_id:
+            result = _pending_plan_error(
+                decision.plan_id,
+                "pending_plan_not_found",
+                "没有匹配的待确认方案，请重新提出操作要求。",
+            )
+            append_history(session, "assistant", _assistant_history_content(result))
+            return result
+        if decision.decision == "cancel":
+            _session_set(session, "pending_plan", None)
+            result = PlanDecision(
+                decision="guidance",
+                plan_id=decision.plan_id,
+                guidance_code="pending_plan_cancelled",
+                answer="已取消待执行方案。",
+            )
+            append_history(session, "assistant", _assistant_history_content(result))
+            return result
+        if pending_plan.session_facts_digest != _session_facts_digest(session_facts):
+            _session_set(session, "pending_plan", None)
+            result = _pending_plan_error(
+                decision.plan_id,
+                "pending_plan_stale",
+                "会话数据已变化，原方案已失效，请重新提出操作要求。",
+            )
+            append_history(session, "assistant", _assistant_history_content(result))
+            return result
+        _session_set(session, "pending_plan", None)
+        decision = PlanDecision(
+            decision="execute",
+            plan_id=pending_plan.plan_id,
+            steps=pending_plan.steps,
+        )
+    elif decision.decision != "execute":
+        _session_set(session, "pending_plan", None)
+        append_history(session, "assistant", _assistant_history_content(decision))
+        return decision
+    else:
+        _session_set(session, "pending_plan", None)
     report = await _execute_plan_with_threat_transaction(
         session=session,
         team=team,

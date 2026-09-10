@@ -198,6 +198,41 @@ def test帮助决策渲染能力说明(monkeypatch):
     assert "字段映射" in sent[0]
 
 
+def test提案只渲染只读步骤和确认选项(monkeypatch):
+    import web.plan_renderer as renderer
+    from contracts.planner_models import PlanDecision
+
+    sent = []
+
+    class _Message:
+        def __init__(self, content, elements=None):
+            self.content = content
+            self.elements = elements or []
+
+        async def send(self):
+            sent.append((self.content, self.elements))
+
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+    proposal = PlanDecision.model_validate(
+        {
+            "decision": "proposal",
+            "plan_id": "proposal-log",
+            "reason_code": "confirmation_required",
+            "question": "将识别日志类型，是否执行？",
+            "choices": ["确认执行", "取消"],
+            "steps": [{"step_id": "log-1", "type": "log_parse"}],
+        }
+    )
+
+    asyncio.run(renderer.render_decision(proposal))
+
+    assert len(sent) == 1
+    assert "计划步骤" in sent[0][0]
+    assert "`log_parse`" in sent[0][0]
+    assert "确认执行" in sent[0][0]
+    assert sent[0][1] == []
+
+
 def _mount_chainlit_captures(monkeypatch, renderer):
     """挂载 Chainlit 消息/表格/文件捕获桩，返回 captured 字典。"""
     captured = {"dataframes": [], "files": [], "messages": []}

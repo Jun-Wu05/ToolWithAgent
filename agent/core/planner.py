@@ -17,7 +17,13 @@ from pydantic import ValidationError
 from agent.core.model_config import ModelConfig
 from agent.prompts import load_planner_prompt
 from agent.shared.logger import get_logger
-from contracts.planner_models import ConversationTurn, FillStep, LogParseStep, PlanDecision
+from contracts.planner_models import (
+    ConversationTurn,
+    FillStep,
+    LogParseStep,
+    PendingPlan,
+    PlanDecision,
+)
 from application.progress import NullProgressSink
 from contracts.progress import (
     ProgressEvent,
@@ -60,12 +66,21 @@ def build_planner_input(
     user_text: str,
     conversation_history: Sequence[ConversationTurn],
     session_facts: SessionFacts,
+    pending_plan: PendingPlan | None = None,
 ) -> str:
     """构建仅含用户原文、有限历史和安全事实的 Planner 输入。"""
     payload = {
         "user_text": user_text,
         "conversation_history": _limited_history(conversation_history),
         "session_facts": session_facts.model_dump(mode="json"),
+        "pending_plan": (
+            {
+                "plan_id": pending_plan.plan_id,
+                "operations": [step.type for step in pending_plan.steps],
+            }
+            if pending_plan
+            else None
+        ),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -114,6 +129,7 @@ _PLAN_DECISION_KEYS = frozenset(
         "decision",
         "plan_id",
         "steps",
+        "pending_plan_id",
         "reason_code",
         "question",
         "choices",
@@ -209,7 +225,7 @@ def _guard_explicit_feature_field(user_text: str, decision: PlanDecision) -> Pla
     只判短语族存在与参数缺席的矛盾组合，不从中文文本抽取字段名；
     字段识别始终是 Planner 模型的职责（PRD #110「显式意图确定性守卫」）。
     """
-    if decision.decision != "execute":
+    if decision.decision not in {"execute", "proposal"}:
         return decision
     if not _EXPLICIT_FEATURE_FIELD_PHRASE_RE.search(user_text):
         return decision
@@ -237,7 +253,7 @@ def _guard_cross_turn_threat_target(
     session_facts: SessionFacts,
 ) -> PlanDecision:
     """阻止 Planner 把用户点名的冲突字段静默改写为产物绑定字段。"""
-    if decision.decision != "execute":
+    if decision.decision not in {"execute", "proposal"}:
         return decision
     threat_fact = next(
         (
@@ -361,11 +377,17 @@ class PlannerService:
         user_text: str,
         conversation_history: Sequence[ConversationTurn],
         session_facts: SessionFacts,
+        pending_plan: PendingPlan | None = None,
         progress_sink: ProgressSink | None = None,
         progress_plan_id: str = "planning",
     ) -> PlanDecision:
         """调用 Planner 一次；服务或结构失败时拒绝执行并返回明确追问。"""
-        planner_input = build_planner_input(user_text, conversation_history, session_facts)
+        planner_input = build_planner_input(
+            user_text,
+            conversation_history,
+            session_facts,
+            pending_plan,
+        )
         runner = self._get_runner()
         sink = progress_sink or NullProgressSink()
         started_at = time.monotonic()

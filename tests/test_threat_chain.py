@@ -699,6 +699,36 @@ def test显式来源已有删除步骤时重新编译但不重复删除():
     ]
 
 
+def test待确认威胁提案在保存前完成相同编译():
+    session = _chain_session()
+    for rule in session["mapped_sub_rules"]:
+        rule["normalize"].append({"index": "威胁类型", "mappings": []})
+        rule["parser"]["filter"][0]["fields"]["威胁类型"] = "其他"
+    skeleton = build_threat_chain_steps(
+        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        config_ref="session.mapped_sub_rules",
+    )
+    proposal = PlanDecision(
+        decision="proposal",
+        plan_id="proposal-replace",
+        reason_code="confirmation_required",
+        question="是否执行？",
+        choices=("确认执行", "取消"),
+        steps=skeleton.steps,
+    )
+
+    compiled = compile_explicit_threat_plan(proposal, session)
+
+    assert compiled.decision == "proposal"
+    assert [step.type for step in compiled.steps] == [
+        "enum_extract",
+        "threat_mapping",
+        "delete_fields",
+        "add_fields",
+        "fill",
+    ]
+
+
 def test显式来源覆盖在指令链路成功后记录():
     """主计划含成功的 add_fields(威胁类型, %{B}) → 会话记住来源覆盖。"""
     session = _chain_session()

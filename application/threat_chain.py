@@ -117,7 +117,7 @@ def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
 
 def compile_explicit_threat_plan(plan: PlanDecision, session: Any) -> PlanDecision:
     """把 Planner 的威胁来源语义骨架编译为匹配当前配置的确定性链路。"""
-    if plan.decision != "execute":
+    if plan.decision not in {"execute", "proposal"}:
         return plan
     allowed = (
         EnumExtractStep,

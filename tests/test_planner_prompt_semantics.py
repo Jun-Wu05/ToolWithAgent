@@ -114,9 +114,9 @@ def test提示词约束威胁填充固定目标与无绑定澄清():
 
 def test提示词声明威胁链路四步指令与换来源话术():
     """显式链路指令生成四步且 X 逐字；换来源/删字段话术消歧（#173）。"""
-    assert "威胁类型链路指令" in PROMPT
+    assert "威胁类型决策表" in PROMPT
     assert "enum_extract(<字段>) → threat_mapping → add_fields(威胁类型=%{<字段>}, reference, rule_group=threat)" in PROMPT
-    assert "逐字取自指令原文" in PROMPT
+    assert "逐字取自当前指令" in PROMPT
     assert "请先执行标准字段映射以判定威胁子规则" in PROMPT
     assert "换链路来源" in PROMPT
     assert "重新执行字段映射会自动重建该字段" in PROMPT
@@ -131,22 +131,28 @@ def test提示词按语义槽位识别威胁类型完整链路():
     for semantic_slot in ("`目标字段=威胁类型`", "`来源字段=X`", "`值映射意图`"):
         assert semantic_slot in PROMPT
     assert "reason_code=threat_source_required" in PROMPT
-    assert "session_facts.threat_source_fields" in PROMPT
+    assert "不在 `available_fields`" in PROMPT
     for synonym in ("映射为", "作为来源", "根据", "转成", "改用"):
         assert synonym in PROMPT
-    assert "不以“提取枚举值”等固定短语为必要条件" in PROMPT
-    assert "明确只做普通字段名映射且排除值映射" in PROMPT
-    assert "首次链路的来源存在性只检查 `available_fields`" in PROMPT
+    assert "不依赖固定短语" in PROMPT
+    assert "明确只做普通字段名映射并排除值映射" in PROMPT
+    assert "首次链路只检查 `available_fields`" in PROMPT
     assert "不得臆造“威胁子规则字段池”门槛" in PROMPT
 
 
-def test提示词定义唯一方案的多轮确认与优先级():
-    """肯定回复可续接唯一方案，但否定、取消和换来源必须优先（#211）。"""
-    assert "确认/可以/执行吧/继续" in PROMPT
-    assert "重新校验当前 `session_facts`" in PROMPT
-    assert "不得再次要求确认" in PROMPT
-    assert "否定、取消、换来源优先于肯定续接" in PROMPT
-    assert "从最近一轮用户原始请求重建" in PROMPT
+def test提示词定义类型化提案确认协议():
+    """Agent 判断确认或取消，但不得复制或重建待确认步骤。"""
+    assert "`pending_plan` 存在" in PROMPT
+    assert "返回 `confirm`" in PROMPT
+    assert "取消时返回 `cancel`" in PROMPT
+    assert "只携带 `pending_plan_id`" in PROMPT
+    assert "不得从对话历史重建步骤" in PROMPT
+
+
+def test提示词消除固定字段冲突且没有超出长度预算():
+    assert "【事件名称】【事件级别】【日志类型】是系统固定字段" in PROMPT
+    assert "威胁类型不适用本条" in PROMPT
+    assert len(PROMPT) <= 15_031
 
 
 def test提示词包含合并与提取的单操作化规则():

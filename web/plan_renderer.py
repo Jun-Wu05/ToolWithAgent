@@ -159,6 +159,18 @@ def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
 
 async def render_decision(decision: PlanDecision) -> None:
     """渲染澄清或帮助决策；执行决策必须交给 PlanExecutor。"""
+    if decision.decision == "proposal":
+        steps = "\n".join(
+            f"{position}. `{step.type}`" for position, step in enumerate(decision.steps, 1)
+        )
+        choices = "\n".join(f"- {choice}" for choice in decision.choices)
+        await cl.Message(
+            content=(
+                f"📋 {decision.question}\n\n计划步骤：\n{steps}"
+                f"\n\n可选：\n{choices}"
+            )
+        ).send()
+        return
     if decision.decision == "clarification":
         choices = "\n".join(f"- {choice}" for choice in decision.choices)
         suffix = f"\n\n可选：\n{choices}" if choices else ""
@@ -172,7 +184,7 @@ async def render_decision(decision: PlanDecision) -> None:
             return
         await cl.Message(content="我可以处理日志类型提取、字段映射、枚举提取、威胁映射、填充、取消映射和导出。请说明目标与数据来源。").send()
         return
-    raise ValueError("执行决策不能直接渲染")
+    raise ValueError("执行或控制决策不能直接渲染")
 
 
 def build_execution_report_content(
