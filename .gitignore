@@ -80,6 +80,7 @@ docs/*
 !docs/architecture/
 !docs/design/
 !docs/design/DESIGN.md
+!docs/research/
 !docs/source-code-analysis.html
 
 # GitHub Copilot Skills（自动生成，不提交）
