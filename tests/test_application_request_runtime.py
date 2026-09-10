@@ -239,3 +239,118 @@ def test显式威胁来源计划按当前配置编译为原子替换链(monkeypa
     ]
     assert plan.steps[0].target_field == "alarm_name"
     assert plan.steps[3].field_value == "%{alarm_name}"
+
+
+def test自动选择跳过无有效映射并只提交成功候选(monkeypatch) -> None:
+    """候选试跑隔离：全兜底结果不提交，下一有效来源才写回。"""
+    from application import request_runtime
+    from application.session_state import SessionState
+    from contracts.planner_models import (
+        ExecutionReport,
+        PlanDecision,
+        StepResult,
+        StepStatus,
+        ThreatMappingArtifact,
+        ThreatMappingRow,
+    )
+
+    class Planner:
+        async def plan(self, **_kwargs):
+            return PlanDecision(
+                decision="clarification",
+                plan_id="auto-source",
+                reason_code="threat_source_auto_requested",
+                question="placeholder",
+            )
+
+    class Sink:
+        async def publish(self, _event):
+            pass
+
+    monkeypatch.setattr(
+        request_runtime,
+        "rank_threat_source_candidates",
+        lambda _fields: ("threat_type", "alarm_name", "event_type1"),
+    )
+    attempts = []
+
+    async def execute_candidate(*, session, plan, **_kwargs):
+        source = plan.steps[0].target_field
+        attempts.append(source)
+        session.mapped_sub_rules[0]["selected"] = source
+        mapped_value = "其他" if source == "threat_type" else "网络扫描"
+        return ExecutionReport(
+            plan_id=plan.plan_id,
+            results=(
+                StepResult(
+                    step_id="threat-chain-map",
+                    operation_type="threat_mapping",
+                    status=StepStatus.SUCCESS,
+                    artifact=ThreatMappingArtifact(
+                        mappings=(
+                            ThreatMappingRow(
+                                mappingType="REGULAR",
+                                orgValue=".*",
+                                mappingValue=mapped_value,
+                            ),
+                        ),
+                        source_field=source,
+                        item_count=1,
+                    ),
+                ),
+                StepResult(
+                    step_id="threat-chain-fill",
+                    operation_type="fill",
+                    status=StepStatus.SUCCESS,
+                    changed_count=1,
+                ),
+                StepResult(
+                    step_id="threat-chain-add",
+                    operation_type="add_fields",
+                    status=StepStatus.SUCCESS,
+                    changed_count=1,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        request_runtime, "_execute_plan_with_threat_transaction", execute_candidate
+    )
+    session = SessionState(
+        raw_log_lines=["alarm_name=scan threat_type=1002"],
+        mapped_sub_rules=[
+            {
+                "name": "threat-rule",
+                "normalize": [
+                    {"index": "alarm_name", "result": ["scan"]},
+                    {"index": "event_type1", "result": ["scan"]},
+                    {"index": "threat_type", "result": ["1002"]},
+                ],
+                "parser": {
+                    "filter": [
+                        {
+                            "name": "addFields",
+                            "id": "",
+                            "fields": {"事件名称": "网络攻击", "事件级别": "提醒"},
+                        }
+                    ]
+                },
+            }
+        ],
+    )
+
+    result = asyncio.run(
+        request_runtime.run_user_request(
+            session=session,
+            team=None,
+            user_text="请为威胁类型选择合适的来源字段",
+            progress_sink=Sink(),
+            progress_plan_id="auto-source",
+            planner=Planner(),
+        )
+    )
+
+    assert attempts == ["threat_type", "alarm_name"]
+    assert result.status == StepStatus.SUCCESS
+    assert session.mapped_sub_rules[0]["selected"] == "alarm_name"
+    assert session.threat_source_field_override == "alarm_name"

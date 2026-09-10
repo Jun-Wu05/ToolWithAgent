@@ -96,7 +96,7 @@ def test自然语言恰好调用planner一次且返回前不执行业务():
     assert decision.steps[0].type == "fill"
 
 
-def test威胁来源澄清丢弃模型候选并只展示真实共同字段():
+def test威胁来源澄清丢弃模型候选且不倾倒字段池():
     from agent.core.planner import PlannerService
 
     async def hallucinating_runner(_planner_input: str):
@@ -110,7 +110,7 @@ def test威胁来源澄清丢弃模型候选并只展示真实共同字段():
 
     decision = asyncio.run(
         PlannerService(runner=hallucinating_runner).plan(
-            user_text="请为威胁类型选择合适的来源字段",
+            user_text="我要进行威胁类型映射",
             conversation_history=(
                 ConversationTurn(role="user", content="用 event_str 作为威胁类型来源"),
             ),
@@ -120,8 +120,63 @@ def test威胁来源澄清丢弃模型候选并只展示真实共同字段():
         )
     )
 
-    assert decision.question == "请选择用于威胁类型映射的来源字段。"
-    assert decision.choices == ("alarm_name", "event_type1")
+    assert decision.question == "请明确用于威胁类型映射的来源字段。"
+    assert decision.choices == ()
+
+
+def test自动选择威胁来源不展示完整字段池() -> None:
+    """自动选择是执行请求，不应把资格字段池直接倾倒给用户。"""
+    from agent.core.planner import PlannerService
+
+    async def runner(_planner_input: str):
+        return PlanDecision(
+            decision="clarification",
+            plan_id="auto-threat-source",
+            reason_code="threat_source_required",
+            question="placeholder",
+            choices=("accuracy", "alarm_name", "event_str"),
+        )
+
+    decision = asyncio.run(
+        PlannerService(runner=runner).plan(
+            user_text="请为威胁类型选择合适的来源字段",
+            conversation_history=(),
+            session_facts=SessionFacts(
+                threat_source_fields=("accuracy", "alarm_name", "event_type1")
+            ),
+        )
+    )
+
+    assert decision.reason_code == "threat_source_auto_requested"
+    assert decision.question == "正在从真实字段中自动选择威胁类型来源。"
+    assert decision.choices == ()
+
+
+def test不存在的显式威胁来源返回定向错误() -> None:
+    """显式字段不存在时只说明该字段，不回退成完整候选清单。"""
+    from agent.core.planner import PlannerService
+
+    async def runner(_planner_input: str):
+        return PlanDecision(
+            decision="clarification",
+            plan_id="missing-threat-source",
+            reason_code="threat_source_not_found",
+            question="placeholder",
+            choices=("alarm_name", "event_type1"),
+            parameters={"requested_field": "event_str"},
+        )
+
+    decision = asyncio.run(
+        PlannerService(runner=runner).plan(
+            user_text="用 event_str 作为威胁类型来源",
+            conversation_history=(),
+            session_facts=SessionFacts(threat_source_fields=("alarm_name",)),
+        )
+    )
+
+    assert decision.reason_code == "threat_source_not_found"
+    assert decision.question == "字段 `event_str` 不存在于当前威胁子规则，未执行。"
+    assert decision.choices == ()
 
 
 def test跨轮威胁填充不能静默改写用户明确指定的冲突目标():
