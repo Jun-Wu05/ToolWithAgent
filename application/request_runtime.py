@@ -12,15 +12,24 @@ from application.execution import ExecutionContext
 from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
 from application.model_runtime import resolve_session_config
+from application.progress import NullProgressSink
 from application.session_projection import build_session_facts
 from application.threat_chain import (
+    build_threat_source_plan,
     compile_explicit_threat_plan,
     commit_threat_chain_session,
     is_threat_type_replacement_plan,
+    rank_threat_source_candidates,
     run_threat_chain_after_mapping,
+    set_threat_source_override,
     stage_threat_chain_session,
 )
-from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
+from contracts.planner_models import (
+    ExecutionReport,
+    PlanDecision,
+    StepStatus,
+    ThreatMappingArtifact,
+)
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressSink, ProgressStatus
 from contracts.session_facts import SessionFacts
 
@@ -68,6 +77,84 @@ async def _execute_plan_with_threat_transaction(
     if transactional and report.status == StepStatus.SUCCESS:
         commit_threat_chain_session(execution_session, session)
     return report
+
+
+_RETRYABLE_THREAT_SOURCE_ERRORS = {
+    "enum_extract_empty",
+    "enum_target_field_not_found",
+    "threat_mapping_empty",
+}
+
+
+def _has_meaningful_threat_mapping(report: ExecutionReport) -> bool:
+    """自动试选至少得到一个非“其他”映射才允许提交。"""
+    return any(
+        isinstance(result.artifact, ThreatMappingArtifact)
+        and any(
+            row.mapped_value.strip() and row.mapped_value.strip() != "其他"
+            for row in result.artifact.mappings
+        )
+        for result in report.results
+    )
+
+
+async def _run_auto_threat_source_selection(
+    *, session: Any, team: Any, session_facts: SessionFacts
+) -> PlanDecision | ExecutionReport:
+    """在隔离会话中最多试三个真实来源，首个有效全链成功后一次提交。"""
+    candidates = rank_threat_source_candidates(session_facts.threat_source_fields)
+    if not candidates:
+        return PlanDecision(
+            decision="clarification",
+            plan_id="auto-threat-source",
+            reason_code="threat_source_required",
+            question="当前威胁子规则没有可试选的共同来源字段。",
+        )
+
+    for position, source_field in enumerate(candidates, start=1):
+        staged_session = stage_threat_chain_session(session)
+        plan = build_threat_source_plan(
+            staged_session,
+            source_field,
+            plan_id=f"plan-threat-source-auto-{position}",
+        )
+        if plan is None:
+            break
+        report = await _execute_plan_with_threat_transaction(
+            session=staged_session,
+            team=team,
+            plan=plan,
+            progress_sink=NullProgressSink(),
+        )
+        if report.status == StepStatus.SUCCESS and _has_meaningful_threat_mapping(report):
+            commit_threat_chain_session(staged_session, session)
+            set_threat_source_override(session, source_field)
+            logger.info(
+                "[THREAT_CHAIN] 自动来源试选成功: source=%s attempt=%s",
+                source_field,
+                position,
+            )
+            return report
+        failed = next(
+            (result for result in report.results if result.status != StepStatus.SUCCESS),
+            None,
+        )
+        if failed is not None and failed.error_code not in _RETRYABLE_THREAT_SOURCE_ERRORS:
+            return report
+        logger.info(
+            "[THREAT_CHAIN] 自动来源试选未命中: source=%s attempt=%s error=%s",
+            source_field,
+            position,
+            failed.error_code if failed is not None else "all_degraded",
+        )
+
+    return PlanDecision(
+        decision="clarification",
+        plan_id="auto-threat-source",
+        reason_code="threat_source_required",
+        question="自动尝试未找到可可靠映射的威胁类型来源，请明确选择一个字段。",
+        choices=candidates,
+    )
 
 
 _DECISION_LABELS = {
@@ -261,6 +348,14 @@ async def _run_user_request_scoped(
             + int(bool(getattr(step, "target_field", None))),
             len(step.depends_on),
         )
+    if decision.reason_code == "threat_source_auto_requested":
+        auto_result = await _run_auto_threat_source_selection(
+            session=session,
+            team=team,
+            session_facts=session_facts,
+        )
+        append_history(session, "assistant", _assistant_history_content(auto_result))
+        return auto_result
     if decision.decision != "execute":
         append_history(session, "assistant", _assistant_history_content(decision))
         return decision

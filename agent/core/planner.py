@@ -294,22 +294,45 @@ def _guard_cross_turn_threat_target(
     return decision
 
 
+_AUTO_THREAT_SOURCE_RE = re.compile(
+    r"(?:选择|挑选|推荐)[^，。;；]{0,20}(?:合适|最佳|适合)[^，。;；]{0,20}字段"
+)
+
+
 def _normalize_threat_source_clarification(
-    decision: PlanDecision, session_facts: SessionFacts
+    user_text: str, decision: PlanDecision, session_facts: SessionFacts
 ) -> PlanDecision:
-    """来源候选只取确定性会话事实，不展示模型生成的字段名。"""
-    if (
-        decision.decision != "clarification"
-        or decision.reason_code != "threat_source_required"
-    ):
+    """统一威胁来源提示，禁止把完整字段池作为推荐列表展示。"""
+    if decision.decision != "clarification":
         return decision
-    candidates = session_facts.threat_source_fields
+    auto_requested = decision.reason_code == "threat_source_auto_requested" or (
+        decision.reason_code == "threat_source_required"
+        and _AUTO_THREAT_SOURCE_RE.search(user_text)
+    )
+    if auto_requested:
+        return decision.model_copy(
+            update={
+                "reason_code": "threat_source_auto_requested",
+                "question": "正在从真实字段中自动选择威胁类型来源。",
+                "choices": (),
+            }
+        )
+    if decision.reason_code == "threat_source_not_found":
+        requested = decision.parameters.get("requested_field", "").replace("`", "").strip()
+        question = (
+            f"字段 `{requested}` 不存在于当前威胁子规则，未执行。"
+            if requested
+            else "指定字段不存在于当前威胁子规则，未执行。"
+        )
+        return decision.model_copy(update={"question": question, "choices": ()})
+    if decision.reason_code != "threat_source_required":
+        return decision
     question = (
-        "请选择用于威胁类型映射的来源字段。"
-        if candidates
+        "请明确用于威胁类型映射的来源字段。"
+        if session_facts.threat_source_fields
         else "当前威胁子规则没有共同可用的来源字段，请先检查字段映射结果。"
     )
-    return decision.model_copy(update={"question": question, "choices": candidates})
+    return decision.model_copy(update={"question": question, "choices": ()})
 
 
 class PlannerService:
@@ -415,7 +438,7 @@ class PlannerService:
             )
             decision = _guard_explicit_feature_field(user_text, decision)
             decision = _normalize_threat_source_clarification(
-                decision, session_facts
+                user_text, decision, session_facts
             )
             elapsed_seconds = time.monotonic() - started_at
             logger.info(

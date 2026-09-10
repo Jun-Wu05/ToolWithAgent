@@ -12,6 +12,7 @@ import numpy as np
 from agent.core import field_retriever
 from application.threat_chain import (
     compile_explicit_threat_plan,
+    rank_threat_source_candidates,
     SESSION_OVERRIDE_KEY,
     run_threat_chain_after_mapping,
 )
@@ -114,6 +115,30 @@ _FULL_MAPPING = json.dumps(
     ],
     ensure_ascii=False,
 )
+
+
+def test自动来源候选复用检索并优先描述字段(monkeypatch):
+    """高相似数字类型可先试，但描述型 alarm_name 必须进入三候选。"""
+    monkeypatch.setattr(
+        "application.threat_chain._retrieve_source_candidates",
+        lambda fields: {
+            field: [
+                (
+                    "威胁类型",
+                    1.0 if field == "threat_type" else 0.0,
+                    "threat_type",
+                    "",
+                )
+            ]
+            for field in fields
+        },
+    )
+
+    ranked = rank_threat_source_candidates(
+        ("accuracy", "action", "alarm_name", "event_type1", "threat_type", "src_ip")
+    )
+
+    assert ranked == ("threat_type", "alarm_name", "event_type1")
 
 
 def _mock_retrieval(monkeypatch) -> None:

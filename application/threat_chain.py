@@ -13,6 +13,7 @@ application 请求运行时层后置检查标注结果，构造确定性四步�
 from __future__ import annotations
 
 import copy
+import re
 import time
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -93,6 +94,11 @@ def commit_threat_chain_session(staged: Any, session: Any) -> None:
         _session_set(session, key, _session_get(staged, key))
 
 
+def set_threat_source_override(session: Any, source_field: str) -> None:
+    """记录已成功验证的威胁来源，供本会话后续自动链复用。"""
+    _session_set(session, SESSION_OVERRIDE_KEY, source_field)
+
+
 def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
     """识别同时包含生成字段与威胁填充的显式威胁全链。"""
     has_generated_field = any(
@@ -157,6 +163,23 @@ def compile_explicit_threat_plan(plan: PlanDecision, session: Any) -> PlanDecisi
     ):
         return plan
 
+    compiled = build_threat_source_plan(
+        session, enum_step.target_field, plan_id=plan.plan_id
+    )
+    if compiled is None:
+        return plan
+    logger.info(
+        "[THREAT_CHAIN] 显式来源计划已编译: source=%s steps=%s",
+        enum_step.target_field,
+        [step.type for step in compiled.steps],
+    )
+    return plan.model_copy(update={"steps": compiled.steps})
+
+
+def build_threat_source_plan(
+    session: Any, source_field: str, *, plan_id: str
+) -> PlanDecision | None:
+    """按当前真实配置为一个明确来源构造原子威胁类型链路。"""
     facts = build_session_facts(session)
     threat_rule_names = tuple(
         item.rule_name
@@ -164,27 +187,16 @@ def compile_explicit_threat_plan(plan: PlanDecision, session: Any) -> PlanDecisi
         if item.event_name in THREAT_EVENT_NAMES
     )
     if not threat_rule_names:
-        return plan
+        return None
     field_state = inspect_threat_field_state(
         _session_get(session, "mapped_sub_rules"), threat_rule_names
     )
-    compiled = build_threat_chain_steps(
-        SourceFieldDecision(
-            enum_step.target_field,
-            1.0,
-            len(threat_rule_names),
-            "explicit",
-        ),
+    chain = build_threat_chain_steps(
+        SourceFieldDecision(source_field, 1.0, len(threat_rule_names), "explicit"),
         config_ref=CHAIN_CONFIG_REF,
         threat_field_state=field_state,
     )
-    logger.info(
-        "[THREAT_CHAIN] 显式来源计划已编译: source=%s field_state=%s steps=%s",
-        enum_step.target_field,
-        field_state,
-        [step.type for step in compiled.steps],
-    )
-    return plan.model_copy(update={"steps": compiled.steps})
+    return PlanDecision(decision="execute", plan_id=plan_id, steps=chain.steps)
 
 
 @contextmanager
@@ -239,7 +251,7 @@ def record_explicit_source_override(
             for result in report.results
         )
         if succeeded:
-            _session_set(session, SESSION_OVERRIDE_KEY, referenced)
+            set_threat_source_override(session, referenced)
             logger.info(
                 "[THREAT_CHAIN] S0 会话来源覆盖已记录: override=%s step_id=%s",
                 referenced,
@@ -252,6 +264,39 @@ def record_explicit_source_override(
 def _retrieve_source_candidates(fields: list[str]) -> dict[str, list[tuple[str, float, str, str]]]:
     """对字段池全量字段检索威胁类型候选（黑名单记录按需包含，#173 X 判定）。"""
     return batch_retrieve_candidates_table(fields, include_mapping_excluded=True)
+
+
+def rank_threat_source_candidates(
+    fields: tuple[str, ...], *, limit: int = 3
+) -> tuple[str, ...]:
+    """从真实共有字段中选最多三个候选，语义分优先、字段名只作破平。"""
+    ordered = tuple(dict.fromkeys(fields))
+    try:
+        table = _retrieve_source_candidates(list(ordered))
+    except Exception as error:  # noqa: BLE001 - 检索失败仍可用字段名稳定破平
+        logger.warning("[THREAT_CHAIN] 自动来源候选检索失败: %s", type(error).__name__)
+        table = {}
+    positive = {"alarm": 2, "name": 2, "event": 1, "attack": 1, "threat": 1, "type": 1}
+    negative = {"id", "ip", "port", "time", "timestamp", "count", "mac", "addr", "address"}
+
+    def score(item: tuple[int, str]) -> tuple[float, int, int]:
+        """返回语义、描述性和原始顺序组成的稳定降序键。"""
+        position, field = item
+        semantic = max(
+            (row[1] for row in table.get(field, ()) if row[0] == THREAT_TYPE_FIELD),
+            default=0.0,
+        )
+        tokens = {
+            re.sub(r"\d+$", "", token)
+            for token in re.split(r"[^a-z0-9]+", field.lower())
+            if token
+        }
+        lexical = sum(positive.get(token, 0) for token in tokens) - 2 * len(tokens & negative)
+        # ponytail: 字段名只用于零分破平；三次保险试跑不足时再引入值画像。
+        return semantic, lexical, -position
+
+    ranked = sorted(enumerate(ordered), key=score, reverse=True)
+    return tuple(field for _, field in ranked[:limit])
 
 
 def _determine_source(
