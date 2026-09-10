@@ -70,6 +70,42 @@ def _sample_values(entry: Mapping[str, Any] | None) -> tuple[str, ...]:
     return tuple(str(value) for value in raw if str(value).strip())
 
 
+def _rule_sample_values(
+    rule: Mapping[str, Any], source_field: str
+) -> tuple[str, ...]:
+    """normalize 无样例结果时，按规则自身 KV 解析参数读取 sample。"""
+    parser = rule.get("parser")
+    if not isinstance(parser, Mapping) or parser.get("name") != "delimitWithKeyMap":
+        return ()
+    sample = rule.get("sample")
+    lines = sample if isinstance(sample, list) else str(sample or "").splitlines()
+    if not lines:
+        return ()
+    field_delimit = {r"\s": "space", r"\t": "\t"}.get(
+        str(parser.get("delimit") or ""), str(parser.get("delimit") or "")
+    )
+    kv_delimit = str(parser.get("tab") or "")
+    if not field_delimit or not kv_delimit:
+        return ()
+    from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
+
+    try:
+        extractor = KvExtractor(
+            field_delimit=field_delimit,
+            kv_delimit=kv_delimit,
+        )
+        return tuple(
+            dict.fromkeys(
+                str(value)
+                for line in lines
+                if (value := extractor.extract_value(str(line), source_field)) is not None
+                and str(value).strip()
+            )
+        )
+    except (TypeError, ValueError):
+        return ()
+
+
 def _reference_field(binding: str) -> str | None:
     if not (binding.startswith("%{") and binding.endswith("}")):
         return None
@@ -93,7 +129,9 @@ def _enrich_threat_row(
             }
         )
 
-    samples = _sample_values(_normalize_entry(rule, source_field))
+    samples = _sample_values(_normalize_entry(rule, source_field)) or _rule_sample_values(
+        rule, source_field
+    )
     target = _normalize_entry(rule, THREAT_TYPE_FIELD)
     mappings = target.get("mappings", []) if target is not None else []
     mapping_rows = mappings if isinstance(mappings, list) else []

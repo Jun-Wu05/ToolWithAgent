@@ -955,3 +955,86 @@ def test信息型作答渲染为guidance答案而非能力说明(monkeypatch):
     assert captured["messages"][0].startswith("📖 当前子规则事件标注")
     assert "AUDIT_kv_子规则=审计事件（信息）" in captured["messages"][0]
     assert "我可以处理" in captured["messages"][1]
+
+
+def test跨轮报告锚点更新同一消息且保存最终表(monkeypatch):
+    """成功威胁填充只更新原消息，供下一轮继续复用同一锚点。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import (
+        EventAnnotationRow,
+        ExecutionReport,
+        FieldMappingArtifact,
+        StepResult,
+        StepStatus,
+    )
+
+    store = {}
+
+    class UserSession:
+        def get(self, key):
+            return store.get(key)
+
+        def set(self, key, value):
+            store[key] = value
+
+    class Message:
+        content = ""
+        updates = 0
+
+        async def update(self):
+            self.updates += 1
+
+    monkeypatch.setattr(renderer.cl, "user_session", UserSession())
+    primary = ExecutionReport(
+        plan_id="field-mapping",
+        results=(
+            StepResult(
+                step_id="field-mapping",
+                operation_type="field_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=FieldMappingArtifact(
+                    item_count=0,
+                    mappings=(),
+                    event_annotations=(
+                        EventAnnotationRow(
+                            rule_name="threat-rule",
+                            event_name="网络攻击",
+                            event_level="提醒",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    chain = ExecutionReport(
+        plan_id="explicit-threat",
+        results=(
+            StepResult(
+                step_id="threat-chain-fill",
+                operation_type="fill",
+                status=StepStatus.SUCCESS,
+                changed_count=1,
+            ),
+        ),
+    )
+    final_config = [
+        {
+            "name": "threat-rule",
+            "normalize": [{"index": "威胁类型", "mappings": []}],
+            "parser": {
+                "filter": [
+                    {"name": "addFields", "fields": {"威胁类型": "其他"}}
+                ]
+            },
+        }
+    ]
+    message = Message()
+    renderer.remember_primary_report(message, primary)
+
+    updated = asyncio.run(renderer.refresh_primary_report_anchor(chain, final_config))
+
+    assert updated is True
+    assert message.updates == 1
+    assert "—（固定值）" in message.content
+    assert "其他" in message.content
+    assert store[renderer._PRIMARY_REPORT_ANCHOR_KEY][0] is message

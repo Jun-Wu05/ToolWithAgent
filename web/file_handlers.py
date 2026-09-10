@@ -22,6 +22,7 @@ from application.enum_mapping_attachments import commit_enum_mapping_attachment
 from application.file_input import build_simplified_data, commit_primary_dataset, simple_decode
 from web.parsers import create_dataframe_elements
 from application.session_state import PrimaryDatasetSnapshot
+from web.plan_renderer import clear_primary_report_anchor
 
 
 # 枚举映射表列头关键词（唯一实现；utils 版重复副本已删除）
@@ -132,6 +133,7 @@ async def handle_file_upload(user_session, element):
                 uploaded_file_time=file_time,
             )
             commit_primary_dataset(user_session, snapshot)
+            clear_primary_report_anchor()
             logger.info(f"[FILE_UPLOAD] 记录上传文件元信息: name={file_name_val}, time={file_time}")
 
             # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
@@ -279,6 +281,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
             uploaded_file_time=file_time,
         )
         commit_primary_dataset(user_session, snapshot)
+        clear_primary_report_anchor()
 
         await cl.Message(
             content=f"📊 已读取 Excel 文件 `{file_name}`\n\n"

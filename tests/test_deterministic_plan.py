@@ -232,6 +232,7 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
     execution_count = 0
     rendered = []
     updated = []
+    anchored = []
     lifecycle = []
 
     class _FakeLedger:
@@ -263,6 +264,9 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
     async def capture_update(message, report):
         updated.append((message, report))
 
+    def capture_anchor(message, report):
+        anchored.append((message, report))
+
     monkeypatch.setattr(runtime, "_execute_plan_with_threat_transaction", fake_execute)
     monkeypatch.setattr(runtime, "run_threat_chain_after_mapping", fake_chain)
     monkeypatch.setattr(deterministic_plan, "get_session_progress_sink", lambda: _FakeLedger())
@@ -271,6 +275,12 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
         deterministic_plan,
         "update_execution_report_message",
         capture_update,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        deterministic_plan,
+        "remember_primary_report",
+        capture_anchor,
         raising=False,
     )
     step = FieldMappingStep(
@@ -305,3 +315,4 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
         (ExecutionReport(plan_id=primary.plan_id, results=(follow_up,)), False),
     ]
     assert lifecycle == ["begin", "finish"]
+    assert anchored == updated

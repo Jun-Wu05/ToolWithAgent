@@ -14,7 +14,12 @@ from application.request_runtime import (
 )
 from contracts.planner_models import ExecutionReport
 from web.chainlit_progress import get_session_progress_sink, reset_session_progress_sink
-from web.plan_renderer import render_decision, render_execution_report
+from web.plan_renderer import (
+    clear_primary_report_anchor,
+    refresh_primary_report_anchor,
+    render_decision,
+    render_execution_report,
+)
 
 
 async def handle_user_message(user_session: Any, team: Any, user_text: str) -> None:
@@ -49,6 +54,12 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
             progress_plan_id=progress_plan_id,
         )
         if isinstance(result, ExecutionReport):
+            final_config = (
+                user_session.mapped_sub_rules
+                if hasattr(user_session, "mapped_sub_rules")
+                else user_session.get("mapped_sub_rules")
+            )
+            await refresh_primary_report_anchor(result, final_config)
             await render_execution_report(result)
         else:
             await render_decision(result)
@@ -59,4 +70,5 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
 async def _clear_session_data(user_session: Any) -> None:
     """执行确定性清空事件，并只保留统一的完成提示。"""
     clear_session_data(user_session)
+    clear_primary_report_anchor()
     await cl.Message(content="🗑️ **数据已清空** — 请上传新文件继续处理。").send()
