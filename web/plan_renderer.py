@@ -18,6 +18,10 @@ from web.utils import render_log_parser_result
 
 logger = get_logger("plan_renderer")
 
+_THREAT_ENUM_STEP = "threat-chain-enum"
+_THREAT_MAPPING_STEP = "threat-chain-map"
+_THREAT_FILL_STEP = "threat-chain-fill"
+
 
 def _escape_markdown_cell(value: object) -> str:
     """转义 GFM 表格动态单元格，并将换行保留为单元格内换行。"""
@@ -111,6 +115,19 @@ def _download_filename(kind: str, timestamp: str) -> str:
     raise ValueError(f"不支持的下载产物类型: {kind}")
 
 
+def _threat_chain_download_step_ids(
+    execution_report: ExecutionReport,
+) -> set[str] | None:
+    """完整威胁链只公开映射表和最终配置；非该链路保持原下载策略。"""
+    result_by_id = {result.step_id: result for result in execution_report.results}
+    if not ({_THREAT_ENUM_STEP, _THREAT_MAPPING_STEP} & result_by_id.keys()):
+        return None
+    final = result_by_id.get(_THREAT_FILL_STEP)
+    if final is None or final.status != StepStatus.SUCCESS:
+        return set()
+    return {_THREAT_MAPPING_STEP, _THREAT_FILL_STEP}
+
+
 def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
     """根据成功产物挂载既有类型化动作，不在渲染器内执行领域逻辑。"""
     action_specs: list[tuple[str, str, str]] = []
@@ -200,11 +217,17 @@ async def render_execution_report(
     actions = _build_result_actions(execution_report)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     field_mapping_downloads: list[tuple[str, str, bytes]] = []
+    threat_download_steps = _threat_chain_download_step_ids(execution_report)
     for result in execution_report.results:
         artifact = result.artifact
         if artifact is None:
             continue
+        download_allowed = (
+            threat_download_steps is None or result.step_id in threat_download_steps
+        )
         if artifact.artifact_type == "config_export":
+            if not download_allowed:
+                continue
             content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
             download_elements.append(
                 cl.File(
@@ -228,37 +251,39 @@ async def render_execution_report(
         elif artifact.artifact_type == "threat_mapping":
             rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
             dataframe_elements.extend(create_dataframe_elements(rows))
-            dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
-            download_elements.append(
-                cl.File(
-                    name=_download_filename("threat_mapping", timestamp),
-                    content=output.getvalue(),
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            if download_allowed:
+                dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
+                download_elements.append(
+                    cl.File(
+                        name=_download_filename("threat_mapping", timestamp),
+                        content=output.getvalue(),
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
                 )
-            )
         elif artifact.artifact_type == "enum_values":
             # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
             rows = [{"枚举值": value} for value in artifact.values]
             dataframe_elements.extend(create_dataframe_elements(rows))
-            download_elements.append(
-                cl.File(
-                    name=_download_filename("enum_values", timestamp),
-                    content=json.dumps(
-                        {
-                            "field": artifact.field,
-                            "regex": artifact.regex,
-                            "original_log": list(artifact.original_log),
-                            "value": list(artifact.values),
-                        },
-                        ensure_ascii=False,
-                        indent=4,
-                    ).encode("utf-8"),
-                    mime="application/json",
+            if download_allowed:
+                download_elements.append(
+                    cl.File(
+                        name=_download_filename("enum_values", timestamp),
+                        content=json.dumps(
+                            {
+                                "field": artifact.field,
+                                "regex": artifact.regex,
+                                "original_log": list(artifact.original_log),
+                                "value": list(artifact.values),
+                            },
+                            ensure_ascii=False,
+                            indent=4,
+                        ).encode("utf-8"),
+                        mime="application/json",
+                    )
                 )
-            )
         elif artifact.artifact_type == "log_classification":
             download_elements.append(
                 cl.File(

@@ -784,6 +784,118 @@ def test多产物复合计划按汇总表格下载纵向发送(monkeypatch):
     }
 
 
+def test完整威胁链成功后只下载映射表和最终配置(monkeypatch):
+    import web.plan_renderer as renderer
+    from contracts.planner_models import (
+        ConfigExportArtifact,
+        EnumValuesArtifact,
+        ExecutionReport,
+        StepResult,
+        StepStatus,
+        ThreatMappingArtifact,
+        ThreatMappingRow,
+    )
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    monkeypatch.setattr(
+        renderer,
+        "datetime",
+        SimpleNamespace(now=lambda: datetime(2026, 9, 10, 9, 30)),
+    )
+
+    def config_result(step_id: str, operation_type: str, content: str, kind: str):
+        return StepResult(
+            step_id=step_id,
+            operation_type=operation_type,
+            status=StepStatus.SUCCESS,
+            artifact=ConfigExportArtifact(
+                item_count=1, content=content, download_kind=kind
+            ),
+            message="步骤执行成功",
+        )
+
+    report = ExecutionReport(
+        plan_id="plan-threat-chain",
+        results=(
+            StepResult(
+                step_id="threat-chain-enum",
+                operation_type="enum_extract",
+                status=StepStatus.SUCCESS,
+                artifact=EnumValuesArtifact(item_count=1, values=("scan",)),
+                message="步骤执行成功",
+            ),
+            StepResult(
+                step_id="threat-chain-map",
+                operation_type="threat_mapping",
+                status=StepStatus.SUCCESS,
+                artifact=ThreatMappingArtifact(
+                    item_count=1,
+                    mappings=(
+                        ThreatMappingRow(
+                            mappingType="EQUAL",
+                            orgValue="scan",
+                            mappingValue="扫描",
+                        ),
+                    ),
+                ),
+                message="步骤执行成功",
+            ),
+            config_result(
+                "threat-chain-replace", "delete_fields", "after-delete", "field_adjusted_config"
+            ),
+            config_result(
+                "threat-chain-add", "add_fields", "after-add", "field_adjusted_config"
+            ),
+            config_result(
+                "threat-chain-fill", "fill", "final-config", "threatmapping_config"
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert {item["name"] for item in captured["files"]} == {
+        "threatmapping_20260910_0930.xlsx",
+        "threatmapping_config_20260910_0930.txt",
+    }
+
+
+def test威胁链失败时不下载已产生的中间文件(monkeypatch):
+    import web.plan_renderer as renderer
+    from contracts.planner_models import (
+        EnumValuesArtifact,
+        ExecutionReport,
+        StepResult,
+        StepStatus,
+    )
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-threat-chain-failed",
+        results=(
+            StepResult(
+                step_id="threat-chain-enum",
+                operation_type="enum_extract",
+                status=StepStatus.SUCCESS,
+                artifact=EnumValuesArtifact(item_count=1, values=("scan",)),
+                message="步骤执行成功",
+            ),
+            StepResult(
+                step_id="threat-chain-map",
+                operation_type="threat_mapping",
+                status=StepStatus.FAILED,
+                error_code="threat_mapping_failed",
+                message="映射失败",
+            ),
+        ),
+    )
+
+    asyncio.run(renderer.render_execution_report(report))
+
+    assert captured["files"] == []
+    assert len(captured["dataframes"]) == 1
+
+
 def test无产物报告只发送汇总消息(monkeypatch):
     """#195：没有表格或下载产物时，不生成空的附加消息。"""
     import web.plan_renderer as renderer
