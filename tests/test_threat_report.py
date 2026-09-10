@@ -108,6 +108,41 @@ def test已知来源但样例缺失或无法匹配时不猜测():
     ]
 
 
+def test_normalize结果为空时从规则sample提取实际威胁类型():
+    """最终配置不携带枚举 result 时，报告仍复用规则解析器读取 sample。"""
+    rule = _rule("alarm-rule", [])
+    rule["normalize"][0]["index"] = "alarm_name"
+    rule["normalize"][1]["mappings"] = [
+        {
+            "mappingType": "REGULAR",
+            "orgValue": r"(?i).*NMAP.*",
+            "mappingValue": "网络扫描",
+        }
+    ]
+    rule["parser"].update(
+        {
+            "name": "delimitWithKeyMap",
+            "tab": "=",
+            "delimit": r"\s",
+        }
+    )
+    rule["parser"]["filter"][0]["fields"]["威胁类型"] = "%{alarm_name}"
+    rule["sample"] = 'src_ip="1.1.1.1" alarm_name="TCP_网络扫描_NMAP工具_SSL_扫描"'
+
+    row = build_threat_report_rows(
+        (
+            EventAnnotationRow(
+                rule_name="alarm-rule", event_name="网络攻击", event_level="提醒"
+            ),
+        ),
+        [rule],
+        chain_succeeded=True,
+    )[0]
+
+    assert row.threat_source_field == "alarm_name"
+    assert row.threat_types == ("网络扫描",)
+
+
 def test链路失败时威胁行明确显示未生成():
     annotation = EventAnnotationRow(
         rule_name="brute-rule", event_name="网络攻击", event_level="提醒"

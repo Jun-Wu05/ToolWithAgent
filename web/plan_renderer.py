@@ -11,6 +11,7 @@ import pandas as pd
 
 from agent.shared.event_classify import THREAT_EVENT_NAMES
 from agent.shared.logger import get_logger
+from application.threat_report import refresh_report_event_annotations
 from web.parsers import create_dataframe_elements
 from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
 from web.utils import render_log_parser_result
@@ -21,6 +22,7 @@ logger = get_logger("plan_renderer")
 _THREAT_ENUM_STEP = "threat-chain-enum"
 _THREAT_MAPPING_STEP = "threat-chain-map"
 _THREAT_FILL_STEP = "threat-chain-fill"
+_PRIMARY_REPORT_ANCHOR_KEY = "primary_field_mapping_report"
 
 
 def _escape_markdown_cell(value: object) -> str:
@@ -207,6 +209,40 @@ async def update_execution_report_message(message, execution_report: ExecutionRe
     """仅用最终报告更新既有主消息，避免重复创建任何附件元素。"""
     message.content = build_execution_report_content(execution_report)
     await message.update()
+
+
+def remember_primary_report(message, execution_report: ExecutionReport) -> None:
+    """在当前 Chainlit 会话保存可跨轮更新的字段映射主报告。"""
+    cl.user_session.set(_PRIMARY_REPORT_ANCHOR_KEY, (message, execution_report))
+
+
+def clear_primary_report_anchor() -> None:
+    """主数据切换或清空时废弃旧报告锚点。"""
+    cl.user_session.set(_PRIMARY_REPORT_ANCHOR_KEY, None)
+
+
+async def refresh_primary_report_anchor(
+    execution_report: ExecutionReport, final_config
+) -> bool:
+    """威胁类型链路成功后用最终配置原地更新既有五列表格。"""
+    fill_succeeded = any(
+        result.step_id == _THREAT_FILL_STEP and result.status == StepStatus.SUCCESS
+        for result in execution_report.results
+    )
+    if not fill_succeeded:
+        return False
+    anchor = cl.user_session.get(_PRIMARY_REPORT_ANCHOR_KEY)
+    if not anchor:
+        return False
+    message, primary_report = anchor
+    refreshed = refresh_report_event_annotations(
+        primary_report,
+        final_config,
+        chain_succeeded=True,
+    )
+    await update_execution_report_message(message, refreshed)
+    remember_primary_report(message, refreshed)
+    return True
 
 
 async def render_execution_report(

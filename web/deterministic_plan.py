@@ -6,7 +6,11 @@ from typing import Any, Sequence
 
 from web.chainlit_progress import get_session_progress_sink
 from application.request_runtime import run_deterministic_plan
-from web.plan_renderer import render_execution_report, update_execution_report_message
+from web.plan_renderer import (
+    remember_primary_report,
+    render_execution_report,
+    update_execution_report_message,
+)
 from contracts.planner_models import ExecutionReport, PlanDecision, StepSpec
 
 
@@ -43,6 +47,7 @@ async def execute_deterministic_plan(
         )
         if primary_message is not None:
             await update_execution_report_message(primary_message, final_primary)
+            remember_primary_report(primary_message, final_primary)
         follow_up_results = report.results[primary_result_count:]
         if follow_up_results:
             await render_execution_report(
