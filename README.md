@@ -54,11 +54,10 @@ toolswithagent/
 │
 ├── agent/                           # AI Agent 系统
 │   ├── core/                        # 核心层
-│   │   ├── team.py                  # Agno Team 与专业 Agent 构造
+│   │   ├── team.py                  # 专业 Agent 注册表（FieldMappingAgent / ThreatAgent，无自主路由）
 │   │   ├── planner.py               # 独立 PlannerAgent（ADR-0005）
 │   │   ├── agent.py                 # 上传解码兼容入口与历史 simple_encode
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
-│   │   ├── resilience.py            # CircuitBreaker + ModelFallback + RetryPolicy
 │   │   ├── standard_field_catalog.py # 只读标准字段 schema、资源与确定性 lookup
 │   │   ├── field_retriever.py       # Embedding 语义检索（缓存 + 排除 + 候选排序）
 │   │   └── tracing.py               # OpenTelemetry 请求追踪
@@ -152,8 +151,8 @@ chainlit run web/chainlit_app.py
 
 ## 技术栈
 
-- **Agent 框架**：Agno (Team Route Mode, 4+ MemberAgents)
-- **LLM Provider**：SiliconFlow (主) / DeepSeek (备用)，含 CircuitBreaker 熔断
+- **Agent 框架**：Agno（独立 PlannerAgent 一次规划 + 2 个专业 Agent 的不可路由注册表，ADR-0005）
+- **LLM Provider**：SiliconFlow (主) / DeepSeek (备用)
 - **Web 界面**：Chainlit
 - **向量检索**：SiliconFlow Embedding API（Qwen3-Embedding-8B）+ 中文同义词桥接 + token 重排序
 - **可观测性**：OpenTelemetry

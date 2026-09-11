@@ -56,7 +56,7 @@ async def handle_file_upload(user_session, element):
                 logger.info(f"[FILE_UPLOAD] Excel 表头检测: is_enum_table={is_enum_table}, file={file_name}")
 
                 if not is_enum_table:
-                    # 不是枚举映射表 → 直接读取为数据表格，供 LogParserAgent 等下游使用
+                    # 不是枚举映射表 → 直接读取为数据表格，供日志解析适配器等下游使用
                     logger.info(f"[FILE_UPLOAD] Excel 列头不匹配枚举映射表，按数据表格处理: {file_name}")
                     await _handle_excel_data_table(excel_path, file_name, user_session)
                     return
@@ -241,7 +241,7 @@ async def _handle_excel_data_table(excel_path: str, file_name: str, user_session
 
         file_time = datetime.now().strftime("%H:%M:%S")
 
-        # 提取"原始日志"列，供 LogParserAgent 精简输入使用
+        # 提取"原始日志"列，供日志解析适配器精简输入使用
         # CHANGED: 替换单元格内的换行符为空格，防止单条日志被拆散成多行碎片
         raw_log_lines = None
         for col in df.columns:

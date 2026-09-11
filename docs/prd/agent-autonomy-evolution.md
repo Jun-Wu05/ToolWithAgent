@@ -5,7 +5,7 @@
 > 技术决策：[ADR-0011 有界自恢复循环](../adr/0011-bounded-self-recovery.md)；领域术语见 CONTEXT.md「自恢复」「最近执行摘要」条目与角色边界表
 > UI 模式：`headless`（无新增可视化页面；追问文案经现有 Chainlit 渲染）
 > 前置依赖：Phase 3 依赖 shared-log-knowledge-review（#190/#191）；Phase 0/1/2 无前置
-> 实施状态：已拆解为 issue（见上），**暂缓领取**——待当前工作区在途分支合并回 master、且本 PRD/ADR-0011/CONTEXT.md 变更合并到 master 后放行（子 issue 改回 `ready-for-agent`）；Phase 0 → 1 → 2 → 3 → 4 串行，每阶段评估门禁通过才进下一阶段
+> 实施状态：已拆解为 issue（见上）并放行（#228/#229/#230 均已进 master）；Phase 0 → 1 → 2 → 3 → 4 串行，每阶段评估门禁通过才进下一阶段
 > 拆解时的已批准收缩：② 结构修正零证据不在 Phase 1 实施；③ 用确定性启发式（威胁链候选得分表下一候选），LLM 调用 0 次，满足 ADR-0011「≤1 次」上界
 > 演进取向：渐进式半自主（L1 → L2 → 评估门禁后选择性 L3），**不推翻现有确定性骨架**
 

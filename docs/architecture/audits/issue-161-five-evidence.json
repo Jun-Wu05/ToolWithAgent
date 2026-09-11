@@ -13,8 +13,12 @@
     {
       "id": "base64-tool",
       "name": "Base64 Tool",
-      "module_names": ["agent.tools.base64_tool"],
-      "module_paths": ["agent/tools/base64_tool.py"],
+      "module_names": [
+        "agent.tools.base64_tool"
+      ],
+      "module_paths": [
+        "agent/tools/base64_tool.py"
+      ],
       "evidence": {
         "production_imports": [],
         "dynamic_registrations": [
@@ -52,8 +56,12 @@
     {
       "id": "web-constants",
       "name": "Web 单常量模块",
-      "module_names": ["web.constants"],
-      "module_paths": ["web/constants.py"],
+      "module_names": [
+        "web.constants"
+      ],
+      "module_paths": [
+        "web/constants.py"
+      ],
       "evidence": {
         "production_imports": [],
         "dynamic_registrations": [],
@@ -72,85 +80,60 @@
     {
       "id": "resilience",
       "name": "容错模块",
-      "module_names": ["agent.core.resilience"],
-      "module_paths": ["agent/core/resilience.py"],
+      "module_names": [
+        "agent.core.resilience"
+      ],
+      "module_paths": [
+        "agent/core/resilience.py"
+      ],
       "evidence": {
         "production_imports": [],
         "dynamic_registrations": [],
         "package_reexports": [],
-        "test_dependencies": [
-          {
-            "path": "tests/test_resilience_characterization.py",
-            "line": 7,
-            "kind": "import",
-            "detail": "agent.core.resilience"
-          }
-        ],
+        "test_dependencies": [],
         "external_dependencies": {
-          "status": "pending-human-confirmation",
-          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+          "status": "confirmed-no-consumers",
+          "evidence": "仓库内无生产导入、动态注册、包级重导出；仓库外无直接 Python 模块依赖（#174/#222 复核）。"
         }
       },
-      "summary": "存在独立 characterization 测试，但未发现生产导入、动态注册或包级重导出；外部消费者仍待确认。",
-      "decision": "retain-needs-info",
-      "deletion_authorized": false
+      "summary": "生产代码零引用，唯一 characterization 测试随模块一并删除；#222 Phase 0 遗骸清理确认无仓库外消费者。",
+      "decision": "delete-authorized",
+      "deletion_authorized": true,
+      "deleted_in_issue": 222
     },
     {
       "id": "confirmation-tool",
       "name": "旧确认工具",
-      "module_names": ["agent.tools.confirmation_tool"],
-      "module_paths": ["agent/tools/confirmation_tool.py"],
+      "module_names": [
+        "agent.tools.confirmation_tool"
+      ],
+      "module_paths": [
+        "agent/tools/confirmation_tool.py"
+      ],
       "evidence": {
         "production_imports": [],
-        "dynamic_registrations": [
-          {
-            "path": "agent/tools/confirmation_tool.py",
-            "line": 13,
-            "kind": "decorator",
-            "detail": "@tool"
-          },
-          {
-            "path": "agent/tools/confirmation_tool.py",
-            "line": 54,
-            "kind": "decorator",
-            "detail": "@tool"
-          },
-          {
-            "path": "agent/tools/confirmation_tool.py",
-            "line": 85,
-            "kind": "decorator",
-            "detail": "@tool"
-          },
-          {
-            "path": "agent/tools/confirmation_tool.py",
-            "line": 110,
-            "kind": "decorator",
-            "detail": "@tool"
-          }
-        ],
+        "dynamic_registrations": [],
         "package_reexports": [],
-        "test_dependencies": [
-          {
-            "path": "tests/test_confirmation_tool_characterization.py",
-            "line": 9,
-            "kind": "import",
-            "detail": "agent.tools.confirmation_tool"
-          }
-        ],
+        "test_dependencies": [],
         "external_dependencies": {
-          "status": "pending-human-confirmation",
-          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+          "status": "confirmed-no-consumers",
+          "evidence": "仓库内无生产导入、动态注册、包级重导出；仓库外无直接 Python 模块依赖（#174/#222 复核）。"
         }
       },
-      "summary": "存在四个定义级 @tool 装饰器和独立 characterization 测试，但未发现生产入口加载；现行 HITL 由类型化计划与 Chainlit Action 拥有。",
-      "decision": "retain-needs-info",
-      "deletion_authorized": false
+      "summary": "四个 @tool 从未挂载到任何 Agent，现行 HITL 由类型化计划与 Chainlit Action 拥有；#222 Phase 0 遗骸清理随 characterization 测试一并删除。",
+      "decision": "delete-authorized",
+      "deletion_authorized": true,
+      "deleted_in_issue": 222
     },
     {
       "id": "log-bridge-state",
       "name": "日志桥安装状态",
-      "module_names": ["web.llm_client"],
-      "module_paths": ["web/llm_client.py"],
+      "module_names": [
+        "web.llm_client"
+      ],
+      "module_paths": [
+        "web/llm_client.py"
+      ],
       "evidence": {
         "production_imports": [
           {
@@ -184,8 +167,12 @@
   ],
   "false_positive_control": {
     "name": "日志知识库存储",
-    "module_names": ["agent.tools.log_pattern_store"],
-    "module_paths": ["agent/tools/log_pattern_store.py"],
+    "module_names": [
+      "agent.tools.log_pattern_store"
+    ],
+    "module_paths": [
+      "agent/tools/log_pattern_store.py"
+    ],
     "expected_production_importers": [
       "agent/tools/pipeline/common/knowledge_store.py",
       "agent/tools/pipeline/log_header_processor.py"

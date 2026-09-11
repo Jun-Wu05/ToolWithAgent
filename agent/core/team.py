@@ -1,25 +1,18 @@
 """专业 Agent 注册表。
 
-自然语言理解只由独立 PlannerAgent 负责；本模块创建字段映射、威胁映射、
-枚举处理和日志解析 Agent，并以不可路由的注册表提供给执行适配器。
+自然语言理解只由独立 PlannerAgent 负责；本模块创建字段映射与威胁映射
+Agent，并以不可路由的注册表提供给执行适配器。
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 
 from agno.agent import Agent
 
 from agent.core.model_config import ModelConfig
-from agent.prompts import load_field_weak_prompt, load_threat_type_prompt, load_enum_field_prompt
-from agent.tools import (
-    enum_field_tool,
-    extract_enum_from_logs,
-    extract_enum_with_regex,
-    identify_log_format,
-    classify_log_features,
-)
+from agent.prompts import load_field_weak_prompt, load_threat_type_prompt
 
 
 # ============= 加载原始提示词 =============
@@ -29,7 +22,6 @@ def _load_prompts() -> dict:
     return {
         "field": load_field_weak_prompt(),
         "threat": load_threat_type_prompt(),
-        "enum": load_enum_field_prompt(),
     }
 
 
@@ -110,22 +102,7 @@ def _get_threat_instructions() -> str:
 """
 
 
-# ============= 枚举处理 Agent =============
-
-def _get_enum_instructions() -> str:
-    """获取枚举Agent指令"""
-    prompts = _load_prompts()
-    return f"""你是网络安全设备配置规则枚举字段处理专家。
-
-{prompts['enum']}
-
-注意：
-- 必须严格按照上述规则执行
-- 枚举值必须精确匹配
-"""
-
-
-# ============= 创建专业Agent =============
+# ============= 创建专业 Agent 注册表 =============
 
 def create_field_mapping_agent() -> Agent:
     """创建纯结构化字段映射 Agent；字段回写由执行适配器负责。"""
@@ -153,67 +130,6 @@ def create_threat_agent() -> Agent:
     )
 
 
-def create_enum_agent() -> Agent:
-    """创建枚举Agent（挂载工具：enum_field_tool, extract_enum_from_logs, extract_enum_with_regex）"""
-    return Agent(
-        name="EnumAgent",
-        role="枚举字段专家",
-        model=ModelConfig.get_main_model(),
-        instructions=_get_enum_instructions(),
-        tools=[
-            enum_field_tool,              # 提取可枚举字段
-            extract_enum_from_logs,       # 从日志中提取枚举值
-            extract_enum_with_regex,      # 正则提取枚举值（返回值含所有枚举数据，生成下载文件由 Web 层完成）
-        ],
-        tool_call_limit=3,                # v2: 3 个工具，3 次足够
-        markdown=True,
-        debug_mode=False,
-    )
-
-
-# ============= 日志解析 Agent =============
-
-def _get_log_parser_instructions() -> str:
-    """获取日志解析Agent指令"""
-    return """你是日志格式识别与字段特征提取专家。
-
-## 任务流程
-1. 使用 `identify_log_format` 识别日志格式（json/kv/space/semicolon/comma）
-2. 根据识别结果判断是否需要分类：
-   - 若为 JSON 或 KV 格式，字段名已明确，可跳过分类
-   - 若为 space/semicolon/comma 格式，使用 `classify_log_features` 推断字段名和类型
-
-## 输出要求
-- 输出 JSON 格式的字段列表和特征分类结果
-- 包含每个字段的名称、类型、别名、位置、样本值
-- 不要输出解释性文字，直接输出结果
-
-## 约束
-- 只做格式识别和字段提取，不修改原始日志
-- 不做威胁分析、枚举提取、字段映射
-- 工具中已包含 LLM 调用，你只需调工具即可"""
-
-
-def create_log_parser_agent() -> Agent:
-    """创建日志解析Agent（挂载工具：identify_log_format, classify_log_features）
-
-    设计意图：工具内部通过 httpx 直调 LLM，不经 Agno 路由循环，省 40-60s。
-    """
-    return Agent(
-        name="LogParserAgent",
-        role="日志格式识别与字段提取专家",
-        model=ModelConfig.get_main_model(),
-        instructions=_get_log_parser_instructions(),
-        tools=[
-            identify_log_format,           # Step 1: 格式识别（工具内调 LLM）
-            classify_log_features,         # Step 2: 特征分类（工具内调 LLM）
-        ],
-        tool_call_limit=2,                 # 2 个工具，2 次足够
-        markdown=True,
-        debug_mode=False,
-    )
-
-
 # ============= 创建专业 Agent 注册表 =============
 
 
@@ -237,7 +153,5 @@ def create_data_mapping_team() -> ProfessionalAgentRegistry:
         members=(
             create_field_mapping_agent(),
             create_threat_agent(),
-            create_enum_agent(),
-            create_log_parser_agent(),
         )
     )
