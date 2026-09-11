@@ -4,6 +4,7 @@ import asyncio
 import base64
 import copy
 import json
+import logging
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -947,9 +948,10 @@ def test上传规则全部已映射时直接成功且不调模型():
     assert "所有字段均已映射，无需再次执行" in (report.results[0].message or "")
 
 
-def test字段映射一对一冲突裁决后仅写回保留者(monkeypatch):
+def test字段映射一对一冲突裁决后仅写回保留者(monkeypatch, caplog):
     """Adapter 在任何 apply 前裁决，并让 Session、Artifact 与消息保持一致。"""
     _permissive_standard_catalog(monkeypatch)
+    caplog.set_level(logging.INFO, logger="execution_adapters")
 
     class CollisionMember:
         name = "FieldMappingAgent"
@@ -1008,14 +1010,28 @@ def test字段映射一对一冲突裁决后仅写回保留者(monkeypatch):
     assert normalized["client"]["field"] == "源IP"
     assert [row.match_status for row in result.artifact.mappings] == ["未匹配", "匹配成功"]
     assert "检测到 1 组占用冲突，保留 1 个、1 个置未匹配" in (result.message or "")
-    assert "源IP：保留 client；落选 src；依据：精确命中（1.00）" in (result.message or "")
+    # #219：逐组裁决明细只落后端日志，不再进前端消息
+    assert "落选" not in (result.message or "")
+    assert "依据：" not in (result.message or "")
+    conflict_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "[FIELD_MAPPING_CONFLICTS]" in record.getMessage()
+    ]
+    assert len(conflict_logs) == 1
+    assert "step_id=mapping-conflict" in conflict_logs[0]
+    assert "standard_field=源IP" in conflict_logs[0]
+    assert "winner=client" in conflict_logs[0]
+    assert "losers=src" in conflict_logs[0]
+    assert "reason=精确命中（1.00）" in conflict_logs[0]
 
 
-def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch):
+def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch, caplog):
     """#163 跳过的既有映射是只读占用方，新行即使精确命中也不能覆盖或撞入。"""
     from application.adapters.field_mapping import FieldMappingAdapter
 
     _permissive_standard_catalog(monkeypatch)
+    caplog.set_level(logging.INFO, logger="execution_adapters")
 
     class ExistingCollisionRunner:
         async def run(self, fields, **_kwargs):
@@ -1072,9 +1088,17 @@ def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch
     }
     assert normalized["client_ip"].get("field", "") == ""
     assert session["last_mapping_data"][0]["匹配状态"] == "未匹配"
-    assert "保留 external_src；落选 client_ip；依据：既有上传映射占用" in (
-        result.message or ""
-    )
+    assert "检测到 1 组占用冲突，保留 1 个、1 个置未匹配" in (result.message or "")
+    assert "落选" not in (result.message or "")
+    conflict_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "[FIELD_MAPPING_CONFLICTS]" in record.getMessage()
+    ]
+    assert len(conflict_logs) == 1
+    assert "winner=external_src" in conflict_logs[0]
+    assert "losers=client_ip" in conflict_logs[0]
+    assert "reason=既有上传映射占用" in conflict_logs[0]
 
 
 def test威胁映射依赖产物不是枚举值时失败():

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 
 def _row(original: str, standard: str = "源IP") -> dict[str, str]:
     return {
@@ -137,3 +139,57 @@ def test上传配置既有映射占用时新行落选() -> None:
     assert outcome.details[0].winner == "external_src"
     assert outcome.details[0].losers == ("client_ip",)
     assert outcome.details[0].reason == "既有上传映射占用"
+
+
+def test冲突汇总不含逐组明细且明细逐组落日志(caplog) -> None:
+    """#219：前端只留汇总计数，逐组裁决依据以 [FIELD_MAPPING_CONFLICTS] 落后端日志。"""
+    from application.field_mapping_conflicts import (
+        format_field_mapping_conflicts,
+        log_field_mapping_conflicts,
+        resolve_field_mapping_conflicts,
+    )
+
+    caplog.set_level(logging.INFO, logger="execution_adapters")
+    outcome = resolve_field_mapping_conflicts(
+        [_row("src", "源IP"), _row("client", "源IP"), _row("a", "目的IP"), _row("b", "目的IP")],
+        candidate_retriever=_candidates(
+            src=[("源IP", 0.91, "src", "")],
+            client=[("源IP", 1.00, "client", "")],
+            a=[("目的IP", 0.80, "a", "")],
+            b=[("目的IP", 0.60, "b", "")],
+        ),
+    )
+    assert len(outcome.details) == 2
+
+    summary = format_field_mapping_conflicts(outcome.details)
+    assert summary == "检测到 2 组占用冲突，保留 2 个、2 个置未匹配"
+    assert "落选" not in summary and "依据" not in summary
+
+    log_field_mapping_conflicts(outcome.details, plan_id="plan-x", step_id="fm-1")
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "[FIELD_MAPPING_CONFLICTS]" in record.getMessage()
+    ]
+    assert len(lines) == 2
+    assert all("plan_id=plan-x" in line and "step_id=fm-1" in line for line in lines)
+    assert "standard_field=源IP" in lines[0]
+    assert "winner=client" in lines[0]
+    assert "losers=src" in lines[0]
+    assert "reason=精确命中（1.00）" in lines[0]
+    assert "standard_field=目的IP" in lines[1]
+    assert "winner=a" in lines[1]
+    assert "losers=b" in lines[1]
+
+
+def test无冲突时不产生汇总也不落日志(caplog) -> None:
+    """#219：无冲突时消息与日志均不出现冲突段。"""
+    from application.field_mapping_conflicts import (
+        format_field_mapping_conflicts,
+        log_field_mapping_conflicts,
+    )
+
+    caplog.set_level(logging.INFO, logger="execution_adapters")
+    assert format_field_mapping_conflicts(()) == ""
+    log_field_mapping_conflicts((), plan_id="plan-x", step_id="fm-1")
+    assert not [r for r in caplog.records if "[FIELD_MAPPING_CONFLICTS]" in r.getMessage()]
