@@ -69,6 +69,8 @@ chainlit
 tmp/
 archive/
 context_summary/
+# 草稿区（issue/PR 正文草稿、临时脚本、实验产物）；评估基线已迁 evaluation/（#174）
+outputs/
 
 # 评估文档和脚本（运行时生成，不提交）
 eval/
@@ -81,6 +83,7 @@ docs/*
 !docs/design/
 !docs/design/DESIGN.md
 !docs/research/
+!docs/plans/
 !docs/source-code-analysis.html
 
 # GitHub Copilot Skills（自动生成，不提交）

@@ -73,13 +73,12 @@ class RepositoryEvidence:
 
 
 def _python_files(root: Path) -> Iterable[Path]:
-    for path in sorted(root.rglob("*.py")):
-        relative = path.relative_to(root)
-        if any(part in _IGNORED_PARTS for part in relative.parts):
-            continue
-        if relative.parts and (
-            relative.parts[0] in _PRODUCTION_ROOTS or relative.parts[0] == "tests"
-        ):
+    # 只进入会被采纳的顶层目录：扫整个仓库会踩进 outputs/tmp 等草稿区的悬空 junction 而崩溃。
+    for top in sorted(_PRODUCTION_ROOTS | {"tests"}):
+        for path in sorted((root / top).rglob("*.py")):
+            relative = path.relative_to(root)
+            if any(part in _IGNORED_PARTS for part in relative.parts):
+                continue
             yield path
 
 
