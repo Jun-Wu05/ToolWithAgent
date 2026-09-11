@@ -161,6 +161,7 @@ class FieldMappingAdapter:
 
         from application.field_mapping_conflicts import (
             format_field_mapping_conflicts,
+            log_field_mapping_conflicts,
             resolve_field_mapping_conflicts,
         )
 
@@ -172,6 +173,9 @@ class FieldMappingAdapter:
         )
         mapping_rows = list(conflict_outcome.rows)
         conflict_summary = format_field_mapping_conflicts(conflict_outcome.details)
+        log_field_mapping_conflicts(
+            conflict_outcome.details, plan_id=context.plan_id, step_id=step.step_id
+        )
         typed_mappings = tuple(FieldMappingRow.model_validate(row) for row in mapping_rows)
         staged_sub_rule_results = None
         staged_mapped_sub_rules = None

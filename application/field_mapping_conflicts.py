@@ -203,25 +203,36 @@ def resolve_field_mapping_conflicts(
 def format_field_mapping_conflicts(
     details: tuple[FieldMappingConflictDetail, ...],
 ) -> str:
-    """构造用户可见的冲突计数与逐组裁决依据。"""
+    """构造用户可见的冲突汇总计数；逐组裁决依据见 log_field_mapping_conflicts（#219）。"""
     if not details:
         return ""
     loser_count = sum(len(detail.losers) for detail in details)
-    summary = (
+    return (
         f"检测到 {len(details)} 组占用冲突，保留 {len(details)} 个、"
         f"{loser_count} 个置未匹配"
     )
-    groups = [
-        f"{detail.standard_field}：保留 {detail.winner}；"
-        f"落选 {'、'.join(detail.losers)}；依据：{detail.reason}"
-        for detail in details
-    ]
-    return f"{summary}；冲突明细：" + "；".join(groups)
+
+
+def log_field_mapping_conflicts(
+    details: tuple[FieldMappingConflictDetail, ...],
+    *,
+    plan_id: str,
+    step_id: str,
+) -> None:
+    """逐组把裁决明细落后端日志，风格与 [FIELD_MAPPING_WRITEBACK] 一致（#219）。"""
+    for index, detail in enumerate(details, 1):
+        logger.info(
+            "[FIELD_MAPPING_CONFLICTS] plan_id=%s step_id=%s group=%s/%s "
+            "standard_field=%s winner=%s losers=%s reason=%s",
+            plan_id, step_id, index, len(details),
+            detail.standard_field, detail.winner, "、".join(detail.losers), detail.reason,
+        )
 
 
 __all__ = [
     "FieldMappingConflictDetail",
     "FieldMappingConflictOutcome",
     "format_field_mapping_conflicts",
+    "log_field_mapping_conflicts",
     "resolve_field_mapping_conflicts",
 ]
