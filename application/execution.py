@@ -22,6 +22,7 @@ from contracts.planner_models import (
     ThreatMappingStep,
 )
 from application.progress import NullProgressSink
+from application.recovery import RecoveryBudget, RETRYABLE_STEP_TYPES, is_transient
 from contracts.progress import (
     ProgressEvent,
     ProgressPhase,
@@ -39,6 +40,7 @@ class ExecutionContext:
     session_facts: SessionFacts
     plan_id: str = "pending"
     progress_sink: ProgressSink = field(default_factory=NullProgressSink)
+    recovery_budget: RecoveryBudget = field(default_factory=RecoveryBudget)
 
 
 class StepAdapter(Protocol):
@@ -96,11 +98,13 @@ class PlanExecutor:
         *,
         policy: ExecutionPolicy | None = None,
         logger: logging.Logger | None = None,
+        recovery_logger: logging.Logger | None = None,
     ) -> None:
         """接收按操作类型注册的适配器；缺失适配器属于稳定执行错误。"""
         self._adapters = dict(adapters)
         self._policy = policy or NullExecutionPolicy()
         self._logger = logger or logging.getLogger("plan_executor")
+        self._recovery_logger = recovery_logger or logging.getLogger("recovery")
 
     async def execute(
         self,
@@ -136,6 +140,8 @@ class PlanExecutor:
         )
         ledger: dict[str, StepResult] = {}
         ordered_results: list[StepResult] = []
+        recovery_count = 0
+        step_recovery_counts: dict[str, int] = {}
         # 计划级预校验（#148）：事件名的确定性非法值必须在**任何步骤执行前**拦截
         # 整份计划——改名 delete+add 两步中，add 的非法事件名若等到执行期才拒绝，
         # 前面的 delete 已联动删除绑定对并写盘，无法回滚。
@@ -216,17 +222,50 @@ class PlanExecutor:
                 result = self._error_result(step, "adapter_unavailable", "当前操作尚未配置执行适配器")
             else:
                 dependencies = {step_id: ledger[step_id] for step_id in step.depends_on}
-                try:
-                    result = await adapter.execute(step, context, dependencies)
-                    result = self._validate_result(step, result)
-                except Exception as error:
-                    self._logger.exception(
-                        "[EXECUTOR] 步骤异常: plan_id=%s step_id=%s operation=%s error_category=adapter_failed",
+                trigger_error_code: str | None = None
+                while True:
+                    execution_error: Exception | None = None
+                    try:
+                        result = await adapter.execute(step, context, dependencies)
+                        result = self._validate_result(step, result)
+                    except Exception as error:
+                        execution_error = error
+                        self._logger.exception(
+                            "[EXECUTOR] 步骤异常: plan_id=%s step_id=%s operation=%s "
+                            "error_category=adapter_failed",
+                            plan.plan_id,
+                            step.step_id,
+                            step.type,
+                        )
+                        result = self._error_result(
+                            step, "adapter_failed", "执行适配器发生异常"
+                        )
+                    step_recovery_count = step_recovery_counts.get(step.step_id, 0)
+                    budget = context.recovery_budget
+                    if not (
+                        step.type in RETRYABLE_STEP_TYPES
+                        and recovery_count < budget.max_per_plan
+                        and step_recovery_count < budget.max_per_step
+                        and is_transient(
+                            execution_error if execution_error is not None else result
+                        )
+                    ):
+                        break
+                    trigger_error_code = result.error_code or "adapter_failed"
+                    recovery_count += 1
+                    step_recovery_counts[step.step_id] = step_recovery_count + 1
+                if trigger_error_code is not None:
+                    result = result.model_copy(update={"recovered": True})
+                    self._recovery_logger.info(
+                        "[RECOVERY] plan_id=%s step_id=%s type=retry error_code=%s "
+                        "result=%s plan_recovery_count=%s/%s",
                         plan.plan_id,
                         step.step_id,
-                        step.type,
+                        trigger_error_code,
+                        result.status.value,
+                        recovery_count,
+                        budget.max_per_plan,
                     )
-                    result = self._error_result(step, "adapter_failed", "执行适配器发生异常")
 
             ledger[step.step_id] = result
             ordered_results.append(result)

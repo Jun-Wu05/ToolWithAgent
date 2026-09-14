@@ -19,6 +19,7 @@ from contracts.planner_models import (
 )
 
 logger = get_logger("plan_executor")
+recovery_logger = get_logger("recovery")
 
 
 def _failed(step: StepSpec, error_code: str, message: str) -> StepResult:
@@ -160,4 +161,9 @@ class DefaultExecutionPolicy:
 
 def create_plan_executor(adapters: Mapping[str, StepAdapter]) -> PlanExecutor:
     """用默认领域守卫组合框架无关执行核心。"""
-    return PlanExecutor(adapters, policy=DefaultExecutionPolicy(), logger=logger)
+    return PlanExecutor(
+        adapters,
+        policy=DefaultExecutionPolicy(),
+        logger=logger,
+        recovery_logger=recovery_logger,
+    )
