@@ -213,6 +213,8 @@ _PRIMARY_DATASET_STATE_KEYS = (
     "pending_rule_source_step",
     "pending_plan",
     "threat_source_field_override",
+    "current_execution",
+    "previous_execution",
     "mapped_sub_rules",
     "sub_rule_mapping_results",
     "conversation_history",

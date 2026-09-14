@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from contracts.planner_models import ConfigRef
+from contracts.planner_models import ConfigRef, StepStatus
 from contracts.session_artifacts import ReferenceableArtifactFact
 
 
@@ -13,6 +13,26 @@ class EventAnnotationFact(BaseModel):
     rule_name: str = Field(min_length=1)
     event_name: str = ""
     event_level: str = ""
+
+
+class StepSummary(BaseModel):
+    """Planner 可见的单步执行结果目录，不包含步骤产物值。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    step_id: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    status: StepStatus
+    error_code: str | None = None
+    artifact_kinds: tuple[str, ...] = ()
+    artifact_count: int = Field(default=0, ge=0)
+
+
+class ExecutionSummary(BaseModel):
+    """一份已完成计划的安全步骤级摘要。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    plan_id: str = Field(min_length=1)
+    steps: tuple[StepSummary, ...] = ()
 
 
 class SessionFacts(BaseModel):
@@ -30,6 +50,10 @@ class SessionFacts(BaseModel):
     mappable_fields: tuple[str, ...] = ()
     # 所有已判定威胁子规则共同拥有的真实原始字段，可供用户选择来源。
     threat_source_fields: tuple[str, ...] = ()
+    # 当前/最近与上一份已完成计划的步骤级结果目录，索引 0 为最新。
+    recent_execution: tuple[ExecutionSummary, ...] = Field(
+        default=(), max_length=2, exclude_if=lambda summaries: not summaries
+    )
     # 上传配置中以 normalize[].field 是否非空判定的映射状态计数。
     decoded_mapped_field_count: int = Field(default=0, ge=0)
     decoded_unmapped_field_count: int = Field(default=0, ge=0)

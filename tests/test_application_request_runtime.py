@@ -428,6 +428,7 @@ def test提案保存后确认同一计划且只能执行一次(monkeypatch) -> N
             planner=planner,
         )
     )
+    proposal_execution = session.current_execution
     confirmed = asyncio.run(
         request_runtime.run_user_request(
             session=session,
@@ -450,9 +451,11 @@ def test提案保存后确认同一计划且只能执行一次(monkeypatch) -> N
     )
 
     assert proposal.decision == "proposal"
+    assert proposal_execution is None
     assert confirmed.plan_id == "proposal-export"
     assert [plan.plan_id for plan in executed] == ["proposal-export"]
     assert repeated.reason_code == "pending_plan_not_found"
+    assert session.current_execution.plan_id == "proposal-export"
     assert session.pending_plan is None
 
 
@@ -515,6 +518,8 @@ def test取消和事实变化均不执行待确认计划(monkeypatch) -> None:
     stale, stale_session = asyncio.run(run_case("confirm", mutate=True))
 
     assert cancelled.guidance_code == "pending_plan_cancelled"
+    assert cancelled_session.current_execution is None
     assert cancelled_session.pending_plan is None
     assert stale.reason_code == "pending_plan_stale"
+    assert stale_session.current_execution is None
     assert stale_session.pending_plan is None
