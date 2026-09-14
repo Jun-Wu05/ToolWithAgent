@@ -1,4 +1,4 @@
-"""适配器共享接缝：会话读写、结果构造、进度发布与重试判定。
+"""适配器共享接缝：会话读写、结果构造、进度发布与重试等待。
 
 本模块只放跨操作复用的纯函数；操作语义分别位于字段映射、枚举填充、
 威胁填充、取消映射和导出适配器中。
@@ -33,36 +33,6 @@ logger = get_logger("execution_adapters")
 
 # 仓库根目录：适配器据此定位 config/ 与 agent/prompts/ 资产（层级敏感，勿随文件移动改变）。
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _model_error_status_code(error: Exception) -> int | None:
-    """从常见 SDK 异常中读取 HTTP 状态码，不依赖具体供应商类型。"""
-    status_code = getattr(error, "status_code", None)
-    if status_code is None:
-        response = getattr(error, "response", None)
-        status_code = getattr(response, "status_code", None)
-    try:
-        return int(status_code) if status_code is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _is_retriable_model_error(error: Exception) -> bool:
-    """仅允许瞬时网络、限流、服务端和超时错误重试一次。"""
-    if isinstance(error, (TimeoutError, ConnectionError)):
-        return True
-    error_type = type(error).__name__
-    if error_type in {
-        "APIConnectionError",
-        "APITimeoutError",
-        "ConnectError",
-        "ReadTimeout",
-        "WriteTimeout",
-        "RateLimitError",
-    }:
-        return True
-    status_code = _model_error_status_code(error)
-    return status_code == 429 or (status_code is not None and status_code >= 500)
 
 
 def _retry_delay_seconds(error: Exception, default_seconds: float) -> float:

@@ -512,6 +512,7 @@ class StepResult(StrictContract):
     changed_count: int = Field(default=0, ge=0)
     error_code: str | None = None
     message: str | None = None
+    recovered: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class ExecutionReport(StrictContract):

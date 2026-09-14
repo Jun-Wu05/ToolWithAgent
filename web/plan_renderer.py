@@ -199,6 +199,8 @@ def build_execution_report_content(
     lines = []
     for result in execution_report.results:
         detail = result.message or result.error_code or result.status.value
+        if result.recovered:
+            detail = f"{detail}（已自动重试）"
         lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
         artifact = result.artifact
         if artifact is None:
