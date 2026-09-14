@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, List, Dict, Set
 
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+from contracts.session_facts import ExecutionSummary
 from contracts.planner_models import PendingPlan, StepSpec
 from contracts.rule_source import RuleSourceFields
 
@@ -50,6 +51,8 @@ def commit_log_classification(session: Any, classification: Dict[str, Any]) -> b
     )
     for key in _MAPPING_DERIVED_STATE_KEYS:
         _write_state_value(session, key, None)
+    _write_state_value(session, "current_execution", None)
+    _write_state_value(session, "previous_execution", None)
 
     contributions = dict(
         _read_state_value(session, "enum_fill_contributions", {}) or {}
@@ -201,6 +204,13 @@ class SessionState:
     """威胁链路来源字段覆盖（#173）：用户显式纠正过 X 后记忆，自动入口直接
     使用；新上传主数据或重新日志类型提取时清除（数据换了旧纠正失效）"""
 
+    # ---- 最近执行摘要 ----
+    current_execution: Optional[ExecutionSummary] = None
+    """当前/最近一份已完成计划的安全步骤级摘要"""
+
+    previous_execution: Optional[ExecutionSummary] = None
+    """上一份已完成计划的安全步骤级摘要"""
+
     # ---- 标准字段映射结果 ----
     mapped_sub_rules: Optional[List[Dict[str, Any]]] = None
     """映射后的子规则列表，供导出使用"""
@@ -266,6 +276,8 @@ class SessionState:
         self.pending_rule_source_step = None
         self.pending_plan = None
         self.threat_source_field_override = None
+        self.current_execution = None
+        self.previous_execution = None
         self.mapped_sub_rules = None
         self.sub_rule_mapping_results = None
         # 主数据失效时 Planner 历史也必须失效，避免旧文件语义污染新请求。

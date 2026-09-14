@@ -15,7 +15,7 @@ from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
 from application.model_runtime import resolve_session_config
 from application.progress import NullProgressSink
-from application.session_projection import build_session_facts
+from application.session_projection import build_session_facts, summarize_report
 from application.threat_chain import (
     build_threat_source_plan,
     compile_explicit_threat_plan,
@@ -129,6 +129,7 @@ async def _run_auto_threat_source_selection(
             plan=plan,
             progress_sink=NullProgressSink(),
         )
+        _record_execution_summary(session, report)
         if report.status == StepStatus.SUCCESS and _has_meaningful_threat_mapping(report):
             commit_threat_chain_session(staged_session, session)
             set_threat_source_override(session, source_field)
@@ -231,6 +232,16 @@ def _session_set(session: Any, key: str, value: Any) -> None:
     setattr(session, key, value)
 
 
+def _record_execution_summary(session: Any, report: ExecutionReport) -> None:
+    """把一份已完成计划滚动写入当前/上一份安全摘要槽位。"""
+    _session_set(
+        session,
+        "previous_execution",
+        _session_get(session, "current_execution"),
+    )
+    _session_set(session, "current_execution", summarize_report(report))
+
+
 def _read_pending_plan(session: Any) -> PendingPlan | None:
     """读取类型化待确认计划；损坏状态按不存在处理。"""
     value = _session_get(session, "pending_plan")
@@ -290,6 +301,8 @@ def clear_session_data(session: Any) -> None:
         "pending_rule_source_step",
         "pending_plan",
         "threat_source_field_override",
+        "current_execution",
+        "previous_execution",
         "mapped_sub_rules",
         "enum_preview",
         "enum_excel_path",
@@ -476,6 +489,7 @@ async def _run_user_request_scoped(
         team=team,
         progress_sink=progress_sink,
     )
+    _record_execution_summary(session, final_report)
     append_history(session, "assistant", _assistant_history_content(final_report))
     return final_report
 
@@ -517,10 +531,12 @@ async def _run_deterministic_plan_scoped(
     if on_primary_report is not None:
         await on_primary_report(report)
     # 执行后确定性续跑（#173）：按钮/确定性入口的字段映射同样触发威胁链路
-    return await run_threat_chain_after_mapping(
+    final_report = await run_threat_chain_after_mapping(
         report=report,
         plan_steps=plan.steps,
         session=session,
         team=team,
         progress_sink=progress_sink,
     )
+    _record_execution_summary(session, final_report)
+    return final_report

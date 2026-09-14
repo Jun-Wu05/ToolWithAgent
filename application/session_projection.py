@@ -10,14 +10,55 @@ from agent.shared.event_classify import (
     read_entity_event_name,
 )
 from application.artifact_targets import resolve_standard_target
-from contracts.planner_models import ConfigRef
+from contracts.planner_models import ConfigRef, ExecutionReport
 from contracts.session_artifacts import (
     ArtifactTargetBinding,
     EnumArtifactSlot,
     ReferenceableArtifactFact,
     ThreatArtifactSlot,
 )
-from contracts.session_facts import EventAnnotationFact, SessionFacts
+from contracts.session_facts import (
+    EventAnnotationFact,
+    ExecutionSummary,
+    SessionFacts,
+    StepSummary,
+)
+
+
+def summarize_report(report: ExecutionReport) -> ExecutionSummary:
+    """把执行账本收缩为不含业务值的 Planner 安全摘要。"""
+    return ExecutionSummary(
+        plan_id=report.plan_id,
+        steps=tuple(
+            StepSummary(
+                step_id=result.step_id,
+                type=result.operation_type,
+                status=result.status,
+                error_code=result.error_code,
+                artifact_kinds=(result.artifact.artifact_type,) if result.artifact else (),
+                artifact_count=result.artifact.item_count if result.artifact else 0,
+            )
+            for result in report.results
+        ),
+    )
+
+
+def _recent_execution(session: Any) -> tuple[ExecutionSummary, ...]:
+    """按最新优先投影两个类型化摘要槽位，损坏的兼容值按不存在处理。"""
+    summaries: list[ExecutionSummary] = []
+    for key in ("current_execution", "previous_execution"):
+        value = _read_session_value(session, key)
+        if value is None:
+            continue
+        try:
+            summaries.append(
+                value
+                if isinstance(value, ExecutionSummary)
+                else ExecutionSummary.model_validate(value)
+            )
+        except (TypeError, ValueError):
+            continue
+    return tuple(summaries)
 
 
 def _read_session_value(session: Any, key: str, default: Any = None) -> Any:
@@ -327,6 +368,7 @@ def build_session_facts(session: Any) -> SessionFacts:
         threat_source_fields=_collect_threat_source_fields(
             mapped_sub_rules, event_annotations
         ),
+        recent_execution=_recent_execution(session),
         decoded_mapped_field_count=decoded_mapped_count,
         decoded_unmapped_field_count=decoded_unmapped_count,
         enum_mapping_target_fields=_collect_enum_target_fields(enum_preview),
