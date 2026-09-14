@@ -11,12 +11,12 @@ from typing import Any
 from agent.shared.logger import get_logger
 
 from application.adapters.shared import (
-    _is_retriable_model_error,
     _retry_delay_seconds,
     run_member_stream,
 )
 from application.field_mapping_input import build_batch_llm_input
 from application.parsing import parse_json_mapping_result
+from application.recovery import is_transient
 from contracts.progress import ProgressPhase, ProgressStatus
 
 
@@ -365,7 +365,7 @@ class FieldMappingBatchRunner:
                             type(error).__name__,
                         )
                         raise _ModelCallTimeout(origin, error) from error
-                    retriable = _is_retriable_model_error(error)
+                    retriable = is_transient(error)
                     logger.warning(
                         "[MODEL_CALL_FAILED] 专业模型调用失败: plan_id=%s step_id=%s "
                         "operation=field_mapping batch=%s/%s split_depth=%s attempt=%s "

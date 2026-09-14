@@ -10,13 +10,14 @@ from typing import Any
 from agent.shared.logger import get_logger
 from application.adapters.shared import (
     REPO_ROOT, _build_config_artifact, _count_tagged_normalize, _failed,
-    _is_retriable_model_error, _publish_progress, _retry_delay_seconds,
-    _needs_input, _session_get, _session_set, _success,
+    _publish_progress, _retry_delay_seconds, _needs_input, _session_get,
+    _session_set, _success,
 )
 from application.execution import ExecutionContext
 from application.field_mapping_batch import (
     FieldMappingBatchError, FieldMappingBatchRunner, FieldMappingExecutionPolicy,
 )
+from application.recovery import is_transient
 from contracts.progress import ProgressPhase, ProgressStatus
 from contracts.planner_models import (
     FieldMappingArtifact, FieldMappingRow, FieldMappingStep, StepResult, StepStatus,
@@ -346,7 +347,7 @@ class FieldMappingAdapter:
                 )
                 break
             except Exception as error:  # noqa: BLE001 - 适配层统一判定可重试错误
-                if attempt == 0 and _is_retriable_model_error(error):
+                if attempt == 0 and is_transient(error):
                     await asyncio.sleep(
                         _retry_delay_seconds(error, self._mapping_policy.retry_delay_seconds)
                     )
