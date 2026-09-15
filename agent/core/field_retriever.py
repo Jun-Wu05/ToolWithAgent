@@ -279,6 +279,51 @@ def _call_embedding_api(texts: list[str], retries: int = EMBEDDING_MAX_RETRIES) 
     )
     return None
 
+
+# 进程内查询向量缓存（#245）：{(模型, 维度, 复合查询文本): 向量}。
+# 键取最终嵌入文本，tag_rules/synonyms 变更会改变文本、自然产生新键；
+# 模型/维度为模块常量，缓存随进程生命周期失效，无需持久化与手动失效。
+_QUERY_EMBEDDING_CACHE: dict[tuple[str, int, str], np.ndarray] = {}
+
+
+def _query_cache_key(query_text: str) -> tuple[str, int, str]:
+    return (EMBEDDING_MODEL, EMBEDDING_DIM, query_text)
+
+
+def _embed_query_texts(query_texts: list[str], *, failure_label: str) -> np.ndarray:
+    """
+    查询向量生成：请求内保序去重 + 进程内缓存，仅对 miss 批次调 Embedding API。
+
+    与直连调用相比仅减少调用次数：命中文本不再重复计费、不再重复暴露于
+    429/503 波动；miss 批次失败仍抛 RuntimeError，失败结果不写缓存。
+
+    Args:
+        query_texts: 最终复合查询文本（_build_query_text_for_embedding 的输出）
+        failure_label: 失败异常信息中的场景名（主字段轮/变体轮）
+
+    Returns:
+        与 query_texts 等长、按输入顺序对齐的向量矩阵
+    """
+    unique_texts = list(dict.fromkeys(query_texts))
+    missing = [
+        t for t in unique_texts if _query_cache_key(t) not in _QUERY_EMBEDDING_CACHE
+    ]
+    for batch_start in range(0, len(missing), EMBEDDING_BATCH_SIZE):
+        batch = missing[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
+        vectors = _call_embedding_api(batch)
+        if vectors is None:
+            raise RuntimeError(
+                f"[EMBEDDING] {failure_label}（第 {batch_start // EMBEDDING_BATCH_SIZE + 1} 批），"
+                f"共 {len(missing)} 个待嵌入文本，批次大小 {EMBEDDING_BATCH_SIZE}"
+            )
+        for text, vector in zip(batch, vectors):
+            _QUERY_EMBEDDING_CACHE[_query_cache_key(text)] = vector
+        # 批次间休眠，防止 API 429 限流（最后一批不睡）
+        if batch_start + EMBEDDING_BATCH_SIZE < len(missing):
+            time.sleep(EMBEDDING_BATCH_SLEEP)
+    return np.array([_QUERY_EMBEDDING_CACHE[_query_cache_key(t)] for t in query_texts])
+
+
 def _cosine_similarity(query_vec: np.ndarray, corpus_mat: np.ndarray) -> np.ndarray:
     """
     计算余弦相似度（矩阵乘法优化）。
@@ -761,22 +806,11 @@ def batch_retrieve_candidates_table(
     if not include_mapping_excluded:
         embeddings, records = _apply_mapping_exclusions(embeddings, records)
 
-    # 批量嵌入用户字段名 — 按 EMBEDDING_BATCH_SIZE 分批，防止 413 Request Entity Too Large
-    all_vectors: list[np.ndarray] = []
-    for batch_start in range(0, len(raw_field_names), EMBEDDING_BATCH_SIZE):
-        batch_raw = raw_field_names[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
-        batch_tagged = [_build_query_text_for_embedding(n) for n in batch_raw]
-        vectors = _call_embedding_api(batch_tagged)
-        if vectors is None:
-            raise RuntimeError(
-                f"[EMBEDDING] 语义检索失败（第 {batch_start // EMBEDDING_BATCH_SIZE + 1} 批），"
-                f"共 {len(raw_field_names)} 个字段，批次大小 {EMBEDDING_BATCH_SIZE}"
-            )
-        all_vectors.append(vectors)
-        # 批次间休眠，防止 API 429 限流（最后一批不睡）
-        if batch_start + EMBEDDING_BATCH_SIZE < len(raw_field_names):
-            time.sleep(EMBEDDING_BATCH_SLEEP)
-    query_vecs = np.concatenate(all_vectors, axis=0)
+    # 批量嵌入用户字段名 — 保序去重 + 进程内缓存，仅对 miss 分批调 API（#245）
+    query_vecs = _embed_query_texts(
+        [_build_query_text_for_embedding(n) for n in raw_field_names],
+        failure_label="语义检索失败",
+    )
 
     # L2 归一化查询向量
     norms = np.linalg.norm(query_vecs, axis=1, keepdims=True)
@@ -803,21 +837,14 @@ def batch_retrieve_candidates_table(
                 stripped_to_original[len(stripped_variants)] = i
                 stripped_variants.append(v)
 
-    # 批量嵌入去前缀变体
+    # 批量嵌入去前缀变体（与主字段轮共享进程内缓存，#245）
     stripped_vecs: Optional[np.ndarray] = None
     if stripped_variants:
         try:
-            stripped_vecs_list: list[np.ndarray] = []
-            for bs in range(0, len(stripped_variants), EMBEDDING_BATCH_SIZE):
-                batch_raw = stripped_variants[bs:bs + EMBEDDING_BATCH_SIZE]
-                batch_tagged = [_build_query_text_for_embedding(v) for v in batch_raw]
-                vecs = _call_embedding_api(batch_tagged)
-                if vecs is None:
-                    raise RuntimeError(f"[EMBEDDING] 去前缀变体嵌入失败（第 {bs // EMBEDDING_BATCH_SIZE + 1} 批）")
-                stripped_vecs_list.append(vecs)
-                if bs + EMBEDDING_BATCH_SIZE < len(stripped_variants):
-                    time.sleep(EMBEDDING_BATCH_SLEEP)
-            stripped_vecs = np.concatenate(stripped_vecs_list, axis=0)
+            stripped_vecs = _embed_query_texts(
+                [_build_query_text_for_embedding(v) for v in stripped_variants],
+                failure_label="去前缀变体嵌入失败",
+            )
             # L2 归一化
             norms_s = np.linalg.norm(stripped_vecs, axis=1, keepdims=True)
             norms_s = np.maximum(norms_s, 1e-10)
