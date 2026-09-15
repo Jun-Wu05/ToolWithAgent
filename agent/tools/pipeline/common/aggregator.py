@@ -23,7 +23,7 @@ def aggregate_by_field(
     logs_str: str,
     feature_field: str,
     extractor: _ExtractorFunc,
-    max_lines: int = 2000,
+    max_lines: int | None = None,
     sample_limit: int = 3,
     sample_max_chars: int = 300,
     kv_delimit: str | None = None,
@@ -39,7 +39,7 @@ def aggregate_by_field(
         logs_str:         原始多行日志字符串。
         feature_field:    要聚合的字段名。
         extractor:        可调用对象 ``(line, feature_field) → value``。
-        max_lines:        最大处理行数。
+        max_lines:        最大处理行数；``None`` 表示全量（#190 默认，不再截断）。
         sample_limit:     每个值保留的最大样本行数。
         sample_max_chars: 每条样本行的最大字符数（超出截断）。
         kv_delimit:       KV 格式的键值分隔符（可选）。
@@ -72,7 +72,8 @@ def aggregate_by_field(
         ).strip()
         lines.append(stripped_line)
     
-    lines = lines[:max_lines]
+    if max_lines is not None:
+        lines = lines[:max_lines]
     total_lines = len(lines)
     matched_lines = 0
 

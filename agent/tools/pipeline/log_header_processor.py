@@ -3,8 +3,11 @@
 日志头特征处理（Path A）。
 
 当日志类型的分类特征位于日志头中时（Step 2a 判定 feature_location=header），
-使用此模块处理：提取日志头 → 脱敏 → 聚合 → 调用专用 LLM → 替换样例日志。
+使用此模块处理：header 聚类仅作结构样本源 → LLM 生成类型提取正则（代码校验）
+→ 正则只作用于日志头、经 aggregate_by_field 全量去重/计数 → 分批补 meaning。
 
+CHANGED (#190): 类型集合改由确定性正则全量扫描决定，聚类与 LLM 不再枚举类型；
+                coverage 四字段随聚合结果输出，不同主结构行计入 unmatched。
 CHANGED (2026-05-29): 集成 HeaderExtractor 消除重复代码；
                        增加 header_end_marker 传递和 real_samples 提取。
 CHANGED (2026-06-02): 支持 KV 格式，feature_identifier 和 analysis 动态设置。
@@ -17,15 +20,18 @@ from __future__ import annotations
 import json
 import re as _re
 
-import httpx
-
-from agent.prompts import load_log_header_classify_prompt, load_kv_feature_identifier_prompt
+from agent.prompts import (
+    load_kv_feature_identifier_prompt,
+    load_log_header_regex_identifier_prompt,
+)
 from agent.shared.logger import get_logger
-from agent.tools.enum_extract_tool import sample_logs
-from agent.tools.pipeline.extractors.header_extractor import aggregate_headers
+from agent.tools.pipeline.common.aggregator import aggregate_by_field
+from agent.tools.pipeline.extractors.header_extractor import (
+    aggregate_headers,
+    extract_header,
+)
 from agent.tools.pipeline.llm_client import (
     _call_llm_direct,
-    _try_parse_json,
     normalize_log_format,
 )
 
@@ -33,21 +39,6 @@ logger = get_logger("log_parser_pipeline")
 
 # JSON 格式的 feature_identifier 固定正则
 _JSON_FEATURE_IDENTIFIER = r"(\{[\S\s]*\})"
-
-
-def _escape_format_braces(text: str) -> str:
-    """转义字符串中的花括号，防止 str.format() 误解析。
-    
-    Python str.format() 将 { } 解释为格式化占位符，但用户数据
-    （如 JSON、日志样例）可能包含花括号。将它们转义为 {{ }}。
-    
-    Args:
-        text: 待转义的字符串。
-    
-    Returns:
-        转义后的字符串。
-    """
-    return text.replace('{', '{{').replace('}', '}}')
 
 
 def _parse_regex_response(response: str) -> str:
@@ -221,103 +212,123 @@ def _generate_kv_feature_identifier(logs_str: str) -> str:
     )
 
 
-def _replace_samples_with_raw(
-    classification_data: dict,
-    logs_str: str,
-    header_end_marker: str = "",
-) -> dict:
-    """用 LLM 输出的 matched_regex 从原始日志中匹配真实样例。
-    
-    CHANGED (2026-06-05): 支持 KV 格式，使用 feature_identifier 正则提取 body。
+# 结构样本上限（#190）：header 聚类降级为结构样本源，最多取 20 条供正则生成
+_LOGTYPE_SAMPLE_LIMIT = 20
+
+
+def _validate_logtype_regex(regex_str: str, header_texts: list[str]) -> tuple[bool, str, str]:
+    """校验类型提取正则：编译 + 恰 1 捕获组 + 对全部结构样本提取非空值。"""
+    try:
+        pattern = _re.compile(regex_str)
+    except _re.error as e:
+        return False, f"正则编译失败: {e}", ""
+    if pattern.groups != 1:
+        return False, f"正则捕获组数≠1 (实际={pattern.groups})", ""
+    preview = ""
+    for text in header_texts:
+        m = pattern.search(text)
+        if not m:
+            return False, f"正则无法匹配结构样本: {text[:60]}", ""
+        value = (m.group(1) or "").strip()
+        if not value:
+            return False, f"捕获值为空: {text[:60]}", ""
+        preview = value[:100]
+    return True, "", preview
+
+
+def _generate_header_logtype_regex(
+    sample_lines: list[str], format_type: str, delimit: str
+) -> _re.Pattern:
+    """用 LLM 生成日志类型路径提取正则（1 捕获组，≤2 次尝试，#190）。
+
+    类型集合由该正则全量扫描决定；首次失败附错误反馈修复一次，
+    再失败抛 ValueError（调用方返回 FAILED），禁止降级为模型自由枚举。
+
+    Args:
+        sample_lines: header 聚类分层的原始日志行样本。
+        format_type:  日志格式（大小写无关）。
+        delimit:      KV 键值分隔符（用于从样本行提取日志头）。
+
+    Returns:
+        编译后的正则对象。
+
+    Raises:
+        ValueError: 全部尝试均失败。
     """
-    log_lines = [l.strip() for l in logs_str.strip().split("\n") if l.strip()]
+    header_texts = [
+        h for h in (extract_header(l, format_type, delimit) or l for l in sample_lines)
+        if h.strip()
+    ]
+    if not header_texts:
+        raise ValueError("无有效日志头样本")
 
-    # CHANGED: 获取 feature_identifier 和 feature_body_group，用于 KV 格式 body 提取
-    feature_identifier = classification_data.get("feature_identifier", "")
-    feature_body_group = classification_data.get("feature_body_group", 0)
-    has_feature_identifier = bool(feature_identifier and feature_body_group > 0)
+    base_prompt = load_log_header_regex_identifier_prompt()
+    max_attempts = 2  # 初次 + 1 次修复
+    last_error, last_regex = "", ""
 
-    # JSON 格式优先用 {...} 提取 body，避免 syslog 头多空格误切断
-    is_json = str(classification_data.get("log_format", "")).upper() == "JSON"
-    
-    # CHANGED: 如果有 feature_identifier 正则，预编译
-    feature_pattern = None
-    if has_feature_identifier:
-        try:
-            feature_pattern = _re.compile(feature_identifier)
-            logger.info(
-                f"[replace_samples] 使用 feature_identifier 提取 body: "
-                f"regex={feature_identifier[:50]}..., body_group={feature_body_group}"
+    for attempt in range(1, max_attempts + 1):
+        prompt = base_prompt.replace(
+            "{sample_logs}", "\n".join(header_texts[:_LOGTYPE_SAMPLE_LIMIT])
+        )
+        if attempt > 1 and last_error:
+            prompt += (
+                f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
+                f"- 上次错误：{last_error}\n"
+                f"- 上次正则：`{last_regex}`\n"
+                f"\n请重新观察样例结构，生成泛化的类型路径提取正则。"
             )
-        except _re.error as e:
-            logger.warning(f"[replace_samples] feature_identifier 正则编译失败: {e}")
-
-    for detail in classification_data.get("classification_details", []):
-        matched_regex = detail.get("matched_regex", "")
-        if not matched_regex:
-            detail["sample"] = ""
-            detail["real_samples"] = ""
+        try:
+            response = _call_llm_direct(
+                prompt, temperature=0.1, max_tokens=500, timeout=30, force_json=False
+            )
+        except Exception as e:
+            last_error, last_regex = f"LLM API 调用失败: {e}", ""
+            logger.debug(
+                f"[_generate_header_logtype_regex] 尝试 {attempt}/{max_attempts} "
+                f"LLM 调用异常: {e}"
+            )
             continue
 
-        try:
-            pattern = _re.compile(matched_regex)
-        except _re.error:
-            logger.warning(f"[replace_samples] 正则语法错误: {matched_regex}")
-            detail["sample"] = ""
-            detail["real_samples"] = ""
+        regex_str = _parse_regex_response(response)
+        if not regex_str:
+            last_error, last_regex = "LLM 输出无法解析为正则", response[:200]
             continue
 
-        found = ""
-        for line in log_lines:
-            if pattern.search(line):
-                found = line
-                break
-
-        # sample = 完整原始行
-        detail["sample"] = found
-        
-        # CHANGED: real_samples 提取逻辑，支持 KV 格式
-        if has_feature_identifier and feature_pattern and found:
-            # 优先使用 feature_identifier 正则提取 body（KV 格式）
-            match = feature_pattern.search(found)
-            if match and len(match.groups()) >= feature_body_group:
-                detail["real_samples"] = match.group(feature_body_group)
-                logger.info(
-                    f"[replace_samples] 为 '{detail.get('logtype', '')}' "
-                    f"使用正则提取 body ({len(detail['real_samples'])} 字符)"
-                )
-            else:
-                # 正则匹配失败，降级剥离头部（JSON 用 {...}，KV 用 marker）
-                from agent.tools.pipeline.common.json_utils import strip_header_to_body
-
-                detail["real_samples"] = strip_header_to_body(
-                    found, header_end_marker, is_json=is_json
-                ) or found
-        elif header_end_marker and found:
-            # 无 feature_identifier，剥离头部（JSON 用 {...}，KV 用 marker）
-            from agent.tools.pipeline.common.json_utils import strip_header_to_body
-
-            detail["real_samples"] = strip_header_to_body(
-                found, header_end_marker, is_json=is_json
-            ) or found
-        elif found and "{" in found:
-            # fallback: header_end_marker 为空时，自动提取 JSON body
-            json_start = found.find("{")
-            json_end = found.rfind("}")
-            if json_start != -1 and json_end > json_start:
-                detail["real_samples"] = found[json_start:json_end + 1]
-            else:
-                detail["real_samples"] = found
-        else:
-            detail["real_samples"] = found
-
-        if found:
+        is_valid, err_msg, preview = _validate_logtype_regex(regex_str, header_texts)
+        if is_valid:
             logger.info(
-                f"[replace_samples] 为 '{detail.get('logtype', '')}' "
-                f"匹配到样例 ({len(found)} 字符)"
+                f"[_generate_header_logtype_regex] 生成成功 "
+                f"(尝试 {attempt}/{max_attempts}): {regex_str}（示例值: {preview}）"
             )
+            return _re.compile(regex_str)
+        last_error, last_regex = err_msg, regex_str
+        logger.debug(
+            f"[_generate_header_logtype_regex] 尝试 {attempt}/{max_attempts} "
+            f"验证失败: {err_msg}（正则: {regex_str}）"
+        )
 
-    return classification_data
+    raise ValueError(
+        f"日志类型提取正则生成失败（共尝试 {max_attempts} 次），最后错误: {last_error}"
+    )
+
+
+def _make_header_logtype_extractor(pattern: _re.Pattern, format_type: str, delimit: str):
+    """构造类型提取器：正则只作用于日志头文本（#190）。
+
+    不同主结构的行（如管道格式）在日志头中匹配不到类型路径，
+    由聚合器计入 unmatched，不参与分类。
+    """
+
+    def extract(line: str, feature_field: str):
+        header = extract_header(line, format_type, delimit)
+        if not header:
+            return None
+        m = pattern.search(header)
+        if not m or not (m.group(1) or "").strip():
+            return None
+        return m.group(1).strip()
+
+    return extract
 
 
 def classify_header_features(
@@ -327,45 +338,47 @@ def classify_header_features(
     header_end_marker: str = "",
     format_info: dict | None = None,
 ) -> str:
-    """Path A: 日志头分类特征提取主函数。
+    """Path A: 日志头分类特征提取主函数（#190 全量确定性枚举）。
 
-    CHANGED: 新增 header_end_marker 参数，用于 real_samples 去头。
-    CHANGED (2026-06-02): 根据 format_type 动态设置 feature_identifier 和 analysis。
-    CHANGED (2026-06-18): 新增 format_info 参数，优先使用 Step1 确定的 delimit/tab，
-                           避免 LLM 二次判断覆盖正确值（修复 delimit 从 ';' 误变为 'space' 的问题）。
+    类型集合由「LLM 生成 + 代码校验的类型提取正则」全量扫描决定；
+    header 聚类只提供结构样本；LLM 另按 ≤20 值/批补充 meaning，
+    批次或覆盖不完整只降级 PARTIAL，不删类型、不自由枚举。
+
+    CHANGED (2026-06-18): 新增 format_info 参数，优先使用 Step1 确定的 delimit/tab。
     """
-    # 辅助函数：根据 format_type 获取 feature_identifier
+    is_kv = (format_type or "").lower() == "kv"
+    kv_feature_identifier = ""
+
     def _get_feature_identifier(fmt_type: str) -> str:
         return "" if (fmt_type or "").lower() == "kv" else _JSON_FEATURE_IDENTIFIER
 
-    if not logs_str or not logs_str.strip():
+    def _failed(error: str, total_valid_lines: int = 0) -> str:
         return json.dumps(
-            {"status": "FAILED", "error": "日志内容为空",
-             "log_format": normalize_log_format(format_type),
-             "log_format_detail": format_detail or format_type,
-             "feature_field": "__header__", "feature_identifier": _get_feature_identifier(format_type),
-             "feature_count": 0, "total_valid_lines": 0, "covered_lines": 0,
-             "classification_details": []},
+            {
+                "status": "FAILED",
+                "error": error,
+                "log_format": normalize_log_format(format_type),
+                "log_format_detail": format_detail or format_type,
+                "feature_field": "__header__",
+                "feature_identifier": kv_feature_identifier or _get_feature_identifier(format_type),
+                "feature_count": 0,
+                "total_valid_lines": total_valid_lines,
+                "covered_lines": 0,
+                "classification_details": [],
+            },
             ensure_ascii=False,
         )
 
-    # CHANGED: KV 格式时，用 LLM 生成 feature_identifier
-    is_kv = (format_type or "").lower() == "kv"
-    kv_feature_identifier = ""
+    if not logs_str or not logs_str.strip():
+        return _failed("日志内容为空")
+
+    # CHANGED: KV 格式时，用 LLM 生成 body 提取正则（feature_identifier）
     if is_kv:
         try:
             kv_feature_identifier = _generate_kv_feature_identifier(logs_str)
         except ValueError as e:
             logger.error(f"[classify_header_features] KV feature_identifier 生成失败: {e}")
-            return json.dumps(
-                {"status": "FAILED", "error": f"KV feature_identifier 生成失败: {e}",
-                 "log_format": normalize_log_format(format_type),
-                 "log_format_detail": format_detail or format_type,
-                 "feature_field": "__header__", "feature_identifier": "",
-                 "feature_count": 0, "total_valid_lines": 0, "covered_lines": 0,
-                 "classification_details": []},
-                ensure_ascii=False,
-            )
+            return _failed(f"KV feature_identifier 生成失败: {e}")
 
     # CHANGED: 确定 KV 格式的键值连接符，用于 header 提取
     kv_delimit = "="
@@ -373,152 +386,140 @@ def classify_header_features(
         kv_delimit = format_info.get("tab", "=")
 
     try:
-        # CHANGED: 传入 format_type 和 delimit，确保 KV 格式正确提取 header
-        agg_result = aggregate_headers(logs_str, format_type=format_type, delimit=kv_delimit)
-        clusters = agg_result["clusters"]
-        total_lines = agg_result["total_lines"]
+        # 1) 结构样本：header 聚类降级为样本源，不再决定类型集合与计数（#190）
+        clusters = aggregate_headers(
+            logs_str, format_type=format_type, delimit=kv_delimit
+        )["clusters"]
+        sample_lines = [
+            c["raw_sample"] for c in clusters if c.get("raw_sample")
+        ][:_LOGTYPE_SAMPLE_LIMIT]
+        if not sample_lines:
+            logger.warning("[classify_header_features] 无结构样本（日志头聚合结果为空）")
+            return _failed("日志头聚合结果为空")
 
-        if not clusters:
-            logger.warning("[classify_header_features] 聚合结果为空")
-            return json.dumps(
-                {"status": "FAILED", "error": "日志头聚合结果为空",
-                 "log_format": normalize_log_format(format_type),
-                 "log_format_detail": format_detail or format_type,
-                 "feature_field": "__header__", "feature_identifier": _get_feature_identifier(format_type),
-                 "feature_count": 0, "total_valid_lines": total_lines,
-                 "covered_lines": 0, "classification_details": []},
-                ensure_ascii=False,
+        # 2) 类型提取正则：失败自动附错误反馈修复一次，再败即 FAILED（无自由枚举兜底）
+        try:
+            logtype_pattern = _generate_header_logtype_regex(
+                sample_lines, format_type, kv_delimit
             )
+        except ValueError as e:
+            logger.error(f"[classify_header_features] {e}")
+            return _failed(f"日志类型提取正则生成失败: {e}")
 
-        # CHANGED: 转义花括号，防止 str.format() 误解析
-        aggregated_text = _escape_format_braces(json.dumps(clusters, ensure_ascii=False))
-        # CHANGED: 使用每个 cluster 的原始未脱敏日志行进行分层采样，
-        # 替代原来的随机5行采样，确保所有日志类型（含少样本类型）都有代表样例
-        representative_lines = [
-            c["raw_sample"] for c in clusters
-            if c.get("raw_sample")
-        ]
-        if representative_lines:
-            sampled = _escape_format_braces('\n'.join(representative_lines[:20]))
-            logger.info(
-                f"[classify_header_features] 分层采样: "
-                f"{len(representative_lines[:20])} 条代表样例（来自 {len(clusters)} 个 cluster）"
-            )
-        else:
-            # fallback: 如果 raw_sample 为空，使用原始随机采样
-            sampled = _escape_format_braces(sample_logs(logs_str, 5))
+        # 3) 确定性全量枚举：正则只作用于日志头文本，不同主结构行自然落入 unmatched
+        # ponytail: 正则仅从 top 结构样本习得；共主导结构的文件次结构会进
+        # unmatched 并报 PARTIAL，升级路径 = 按 cluster 迭代生成多个类型正则
+        logtype_extractor = _make_header_logtype_extractor(
+            logtype_pattern, format_type, kv_delimit
+        )
+        aggregation = aggregate_by_field(
+            logs_str,
+            "__header__",
+            logtype_extractor,
+            kv_delimit=kv_delimit if is_kv else None,
+            header_end_marker="",  # 透传原始行：类型在日志头中，不得剥离
+            is_json=False,
+        )
+        total_lines = aggregation.get("total_lines", 0)
+        matched_lines = aggregation.get("matched_lines", 0)
+        if matched_lines == 0:
+            logger.warning("[classify_header_features] 类型提取正则未匹配到任何日志行")
+            return _failed("类型提取正则未匹配到任何日志行", total_valid_lines=total_lines)
 
-        prompt = load_log_header_classify_prompt().format(
-            aggregated_headers=aggregated_text,
-            sample_count="5",
-            sampled_logs=sampled,
+        # 4) 语义解释：复用 body 分类链路，分批 ≤20；批失败只降级 PARTIAL、类型不动
+        from agent.tools.pipeline.log_classifier import (
+            _build_coverage_block,
+            _meaning_fill_batches,
         )
 
-        logger.info(
-            f"[classify_header_features] 调用 LLM, "
-            f"clusters={len(clusters)}, prompt_len={len(prompt)}"
-        )
+        try:
+            fill = _meaning_fill_batches(
+                aggregation,
+                logs_str,
+                format_type=format_type,
+                format_detail=format_detail or format_type,
+                feature_field="__header__",
+                header_end_marker=header_end_marker,
+                sample_format="kv" if is_kv else "json",
+                extractor_func=logtype_extractor,
+            )
+        except Exception as e:
+            logger.error(
+                f"[classify_header_features] 语义解释失败: {type(e).__name__}: {e}"
+            )
+            return _failed(f"LLM 语义分类失败: {e}", total_valid_lines=total_lines)
 
-        response = _call_llm_direct(
-            prompt, temperature=0.1, max_tokens=4000, timeout=90
+        unmatched_lines = aggregation.get("unmatched_lines", 0)
+        status = (
+            "SUCCESS"
+            if fill["status"] == "SUCCESS" and unmatched_lines == 0
+            else "PARTIAL"
         )
-
-        parsed = _try_parse_json(response)
-        if parsed is None:
-            logger.warning(f"[classify_header_features] LLM 返回非 JSON: {response[:200]}")
-            return json.dumps(
-                {"status": "FAILED", "error": "LLM 返回非 JSON",
-                 "log_format": normalize_log_format(format_type),
-                 "log_format_detail": format_detail or format_type,
-                 "feature_field": "__header__", "feature_identifier": _get_feature_identifier(format_type),
-                 "feature_count": 0, "total_valid_lines": total_lines,
-                 "covered_lines": 0, "classification_details": [],
-                 "raw_response": response[:500]},
-                ensure_ascii=False,
+        fail_reason = ""
+        if status != "SUCCESS":
+            fail_reason = (
+                f"{unmatched_lines} 行未匹配任何类型"
+                if unmatched_lines
+                else "部分批次语义解释降级"
             )
 
-        # 后处理
-        parsed["log_format"] = normalize_log_format(format_type)
-        parsed.setdefault("log_format_detail", format_detail or format_type)
-        parsed.setdefault("feature_field", "__header__")
-        # CHANGED: KV 格式使用 LLM 生成的 feature_identifier，否则使用固定正则
-        if is_kv and kv_feature_identifier:
-            parsed["feature_identifier"] = kv_feature_identifier
-            parsed["feature_body_group"] = 1
-            parsed["feature_value_group"] = 0
-        else:
-            parsed["feature_identifier"] = _get_feature_identifier(format_type)
-            parsed["feature_body_group"] = 0
-            parsed["feature_value_group"] = 0
-        parsed.setdefault("feature_count", 0)
-        parsed.setdefault("total_valid_lines", total_lines)
-        parsed.setdefault("covered_lines", sum(c["count"] for c in clusters[:20]))
-        parsed.setdefault("classification_details", [])
-        parsed.setdefault("categorical_features", "在日志头中")
-        parsed.setdefault("Diversion_method", "日志头特征分类")
-        # CHANGED: analysis 字段优先使用 format_info 中的确定性 delimit/tab（来自 Step1），
-        #          仅当 format_info 缺失时才 fallback 到 LLM 输出（修复 delimit 误判为 space 的问题）
-        llm_analysis = parsed.get("analysis", {})
-        # CHANGED: format_info 优先（Step1 确定性判断），LLM 输出兜底
+        # 5) 组装结果：沿用 header 元数据契约 + coverage 四字段（format_info 优先）
         fi_delimit = (format_info or {}).get("delimit") if format_info else None
         fi_tab = (format_info or {}).get("tab") if format_info else None
-        parsed["analysis"] = {
-            "has_json_structure": not is_kv,
-            "has_cef_prefix": False,
-            "has_key_value_pairs": is_kv,
-            "has_delimited_structure": False,
-            "delimit": fi_delimit or llm_analysis.get("delimit", "判断失败"),
-            "tab": fi_tab or llm_analysis.get("tab", "判断失败"),
+        result = {
+            "status": status,
+            "fail_reason": fail_reason,
+            "log_format": normalize_log_format(format_type),
+            "log_format_detail": format_detail or format_type,
+            "feature_field": "__header__",
+            "feature_identifier": kv_feature_identifier or _get_feature_identifier(format_type),
+            "feature_body_group": 1 if (is_kv and kv_feature_identifier) else 0,
+            "feature_value_group": 0,
+            "feature_count": fill["feature_count"],
+            "total_valid_lines": total_lines,
+            "covered_lines": matched_lines,
+            "coverage": _build_coverage_block(aggregation),
+            "classification_details": fill["classification_details"],
+            "analysis": {
+                "has_json_structure": not is_kv,
+                "has_cef_prefix": False,
+                "has_key_value_pairs": is_kv,
+                "has_delimited_structure": False,
+                "delimit": fi_delimit or "判断失败",
+                "tab": fi_tab or "判断失败",
+            },
+            "categorical_features": "在日志头中",
+            "Diversion_method": "日志头特征分类",
+            "header_end_marker": header_end_marker,
         }
-        # CHANGED: 使用传入的 header_end_marker 而非硬编码 ""
-        parsed["header_end_marker"] = header_end_marker
+        logger.info(
+            f"[classify_header_features] 全量枚举完成: types={fill['feature_count']}, "
+            f"covered={matched_lines}/{total_lines}, unmatched={unmatched_lines}, "
+            f"status={status}"
+        )
 
-        if parsed.get("status") == "SUCCESS":
-            # CHANGED: 传入 header_end_marker 以提取 real_samples
-            parsed = _replace_samples_with_raw(parsed, logs_str, header_end_marker)
-            parsed["feature_count"] = len(parsed.get("classification_details", []))
-
+        if status == "SUCCESS":
             try:
                 from agent.tools.log_pattern_store import (
-                    generate_structured_fingerprint, store_log_knowledge,
+                    generate_structured_fingerprint,
+                    store_log_knowledge,
                 )
                 structured_fp = generate_structured_fingerprint(
-                    classify_result=parsed, format_detail=format_detail,
+                    classify_result=result, format_detail=format_detail,
                     feature_field="__header__",
                 )
                 if structured_fp:
                     _sl = [l for l in logs_str.strip().split("\n") if l.strip()][:10]
                     store_log_knowledge(
                         fingerprint=structured_fp, format_type=format_type,
-                        meta=parsed, sample_logs=_sl,
+                        meta=result, sample_logs=_sl,
                     )
                     logger.info(f"[classify_header_features] 知识库存储成功: {structured_fp[:80]}...")
             except Exception as store_err:
                 logger.warning(f"[classify_header_features] 知识库存储失败: {store_err}")
-        else:
-            parsed.setdefault("fail_reason", "LLM 判断分类失败")
 
-        return json.dumps(parsed, ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
 
-    except httpx.HTTPStatusError as e:
-        logger.error(f"[classify_header_features] API 错误: {e}")
-        return json.dumps(
-            {"status": "FAILED", "error": f"LLM API 调用失败: {e.response.status_code}",
-             "log_format": normalize_log_format(format_type),
-             "log_format_detail": format_detail or format_type,
-             "feature_field": "__header__", "feature_identifier": _get_feature_identifier(format_type),
-             "feature_count": 0, "total_valid_lines": 0, "covered_lines": 0,
-             "classification_details": []},
-            ensure_ascii=False,
-        )
     except Exception as e:
         logger.error(f"[classify_header_features] 异常: {type(e).__name__}: {e}")
-        return json.dumps(
-            {"status": "FAILED", "error": str(e),
-             "log_format": normalize_log_format(format_type),
-             "log_format_detail": format_detail or format_type,
-             "feature_field": "__header__", "feature_identifier": _get_feature_identifier(format_type),
-             "feature_count": 0, "total_valid_lines": 0, "covered_lines": 0,
-             "classification_details": []},
-            ensure_ascii=False,
-        )
+        return _failed(str(e))

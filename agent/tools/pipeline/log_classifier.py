@@ -77,6 +77,84 @@ def _build_feature_identifier(format_type: str, format_detail: str) -> str:
     return ""
 
 
+def _meaning_fill_batches(
+    aggregation: dict,
+    logs_str: str,
+    *,
+    format_type: str,
+    format_detail: str,
+    feature_field: str,
+    header_end_marker: str = "",
+    sample_format: str = "",
+    extractor_func=None,
+    batch_size: int = 20,
+) -> dict:
+    """分批（≤batch_size 值/批）调用分类 LLM 补充 meaning 并合并（#190）。
+
+    类型集合始终以聚合值为准（sanitize 裁剪臆造、回填遗漏）；批次返回
+    无效 JSON 时该批回退聚合详情并把状态降为 PARTIAL；API 异常向上抛出，
+    由调用方按既有语义处理。
+
+    Returns:
+        {"classification_details": [...], "status": "SUCCESS"|"PARTIAL",
+         "feature_count": int}
+    """
+    from agent.tools.pipeline.common.llm_postprocessor import (
+        postprocess_llm_classification,
+    )
+
+    all_values = list(aggregation.get("values", {}).keys())
+    format_name = normalize_log_format(format_type) or format_type
+    sampled_logs_str = sample_logs(logs_str, 5)
+
+    details: list[dict] = []
+    status = "SUCCESS"
+    for start in range(0, len(all_values), batch_size):
+        batch_values = all_values[start:start + batch_size]
+        batch_values_detail = {}
+        for val in batch_values:
+            info = aggregation["values"].get(val, {})
+            batch_values_detail[val] = {
+                "count": info.get("count", 0),
+                "samples": info.get("samples", []),
+            }
+        prompt = load_log_classify_prompt().format(
+            format_type=format_name,
+            format_detail=format_detail,
+            feature_field=feature_field,
+            aggregation_text=json.dumps(batch_values_detail, ensure_ascii=False),
+            sampled_logs=sampled_logs_str,
+        )
+        logger.info(
+            f"[meaning_fill] 批次 {start // batch_size + 1}: "
+            f"values={len(batch_values)}/{len(all_values)}, prompt_len={len(prompt)}"
+        )
+        batch_aggregation = {
+            **aggregation,
+            "values": {v: aggregation["values"].get(v, {}) for v in batch_values},
+            "top_values": batch_values,
+        }
+        response = _call_llm_direct(
+            prompt, temperature=0.2, max_tokens=8000, timeout=120
+        )
+        parsed = postprocess_llm_classification(
+            response, batch_aggregation, logs_str,
+            extractor_func=extractor_func,
+            feature_field=feature_field,
+            header_end_marker=header_end_marker,
+            sample_format=sample_format,
+        )
+        details.extend(parsed.get("classification_details", []))
+        if parsed.get("status") != "SUCCESS":
+            status = "PARTIAL"
+
+    return {
+        "classification_details": details,
+        "status": status,
+        "feature_count": len(details),
+    }
+
+
 # ---------------------------------------------------------------------------
 # 核心：统一的 JSON 分类（替代旧 Path B + C）
 # ---------------------------------------------------------------------------
@@ -95,7 +173,6 @@ def _classify_json_features(
     :mod:`common.llm_postprocessor` 清洗 + 知识库存储。
     """
     from agent.tools.pipeline.extractors.json_extractor import JsonExtractor
-    from agent.tools.pipeline.common.llm_postprocessor import postprocess_llm_classification
     from agent.tools.pipeline.common.knowledge_store import store_classification_knowledge
 
     # 0. 校验输入
@@ -135,38 +212,17 @@ def _classify_json_features(
             ensure_ascii=False,
         )
 
-    # 2. 准备 LLM 输入
-    aggregated_values = aggregation.get("top_values", [])
-    top_values_detail = {}
-    for val in aggregated_values[:20]:
-        info = aggregation["values"].get(val, {})
-        top_values_detail[val] = {
-            "count": info.get("count", 0),
-            "samples": info.get("samples", []),
-        }
-
-    aggregated_json = json.dumps(top_values_detail, ensure_ascii=False)
-    sampled_logs_str = sample_logs(logs_str, 5)
-    format_name = normalize_log_format(format_type) or format_type
-
-    # 3. 构建 prompt
-    prompt = load_log_classify_prompt().format(
-        format_type=format_name,
-        format_detail=format_detail or format_type,
-        feature_field=feature_field,
-        aggregation_text=aggregated_json,
-        sampled_logs=sampled_logs_str,
-    )
-
-    logger.info(
-        f"[_classify_json_features] Calling LLM: "
-        f"format={format_name}, field={feature_field}, "
-        f"unique_values={len(aggregated_values)}, prompt_len={len(prompt)}"
-    )
-
-    # 4. 调用 LLM
+    # 2-5. 分批（≤20 值/批）调用分类 LLM 并后处理（#190：不再只取前 20 个值）
     try:
-        response = _call_llm_direct(prompt, temperature=0.2, max_tokens=8000, timeout=120)
+        parsed = _meaning_fill_batches(
+            aggregation, logs_str,
+            format_type=format_type,
+            format_detail=format_detail or format_type,
+            feature_field=feature_field,
+            header_end_marker=header_end_marker,
+            sample_format="json",
+            extractor_func=extractor.extract_value,
+        )
     except httpx.HTTPStatusError as e:
         logger.error(f"[_classify_json_features] API error: {e}")
         return _build_failed_result(format_type, format_detail, feature_field, f"LLM API 调用失败: {e.response.status_code}")
@@ -174,16 +230,8 @@ def _classify_json_features(
         logger.error(f"[_classify_json_features] LLM error: {type(e).__name__}: {e}")
         return _build_failed_result(format_type, format_detail, feature_field, str(e), total_valid_lines=total_lines)
 
-    # 5. 后处理 LLM 响应
-    parsed = postprocess_llm_classification(
-        response, aggregation, logs_str,
-        extractor_func=extractor.extract_value,
-        feature_field=feature_field,
-        header_end_marker=header_end_marker,
-        sample_format="json",
-    )
-
     # 6. 填充元数据字段
+    format_name = normalize_log_format(format_type) or format_type
     result = {
         "status": parsed.get("status", "PARTIAL"),
         "log_format": format_name,
@@ -244,7 +292,6 @@ def _classify_kv_features(
     :mod:`common.llm_postprocessor` 清洗 + 知识库存储。
     """
     from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
-    from agent.tools.pipeline.common.llm_postprocessor import postprocess_llm_classification
     from agent.tools.pipeline.common.knowledge_store import store_classification_knowledge
 
     # 0. 校验输入
@@ -367,38 +414,16 @@ def _classify_kv_features(
             ensure_ascii=False,
         )
 
-    # 2. 准备 LLM 输入
-    aggregated_values = aggregation.get("top_values", [])
-    top_values_detail = {}
-    for val in aggregated_values[:20]:
-        info = aggregation["values"].get(val, {})
-        top_values_detail[val] = {
-            "count": info.get("count", 0),
-            "samples": info.get("samples", []),
-        }
-
-    aggregated_json = json.dumps(top_values_detail, ensure_ascii=False)
-    sampled_logs_str = sample_logs(logs_str, 5)
-    format_name = normalize_log_format(format_type) or format_type
-
-    # 3. 构建 prompt
-    prompt = load_log_classify_prompt().format(
-        format_type=format_name,
-        format_detail=format_detail or format_type,
-        feature_field=feature_field,
-        aggregation_text=aggregated_json,
-        sampled_logs=sampled_logs_str,
-    )
-
-    logger.info(
-        f"[_classify_kv_features] Calling LLM: "
-        f"format={format_name}, field={feature_field}, "
-        f"unique_values={len(aggregated_values)}, prompt_len={len(prompt)}"
-    )
-
-    # 4. 调用 LLM
+    # 2-5. 分批（≤20 值/批）调用分类 LLM 并后处理（#190：不再只取前 20 个值）
     try:
-        response = _call_llm_direct(prompt, temperature=0.2, max_tokens=8000, timeout=120)
+        parsed = _meaning_fill_batches(
+            aggregation, logs_str,
+            format_type=format_type,
+            format_detail=format_detail or format_type,
+            feature_field=feature_field,
+            header_end_marker=header_end_marker,
+            extractor_func=extractor.extract_value,
+        )
     except httpx.HTTPStatusError as e:
         logger.error(f"[_classify_kv_features] API error: {e}")
         return _build_failed_result(format_type, format_detail, feature_field, f"LLM API 调用失败: {e.response.status_code}")
@@ -406,15 +431,8 @@ def _classify_kv_features(
         logger.error(f"[_classify_kv_features] LLM error: {type(e).__name__}: {e}")
         return _build_failed_result(format_type, format_detail, feature_field, str(e), total_valid_lines=total_lines)
 
-    # 5. 后处理 LLM 响应
-    parsed = postprocess_llm_classification(
-        response, aggregation, logs_str,
-        extractor_func=extractor.extract_value,
-        feature_field=feature_field,
-        header_end_marker=header_end_marker,
-    )
-
     # 6. 填充元数据字段
+    format_name = normalize_log_format(format_type) or format_type
     result = {
         "status": parsed.get("status", "PARTIAL"),
         "log_format": format_name,

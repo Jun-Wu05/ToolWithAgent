@@ -65,7 +65,7 @@ def _prepare_body_analysis(
         delimit: KV 格式的 key-value 连接符。
         tab: KV 格式的 key-value 分隔符。
     """
-    if format_type == "kv":
+    if format_type and format_type.lower() == "kv":  # 大小写无关（#190）
         from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
         extractor = KvExtractor(delimit, tab)
     else:
