@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import httpx
 from agno.tools import tool
@@ -34,29 +35,121 @@ def _strip_bodies(sampled: list[str], header_end_marker: str) -> list[str]:
     return [strip_header_to_body(line, header_end_marker, is_json=False) for line in sampled]
 
 
-def _enforce_format_consistency(parsed: dict, sampled: list[str]) -> None:
-    """确定性一致性校验：LLM 报 JSON 但 body 无 JSON 对象、却呈 KV 结构时纠正为 KV。
+def _parse_json_object(text: str) -> dict | None:
+    """仅当全部文本是 JSON 对象时返回解析结果。"""
+    try:
+        value = json.loads(text.strip())
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _collect_outer_json_objects(sampled: str, header_end_marker: str) -> tuple[list[dict], bool] | None:
+    """解析全部采样行的外层 JSON，拒绝 KV 值中的局部 JSON 片段。"""
+    from agent.tools.pipeline.common.json_utils import extract_json_body
+
+    lines = [line for line in str(sampled).splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    objects: list[dict] = []
+    has_header = False
+    for line in lines:
+        value = _parse_json_object(line)
+        if value is not None:
+            objects.append(value)
+            continue
+
+        body = None
+        if header_end_marker and header_end_marker in line:
+            body = line.split(header_end_marker, 1)[1]
+        else:
+            candidate = extract_json_body(line)
+            if candidate:
+                prefix, suffix = line.split(candidate, 1)
+                prefix_stripped = prefix.rstrip()
+                if (
+                    re.match(r"^<\d+>", prefix.lstrip())
+                    and not suffix.strip()
+                    and not prefix_stripped.endswith(("=", ":"))
+                ):
+                    body = candidate
+
+        value = _parse_json_object(body) if body is not None else None
+        if value is None:
+            return None
+        objects.append(value)
+        has_header = True
+
+    return objects, has_header
+
+
+def _json_field_paths(objects: list[dict]) -> list[str]:
+    """收集外层 JSON 中可定位的叶子字段路径。"""
+    paths: set[str] = set()
+
+    def visit(value, prefix: str) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                path = f"{prefix}.{key}" if prefix else str(key)
+                visit(child, path)
+        elif prefix:
+            paths.add(prefix)
+
+    for obj in objects:
+        visit(obj, "")
+    return sorted(paths)
+
+
+def _json_field_is_present(objects: list[dict], field: str) -> bool:
+    """候选字段必须能从至少一条外层 JSON 路径取值。"""
+    from agent.tools.pipeline.common.json_utils import get_nested_json_value
+
+    return bool(field) and any(get_nested_json_value(obj, field) is not None for obj in objects)
+
+
+def _enforce_format_consistency(parsed: dict, sampled: str) -> list[dict]:
+    """确定性一致性校验：外层 JSON 优先，否则纠正误报的 JSON→KV。
 
     避免 RFC5424 syslog 头 + KV body（如 ``msg_type="x" host_ip="y"``）被 LLM 误判为
     「日志头+JSON」，导致 Step 2 走 JSON 聚合路径 matched=0。只在 body 确实不含
     ``{...}`` 且多数采样行像 key=value 对时才纠正；真正的 JSON 不受影响。
     """
+    outer_json = _collect_outer_json_objects(
+        sampled, parsed.get("header_end_marker", "") or ""
+    )
+    if outer_json is not None:
+        objects, has_header = outer_json
+        if parsed.get("format") != "JSON":
+            logger.warning(
+                "[identify_log_format] 一致性校验：完整外层 body 均为 JSON 对象，"
+                "纠正为 JSON"
+            )
+        parsed["format"] = "JSON"
+        parsed["format_detail"] = "日志头+JSON" if has_header else "JSON"
+        parsed["has_header"] = has_header
+        if not (has_header and parsed.get("feature_location") == "header"):
+            parsed["feature_location"] = "body"
+        for key in ("delimiter", "kv_connector", "kv_separator", "tab", "delimit"):
+            parsed[key] = None
+        return objects
+
     from agent.tools.pipeline.common.json_utils import extract_json_body
     from agent.tools.pipeline.extractors.kv_extractor import _DEFAULT_KV_PATTERN
 
     if parsed.get("format") != "JSON":
-        return
+        return []
     header_end_marker = parsed.get("header_end_marker", "") or ""
     # sample_logs 返回换行拼接的字符串，按行拆分后再剥离日志头。
     sampled_lines = [line for line in str(sampled).splitlines() if line.strip()]
     bodies = _strip_bodies(sampled_lines, header_end_marker)
     # 任一采样行含真实 JSON 对象 → 认可 LLM 的 JSON 判定，不纠正。
     if any(extract_json_body(body) for body in bodies):
-        return
+        return []
     # body 无 JSON 对象；统计呈 KV 结构（至少一个 key=value 对）的行数。
     kv_like = sum(1 for body in bodies if _DEFAULT_KV_PATTERN.search(body))
     if kv_like < max(1, len(bodies) // 2):
-        return
+        return []
     # 确定性检测分隔符：键值分隔符（= 或 :），字段分隔符（space / || / ;）。
     text = " ".join(bodies)
     tab = ":" if text.count(":") > text.count("=") else "="
@@ -76,6 +169,7 @@ def _enforce_format_consistency(parsed: dict, sampled: list[str]) -> None:
         "[identify_log_format] 一致性校验：LLM 报 JSON 但 body 无 JSON 对象、"
         f"呈 KV 结构，纠正为 KV（tab='{tab}', delimit='{delimit}'）"
     )
+    return []
 
 
 def _do_identify_log_format(logs_str: str) -> str:
@@ -182,7 +276,47 @@ def _do_identify_log_format(logs_str: str) -> str:
         parsed.setdefault("format_detail", parsed.get("format_detail") or parsed.get("format", ""))
 
         # 确定性一致性校验：纠正 LLM 误报 JSON（body 实为 KV）的情况
-        _enforce_format_consistency(parsed, sampled)
+        outer_json_objects = _enforce_format_consistency(parsed, sampled)
+
+        # 外层 JSON 格式下，模型推导的 body 字段必须真实存在。
+        # 字符串值中出现的“字段名”不是 JSON 路径；仅用可观测的
+        # 外层叶子路径进行一次有界重试。
+        if (
+            parsed.get("format") == "JSON"
+            and outer_json_objects
+            and parsed.get("feature_location") != "header"
+            and not _json_field_is_present(
+                outer_json_objects, str(parsed.get("feature_field", "") or "")
+            )
+        ):
+            candidates = _json_field_paths(outer_json_objects)
+            retry_prompt = (
+                f"{prompt}\n"
+                "<validation_error>\n"
+                "上一次返回的 feature_field 不是可解析的外层 JSON 路径。\n"
+                f"可选外层 JSON 字段：{json.dumps(candidates, ensure_ascii=False)}\n"
+                "仅从上述字段中选择 feature_field，并保持 format=json。\n"
+                "</validation_error>"
+            )
+            retry_response = _call_llm_direct(
+                retry_prompt, temperature=0.1, max_tokens=500, timeout=90
+            )
+            retry_parsed = _try_parse_json(retry_response)
+            retry_field = (
+                str(retry_parsed.get("feature_field", "") or "")
+                if isinstance(retry_parsed, dict)
+                else ""
+            )
+            if _json_field_is_present(outer_json_objects, retry_field):
+                parsed["feature_field"] = retry_field
+                parsed["feature_location"] = "body"
+            else:
+                parsed["format"] = "UNKNOWN"
+                parsed["format_detail"] = "unknown"
+                parsed["feature_field"] = ""
+                parsed["confidence"] = 0
+                parsed["status"] = "UNSUPPORTED"
+                parsed["error"] = "模型未能从外层 JSON 字段中选出有效的分类特征字段"
 
         # 确定性防护（PR #121 修复）：header_end_marker 等于字段分隔符时必为幻觉——
         # 它会把每行第一个字段（常为分类特征字段）当日志头剥掉。真实日志头标记
