@@ -31,9 +31,12 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
             assert finished_sink is request_sink
             lifecycle.append("finish")
 
-    async def capture_render(report, *, threat_pending=False):
+    async def capture_render(
+        report, *, threat_pending=False, session_facts=None, **_kwargs
+    ):
         """记录交给渲染器的执行报告。"""
         captured["report"] = report
+        captured["session_facts"] = session_facts
         captured["render_count"] = captured.get("render_count", 0) + 1
 
     monkeypatch.setattr(
@@ -74,10 +77,72 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
     assert report.results[0].operation_type == "fill"
     assert report.results[0].changed_count == 1
     assert captured["render_count"] == 1
+    assert captured["session_facts"].has_mapped_sub_rules is True
     assert lifecycle == ["begin", "finish"]
     # 真实领域结果：按钮入口同样把枚举映射写回 normalize。
     mappings = session["mapped_sub_rules"][0]["normalize"][0]["mappings"]
     assert mappings == [{"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}]
+
+
+def test确定性计划需要输入时不以旧模板覆盖生成说明(monkeypatch):
+    """#226：NEEDS_INPUT 主报告已含 Composer 文案，结束阶段不得再次模板化更新。"""
+    import web.deterministic_plan as deterministic_plan
+    from contracts.planner_models import ExecutionReport, StepResult
+
+    primary = ExecutionReport(
+        plan_id="det-needs-input",
+        results=(
+            StepResult(
+                step_id="enum-fill",
+                operation_type="fill",
+                status=StepStatus.NEEDS_INPUT,
+                error_code="enum_target_field_not_found",
+                message="模板追问",
+                choices=("event_type3",),
+            ),
+        ),
+    )
+    updates = []
+
+    class _FakeLedger:
+        def begin_request(self):
+            return object()
+
+        async def finish_request(self, _finished_sink):
+            return None
+
+    async def fake_run(*, on_primary_report, **_kwargs):
+        await on_primary_report(primary)
+        return primary
+
+    async def fake_render(_report, **_kwargs):
+        return object()
+
+    async def capture_update(message, report):
+        updates.append((message, report))
+
+    monkeypatch.setattr(deterministic_plan, "get_session_progress_sink", lambda: _FakeLedger())
+    monkeypatch.setattr(deterministic_plan, "run_deterministic_plan", fake_run)
+    monkeypatch.setattr(deterministic_plan, "render_execution_report", fake_render)
+    monkeypatch.setattr(deterministic_plan, "update_execution_report_message", capture_update)
+    monkeypatch.setattr(deterministic_plan, "remember_primary_report", lambda *_args: None)
+
+    step = FillStep(
+        step_id="enum-fill",
+        type="fill",
+        fill_kind="enum",
+        target_fields=("event_type3",),
+        source_ref="session.enum_mapping_table",
+        config_ref="session.mapped_sub_rules",
+    )
+
+    asyncio.run(
+        deterministic_plan.execute_deterministic_plan(
+            {}, team=None, plan_id=primary.plan_id, steps=[step]
+        )
+    )
+
+    assert updates == []
 
 
 def test应用入口在慢速威胁链前发布主报告且保持合并返回(monkeypatch):
@@ -257,7 +322,7 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
 
     message_handle = object()
 
-    async def capture_render(report, *, threat_pending=False):
+    async def capture_render(report, *, threat_pending=False, **_kwargs):
         rendered.append((report, threat_pending))
         return message_handle
 

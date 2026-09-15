@@ -12,6 +12,7 @@ from application.request_runtime import (
     is_explicit_clear_command,
     run_user_request,
 )
+from application.session_projection import build_session_facts
 from contracts.planner_models import ExecutionReport
 from web.chainlit_progress import get_session_progress_sink, reset_session_progress_sink
 from web.plan_renderer import (
@@ -53,6 +54,7 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
             progress_sink=progress_sink,
             progress_plan_id=progress_plan_id,
         )
+        session_facts = build_session_facts(user_session)
         if isinstance(result, ExecutionReport):
             final_config = (
                 user_session.mapped_sub_rules
@@ -60,9 +62,9 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
                 else user_session.get("mapped_sub_rules")
             )
             await refresh_primary_report_anchor(result, final_config)
-            await render_execution_report(result)
+            await render_execution_report(result, session_facts=session_facts)
         else:
-            await render_decision(result)
+            await render_decision(result, session_facts=session_facts)
     finally:
         # UI 或执行器异常都必须停止心跳，避免请求结束后仍更新旧任务。
         await progress_ledger.finish_request(progress_sink)

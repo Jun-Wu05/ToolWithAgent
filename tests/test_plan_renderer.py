@@ -233,6 +233,87 @@ def test提案只渲染只读步骤和确认选项(monkeypatch):
     assert sent[0][1] == []
 
 
+def test澄清决策仅替换说明且保留确定性选项(monkeypatch):
+    """Composer 不拥有 choices，生成成功也只能替换问题说明。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import PlanDecision
+    from contracts.session_facts import SessionFacts
+
+    sent = []
+
+    class _Message:
+        def __init__(self, content, elements=None):
+            self.content = content
+
+        async def send(self):
+            sent.append(self.content)
+
+    async def runner(_prompt: str):
+        return SimpleNamespace(content="当前缺少目标字段，建议选择「event_type」。")
+
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "clarification",
+            "reason_code": "enum_target_field_not_found",
+            "question": "模板追问",
+            "choices": ["event_type", "src"],
+        }
+    )
+
+    asyncio.run(
+        renderer.render_decision(
+            decision,
+            session_facts=SessionFacts(available_fields=("event_type", "src")),
+            clarification_runner=runner,
+        )
+    )
+
+    assert sent == [
+        "💡 当前缺少目标字段，建议选择「event_type」。\n\n"
+        "可选：\n- event_type\n- src"
+    ]
+
+
+def test澄清生成失败时逐字节回退原模板(monkeypatch):
+    """模型失败不改变既有问题和 choices 的任何字符。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import PlanDecision
+    from contracts.session_facts import SessionFacts
+
+    sent = []
+
+    class _Message:
+        def __init__(self, content, elements=None):
+            self.content = content
+
+        async def send(self):
+            sent.append(self.content)
+
+    def runner(_prompt: str):
+        raise TimeoutError("timeout")
+
+    monkeypatch.setattr(renderer.cl, "Message", _Message)
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "clarification",
+            "reason_code": "enum_target_field_not_found",
+            "question": "模板追问",
+            "choices": ["event_type", "src"],
+        }
+    )
+
+    asyncio.run(
+        renderer.render_decision(
+            decision,
+            session_facts=SessionFacts(available_fields=("event_type", "src")),
+            clarification_runner=runner,
+        )
+    )
+
+    assert sent == ["💡 模板追问\n\n可选：\n- event_type\n- src"]
+
+
 def _mount_chainlit_captures(monkeypatch, renderer):
     """挂载 Chainlit 消息/表格/文件捕获桩，返回 captured 字典。"""
     captured = {"dataframes": [], "files": [], "messages": []}
@@ -954,6 +1035,93 @@ def test无产物报告只发送汇总消息(monkeypatch):
     assert len(captured["messages"]) == 1
     assert captured["messages"][0]["elements"] == []
     assert "blocked-1" in captured["messages"][0]["content"]
+
+
+def test待输入报告生成安全说明并单独保留确定性选项(monkeypatch):
+    """NEEDS_INPUT 不把原模板中的业务值送给模型，choices 仍由契约渲染。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import ExecutionReport, StepResult, StepStatus
+    from contracts.session_facts import SessionFacts
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    prompts = []
+    sensitive_value = "raw-secret-value"
+
+    async def runner(prompt: str):
+        prompts.append(prompt)
+        return SimpleNamespace(content="目标字段不可用，建议选择「event_type」。")
+
+    report = ExecutionReport(
+        plan_id="plan-needs-input",
+        results=(
+            StepResult(
+                step_id="mapping-1",
+                operation_type="field_mapping",
+                status=StepStatus.SUCCESS,
+                message="步骤执行成功",
+                recovered=True,
+            ),
+            StepResult(
+                step_id="enum-1",
+                operation_type="enum_extract",
+                status=StepStatus.NEEDS_INPUT,
+                error_code="enum_target_field_not_found",
+                message=f"模板包含不可发送值：{sensitive_value}",
+                choices=("event_type", "src"),
+            ),
+        ),
+    )
+
+    asyncio.run(
+        renderer.render_execution_report(
+            report,
+            session_facts=SessionFacts(available_fields=("event_type", "src")),
+            clarification_runner=runner,
+        )
+    )
+
+    content = captured["messages"][0]["content"]
+    assert "目标字段不可用，建议选择「event_type」" in content
+    assert "可选：event_type、src" in content
+    assert sensitive_value not in prompts[0]
+    payload = json.loads(prompts[0])
+    assert payload["choices"] == ["event_type", "src"]
+    assert payload["recovery_summary"] == "retry_as_is=1"
+
+
+def test待输入报告生成失败时逐字节回退原模板(monkeypatch):
+    """执行报告的生成失败路径与未启用 Composer 时完全一致。"""
+    import web.plan_renderer as renderer
+    from contracts.planner_models import ExecutionReport, StepResult, StepStatus
+    from contracts.session_facts import SessionFacts
+
+    captured = _mount_chainlit_captures(monkeypatch, renderer)
+    report = ExecutionReport(
+        plan_id="plan-needs-input-fallback",
+        results=(
+            StepResult(
+                step_id="enum-1",
+                operation_type="enum_extract",
+                status=StepStatus.NEEDS_INPUT,
+                error_code="enum_target_field_not_found",
+                message="原有模板文案。可用的字段：event_type、src。",
+                choices=("event_type", "src"),
+            ),
+        ),
+    )
+    expected = renderer.build_execution_report_content(report)
+
+    asyncio.run(
+        renderer.render_execution_report(
+            report,
+            session_facts=SessionFacts(available_fields=("event_type", "src")),
+            clarification_runner=lambda _prompt: (_ for _ in ()).throw(
+                TimeoutError("timeout")
+            ),
+        )
+    )
+
+    assert captured["messages"][0]["content"] == expected
 
 
 def test信息型作答渲染为guidance答案而非能力说明(monkeypatch):

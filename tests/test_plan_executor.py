@@ -347,6 +347,7 @@ def test枚举提取目标字段不在任何词典时在适配器前拦截():
 
     assert report.status == StepStatus.NEEDS_INPUT
     assert report.results[0].error_code == "enum_target_field_not_found"
+    assert report.results[0].choices == ("category", "event_type3", "src")
     assert adapter.calls == []
     message = report.results[0].message or ""
     assert "ghost" in message
