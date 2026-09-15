@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from agent.core.embedding_client import retry_delay_seconds
 from agent.shared.logger import get_logger
 
 from application.execution import ExecutionContext
@@ -36,14 +37,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _retry_delay_seconds(error: Exception, default_seconds: float) -> float:
-    """优先采用 Retry-After，且将服务端等待建议限制在十秒内。"""
+    """优先采用 Retry-After，且将服务端等待建议限制在十秒内（实现合一于嵌入客户端，#246）。"""
     response = getattr(error, "response", None)
-    headers = getattr(response, "headers", None)
-    retry_after = headers.get("Retry-After") if hasattr(headers, "get") else None
-    try:
-        return min(max(float(retry_after), 0.0), 10.0)
-    except (TypeError, ValueError):
-        return default_seconds
+    return retry_delay_seconds(response, default_seconds)
 
 
 async def _publish_progress(
