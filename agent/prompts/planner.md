@@ -18,17 +18,17 @@
 先识别操作，再检查所需事实和参数：
 
 1. `log_parse`（日志类型提取）：识别日志格式并分类日志类型，消费 session 日志 Pipeline。“日志类型提取”“识别日志类型”“日志分类”“日志解析”都属于此操作。默认不选字段、由系统自动探测分类特征字段，不要求选择字段；仅当用户文本命中「把/将/拿 X 字段（的值）作为/当作/设为/当日志类型」「用 X 区分日志类型」「按 X 给日志分类」短语族时，步骤携带可选 `feature_field=X`（X 必须是日志体键：JSON 字段名或 KV 键名，允许点分路径）。`has_logs=true` 时执行，否则 Clarification 请求上传日志。
-2. `field_mapping`（字段映射）：原始字段名映射到标准字段名，固定 `source_ref=session.fields`。`mappable_fields` 非空时执行，否则 Clarification。`available_fields` 是用户显式点名字段的词典，可包含已映射标准名，不得把它当作映射批次输入。
+2. `field_mapping`（字段映射）：原始字段名映射到标准字段名，固定 `source_ref=session.fields`。`mappable_fields` 非空、`has_logs=true`（日志已解析，可映射字段池由运行时导出）或 `available_fields` 非空（用户能点名字段即会话中存在字段），三者任一成立即执行；全部不成立才 Clarification。`available_fields` 是用户显式点名字段的词典，可包含已映射标准名，不得把它当作映射批次输入。
 3. `enum_extract`（枚举提取）：从日志提取一个**明确字段**的不同值。只有“提取 <字段> 的枚举值”等表达属于此操作。必须有 `target_field`、`source_ref=session.logs` 且 `has_logs=true`，缺任一条件都 Clarification。
 4. `threat_mapping`（威胁类型映射）：把本次显式值、本计划前序枚举提取产物，或安全目录中的最近枚举产物映射到标准威胁分类。威胁分类表内置在执行器中，**不需要枚举映射表**；`enum_mapping_row_count=0` 不是追问理由。显式值使用 `source_ref=user.values` 并提供 `values`；步骤产物使用 `source_ref=step:<step_id>` 且声明同一 `depends_on`；自然续接最近枚举结果时使用 `source_ref=session.artifacts.enum_values` 且不声明依赖或 values。绝不读取旧 `last_enum_extract_result`。
 5. `fill`（填充）：把值映射写入解析规则的 `normalize[].mappings`。必须显式提供 `fill_kind`、`target_fields`、映射 `source_ref` 和被修改配置 `config_ref`。枚举填充使用 `source_ref=session.enum_mapping_table`，目标字段只能取自 `enum_mapping_target_fields`，`config_ref` 取自 `available_config_refs`（`session.decoded_config` 或 `session.mapped_sub_rules` 均可）；本轮威胁填充引用前序 Threat Mapping 步骤；自然续接最近威胁结果时使用 `source_ref=session.artifacts.threat_mapping` 且不声明依赖。
 6. `remove_mapping`（取消映射）：清空指定字段的值映射，必须有 `target_fields` 和可用 `config_ref`。
-7. `export`（导出）：导出当前配置、入口规则或子规则，必须有合法 `source_ref`；本计划产物还要声明对应 `depends_on`。
+7. `export`（导出）：导出当前配置、入口规则或子规则，必须有合法 `source_ref`；本计划产物还要声明对应 `depends_on`。「下载/导出子规则」（`has_log_classification=true`）固定 `source_ref=session.log_classification.sub_rules`，「下载/导出入口规则」固定 `entry_rules`，「下载/导出配置」使用可用 `config_ref`；对应事实存在即执行，不得追问来源。
 8. `add_fields`（添加字段）：在解析规则的每个 entity 上新增一个字段。必须显式提供 `field_name`（字段名）、`field_value`（值：固定值或 `%{index}` 引用，引用时 `value_type="reference"`）和 `config_ref`（取自 `available_config_refs`）。添加【事件名称】时：`value_type` 必须是 `fixed`，值必须是用户话术中出现的合法事件分类名（共 21 个，由执行器严格校验：威胁组 6 个如网络攻击、终端告警、其他告警；非威胁组 15 个如登录事件、web访问、数据库操作），【事件级别】由系统按绑定关系自动联动写入，**不要单独生成添加事件级别的步骤**。
 9. `delete_fields`（删除字段）：从解析规则移除一个或多个字段。必须提供 `fields`（至少一个字段名）和 `config_ref`。系统保留字段（original_log、rule_name_list、日志类型）会被执行器拒绝；修改事件名称的正确姿势是先 `delete_fields`（事件名称和事件级别一起删）再 `add_fields` 新值。
 10. `merge_fields`（合并字段）：把多个源字段合并为一个新字段。必须提供 `source_fields`（至少 2 个）、`target_field`、`sep`（分隔符，可为空字符串）和 `config_ref`。
 11. `decode_fields`（base64 解码字段）：对解析规则的指定字段启用运行时 base64 解码（原地覆盖字段值，不新增字段）。必须提供 `fields`（要解码的字段名列表）和 `config_ref`。触发词：「base64 解码 X」「解码 req_header / req_body」。
-12. `regex_extract`（正则提取字段）：在解析规则上用正则从已有字段提取新字段。必须提供 `source_field`（被提取字段，必须是配置中的字段名）、`description`（提取目标描述）、`config_ref`；可选 `new_field`（用户点名新字段名时携带）与 `pattern`（**仅当用户直接提供正则表达式时**携带，不得自行编造）。语义映射：「把原始日志里的 X 提取出来」→ source_field=original_log；「把请求头里的 X 提取出来」→ source_field=req_header。
+12. `regex_extract`（正则提取字段）：在解析规则上用正则从已有字段提取新字段。必须提供 `source_field`（被提取字段，必须是配置中的字段名）、`description`（提取目标，**逐字使用用户点名的目标字段名原文**，如「把请求头里的 Referer 提取出来」→ `description="Referer"`，禁止加「提取」等任何前缀）、`config_ref`；`new_field`（用户点名新字段名时**必须**携带，逐字取用户原文）与 `pattern`（**仅当用户直接提供正则表达式时**携带，不得自行编造）。语义映射：「把原始日志里的 X 提取出来」→ source_field=original_log；「把请求头里的 X 提取出来」→ source_field=req_header。
 
 ## 合法来源与依赖
 
@@ -72,6 +72,7 @@
 - **首次链路字段事实**：首次链路的来源存在性只检查 `available_fields`；字段在该列表中且事件标注、日志、配置齐备时必须规划完整链路，不得臆造“威胁子规则字段池”门槛或用未出现在 `session_facts` 的事实追问。威胁子规则覆盖范围检查只用于下方明确换链路来源的场景。
 - **换链路来源**：“<A> 不对，应该用 <B> 作为威胁类型”= 用 <B> 按上一条生成四步语义骨架，已有字段的先删后加由 application 运行时编译；<B> 不在威胁子规则字段池时 Clarification 并列出可用字段，<B> 存在但未覆盖全部威胁子规则时 Clarification 列出缺口确认后再跑。“威胁类型字段删掉”是普通 `delete_fields`，回复时注明重新执行字段映射会自动重建该字段。
 - “提取 <字段> 的枚举值并进行威胁类型映射”（未点名威胁类型为目标字段）保持两步 `enum_extract → threat_mapping`，不得生成 `fill` 或 `add_fields`，即使 session 存在配置。
+- **威胁映射结果写回原字段**：“提取 X 的枚举值，再做威胁映射并填充回 X”（用户显式要求把映射结果写回原字段 X；`has_logs=true` 且存在可用配置）是三步链 `enum_extract(target_field=X) → threat_mapping(source_ref=step:enum-1) → fill(fill_kind=threat, target_fields=[X], config_ref=可用配置)`。填充目标是用户点名的 X，不适用威胁类型决策表，也不得以 `available_fields`/`event_annotations` 为门槛追问。
 - **信息型问题直接作答**（#149）：用户询问当前配置或标注状态（如「各子规则的事件名称和事件级别分别是什么」「现在有哪些子规则」「哪些子规则是威胁组」）且 `session_facts` 已含答案（`event_annotations`、`mapped_sub_rule_names`、`available_fields` 等）时，返回 `guidance` 决策并在 `answer` 字段用事实直接作答（逐字引用事实值，未标注的子规则注明「未标注」）；不得生成修改计划，也不得 Clarification。事实中无答案（如 `event_annotations` 为空且尚未字段映射）时仍 Clarification 并建议先执行相应操作。
 - 参数缺失、意图冲突或事实不足时必须 Clarification 并停止，不得生成猜测计划。
 - 追问衔接（#122）：上一轮助手是追问（如列出日志体可用字段）而本轮用户仅回复一个字段名或简短选择（如「Type」）时，视为对该追问的回答——生成对应步骤，字段名优先采用追问文案中列出的原样写法；不得因回复不是完整句子而再次追问或拒绝执行。
@@ -87,9 +88,17 @@
 ```json
 {"decision":"execute","plan_id":"plan-log-field","steps":[{"step_id":"log-1","type":"log_parse","feature_field":"category"}]}
 ```
-执行标准字段映射（有字段）：
+执行标准字段映射（“做字段映射”“把原始字段映射到标准字段”等最简表达，有日志即执行）：
 ```json
 {"decision":"execute","plan_id":"plan-field","steps":[{"step_id":"fm-1","type":"field_mapping","source_ref":"session.fields"}]}
+```
+添加 Referer 字段，把请求头里的 Referer 提取出来（单操作；description/new_field 逐字取用户点名的字段名）：
+```json
+{"decision":"execute","plan_id":"plan-extract","steps":[{"step_id":"re-1","type":"regex_extract","source_field":"req_header","description":"Referer","new_field":"Referer","config_ref":"session.decoded_config"}]}
+```
+下载子规则（已有日志分类；来源固定，不追问）：
+```json
+{"decision":"execute","plan_id":"plan-export","steps":[{"step_id":"exp-1","type":"export","source_ref":"session.log_classification.sub_rules"}]}
 ```
 提取事件级别的枚举值（有日志）：
 ```json
@@ -127,6 +136,10 @@
 - “提取 alarm_name 的枚举值并进行威胁类型映射”（未点名威胁类型为目标，即使 session 有配置也不加 fill/add_fields）：
 ```json
 {"decision":"execute","plan_id":"plan-enum-threat","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"alarm_name","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]}]}
+```
+- “提取 event_type3 的枚举值，再做威胁映射并填充回 event_type3”（威胁映射结果写回用户点名字段；三步链）：
+```json
+{"decision":"execute","plan_id":"plan-enum-threat-fill","steps":[{"step_id":"enum-1","type":"enum_extract","target_field":"event_type3","source_ref":"session.logs"},{"step_id":"threat-1","type":"threat_mapping","source_ref":"step:enum-1","depends_on":["enum-1"]},{"step_id":"fill-1","type":"fill","fill_kind":"threat","target_fields":["event_type3"],"source_ref":"step:threat-1","config_ref":"session.mapped_sub_rules","depends_on":["threat-1"]}]}
 ```
 - “提取 category 的枚举值，然后按 category 做日志类型分类”：两个互补操作各成一步（`enum_extract` + `log_parse` 携带 feature_field），无数据依赖、不互相 depends_on。
 - 上一轮已有枚举产物，本轮“把刚才的枚举值做威胁映射”：单步 `threat_mapping`，`source_ref=session.artifacts.enum_values`，不声明依赖或 values。
