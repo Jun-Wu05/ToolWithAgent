@@ -16,6 +16,8 @@ from agent.shared.event_classify import (
     EVENT_LEVEL_FIELD,
     EVENT_NAME_FIELD,
     EVENT_NAME_LEVEL_BINDING,
+    make_event_level_normalize_entry,
+    make_event_name_normalize_entry,
     read_entity_event_name,
 )
 from agent.shared.logger import get_logger
@@ -47,6 +49,11 @@ from application.adapters.field_skill_policy import find_dangling_references
 
 
 logger = get_logger("execution_adapters")
+
+
+def _event_normalize_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """提取通用 add_fields 支持的事件标准字段元数据。"""
+    return {key: entry[key] for key in ("field", "entity", "sim", "core")}
 
 # ---------------------------------------------------------------------------
 # 声明式注册表：步骤类型 → (skill 脚本相对路径, 函数名)
@@ -401,6 +408,10 @@ class FieldSkillAdapter:
                 "sim": True,
                 "core": False,
             }
+        elif step.field_name == EVENT_NAME_FIELD:
+            add_kwargs["normalize_metadata"] = _event_normalize_metadata(
+                make_event_name_normalize_entry(step.field_value)
+            )
         result = self._skill_runner("add_fields")(
             config,
             step.field_name,
@@ -422,6 +433,9 @@ class FieldSkillAdapter:
                 level,
                 target_names=targets,
                 skip_existing=step.skip_existing,
+                normalize_metadata=_event_normalize_metadata(
+                    make_event_level_normalize_entry(level)
+                ),
             )
             if level_result.get("status") != "success":
                 return self._skill_error(step, level_result)
