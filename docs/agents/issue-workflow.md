@@ -84,7 +84,29 @@ gh pr create --repo Jun-Wu05/ToolWithAgent --base master --title "..." --body "C
 - PR 正文必须含 `Closes #<NNN>`（合并自动关 issue）与领取协议复核结论。
 - 单一目的改动 squash 合并；分组提交需要保留的用 merge commit 合并（如 #178）。
 
-### 7. 清理（做完即删）
+### 7. 人工 / 浏览器验收交接
+
+只要验收运行在 worktree（包括多个 PR 汇总后的联合验收分支），交给人工测试前必须明确给出并核对：
+
+- worktree 的绝对路径、分支名和完整 `HEAD`；联合验收时还要列出纳入的 PR / commit。
+- 从该 worktree 启动服务的精确命令，以及预期日志目录 `<worktree>\agent\logs`。
+- 当前端口是否仍被旧进程占用；如已占用，先让用户停止旧服务，再从正确目录启动。
+- 浏览器使用全新聊天 / Session，避免旧会话状态污染结果。
+
+交接清单至少包含以下可复制命令（路径替换为本次实际值）：
+
+```powershell
+Set-Location -LiteralPath '<worktree>'
+git branch --show-current
+git rev-parse HEAD
+git status --short
+Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+chainlit run web/chainlit_app.py --port 8000
+```
+
+启动后必须从新产生的日志确认源码路径或运行目录属于该 worktree；如果日志仍落在主目录，立即停止测试并修正启动目录。浏览器验收默认只交付详细人工步骤和预期结果；只有用户明确要求“自动化测试”“你来操作浏览器”或“你来跑 Web 测试”时，Agent 才能启动服务或操作浏览器。
+
+### 8. 清理（做完即删）
 
 ```bat
 git fetch github master:master
