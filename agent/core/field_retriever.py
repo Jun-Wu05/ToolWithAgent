@@ -1,21 +1,21 @@
 """
-标准字段语义检索器 — 基于 SiliconFlow Embedding API
+标准字段语义检索器 — 字段展开、候选检索、余弦相似度与重排序
 
 组件：
 - FieldRetriever: 管理 embedding 缓存（磁盘持久化）
 - batch_retrieve_candidates(): 运行时批量语义检索
 
 语义检索链路：
-  标准字段表 (654行) → 复合文本 → SiliconFlow Embedding API → numpy (.npy) + records (.json) 缓存
-  用户字段列表 → 批量 Embedding API → 矩阵乘法余弦相似度 → top-K 紧凑候选
+  标准字段表 (654行) → 复合文本 → 嵌入客户端 → numpy (.npy) + records (.json) 缓存
+  用户字段列表 → 嵌入客户端（去重+进程内缓存） → 矩阵乘法余弦相似度 → top-K 紧凑候选
 
-依赖项：numpy（版本 >= 1.21），SiliconFlow API Key（环境变量）
+依赖项：numpy（版本 >= 1.21）；嵌入模型/URL/密钥/重试等 HTTP 细节自 #246 起收拢于
+agent/core/embedding_client.py，本模块零网络细节。
 """
 
 import hashlib
 import json
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -23,6 +23,15 @@ from typing import Optional
 
 import numpy as np
 
+from agent.core.embedding_client import (
+    EMBEDDING_DIM,
+    EMBEDDING_MODEL,
+    QUERY_EMBEDDING_CACHE,
+    call_embedding_api,
+    embed_query_texts,
+    get_api_key,
+    query_cache_key,
+)
 from agent.core.standard_field_catalog import (
     compact_field_name,
     get_standard_field_catalog,
@@ -32,18 +41,16 @@ from agent.shared.logger import get_logger
 
 logger = get_logger("field_retriever")
 
+# 兼容接缝（#246）：以下划线名保留既有 patch/import 入口——
+# 现有测试 monkeypatch field_retriever._call_embedding_api / _get_api_key，
+# log_pattern_store 仍从本模块导入 _call_embedding_api（收口待 #202 系列协调）。
+_call_embedding_api = call_embedding_api
+_get_api_key = get_api_key
+_QUERY_EMBEDDING_CACHE = QUERY_EMBEDDING_CACHE
+_query_cache_key = query_cache_key
+
 # 缓存 schema 版本：标准字段表格式变更时递增，触发自动刷新
 CACHE_SCHEMA_VERSION = "4"  # v4: tag_rules 新增 http tag + synonyms_md5 追踪 + 复合 key 回退，需重建缓存
-
-# Embedding 模型配置
-EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
-EMBEDDING_DIM = 4096
-EMBEDDING_API_URL = "https://api.siliconflow.cn/v1/embeddings"
-# CHANGED: 调整为更稳健的配置（适配 Qwen3-Embedding-8B 大模型批量推理）
-EMBEDDING_BATCH_SIZE = 15  # 每次 API 调用最多嵌入 15 个文本（减半，降低服务端单次负载，防 413）
-EMBEDDING_BATCH_SLEEP = 0.3  # 每批请求间隔（秒），防止 API 429 限流（保持不变）
-EMBEDDING_TIMEOUT = 30.0  # 单次 API 调用超时（秒）— 8B 模型批量推理需更长时间，原 10s 易误超时
-EMBEDDING_MAX_RETRIES = 1  # 瞬时故障最多重试一次，避免批处理长时间无反馈
 
 # 相似度阈值：低于此值的候选不返回
 SIMILARITY_THRESHOLD = 0.15
@@ -161,167 +168,6 @@ def _load_standard_fields() -> list[dict]:
         entry["_composite_text"] = f"{english_expanded} {tag_text} || {system_name} | {field_name} | {obj} | {data_type} | {description}"
         entry["_tags"] = field_tags
     return records
-
-
-def _get_api_key() -> Optional[str]:
-    """获取 SiliconFlow API Key，先从环境变量，优先生效的 Key"""
-    primary = os.getenv("SILICONFLOW_API_KEY", "")
-    if primary:
-        return primary
-    return os.getenv("FALLBACK_API_KEY", "") or None
-
-
-def _call_embedding_api(texts: list[str], retries: int = EMBEDDING_MAX_RETRIES) -> Optional[np.ndarray]:
-    """调用 Embedding API；只对瞬时故障重试且不记录输入或响应原文。"""
-    import requests
-
-    api_key = _get_api_key()
-    if not api_key:
-        logger.warning("[EMBEDDING] 未设置 SILICONFLOW_API_KEY，跳过 embedding")
-        return None
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": EMBEDDING_MODEL,
-        "input": texts,
-        "encoding_format": "float",
-    }
-
-    for attempt in range(retries + 1):
-        call_started_at = time.monotonic()
-        response = None
-        logger.info(
-            "[MODEL_CALL_START] Embedding API 调用开始: model=%s input_count=%s "
-            "attempt=%s timeout_seconds=%s",
-            EMBEDDING_MODEL,
-            len(texts),
-            attempt + 1,
-            EMBEDDING_TIMEOUT,
-        )
-        try:
-            response = requests.post(
-                EMBEDDING_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=EMBEDDING_TIMEOUT,
-            )
-            response.raise_for_status()
-            data = response.json()
-            embeddings = sorted(data["data"], key=lambda item: item["index"])
-            vectors = np.array([item["embedding"] for item in embeddings], dtype=np.float32)
-            logger.info(
-                "[MODEL_CALL_END] Embedding API 调用完成: model=%s input_count=%s "
-                "output_count=%s elapsed_seconds=%.3f",
-                EMBEDDING_MODEL,
-                len(texts),
-                vectors.shape[0],
-                time.monotonic() - call_started_at,
-            )
-            return vectors
-        except requests.exceptions.Timeout:
-            retriable = True
-            logger.warning(
-                "[MODEL_CALL_TIMEOUT] Embedding API 调用超时: model=%s attempt=%s "
-                "timeout_seconds=%s",
-                EMBEDDING_MODEL,
-                attempt + 1,
-                EMBEDDING_TIMEOUT,
-            )
-        except requests.exceptions.RequestException as error:
-            status_code = getattr(getattr(error, "response", None), "status_code", None)
-            retriable = status_code is None or status_code == 429 or (
-                isinstance(status_code, int) and status_code >= 500
-            )
-            logger.warning(
-                "[MODEL_CALL_FAILED] Embedding API 请求失败: model=%s attempt=%s "
-                "status_code=%s error_category=%s retriable=%s",
-                EMBEDDING_MODEL,
-                attempt + 1,
-                status_code if status_code is not None else "none",
-                type(error).__name__,
-                retriable,
-            )
-        except (KeyError, IndexError, ValueError) as error:
-            logger.warning(
-                "[MODEL_CALL_FAILED] Embedding 响应结构非法: model=%s attempt=%s "
-                "error_category=%s",
-                EMBEDDING_MODEL,
-                attempt + 1,
-                type(error).__name__,
-            )
-            return None
-
-        if not retriable or attempt >= retries:
-            break
-        retry_after = None
-        if response is not None:
-            retry_after = response.headers.get("Retry-After")
-        try:
-            delay_seconds = min(max(float(retry_after), 0.0), 10.0)
-        except (TypeError, ValueError):
-            delay_seconds = 2.0
-        logger.info(
-            "[BATCH_RETRY] Embedding API 准备重试: model=%s next_attempt=%s "
-            "delay_seconds=%s",
-            EMBEDDING_MODEL,
-            attempt + 2,
-            delay_seconds,
-        )
-        time.sleep(delay_seconds)
-
-    logger.error(
-        "[MODEL_CALL_FAILED] Embedding API 调用最终失败: model=%s attempt_count=%s",
-        EMBEDDING_MODEL,
-        retries + 1,
-    )
-    return None
-
-
-# 进程内查询向量缓存（#245）：{(模型, 维度, 复合查询文本): 向量}。
-# 键取最终嵌入文本，tag_rules/synonyms 变更会改变文本、自然产生新键；
-# 模型/维度为模块常量，缓存随进程生命周期失效，无需持久化与手动失效。
-_QUERY_EMBEDDING_CACHE: dict[tuple[str, int, str], np.ndarray] = {}
-
-
-def _query_cache_key(query_text: str) -> tuple[str, int, str]:
-    return (EMBEDDING_MODEL, EMBEDDING_DIM, query_text)
-
-
-def _embed_query_texts(query_texts: list[str], *, failure_label: str) -> np.ndarray:
-    """
-    查询向量生成：请求内保序去重 + 进程内缓存，仅对 miss 批次调 Embedding API。
-
-    与直连调用相比仅减少调用次数：命中文本不再重复计费、不再重复暴露于
-    429/503 波动；miss 批次失败仍抛 RuntimeError，失败结果不写缓存。
-
-    Args:
-        query_texts: 最终复合查询文本（_build_query_text_for_embedding 的输出）
-        failure_label: 失败异常信息中的场景名（主字段轮/变体轮）
-
-    Returns:
-        与 query_texts 等长、按输入顺序对齐的向量矩阵
-    """
-    unique_texts = list(dict.fromkeys(query_texts))
-    missing = [
-        t for t in unique_texts if _query_cache_key(t) not in _QUERY_EMBEDDING_CACHE
-    ]
-    for batch_start in range(0, len(missing), EMBEDDING_BATCH_SIZE):
-        batch = missing[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
-        vectors = _call_embedding_api(batch)
-        if vectors is None:
-            raise RuntimeError(
-                f"[EMBEDDING] {failure_label}（第 {batch_start // EMBEDDING_BATCH_SIZE + 1} 批），"
-                f"共 {len(missing)} 个待嵌入文本，批次大小 {EMBEDDING_BATCH_SIZE}"
-            )
-        for text, vector in zip(batch, vectors):
-            _QUERY_EMBEDDING_CACHE[_query_cache_key(text)] = vector
-        # 批次间休眠，防止 API 429 限流（最后一批不睡）
-        if batch_start + EMBEDDING_BATCH_SIZE < len(missing):
-            time.sleep(EMBEDDING_BATCH_SLEEP)
-    return np.array([_QUERY_EMBEDDING_CACHE[_query_cache_key(t)] for t in query_texts])
 
 
 def _cosine_similarity(query_vec: np.ndarray, corpus_mat: np.ndarray) -> np.ndarray:
@@ -806,10 +652,11 @@ def batch_retrieve_candidates_table(
     if not include_mapping_excluded:
         embeddings, records = _apply_mapping_exclusions(embeddings, records)
 
-    # 批量嵌入用户字段名 — 保序去重 + 进程内缓存，仅对 miss 分批调 API（#245）
-    query_vecs = _embed_query_texts(
+    # 批量嵌入用户字段名 — 保序去重 + 进程内缓存，仅对 miss 分批调 API（#245/#246）
+    query_vecs = embed_query_texts(
         [_build_query_text_for_embedding(n) for n in raw_field_names],
         failure_label="语义检索失败",
+        api_call=_call_embedding_api,
     )
 
     # L2 归一化查询向量
@@ -837,13 +684,14 @@ def batch_retrieve_candidates_table(
                 stripped_to_original[len(stripped_variants)] = i
                 stripped_variants.append(v)
 
-    # 批量嵌入去前缀变体（与主字段轮共享进程内缓存，#245）
+    # 批量嵌入去前缀变体（与主字段轮共享进程内缓存，#245/#246）
     stripped_vecs: Optional[np.ndarray] = None
     if stripped_variants:
         try:
-            stripped_vecs = _embed_query_texts(
+            stripped_vecs = embed_query_texts(
                 [_build_query_text_for_embedding(v) for v in stripped_variants],
                 failure_label="去前缀变体嵌入失败",
+                api_call=_call_embedding_api,
             )
             # L2 归一化
             norms_s = np.linalg.norm(stripped_vecs, axis=1, keepdims=True)
