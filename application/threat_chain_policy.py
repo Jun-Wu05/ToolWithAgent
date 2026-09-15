@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -154,6 +154,7 @@ def determine_source_field(
     *,
     override: str | None = None,
     min_score: float = THREAT_SOURCE_MIN_SCORE,
+    exclude: Collection[str] = (),
 ) -> SourceFieldDecision:
     """判定威胁来源字段 X：会话覆盖优先，其次相似度最高且覆盖全部威胁子规则。
 
@@ -163,6 +164,8 @@ def determine_source_field(
             对字段池全量字段的结构化候选表。
         override: 会话级来源覆盖值（用户显式纠正过 X）。
         min_score: 「接近」门槛。
+        exclude: 已试过且结果无信息量的来源字段（自恢复③改选，#225），
+            从覆盖候选中剔除后再按得分取下一候选。
 
     Returns:
         SourceFieldDecision；source_field 为 None 时走降级链路（reason 说明原因）。
@@ -174,6 +177,9 @@ def determine_source_field(
         if override in covering:
             return SourceFieldDecision(override, 1.0, total_rules, "session_override")
         return SourceFieldDecision(None, 0.0, 0, "override_not_covering")
+
+    if exclude:
+        covering -= set(exclude)
 
     if not covering:
         return SourceFieldDecision(None, 0.0, 0, "degrade_no_coverage")
@@ -373,6 +379,60 @@ def build_threat_chain_steps(
     )
 
 
+# 自恢复③（#225 / ADR-0011）：系统推导参数重推导的确定性判定与不可逆门禁
+
+
+def degraded_mapping_ratio(mapped_values: Iterable[str]) -> float:
+    """映射值中降级「其他」（含空值）的占比；无映射行时为 0。"""
+    values = [str(value).strip() for value in mapped_values]
+    if not values:
+        return 0.0
+    degraded = sum(
+        1 for value in values if not value or value == DEGRADED_THREAT_VALUE
+    )
+    return degraded / len(values)
+
+
+def should_rederive(
+    mapped_values: Iterable[str],
+    *,
+    source_reason: str,
+    threshold: float = 1.0,
+) -> bool:
+    """自恢复③触发判定：结果无信息量（降级占比 ≥ 阈值）且 X 来自自动判定。
+
+    用户显式指定（explicit）或会话级纠正（session_override）过的来源是用户
+    意志，不属于「系统推导参数」，一律不触发重推导。
+    """
+    if source_reason != "similarity":
+        return False
+    return degraded_mapping_ratio(mapped_values) >= threshold
+
+
+def is_safe_rederive_plan(steps: Iterable[StepSpec]) -> bool:
+    """不可逆门禁（ADR-0011）：改选重跑只允许链路四步形态且目标恒为威胁类型。
+
+    链路不触碰任何用户手动产物；出现其他步骤类型或其他目标字段即判不安全。
+    """
+    for step in steps:
+        if isinstance(step, (EnumExtractStep, ThreatMappingStep)):
+            continue
+        if isinstance(step, DeleteFieldsStep):
+            if set(step.fields) != {THREAT_TYPE_FIELD}:
+                return False
+            continue
+        if isinstance(step, AddFieldsStep):
+            if step.field_name != THREAT_TYPE_FIELD or step.rule_group != "threat":
+                return False
+            continue
+        if isinstance(step, FillStep):
+            if step.fill_kind != "threat" or step.target_fields != (THREAT_TYPE_FIELD,):
+                return False
+            continue
+        return False
+    return True
+
+
 # 值全覆盖校验（S3 后、S5 前的确定性兜底）
 
 
@@ -439,10 +499,13 @@ __all__ = [
     "ThreatChainPlan",
     "build_threat_chain_steps",
     "collect_threat_field_pools",
+    "degraded_mapping_ratio",
     "determine_source_field",
     "ensure_threat_mapping_coverage",
     "evaluate_chain_trigger",
     "inspect_threat_field_state",
+    "is_safe_rederive_plan",
     "read_entity_event_name",
     "resolve_threat_mapping_value",
+    "should_rederive",
 ]
