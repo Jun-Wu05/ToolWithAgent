@@ -152,7 +152,8 @@ def test提示词定义类型化提案确认协议():
 def test提示词消除固定字段冲突且没有超出长度预算():
     assert "【事件名称】【事件级别】【日志类型】是系统固定字段" in PROMPT
     assert "威胁类型不适用本条" in PROMPT
-    assert len(PROMPT) <= 15_031
+    # #239 锚定扩容（field_mapping 三条件 + regex_extract 逐字 + 填充回链 + export 来源固定）
+    assert len(PROMPT) <= 15_200
 
 
 def test提示词包含合并与提取的单操作化规则():
@@ -181,7 +182,8 @@ def test提示词要求信息型问题直接从会话事实作答():
 
 
 def test提示词区分planner点名词典与字段映射候选池():
-    """映射可执行性只看 mappable_fields，available_fields 仍服务用户点名。"""
-    assert "`mappable_fields` 非空时执行" in PROMPT
+    """映射可执行性看 mappable_fields/has_logs/available_fields 三条件之一（#239 抗漂移），
+    available_fields 仍只服务用户点名、不作映射批次输入。"""
+    assert "三者任一成立即执行" in PROMPT
     assert "`available_fields` 是用户显式点名字段的词典" in PROMPT
     assert "不得把它当作映射批次输入" in PROMPT
