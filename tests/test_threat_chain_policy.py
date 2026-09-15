@@ -13,12 +13,16 @@ from application.threat_chain_policy import (
     THREAT_FIELD_ABSENT,
     THREAT_FIELD_CHAIN,
     THREAT_FIELD_EXISTING,
+    SourceFieldDecision,
     build_threat_chain_steps,
     collect_threat_field_pools,
+    degraded_mapping_ratio,
     determine_source_field,
     ensure_threat_mapping_coverage,
     evaluate_chain_trigger,
     inspect_threat_field_state,
+    is_safe_rederive_plan,
+    should_rederive,
 )
 from agent.shared.event_classify import THREAT_TYPE_FIELD
 
@@ -303,3 +307,70 @@ def test全覆盖校验已覆盖值不重复补行():
     rows = [{"mappingType": "EQUAL", "orgValue": "扫描", "mappingValue": "端口扫描"}]
     ensured = ensure_threat_mapping_coverage(["扫描", "扫描"], list(rows))
     assert ensured == rows
+
+
+# ---------------------------------------------------------------------------
+# 自恢复③（#225）：结果全落「其他」时的确定性改选
+# ---------------------------------------------------------------------------
+
+
+def test改选判定全落其他时触发():
+    assert should_rederive(["其他", "其他"], source_reason="similarity")
+
+
+def test改选判定有任一非其他时不触发():
+    assert not should_rederive(["其他", "暴力破解"], source_reason="similarity")
+
+
+def test改选判定空映射不触发():
+    assert not should_rederive([], source_reason="similarity")
+
+
+def test改选判定用户指定或会话纠正的来源不触发():
+    assert not should_rederive(["其他", "其他"], source_reason="explicit")
+    assert not should_rederive(["其他", "其他"], source_reason="session_override")
+
+
+def test降级占比把空值与其他同等计入():
+    assert degraded_mapping_ratio(["其他", "", "暴力破解"]) == 2 / 3
+    assert degraded_mapping_ratio([]) == 0.0
+
+
+def testX判定排除已试字段后取下一覆盖候选():
+    pools = {"威胁A": ("attack_type", "src_ip"), "威胁B": ("attack_type", "src_ip")}
+    table = _table(
+        attack_type=[(THREAT_TYPE_FIELD, 0.82, "threat_type", "")],
+        src_ip=[(THREAT_TYPE_FIELD, 0.60, "threat_type", "")],
+    )
+    decision = determine_source_field(pools, table, exclude=("attack_type",))
+    assert decision.source_field == "src_ip"
+    assert decision.reason == "similarity"
+
+
+def testX判定排除后无覆盖候选时返回None():
+    table = _table(attack_type=[(THREAT_TYPE_FIELD, 0.82, "threat_type", "")])
+    decision = determine_source_field(POOLS, table, exclude=("attack_type",))
+    assert decision.source_field is None
+    assert decision.reason == "degrade_no_coverage"
+
+
+def test改选门禁接受先删后加链路四步():
+    plan = build_threat_chain_steps(
+        SourceFieldDecision("src_ip", 0.6, 2, "similarity"),
+        config_ref="session.mapped_sub_rules",
+        threat_field_state=THREAT_FIELD_CHAIN,
+    )
+    assert is_safe_rederive_plan(plan.steps)
+
+
+def test改选门禁拒绝触碰威胁类型以外的目标():
+    from contracts.planner_models import DeleteFieldsStep
+
+    foreign_delete = DeleteFieldsStep(
+        step_id="d",
+        type="delete_fields",
+        fields=("备注",),
+        rule_group="threat",
+        config_ref="session.mapped_sub_rules",
+    )
+    assert not is_safe_rederive_plan((foreign_delete,))

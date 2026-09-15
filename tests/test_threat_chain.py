@@ -6,10 +6,12 @@ import asyncio
 import base64
 import copy
 import json
+import logging
 
 import numpy as np
 
 from agent.core import field_retriever
+from application.recovery import RecoveryBudget
 from application.threat_chain import (
     compile_explicit_threat_plan,
     rank_threat_source_candidates,
@@ -184,7 +186,7 @@ def _chain_session() -> dict:
     }
 
 
-def _run(report, session, team):
+def _run(report, session, team, recovery_budget=None):
     return asyncio.run(
         run_threat_chain_after_mapping(
             report=report,
@@ -192,6 +194,7 @@ def _run(report, session, team):
             session=session,
             team=team,
             progress_sink=None,
+            recovery_budget=recovery_budget,
         )
     )
 
@@ -798,3 +801,158 @@ def test非执行决策原样返回():
         )
     )
     assert result is decision
+
+
+# ---------------------------------------------------------------------------
+# 自恢复③（#225）：自动来源结果全落「其他」时确定性改选下一候选重跑一次
+# ---------------------------------------------------------------------------
+
+_OTHER_ONLY_MAPPING = json.dumps(
+    [
+        {"mappingType": "EQUAL", "orgValue": "暴力破解", "mappingValue": "其他"},
+        {"mappingType": "EQUAL", "orgValue": "端口扫描", "mappingValue": "其他"},
+        {"mappingType": "EQUAL", "orgValue": "1.1.1.1", "mappingValue": "其他"},
+        {"mappingType": "EQUAL", "orgValue": "2.2.2.2", "mappingValue": "其他"},
+    ],
+    ensure_ascii=False,
+)
+
+
+class _SwitchingThreatMember:
+    """按输入值区分来源：attack_type 值全落「其他」，src_ip 值得到有效映射。
+
+    run_also_other=True 时 src_ip 分支同样全落「其他」（第二次仍无信息量场景）。
+    """
+
+    name = "ThreatAgent"
+
+    def __init__(self) -> None:
+        self.inputs: list[str] = []
+        self.run_also_other = False
+
+    def run(self, model_input: str) -> str:
+        self.inputs.append(model_input)
+        if "1.1.1.1" in model_input and not self.run_also_other:
+            return json.dumps(
+                [
+                    {"mappingType": "EQUAL", "orgValue": "1.1.1.1", "mappingValue": "暴力破解"},
+                    {"mappingType": "EQUAL", "orgValue": "2.2.2.2", "mappingValue": "端口扫描"},
+                ],
+                ensure_ascii=False,
+            )
+        return _OTHER_ONLY_MAPPING
+
+
+def test首跑全落其他时自动改选下一候选重跑并注明(monkeypatch, caplog):
+    """attack_type 全「其他」→ 改选 src_ip 重跑成功；报告注明改选且不写会话覆盖。"""
+    _mock_retrieval(monkeypatch)
+    _mock_enum_llm(monkeypatch)
+    member = _SwitchingThreatMember()
+    session = _chain_session()
+
+    with caplog.at_level(logging.INFO, logger="recovery"):
+        extended = _run(_mapping_report(), session, _Team(member))
+
+    summary = extended.results[-1]
+    assert summary.message.startswith("🔗 威胁类型链路已自动完成")
+    assert "来源字段=src_ip" in summary.message
+    assert "来源字段已自动改选 attack_type → src_ip" in summary.message
+    for rule in session["mapped_sub_rules"]:
+        assert _threat_binding(rule) == "%{src_ip}"
+    # 会话级来源覆盖只有用户显式纠正才写（CONTEXT.md「不代用户改参」）
+    assert session.get(SESSION_OVERRIDE_KEY) is None
+    # 恰好两次威胁映射调用：首跑 + 改选重跑，无第三次
+    assert len(member.inputs) == 2
+    audit = [record.message for record in caplog.records if "type=rederive" in record.message]
+    assert len(audit) == 1
+    assert "old_source=attack_type" in audit[0]
+    assert "new_source=src_ip" in audit[0]
+    annotations = extended.results[0].artifact.event_annotations
+    assert [row.threat_source_field for row in annotations] == ["src_ip", "src_ip"]
+
+
+def test改选重跑仍全落其他时保持降级不再重试(monkeypatch):
+    """第二次仍全「其他」→ 保留改选结果（降级态），不触发第三次。"""
+    _mock_retrieval(monkeypatch)
+    _mock_enum_llm(monkeypatch)
+    member = _SwitchingThreatMember()
+    member.run_also_other = True
+    session = _chain_session()
+
+    extended = _run(_mapping_report(), session, _Team(member))
+
+    summary = extended.results[-1]
+    assert summary.message.startswith("🔗 威胁类型链路已自动完成")
+    assert "来源字段已自动改选 attack_type → src_ip" in summary.message
+    assert "结果仍全为「其他」，保持降级" in summary.message
+    for rule in session["mapped_sub_rules"]:
+        assert _threat_binding(rule) == "%{src_ip}"
+        threat_entries = [
+            entry for entry in rule["normalize"] if entry.get("index") == "威胁类型"
+        ]
+        assert threat_entries[0]["mappings"], "改选重跑后仍应写入映射行"
+        assert all(
+            mapping.get("mappingValue") == "其他"
+            for mapping in threat_entries[0]["mappings"]
+        )
+    # 恰好两次威胁映射调用：首跑 + 改选重跑，无第三次
+    assert len(member.inputs) == 2
+
+
+def test改选预算为零时行为与现状一致(monkeypatch):
+    """max_rederive=0 → 不改选，首跑结果即终态（可配 0 回到现状）。"""
+    _mock_retrieval(monkeypatch)
+    _mock_enum_llm(monkeypatch)
+    member = _SwitchingThreatMember()
+    session = _chain_session()
+
+    extended = _run(
+        _mapping_report(),
+        session,
+        _Team(member),
+        recovery_budget=RecoveryBudget(max_rederive=0),
+    )
+
+    summary = extended.results[-1]
+    assert "来源字段=attack_type" in summary.message
+    assert "自动改选" not in summary.message
+    for rule in session["mapped_sub_rules"]:
+        assert _threat_binding(rule) == "%{attack_type}"
+    assert len(member.inputs) == 1
+
+
+def test会话纠正过的来源全落其他时不触发改选(monkeypatch):
+    """session_override 入口不参与重推导（用户纠正优先于系统自判）。"""
+    _mock_retrieval(monkeypatch)
+    _mock_enum_llm(monkeypatch)
+    member = _ThreatMember(_OTHER_ONLY_MAPPING)
+    session = _chain_session()
+    session[SESSION_OVERRIDE_KEY] = "attack_type"
+
+    extended = _run(_mapping_report(), session, _Team(member))
+
+    summary = extended.results[-1]
+    assert "来源字段=attack_type" in summary.message
+    assert "自动改选" not in summary.message
+    assert len(extended.results) >= 2
+
+
+def test改选重跑被不可逆门禁拦截时升级警告(monkeypatch):
+    """门禁判定不安全 → 不重跑，汇总行升级 ⚠️ 并说明放弃自动改选。"""
+    _mock_retrieval(monkeypatch)
+    _mock_enum_llm(monkeypatch)
+    member = _SwitchingThreatMember()
+    session = _chain_session()
+    monkeypatch.setattr(
+        "application.threat_chain.is_safe_rederive_plan", lambda steps: False
+    )
+
+    extended = _run(_mapping_report(), session, _Team(member))
+
+    summary = extended.results[-1]
+    assert summary.message.startswith("⚠️")
+    assert "未通过不可逆门禁" in summary.message
+    # 未重跑：只有首次映射调用，首次结果保持
+    assert len(member.inputs) == 1
+    for rule in session["mapped_sub_rules"]:
+        assert _threat_binding(rule) == "%{attack_type}"

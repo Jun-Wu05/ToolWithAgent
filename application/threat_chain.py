@@ -27,6 +27,7 @@ from application.adapters.shared import _session_get, _session_set
 from application.execution import ExecutionContext
 from application.execution_policy import create_plan_executor
 from application.progress import NullProgressSink
+from application.recovery import RecoveryBudget
 from application.session_projection import build_session_facts
 from application.threat_chain_policy import (
     ChainTrigger,
@@ -34,9 +35,12 @@ from application.threat_chain_policy import (
     ThreatChainPlan,
     build_threat_chain_steps,
     collect_threat_field_pools,
+    degraded_mapping_ratio,
     determine_source_field,
     evaluate_chain_trigger,
     inspect_threat_field_state,
+    is_safe_rederive_plan,
+    should_rederive,
 )
 from application.threat_report import refresh_report_event_annotations
 from contracts.planner_models import (
@@ -49,12 +53,14 @@ from contracts.planner_models import (
     StepResult,
     StepStatus,
     StepSpec,
+    ThreatMappingArtifact,
     ThreatMappingStep,
     THREAT_TYPE_FIELD,
 )
 from contracts.progress import ProgressSink
 
 logger = get_logger("threat_chain")
+recovery_logger = get_logger("recovery")
 
 CHAIN_PLAN_ID = "threat-chain-auto"
 """链路续跑计划 ID（进度与日志可按此归组）。"""
@@ -304,8 +310,11 @@ def _determine_source(
     pools: dict[str, tuple[str, ...]],
     trigger: ChainTrigger,
     session: Any,
-) -> tuple[Any, str]:
-    """S1：会话覆盖优先，否则相似度最高；检索失败按无候选降级。"""
+) -> tuple[Any, dict[str, list[tuple[str, float, str, str]]]]:
+    """S1：会话覆盖优先，否则相似度最高；检索失败按无候选降级。
+
+    返回判定结论与候选表（自恢复③改选需在同一得分表上取下一候选）。
+    """
     override = _session_get(session, SESSION_OVERRIDE_KEY)
     ordered_fields: list[str] = []
     for indexes in pools.values():
@@ -348,18 +357,23 @@ def _determine_source(
         decision.reason,
         override,
     )
-    return decision, override or ""
+    return decision, table
 
 
 def _chain_summary(
-    plan: ThreatChainPlan, chain_results: tuple[StepResult, ...], elapsed: float
+    plan: ThreatChainPlan,
+    chain_results: tuple[StepResult, ...],
+    elapsed: float,
+    *,
+    note: str = "",
+    force_warning: bool = False,
 ) -> str:
     """S6：汇总链路形态与结果（成功 🔗 / 未完全成功 ⚠️，含失败原因）。"""
     failures = [
         result for result in chain_results if result.status != StepStatus.SUCCESS
     ]
     all_success = not failures
-    icon = "🔗" if all_success else "⚠️"
+    icon = "🔗" if all_success and not force_warning else "⚠️"
     parts = list(plan.summary_parts)
     if plan.skipped_add_reason:
         parts.append(plan.skipped_add_reason)
@@ -372,6 +386,8 @@ def _chain_summary(
             f"第 {chain_results.index(first) + 1} 步失败（{first.error_code or first.status}）：{detail}"
         )
         parts.append("字段映射结果不受影响，可用显式指令重试链路")
+    if note:
+        parts.append(note)
     headline = "威胁类型链路已自动完成" if all_success else "威胁类型链路未完全成功"
     return f"{icon} {headline}：" + "；".join(part for part in parts if part)
 
@@ -383,16 +399,20 @@ async def run_threat_chain_after_mapping(
     session: Any,
     team: Any,
     progress_sink: ProgressSink | None = None,
+    recovery_budget: RecoveryBudget | None = None,
 ) -> Any:
     """字段映射成功后的执行后确定性续跑入口（S0-S6）。
 
     非 ExecutionReport（澄清/引导决策）原样返回；链路任何失败都不改变
     主报告的结果行与整体状态，只追加成功步骤行与汇总行。
+    recovery_budget 控制自恢复预算（含 ③ 改选次数），None 用默认预算。
     """
     if not isinstance(report, ExecutionReport):
         return report
     with _stage_span("threat_chain"):
-        return await _run_chain(report, plan_steps, session, team, progress_sink)
+        return await _run_chain(
+            report, plan_steps, session, team, progress_sink, recovery_budget
+        )
 
 
 async def _run_chain(
@@ -401,8 +421,9 @@ async def _run_chain(
     session: Any,
     team: Any,
     progress_sink: ProgressSink | None,
+    recovery_budget: RecoveryBudget | None,
 ) -> ExecutionReport:
-    """链路主体（S0-S6，stage span 内执行）。"""
+    """链路主体（S0-S6 + 自恢复③改选，stage span 内执行）。"""
     started = time.monotonic()
 
     # S0 触发判定：显式来源覆盖记录 + 威胁子规则判定
@@ -448,7 +469,7 @@ async def _run_chain(
 
     # S1 来源字段判定
     with _stage_span("threat_chain_s1_source"):
-        decision, _override = _determine_source(pools, trigger, session)
+        decision, candidate_table = _determine_source(pools, trigger, session)
 
     # 构造（含 S4 分支：absent/chain/existing 决定加删跳过）
     threat_field_state = inspect_threat_field_state(mapped_rules, trigger.threat_rule_names)
@@ -465,6 +486,7 @@ async def _run_chain(
     )
 
     # S2-S5 经统一执行器续跑（每步进度事件自动进入同一进度账本）
+    chain_budget = recovery_budget or RecoveryBudget()
     chain_decision = PlanDecision(
         decision="execute",
         plan_id=CHAIN_PLAN_ID,
@@ -481,6 +503,7 @@ async def _run_chain(
                     session=staged_session,
                     session_facts=build_session_facts(staged_session),
                     progress_sink=progress_sink or NullProgressSink(),
+                    recovery_budget=chain_budget,
                 ),
             )
         except Exception as error:  # noqa: BLE001 - 链路异常不波及字段映射结果
@@ -504,6 +527,119 @@ async def _run_chain(
 
     if chain_report.status == StepStatus.SUCCESS:
         commit_threat_chain_session(staged_session, session)
+
+    # S5+ 自恢复③（#225 / ADR-0011）：自动判定的来源字段结果全落「其他」（无信息量）
+    # 时，从 S1 得分表确定性改选下一覆盖候选重跑一次。用户指定或会话级纠正过的来源
+    # 不参与；预算 0 保持现状。ponytail: 阈值 1.0 是最保守启发式，若门禁数据显示
+    # 80% 落「其他」也应改选，再调；LLM 判断的升级路径见 ADR-0011。
+    rederive_note = ""
+    gate_blocked = False
+    mapped_values = [
+        row.mapped_value
+        for result in chain_report.results
+        if isinstance(result.artifact, ThreatMappingArtifact)
+        for row in result.artifact.mappings
+    ]
+    if (
+        chain_report.status == StepStatus.SUCCESS
+        and chain_budget.max_rederive > 0
+        and should_rederive(mapped_values, source_reason=decision.reason)
+    ):
+        next_decision = determine_source_field(
+            pools, candidate_table, exclude=(decision.source_field,)
+        )
+        if next_decision.source_field is None:
+            logger.info(
+                "[THREAT_CHAIN] 自恢复③无下一覆盖候选，保持现状: old_source=%s",
+                decision.source_field,
+            )
+        else:
+            # 按提交后的最新配置重建（首次成功已改变威胁类型字段现状，幂等语义自带）
+            next_state = inspect_threat_field_state(
+                _session_get(session, "mapped_sub_rules"),
+                trigger.threat_rule_names,
+            )
+            next_plan = build_threat_chain_steps(
+                next_decision,
+                config_ref=CHAIN_CONFIG_REF,
+                threat_field_state=next_state,
+            )
+            if not is_safe_rederive_plan(next_plan.steps):
+                rederive_note = "改选重跑未通过不可逆门禁，已放弃自动改选"
+                gate_blocked = True
+                logger.error(
+                    "[THREAT_CHAIN] 自恢复③不可逆门禁拦截: old_source=%s new_source=%s",
+                    decision.source_field,
+                    next_decision.source_field,
+                )
+            else:
+                restaged_session = stage_threat_chain_session(session)
+                rerun_report: ExecutionReport | None = None
+                with _stage_span("threat_chain_rederive"):
+                    try:
+                        rerun_report = await create_plan_executor(
+                            create_default_adapters(team)
+                        ).execute(
+                            PlanDecision(
+                                decision="execute",
+                                plan_id=CHAIN_PLAN_ID,
+                                steps=next_plan.steps,
+                            ),
+                            ExecutionContext(
+                                session=restaged_session,
+                                session_facts=build_session_facts(restaged_session),
+                                progress_sink=progress_sink or NullProgressSink(),
+                                recovery_budget=chain_budget,
+                            ),
+                        )
+                    except Exception as error:  # noqa: BLE001 - 重跑异常保留首次结果
+                        logger.error(
+                            "[THREAT_CHAIN] 自恢复③重跑异常: error=%s",
+                            type(error).__name__,
+                        )
+                recovery_logger.info(
+                    "[RECOVERY] plan_id=%s step_id=%s type=rederive old_source=%s "
+                    "new_source=%s other_ratio=%.2f result=%s",
+                    CHAIN_PLAN_ID,
+                    SUMMARY_STEP_ID,
+                    decision.source_field,
+                    next_decision.source_field,
+                    degraded_mapping_ratio(mapped_values),
+                    rerun_report.status.value
+                    if rerun_report is not None
+                    else "exception",
+                )
+                if rerun_report is not None and rerun_report.status == StepStatus.SUCCESS:
+                    commit_threat_chain_session(restaged_session, session)
+                    plan = next_plan
+                    chain_report = rerun_report
+                    rerun_values = [
+                        row.mapped_value
+                        for result in rerun_report.results
+                        if isinstance(result.artifact, ThreatMappingArtifact)
+                        for row in result.artifact.mappings
+                    ]
+                    # 第二次执行成功但仍全落「其他」：保持降级现状，不再重试
+                    still_degraded = degraded_mapping_ratio(rerun_values) >= 1.0
+                    rederive_note = (
+                        f"来源字段已自动改选 {decision.source_field} → "
+                        f"{next_decision.source_field}"
+                        + ("，结果仍全为「其他」，保持降级" if still_degraded else "")
+                    )
+                    logger.info(
+                        "[THREAT_CHAIN] 自恢复③改选重跑完成: old_source=%s "
+                        "new_source=%s still_degraded=%s",
+                        decision.source_field,
+                        next_decision.source_field,
+                        still_degraded,
+                    )
+                else:
+                    # 重跑执行失败：保留首次已提交结果，不再重试
+                    rederive_note = (
+                        f"已自动改选 {decision.source_field} → "
+                        f"{next_decision.source_field} 重跑，未获得更好结果，保留首次结果"
+                    )
+
     report = refresh_report_event_annotations(
         report,
         _session_get(session, "mapped_sub_rules"),
@@ -512,7 +648,13 @@ async def _run_chain(
 
     # S6 汇总：只追加成功步骤行（失败不降级主报告状态），汇总行说明全貌
     elapsed = time.monotonic() - started
-    summary = _chain_summary(plan, chain_report.results, elapsed)
+    summary = _chain_summary(
+        plan,
+        chain_report.results,
+        elapsed,
+        note=rederive_note,
+        force_warning=gate_blocked,
+    )
     logger.info(
         "[THREAT_CHAIN] S6 链路结束: status=%s elapsed=%.1fs result_count=%s",
         chain_report.status,
