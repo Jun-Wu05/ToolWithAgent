@@ -5,12 +5,12 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from web.adapters.skill_ops import _load_skill_function  # noqa: E402
+from application.adapters.field_skill import _load_skill_function  # noqa: E402
 from agent.shared.event_classify import apply_event_fields_to_sub_rules  # noqa: E402
 
-TEST_DIR = Path(__file__).resolve().parent.parent.parent / "archive" / "skillsdesign" / "test"
+TEST_DIR = Path(__file__).resolve().parent.parent / "archive" / "skillsdesign" / "test"
 
 add_field = _load_skill_function("add_fields")
 delete_field = _load_skill_function("delete_fields")
