@@ -15,6 +15,7 @@
 </format_types>
 
 <important_rules>
+- 格式以每行最外层完整、可解析的数据结构为准；字符串值内部的结构不得改变外层格式
 - 对于"日志头 + JSON body"的格式，必须识别为 format="json"，NOT "syslog" NOT "mixed"
 - 所有可解析的 JSON body 日志（包括有 syslog 前缀的）都属于 json 类型
 - 如果识别到 feature_field，请务必填写具体字段名，不要留空
@@ -62,14 +63,9 @@
 
   如果无日志头（纯 JSON / 纯 KV），header_end_marker 为空字符串。
   </header_detection>
-  +++++++ REPLACE
-
-
 <output>
 严格输出一行 JSON，不要额外文字，不要 markdown 代码块包裹：
 {{"format":"json|kv|space|semicolon|comma|unknown","format_detail":"日志头+JSON|JSON|KV|日志头+KV|等","delimiter":"分隔符字符","confidence":0.0~1.0,"kv_connector":"=或:","kv_separator":"分隔符代码格式（空格填space，分号填semicolon，英文逗号填comma，中文逗号填chinese_comma，管道填pipe，tab填tab）","has_header":true|false,"header_end_marker":"日志头与body的分界标记字符串（如RFC5424的' - '、BSD syslog的': '等，纯格式为空字符串）","has_header_feature":true|false,"feature_field":"日志分类特征字段名（JSON格式填字段名如event_type，KV格式填key名如type、log_type；找不到时为空字符串）","feature_location":"body|header|unknown（特征值在header中则填header，在body内则填body，无法判断填unknown）","reason":"判断理由"}}
-  +++++++ REPLACE
-
 注意：
 - format_detail 必须准确描述结构，如"日志头+KV"表示 syslog 头部后跟 KV body
 - has_header_feature 判断规则：当 has_header=true 时，检查日志头中是否包含可作为日志类型分类的特征关键词（如攻击类型名、功能模块名、日志类别等），不包含 IP/时间/UUID/数字/日志级别等非分类信息。如果 has_header=false，则 has_header_feature 必须为 false
@@ -78,7 +74,6 @@
   - KV 格式：识别 KV body 中哪个 key 是日志分类的主要特征字段（如 type、log_type、category、event 等）
   - 如果 has_header_feature=true 且特征在头部，则 feature_field 可留空
 - feature_location: 分类特征所在位置。"body"=分类字段在body内部值中，"header"=分类特征在日志头部分（{{之前的文本}}），"unknown"=无法判断
-  +++++++ REPLACE
 </output>
 
 <input>
