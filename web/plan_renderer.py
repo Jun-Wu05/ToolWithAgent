@@ -11,9 +11,11 @@ import pandas as pd
 
 from agent.shared.event_classify import THREAT_EVENT_NAMES
 from agent.shared.logger import get_logger
+from application.clarification import ClarificationRunner, compose_clarification
 from application.threat_report import refresh_report_event_annotations
 from web.parsers import create_dataframe_elements
 from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
+from contracts.session_facts import SessionFacts
 from web.utils import render_log_parser_result
 
 
@@ -157,7 +159,12 @@ def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
     ]
 
 
-async def render_decision(decision: PlanDecision) -> None:
+async def render_decision(
+    decision: PlanDecision,
+    *,
+    session_facts: SessionFacts | None = None,
+    clarification_runner: ClarificationRunner | None = None,
+) -> None:
     """渲染澄清或帮助决策；执行决策必须交给 PlanExecutor。"""
     if decision.decision == "proposal":
         steps = "\n".join(
@@ -174,7 +181,20 @@ async def render_decision(decision: PlanDecision) -> None:
     if decision.decision == "clarification":
         choices = "\n".join(f"- {choice}" for choice in decision.choices)
         suffix = f"\n\n可选：\n{choices}" if choices else ""
-        await cl.Message(content=f"💡 {decision.question}{suffix}").send()
+        explanation = decision.question
+        if session_facts is not None:
+            explanation = (
+                await compose_clarification(
+                    "clarification",
+                    session_facts,
+                    decision.reason_code,
+                    decision.choices,
+                    "",
+                    runner=clarification_runner,
+                )
+                or explanation
+            )
+        await cl.Message(content=f"💡 {explanation}{suffix}").send()
         return
     if decision.decision == "guidance":
         # 信息型问题作答（#149）：planner 从会话事实直接生成的答案；
@@ -188,7 +208,10 @@ async def render_decision(decision: PlanDecision) -> None:
 
 
 def build_execution_report_content(
-    execution_report: ExecutionReport, *, threat_pending: bool = False
+    execution_report: ExecutionReport,
+    *,
+    threat_pending: bool = False,
+    clarification_text: str | None = None,
 ) -> str:
     """构造可原地刷新的报告正文，不创建表格、下载或动作元素。"""
     status_icon = {
@@ -197,8 +220,14 @@ def build_execution_report_content(
         StepStatus.FAILED: "❌",
     }
     lines = []
+    pending_clarification = clarification_text
     for result in execution_report.results:
         detail = result.message or result.error_code or result.status.value
+        if result.status == StepStatus.NEEDS_INPUT and pending_clarification is not None:
+            detail = pending_clarification
+            if result.choices:
+                detail = f"{detail} 可选：{'、'.join(result.choices)}"
+            pending_clarification = None
         if result.recovered:
             detail = f"{detail}（已自动重试）"
         lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
@@ -260,9 +289,35 @@ async def refresh_primary_report_anchor(
 
 
 async def render_execution_report(
-    execution_report: ExecutionReport, *, threat_pending: bool = False
+    execution_report: ExecutionReport,
+    *,
+    threat_pending: bool = False,
+    session_facts: SessionFacts | None = None,
+    clarification_runner: ClarificationRunner | None = None,
 ):
     """先发送步骤汇总，再按顺序纵向发送表格和下载，并返回主消息句柄。"""
+    clarification_text = None
+    needs_input = next(
+        (
+            result
+            for result in execution_report.results
+            if result.status == StepStatus.NEEDS_INPUT
+        ),
+        None,
+    )
+    if session_facts is not None and needs_input is not None:
+        recovered_count = sum(result.recovered for result in execution_report.results)
+        recovery_summary = (
+            f"retry_as_is={recovered_count}" if recovered_count else ""
+        )
+        clarification_text = await compose_clarification(
+            "needs_input",
+            session_facts,
+            needs_input.error_code,
+            needs_input.choices,
+            recovery_summary,
+            runner=clarification_runner,
+        )
     dataframe_elements, download_elements = [], []
     actions = _build_result_actions(execution_report)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -348,7 +403,9 @@ async def render_execution_report(
             )
     message_kwargs = {
         "content": build_execution_report_content(
-            execution_report, threat_pending=threat_pending
+            execution_report,
+            threat_pending=threat_pending,
+            clarification_text=clarification_text,
         ),
         "elements": [],
     }

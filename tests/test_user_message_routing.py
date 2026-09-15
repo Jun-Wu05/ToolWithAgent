@@ -48,6 +48,7 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
 
     events = []
     rendered = []
+    rendered_facts = []
     planner = FakePlanner(decision, events)
     FakeExecutor.events = events
     FakeExecutor.calls = 0
@@ -86,11 +87,13 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
     )
     planner.progress_lifecycle = lifecycle
 
-    async def render_decision(decision):
+    async def render_decision(decision, **kwargs):
         rendered.append(decision.decision)
+        rendered_facts.append(kwargs.get("session_facts"))
 
-    async def render_report(report):
+    async def render_report(report, **kwargs):
         rendered.append("report")
+        rendered_facts.append(kwargs.get("session_facts"))
 
     async def clear_session(user_session):
         events.append("clear")
@@ -104,6 +107,7 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
     monkeypatch.setattr(handlers, "reset_session_progress_sink", reset_progress)
 
     asyncio.run(handlers.handle_user_message(session or {}, object(), user_text))
+    planner.rendered_facts = rendered_facts
     return planner, events, rendered
 
 
@@ -143,6 +147,25 @@ def test意图冲突返回澄清且不调用执行器(monkeypatch):
     assert events == ["planner"]
     assert FakeExecutor.calls == 0
     assert rendered == ["clarification"]
+
+
+def test澄清渲染接收当前安全会话事实(monkeypatch):
+    """自然语言入口只把 SessionFacts 投影交给 Composer，不传业务会话。"""
+    decision = PlanDecision(
+        decision="clarification",
+        reason_code="ambiguous_intent",
+        question="请选择要执行的操作",
+        choices=("枚举提取", "威胁映射"),
+    )
+
+    planner, _, _ = _run(
+        monkeypatch,
+        decision,
+        session={"raw_log_lines": ["secret_business_value"]},
+    )
+
+    assert planner.rendered_facts[0].has_logs is True
+    assert "secret_business_value" not in planner.rendered_facts[0].model_dump_json()
 
 
 def test帮助决策不调用执行器(monkeypatch):
@@ -353,7 +376,7 @@ def test后续威胁链报告先刷新原主报告再渲染链路结果(monkeypa
     async def refresh_anchor(result, final_config):
         events.append(("refresh", result, final_config))
 
-    async def render_report(result):
+    async def render_report(result, **_kwargs):
         events.append(("render", result))
 
     session = {"mapped_sub_rules": [{"name": "threat-rule"}]}

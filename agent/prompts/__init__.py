@@ -7,6 +7,7 @@ from agent.core.standard_field_catalog import get_standard_field_catalog
 
 __all__ = [
     "get_prompts_dir",
+    "load_clarification_prompt",
     "load_enum_extract_prompt",
     "load_enum_field_prompt",
     "load_event_classify_prompt",
@@ -49,6 +50,11 @@ def _load_optional_md(filename: str) -> str:
 def load_log_format_identify_prompt() -> str:
     """加载日志格式识别提示词。"""
     return _load_optional_md("log_format_identify.md")
+
+
+def load_clarification_prompt() -> str:
+    """加载升级追问生成指令。"""
+    return _load_md_or_fail("clarification.md", "升级追问生成")
 
 
 def load_log_classify_feature_prompt() -> str:

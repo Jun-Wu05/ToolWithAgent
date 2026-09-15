@@ -33,7 +33,12 @@ def _failed(step: StepSpec, error_code: str, message: str) -> StepResult:
     )
 
 
-def _needs_input(step: StepSpec, error_code: str, message: str) -> StepResult:
+def _needs_input(
+    step: StepSpec,
+    error_code: str,
+    message: str,
+    choices: tuple[str, ...] = (),
+) -> StepResult:
     """构造稳定的执行前待输入结果。"""
     return StepResult(
         step_id=step.step_id,
@@ -41,6 +46,7 @@ def _needs_input(step: StepSpec, error_code: str, message: str) -> StepResult:
         status=StepStatus.NEEDS_INPUT,
         error_code=error_code,
         message=message,
+        choices=choices,
     )
 
 
@@ -123,6 +129,7 @@ class DefaultExecutionPolicy:
                 f"日志中可用的字段：{'、'.join(available_keys)}。"
                 "请回复要作为日志类型的字段名，或直接说“日志类型提取”由系统自动探测。"
             ),
+            tuple(available_keys),
         )
 
     def _validate_enum_target_field(
@@ -156,6 +163,7 @@ class DefaultExecutionPolicy:
                 f"可用的字段：{'、'.join(known_fields)}。"
                 "请回复要提取枚举值的字段名。"
             ),
+            tuple(known_fields),
         )
 
 

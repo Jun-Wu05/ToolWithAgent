@@ -12,6 +12,7 @@ import pytest
 
 
 PROMPT_LOADERS = {
+    "load_clarification_prompt": "clarification.md",
     "load_enum_extract_prompt": "enum_extract.md",
     "load_enum_field_prompt": "enum_field.md",
     "load_event_classify_prompt": "event_classify.md",
@@ -110,6 +111,7 @@ def test_prompt_consumers_use_the_package_and_legacy_exports_are_identical() -> 
 
     root = Path(__file__).parents[1]
     expected_imports = {
+        root / "application/clarification.py": "load_clarification_prompt",
         root / "agent/core/planner.py": "load_planner_prompt",
         root / "agent/shared/event_classify.py": "load_event_classify_prompt",
     }
