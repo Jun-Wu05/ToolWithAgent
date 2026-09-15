@@ -10,6 +10,16 @@ if _ROOT not in sys.path:
 
 
 @pytest.fixture(autouse=True)
+def _clear_query_embedding_cache():
+    """隔离 field_retriever 的进程内查询向量缓存（#245），避免用例间串味。"""
+    from agent.core import field_retriever
+
+    field_retriever._QUERY_EMBEDDING_CACHE.clear()
+    yield
+    field_retriever._QUERY_EMBEDDING_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
 def _fake_event_name_classifier(monkeypatch):
     """默认把事件名称判定替换为空判定，避免测试意外发起真实 LLM 调用。
 
