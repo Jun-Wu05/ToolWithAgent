@@ -112,3 +112,84 @@ def test_stale_cache_without_api_key_fails_closed_without_rebuild(monkeypatch) -
     )
 
     assert field_retriever.init_field_cache() is False
+
+
+def _build_matching_cache_meta() -> dict:
+    """构造与当前常量及索引输入文件全部匹配的缓存元数据。"""
+    from agent.core import field_retriever
+
+    return {
+        "schema_version": field_retriever.CACHE_SCHEMA_VERSION,
+        "standard_fields_md5": _md5(CONFIG / "标准字段.txt"),
+        "tag_rules_md5": _md5(CONFIG / "tag_rules.json"),
+        "synonyms_md5": _md5(CONFIG / "field_synonyms.json"),
+        "embedding_model": field_retriever.EMBEDDING_MODEL,
+        "embedding_dim": field_retriever.EMBEDDING_DIM,
+    }
+
+
+def _stub_rebuild_path(monkeypatch, stale_meta: dict) -> list:
+    """接上重建路径记录桩：API Key、标准字段表与缓存构建全部打桩。"""
+    from agent.core import field_retriever
+
+    rebuild_calls: list = []
+    records = [{"_composite_text": "事件名称"}]
+    monkeypatch.setattr(field_retriever, "_get_cache_meta", lambda: stale_meta)
+    monkeypatch.setattr(field_retriever, "_get_api_key", lambda: "test-key")
+    monkeypatch.setattr(field_retriever, "_load_standard_fields", lambda: records)
+    monkeypatch.setattr(
+        field_retriever,
+        "_build_cache",
+        lambda texts, recs: rebuild_calls.append((texts, recs)),
+    )
+    return rebuild_calls
+
+
+def test_stale_cache_model_mismatch_triggers_rebuild(monkeypatch) -> None:
+    """meta 的 embedding_model 与当前模型不一致时必须触发重建，不得静默复用旧向量。"""
+    from agent.core import field_retriever
+
+    assert field_retriever._CACHE_EMBEDDINGS_PATH.exists()
+    assert field_retriever._CACHE_RECORDS_PATH.exists()
+    stale_meta = _build_matching_cache_meta()
+    stale_meta["embedding_model"] = "Other/Embedding-Model"
+
+    rebuild_calls = _stub_rebuild_path(monkeypatch, stale_meta)
+
+    assert field_retriever.init_field_cache() is True
+    assert len(rebuild_calls) == 1
+
+
+def test_stale_cache_dim_mismatch_triggers_rebuild(monkeypatch) -> None:
+    """meta 的 embedding_dim 与当前维度不一致时必须触发重建。"""
+    from agent.core import field_retriever
+
+    assert field_retriever._CACHE_EMBEDDINGS_PATH.exists()
+    assert field_retriever._CACHE_RECORDS_PATH.exists()
+    stale_meta = _build_matching_cache_meta()
+    stale_meta["embedding_dim"] = field_retriever.EMBEDDING_DIM + 1024
+
+    rebuild_calls = _stub_rebuild_path(monkeypatch, stale_meta)
+
+    assert field_retriever.init_field_cache() is True
+    assert len(rebuild_calls) == 1
+
+
+def test_fresh_cache_with_matching_model_and_dim_skips_rebuild(monkeypatch) -> None:
+    """模型/维度与当前常量一致且其余键匹配时不得触发重建（防止过度失效）。"""
+    from agent.core import field_retriever
+
+    assert field_retriever._CACHE_EMBEDDINGS_PATH.exists()
+    assert field_retriever._CACHE_RECORDS_PATH.exists()
+    monkeypatch.setattr(
+        field_retriever, "_get_cache_meta", lambda: _build_matching_cache_meta()
+    )
+    monkeypatch.setattr(
+        field_retriever,
+        "_build_cache",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("匹配的缓存元数据不应触发重建")
+        ),
+    )
+
+    assert field_retriever.init_field_cache() is True
