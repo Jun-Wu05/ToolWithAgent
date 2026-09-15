@@ -419,13 +419,16 @@ def init_field_cache(force_refresh: bool = False) -> bool:
         bool: 缓存是否就绪（可用）
     """
     if not force_refresh and _CACHE_EMBEDDINGS_PATH.exists() and _CACHE_RECORDS_PATH.exists():
-        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 + tag规则 MD5 + 同义词表 MD5 是否匹配
+        # 检查缓存元数据：schema 版本 + 标准字段文件 MD5 + tag规则 MD5 + 同义词表 MD5 + 模型/维度 是否匹配
         meta = _get_cache_meta()
         if meta:
             meta_version = meta.get("schema_version", "")
             meta_md5 = meta.get("standard_fields_md5", "")
             meta_tag_md5 = meta.get("tag_rules_md5", "")
             meta_synonyms_md5 = meta.get("synonyms_md5", "")
+            # 向量空间随嵌入模型/维度变化；缺失或漂移时旧向量不可比，必须重建
+            meta_model = meta.get("embedding_model", "")
+            meta_dim = meta.get("embedding_dim", 0)
             current_md5 = _compute_file_md5(_STANDARD_FIELDS_PATH)
             # tag 规则影响索引端 _composite_text，变更需重建缓存
             current_tag_md5 = _compute_file_md5(_TAG_RULES_PATH) if _TAG_RULES_PATH.exists() else ""
@@ -435,8 +438,10 @@ def init_field_cache(force_refresh: bool = False) -> bool:
             if (meta_version == CACHE_SCHEMA_VERSION
                     and meta_md5 == current_md5
                     and meta_tag_md5 == current_tag_md5
-                    and meta_synonyms_md5 == current_synonyms_md5):
-                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5+tag规则+同义词），跳过初始化")
+                    and meta_synonyms_md5 == current_synonyms_md5
+                    and meta_model == EMBEDDING_MODEL
+                    and meta_dim == EMBEDDING_DIM):
+                logger.info("[CACHE] Embedding 缓存已存在且匹配（版本+MD5+tag规则+同义词+模型+维度），跳过初始化")
                 return True
             else:
                 differ: list[str] = []
@@ -448,6 +453,10 @@ def init_field_cache(force_refresh: bool = False) -> bool:
                     differ.append(f"tag规则MD5: {meta_tag_md5[:8]}... → {current_tag_md5[:8]}...")
                 if meta_synonyms_md5 != current_synonyms_md5:
                     differ.append(f"同义词MD5: {meta_synonyms_md5[:8]}... → {current_synonyms_md5[:8]}...")
+                if meta_model != EMBEDDING_MODEL:
+                    differ.append(f"模型: {meta_model} → {EMBEDDING_MODEL}")
+                if meta_dim != EMBEDDING_DIM:
+                    differ.append(f"维度: {meta_dim} → {EMBEDDING_DIM}")
                 logger.info(f"[CACHE] 标准字段表已变更 ({', '.join(differ)})，自动触发缓存刷新")
         else:
             logger.info("[CACHE] 缓存元数据缺失，触发缓存刷新")
