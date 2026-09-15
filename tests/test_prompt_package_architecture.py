@@ -23,6 +23,7 @@ PROMPT_LOADERS = {
     "load_log_feature_locate_prompt": "log_feature_locate.md",
     "load_log_format_identify_prompt": "log_format_identify.md",
     "load_log_header_classify_prompt": "log_header_classify.md",
+    "load_log_header_regex_identifier_prompt": "log_header_regex_identifier.md",
     "load_planner_prompt": "planner.md",
     "load_threat_type_prompt": "threat_type.md",
 }
@@ -69,6 +70,7 @@ def test_prompt_loaders_preserve_missing_policies(monkeypatch, tmp_path) -> None
         "load_log_format_identify_prompt",
         "load_log_classify_feature_prompt",
         "load_log_header_classify_prompt",
+        "load_log_header_regex_identifier_prompt",
         "load_log_feature_locate_prompt",
         "load_kv_feature_identifier_prompt",
     }

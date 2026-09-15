@@ -263,7 +263,7 @@ class KvExtractor(ValueExtractor):
         self,
         logs_str: str,
         feature_field: str,
-        max_lines: int = 2000,
+        max_lines: int | None = None,
         header_end_marker: str = "",
     ) -> dict:
         """从所有行中提取特征值并按值聚合。
@@ -273,7 +273,7 @@ class KvExtractor(ValueExtractor):
         Args:
             logs_str:         原始多行日志字符串。
             feature_field:    要聚合的字段名。
-            max_lines:        最大处理行数。
+            max_lines:        最大处理行数；``None`` 表示全量（默认）。
             header_end_marker: 日志头与 body 的分隔符（用于剥离日志头）。
 
         Returns:

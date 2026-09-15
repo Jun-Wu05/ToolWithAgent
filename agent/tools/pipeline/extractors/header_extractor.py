@@ -47,7 +47,8 @@ def extract_header(line: str, format_type: str = "json", delimit: str = "=") -> 
 
     # 2. KV 分割：用 delimit 字符定位第一个 KV 对
     # CHANGED: 支持 -前缀、(数字)后缀的字段名（如 -Slot=、SrcZoneName(1025)=）
-    if format_type == "kv" and delimit:
+    # CHANGED: 大小写无关（#190：生产侧 format_type 为大写 "KV"）
+    if format_type and format_type.lower() == "kv" and delimit:
         # 匹配：空格/行首 + 字段名(含.-前缀和(数字)后缀) + delimit
         pattern = rf'(?:^|\s)[\w.-]+(?:\(\d+\))?\s*{_re.escape(delimit)}'
         match = _re.search(pattern, line)
@@ -167,7 +168,7 @@ class HeaderExtractor(ValueExtractor):
         self,
         logs_str: str,
         feature_field: str,
-        max_lines: int = 2000,
+        max_lines: int | None = None,
     ) -> dict:
         """聚合头部聚类（委托给 :func:`aggregate_headers`）。
 

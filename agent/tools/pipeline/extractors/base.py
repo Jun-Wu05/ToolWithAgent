@@ -33,7 +33,7 @@ class ValueExtractor(ABC):
         self,
         logs_str: str,
         feature_field: str,
-        max_lines: int = 2000,
+        max_lines: int | None = None,
     ) -> dict:
         """从所有行中提取特征值并按值聚合。
 
@@ -43,7 +43,7 @@ class ValueExtractor(ABC):
         Args:
             logs_str:      原始多行日志字符串。
             feature_field: 要聚合的字段名。
-            max_lines:     最大处理行数。
+            max_lines:     最大处理行数；``None`` 表示全量（默认）。
 
         Returns:
             聚合结果字典。

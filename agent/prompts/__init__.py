@@ -18,6 +18,7 @@ __all__ = [
     "load_log_feature_locate_prompt",
     "load_log_format_identify_prompt",
     "load_log_header_classify_prompt",
+    "load_log_header_regex_identifier_prompt",
     "load_planner_prompt",
     "load_standard_fields",
     "load_threat_type_prompt",
@@ -75,6 +76,11 @@ def load_log_feature_locate_prompt() -> str:
 def load_kv_feature_identifier_prompt() -> str:
     """加载 KV 特征正则生成提示词。"""
     return _load_optional_md("kv_feature_identifier.md")
+
+
+def load_log_header_regex_identifier_prompt() -> str:
+    """加载日志头类型提取正则生成提示词（#190）。"""
+    return _load_optional_md("log_header_regex_identifier.md")
 
 
 def load_field_weak_prompt() -> str:
