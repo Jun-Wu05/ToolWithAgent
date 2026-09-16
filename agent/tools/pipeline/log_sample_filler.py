@@ -2,8 +2,8 @@
 """
 样例日志替换（Step 4）。
 
-用 feature_identifier 双捕获组正则从原始日志中匹配真实样例，
-替换 LLM 返回的占位符 sample，提取不含 syslog 头部的 JSON body。
+保留上游确定性分类已绑定的真实样例；仅对缺失样本使用
+feature_identifier 双捕获组严格补齐，并提取不含 syslog 头部的 body。
 """
 
 from __future__ import annotations
@@ -22,10 +22,11 @@ def fill_sample_logs(
     feature_identifier: str = "",
     header_end_marker: str = "",
 ) -> dict:
-    """用 feature_identifier 从原始日志匹配真实样例。
+    """保留已绑定样本，并用 feature_identifier 严格补齐缺失样本。
 
-    对每个 classification_detail，用双捕获组正则匹配原始日志行，
-    提取 JSON 主体（不含 syslog 头部）作为 real_samples。
+    对每个 classification_detail，已有 sample / real_samples 均不改写；
+    仅当 sample 缺失时，用双捕获组正则匹配原始日志行，且
+    捕获值必须与 logtype 严格相等。
 
     参数:
         classification: classify_log_features 的输出字典
@@ -70,6 +71,24 @@ def fill_sample_logs(
         detail_copy.pop("meaning", None)
         logtype = detail_copy.get("logtype", "")
 
+        # 上游分类器已用确定性 extractor 建立类型血缘；本步只补齐 body，
+        # 不得为了补 real_samples 而重新搜索并改写权威 sample。
+        existing_sample = detail_copy.get("sample")
+        if existing_sample:
+            if not detail_copy.get("real_samples"):
+                body_from_sample = None
+                if fi_pattern and feature_body_group > 0:
+                    match = fi_pattern.search(existing_sample)
+                    if match and len(match.groups()) >= feature_body_group:
+                        body_from_sample = match.group(feature_body_group)
+                if not body_from_sample:
+                    body_from_sample = _strip_header(existing_sample, header_end_marker)
+                if body_from_sample == existing_sample and "{" in existing_sample:
+                    body_from_sample = _extract_json_body(existing_sample) or existing_sample
+                detail_copy["real_samples"] = body_from_sample or existing_sample
+            result["classification_details"].append(detail_copy)
+            continue
+
         # 策略 A：用 feature_identifier 双捕获组正则提取
         if fi_pattern and logtype:
             try:
@@ -93,22 +112,9 @@ def fill_sample_logs(
             except _re.error:
                 pass
 
-        # 策略 B：正则未匹配时，用子串匹配 + JSON body 提取
-        if not detail_copy.get("real_samples") and logtype:
-            for line in lines:
-                if logtype in line:
-                    detail_copy["sample"] = line
-                    stripped = _strip_header(line, header_end_marker)
-                    if stripped == line and "{" in line:
-                        # 无 header_end_marker — 尝试提取 JSON body
-                        json_body = _extract_json_body(line)
-                        detail_copy["real_samples"] = json_body if json_body else line
-                    else:
-                        detail_copy["real_samples"] = stripped
-                    break
-
-        # 最终兜底
+        # 最终兜底：无法严格匹配就显式失败，不借用“包含类型名”的其他日志。
         if not detail_copy.get("real_samples"):
+            detail_copy["sample"] = "[匹配失败]"
             detail_copy["real_samples"] = "[匹配失败]"
 
         result["classification_details"].append(detail_copy)
