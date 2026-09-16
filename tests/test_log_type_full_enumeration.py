@@ -49,14 +49,26 @@ def _classify_header(logs: str) -> dict:
     )
 
 
-def _mock_llm(monkeypatch, *, regex_responses=None, meaning_fail_batches=0) -> dict:
+def _mock_llm(
+    monkeypatch,
+    *,
+    regex_responses=None,
+    body_regex_responses=None,
+    meaning_fail_batches=0,
+) -> dict:
     """打桩三处 LLM：类型正则生成 / KV body 正则生成 / meaning 分批分类。
 
     regex_responses：类型正则生成的响应序列（耗尽后回落结构正则）；
     meaning_fail_batches：前 N 个 meaning 批次返回非法 JSON。
     """
-    counters = {"regex_calls": 0, "meaning_calls": 0}
+    counters = {
+        "regex_calls": 0,
+        "body_regex_calls": 0,
+        "body_prompts": [],
+        "meaning_calls": 0,
+    }
     regex_responses = list(regex_responses or [])
+    body_regex_responses = list(body_regex_responses or [])
 
     def _header_llm(prompt, *args, **kwargs):
         if "日志头样例" in prompt:
@@ -65,7 +77,11 @@ def _mock_llm(monkeypatch, *, regex_responses=None, meaning_fail_batches=0) -> d
                 return regex_responses.pop(0)
             return f"r'{STRUCTURAL_LOGTYPE_REGEX}'"
         if "分隔符" in prompt:
-            return "r'^(.*)$'"
+            counters["body_regex_calls"] += 1
+            counters["body_prompts"].append(prompt)
+            if body_regex_responses:
+                return body_regex_responses.pop(0)
+            return r"r'^.*?\S+/\d+/\S+:\s*(.*)$'"
         raise AssertionError(f"意外的日志头路径 LLM 调用: {prompt[:80]}")
 
     def _meaning_llm(prompt, *args, **kwargs):
@@ -168,6 +184,55 @@ def test_20k_lines_full_enumeration(monkeypatch) -> None:
     assert result["coverage"]["unmatched_lines"] == 0
 
 
+def test_kv_body_regex_retries_until_mixed_boundaries_are_fully_covered(
+    monkeypatch,
+) -> None:
+    """同批次 ``: body`` / ``:body`` 必须由一个全覆盖正则提取。"""
+    counters = _mock_llm(
+        monkeypatch,
+        body_regex_responses=[
+            r"r'^.*?\S+/\d+/\S+:\s+(.*)$'",
+            r"r'^.*?\S+/\d+/\S+:\s*(.*)$'",
+        ],
+    )
+    spaced = _h3c_line("TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG", 1)
+    tight = _h3c_line("SSLVPN/5/SSLVPN_USER_LOGIN", 2).replace(": Src=", ":Src=")
+
+    result = _classify_header("\n".join([spaced, tight]))
+
+    assert result["status"] == "SUCCESS"
+    assert counters["body_regex_calls"] == 2
+    assert "TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG" in counters["body_prompts"][0]
+    assert "SSLVPN/5/SSLVPN_USER_LOGIN" in counters["body_prompts"][0]
+    assert "覆盖不完整: 1/2" in counters["body_prompts"][1]
+    details = {d["logtype"]: d for d in result["classification_details"]}
+    assert details["TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG"]["real_samples"].startswith(
+        "Src="
+    )
+    assert details["SSLVPN/5/SSLVPN_USER_LOGIN"]["real_samples"].startswith("Src=")
+    assert all(not d["real_samples"].startswith("<") for d in details.values())
+
+
+def test_kv_body_regex_returns_failed_when_retry_still_misses_a_variant(
+    monkeypatch,
+) -> None:
+    """两次生成均未覆盖全部有效行时不得返回伪 SUCCESS。"""
+    strict = r"r'^.*?\S+/\d+/\S+:\s+(.*)$'"
+    counters = _mock_llm(
+        monkeypatch,
+        body_regex_responses=[strict, strict],
+    )
+    spaced = _h3c_line("TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG", 1)
+    tight = _h3c_line("SSLVPN/5/SSLVPN_USER_LOGIN", 2).replace(": Src=", ":Src=")
+
+    result = _classify_header("\n".join([spaced, tight]))
+
+    assert result["status"] == "FAILED"
+    assert "feature_identifier" in result["error"]
+    assert "1/2" in result["error"]
+    assert counters["body_regex_calls"] == 2
+
+
 def test_mixed_structure_minority_reported_as_unmatched_partial(monkeypatch) -> None:
     """不同主结构（管道格式）不被捕获，进 coverage unmatched，状态 PARTIAL。"""
     _mock_llm(monkeypatch)
@@ -207,6 +272,37 @@ def test_meaning_batch_failure_downgrades_partial_not_deleting_types(monkeypatch
 
     assert result["status"] == "PARTIAL"
     assert result["feature_count"] == 21
+
+
+def test_meaning_batches_propagate_body_extraction_failure_reason(monkeypatch) -> None:
+    """后处理的 body 失败原因必须穿透批处理结果。"""
+    import agent.tools.pipeline.common.llm_postprocessor as postprocessor
+
+    monkeypatch.setattr(log_classifier, "_call_llm_direct", lambda *a, **kw: "{}")
+    monkeypatch.setattr(
+        postprocessor,
+        "postprocess_llm_classification",
+        lambda *a, **kw: {
+            "status": "PARTIAL",
+            "fail_reason": "1 个日志类型的 KV body 提取失败",
+            "classification_details": [{"logtype": "TYPE"}],
+        },
+    )
+
+    result = log_classifier._meaning_fill_batches(
+        {
+            "values": {"TYPE": {"count": 1, "samples": ["type=TYPE"]}},
+            "top_values": ["TYPE"],
+        },
+        "type=TYPE",
+        format_type="KV",
+        format_detail="日志头+KV",
+        feature_field="__header__",
+        extractor_func=lambda line, field: "TYPE",
+    )
+
+    assert result["status"] == "PARTIAL"
+    assert result["fail_reason"] == "1 个日志类型的 KV body 提取失败"
 
 
 # ---------- 正则生成失败语义 ----------

@@ -87,6 +87,8 @@ def _meaning_fill_batches(
     header_end_marker: str = "",
     sample_format: str = "",
     extractor_func=None,
+    feature_identifier: str = "",
+    feature_body_group: int = 0,
     batch_size: int = 20,
 ) -> dict:
     """分批（≤batch_size 值/批）调用分类 LLM 补充 meaning 并合并（#190）。
@@ -109,6 +111,7 @@ def _meaning_fill_batches(
 
     details: list[dict] = []
     status = "SUCCESS"
+    fail_reasons: list[str] = []
     for start in range(0, len(all_values), batch_size):
         batch_values = all_values[start:start + batch_size]
         batch_values_detail = {}
@@ -143,15 +146,20 @@ def _meaning_fill_batches(
             feature_field=feature_field,
             header_end_marker=header_end_marker,
             sample_format=sample_format,
+            feature_identifier=feature_identifier,
+            feature_body_group=feature_body_group,
         )
         details.extend(parsed.get("classification_details", []))
         if parsed.get("status") != "SUCCESS":
             status = "PARTIAL"
+            if parsed.get("fail_reason"):
+                fail_reasons.append(str(parsed["fail_reason"]))
 
     return {
         "classification_details": details,
         "status": status,
         "feature_count": len(details),
+        "fail_reason": "; ".join(dict.fromkeys(fail_reasons)),
     }
 
 
@@ -464,7 +472,17 @@ def _classify_kv_features(
     if has_header:
         try:
             from agent.tools.pipeline.log_header_processor import _generate_kv_feature_identifier
-            feature_identifier = _generate_kv_feature_identifier(logs_str)
+
+            source_lines = [line for line in logs_str.splitlines() if line.strip()]
+            classified_lines = [line for line in body_logs.splitlines() if line.strip()]
+            matched_source_lines = [
+                source
+                for source, classified in zip(source_lines, classified_lines)
+                if extractor.extract_value(classified, feature_field) is not None
+            ]
+            feature_identifier = _generate_kv_feature_identifier(
+                "\n".join(matched_source_lines), kv_delimit
+            )
             result["feature_identifier"] = feature_identifier
             result["feature_body_group"] = 1
             result["feature_value_group"] = 0

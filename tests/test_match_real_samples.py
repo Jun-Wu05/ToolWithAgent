@@ -140,6 +140,35 @@ class TestRealSamplesPureKV:
         )
 
 
+class TestRealSamplesKVHeaderFailure:
+    """已声明 KV body 正则时，意外失配必须失败关闭。"""
+
+    def test_feature_identifier_miss_preserves_sample_but_rejects_headed_body(self):
+        line = "<6> Sep 04 17:00:08 host TYPE/6/EVENT:body=ok type=TYPE"
+        parsed = {
+            "status": "SUCCESS",
+            "feature_field": "__header__",
+            "feature_identifier": r"TYPE/6/EVENT:\s+(.*)",
+            "feature_body_group": 1,
+            "classification_details": [{"logtype": "TYPE"}],
+        }
+
+        result = match_real_samples(
+            parsed,
+            line,
+            lambda value, _: "TYPE" if "type=TYPE" in value else None,
+            feature_field="__header__",
+            header_end_marker=": ",
+            sample_format="kv",
+        )
+
+        detail = result["classification_details"][0]
+        assert detail["sample"] == line
+        assert detail["real_samples"] == "[匹配失败]"
+        assert result["status"] == "PARTIAL"
+        assert "body" in result["fail_reason"]
+
+
 class TestRealSamplesJSON:
     """JSON 日志的 real_samples 应正确提取 {...} body（保留原有行为）。"""
 
