@@ -211,6 +211,7 @@ def match_real_samples(
                 sample_matched[val_str] = line
 
     unmatched: list[str] = []
+    body_extraction_failures: list[str] = []
     for detail in details:
         lt = detail.get("logtype", "")
         matched_line = sample_matched.get(lt, "")
@@ -223,21 +224,23 @@ def match_real_samples(
             detail["real_samples"] = strip_header_to_body(
                 matched_line, header_end_marker, is_json=True
             )
-        elif has_feature_identifier and feature_pattern and matched_line:
-            match = feature_pattern.search(matched_line)
-            if match and len(match.groups()) >= feature_body_group:
-                detail["real_samples"] = match.group(feature_body_group)
+        elif has_feature_identifier and matched_line:
+            match = feature_pattern.search(matched_line) if feature_pattern else None
+            body = (
+                (match.group(feature_body_group) or "").strip()
+                if match and len(match.groups()) >= feature_body_group
+                else ""
+            )
+            if body and body != matched_line.strip():
+                detail["real_samples"] = body
                 logger.info(
                     f"[llm_postprocessor] 为 '{lt}' "
                     f"使用正则提取 body ({len(detail['real_samples'])} 字符)"
                 )
             else:
-                # 正则匹配失败，降级使用 header_end_marker
-                if header_end_marker:
-                    parts = matched_line.split(header_end_marker, 1)
-                    detail["real_samples"] = parts[1] if len(parts) == 2 else matched_line
-                else:
-                    detail["real_samples"] = matched_line
+                # 已声明 body 正则却失配时失败关闭，禁止把 syslog 完整行伪装成 body。
+                detail["real_samples"] = "[匹配失败]"
+                body_extraction_failures.append(lt or "<unknown>")
         elif header_end_marker and matched_line:
             # 无 feature_identifier，JSON 格式：优先用 {...} 提取 body，
             # 避免 syslog 头多空格时 split(marker, 1) 从首个空格误切断
@@ -271,6 +274,17 @@ def match_real_samples(
         logger.warning(
             f"[llm_postprocessor] Unmatched logtypes: {unmatched[:10]}"
         )
+    if body_extraction_failures:
+        reason = (
+            f"{len(body_extraction_failures)} 个日志类型的 KV body 提取失败: "
+            f"{body_extraction_failures[:10]}"
+        )
+        previous_reason = parsed.get("fail_reason", "")
+        parsed["status"] = "PARTIAL"
+        parsed["fail_reason"] = (
+            f"{previous_reason}; {reason}" if previous_reason else reason
+        )
+        logger.warning(f"[llm_postprocessor] {reason}")
 
     return parsed
 
@@ -283,6 +297,8 @@ def postprocess_llm_classification(
     feature_field: str | None = None,
     header_end_marker: str = "",
     sample_format: str = "",
+    feature_identifier: str = "",
+    feature_body_group: int = 0,
 ) -> dict:
     """完整的 LLM 响应后处理管线。
 
@@ -299,6 +315,8 @@ def postprocess_llm_classification(
         feature_field:     字段名覆盖。
         header_end_marker: 头部与 body 的分隔符。
         sample_format:     调用方确认的样本格式。
+        feature_identifier: 调用方已全量校验的 body 提取正则。
+        feature_body_group: body 捕获组索引。
 
     Returns:
         包含 status、classification_details、feature_count 等键的字典。
@@ -314,6 +332,9 @@ def postprocess_llm_classification(
 
     parsed.setdefault("status", "SUCCESS")
     parsed.setdefault("classification_details", [])
+    if feature_identifier:
+        parsed["feature_identifier"] = feature_identifier
+        parsed["feature_body_group"] = feature_body_group
 
     parsed = sanitize_classification_details(parsed, aggregation)
     parsed = match_real_samples(

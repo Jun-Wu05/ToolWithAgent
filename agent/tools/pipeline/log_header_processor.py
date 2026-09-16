@@ -40,6 +40,10 @@ logger = get_logger("log_parser_pipeline")
 # JSON 格式的 feature_identifier 固定正则
 _JSON_FEATURE_IDENTIFIER = r"(\{[\S\s]*\})"
 
+# KV body 正则提示只携带有界结构样本；最终正确性仍由全量日志校验保证。
+_KV_BODY_SAMPLE_LIMIT = 20
+_KV_BODY_SAMPLE_MAX_CHARS = 600
+
 
 def _parse_regex_response(response: str) -> str:
     """从 LLM 响应中鲁棒提取正则字符串。
@@ -79,12 +83,34 @@ def _parse_regex_response(response: str) -> str:
     return ""
 
 
-def _validate_regex(regex_str: str, sample_line: str) -> tuple[bool, str, str]:
-    """验证正则：编译 + 匹配 + 恰好 1 个捕获组。
+def _select_kv_body_samples(logs_str: str, kv_delimit: str) -> list[str]:
+    """按日志头结构选择有界 KV 样本，避免只观察首行。"""
+    clusters = aggregate_headers(
+        logs_str,
+        format_type="kv",
+        delimit=kv_delimit,
+        max_clusters=_KV_BODY_SAMPLE_LIMIT,
+    ).get("clusters", [])
+    samples = [c.get("raw_sample", "") for c in clusters if c.get("raw_sample")]
+    if not samples:
+        samples = [line for line in logs_str.splitlines() if line.strip()]
+    return [
+        sample[:_KV_BODY_SAMPLE_MAX_CHARS]
+        for sample in samples[:_KV_BODY_SAMPLE_LIMIT]
+    ]
+
+
+def _validate_regex(
+    regex_str: str,
+    lines: list[str],
+    kv_delimit: str = "=",
+) -> tuple[bool, str, str]:
+    """验证 KV body 正则：结构合法且覆盖本批全部有效日志。
 
     Args:
         regex_str: 待验证的正则字符串。
-        sample_line: 样例日志行。
+        lines: 本批全部有效日志行。
+        kv_delimit: KV 键值连接符。
 
     Returns:
         (is_valid, error_msg, body_preview)
@@ -98,19 +124,44 @@ def _validate_regex(regex_str: str, sample_line: str) -> tuple[bool, str, str]:
     except _re.error as e:
         return False, f"正则编译失败: {e}", ""
 
-    # 匹配检查
-    m = pattern.search(sample_line)
-    if not m:
-        return False, "正则无法匹配样例日志", ""
-
     # 捕获组检查
-    if len(m.groups()) != 1:
-        return False, f"正则捕获组数≠1 (实际={len(m.groups())})", ""
+    if pattern.groups != 1:
+        return False, f"正则捕获组数≠1 (实际={pattern.groups})", ""
 
-    return True, "", m.group(1)[:100]
+    total = len(lines)
+    matched = 0
+    first_error = ""
+    body_preview = ""
+    kv_start = _re.compile(
+        rf"^[\w.-]+(?:\(\d+\))?\s*{_re.escape(kv_delimit)}"
+    )
+    for line in lines:
+        match = pattern.search(line)
+        body = (match.group(1) or "").strip() if match else ""
+        error = ""
+        if not match:
+            error = "正则未匹配"
+        elif not body:
+            error = "body 捕获为空"
+        elif body == line.strip() and extract_header(line, "kv", kv_delimit):
+            error = "body 仍是完整原始行"
+        elif body.startswith("<") and _re.match(r"^<\d+>", body):
+            error = "body 仍包含 syslog PRI 头"
+        elif not kv_start.match(body):
+            error = f"body 未以 KV 字段（连接符 {kv_delimit!r}）开头"
+        else:
+            matched += 1
+            if not body_preview:
+                body_preview = body[:100]
+        if error and not first_error:
+            first_error = f"{error}; 首个失败样本={line[:200]!r}"
+
+    if matched != total:
+        return False, f"覆盖不完整: {matched}/{total}; {first_error}", ""
+    return True, "", body_preview
 
 
-def _generate_kv_feature_identifier(logs_str: str) -> str:
+def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str:
     """用 LLM 生成 KV body 提取正则（单个捕获组，Group1 = KV body）。
 
     CHANGED (2026-06-18): 增加重试机制（最多 1 次重试），重试时将错误反馈
@@ -126,11 +177,20 @@ def _generate_kv_feature_identifier(logs_str: str) -> str:
     Raises:
         ValueError: 所有重试均失败时抛出。
     """
-    lines = [l.strip() for l in logs_str.strip().split("\n") if l.strip()]
-    if not lines:
+    all_lines = [l.strip() for l in logs_str.strip().split("\n") if l.strip()]
+    if not all_lines:
         raise ValueError("日志内容为空，无法生成 feature_identifier")
 
-    sample_line = lines[0]
+    kv_pair = _re.compile(
+        rf"[\w.-]+(?:\(\d+\))?\s*{_re.escape(kv_delimit)}"
+    )
+    lines = [line for line in all_lines if kv_pair.search(line)]
+    if not lines:
+        raise ValueError("没有可识别的 KV 日志行，无法生成 feature_identifier")
+
+    valid_logs_str = "\n".join(lines)
+    sample_lines = _select_kv_body_samples(valid_logs_str, kv_delimit)
+    sample_block = "\n".join(f"- `{line}`" for line in sample_lines)
     base_prompt = load_kv_feature_identifier_prompt()
 
     max_attempts = 2  # 初次 + 1 次重试
@@ -141,13 +201,13 @@ def _generate_kv_feature_identifier(logs_str: str) -> str:
         logger.debug(f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} 开始")
 
         # CHANGED: 重试时附加错误反馈
-        prompt = base_prompt.replace("{sample_log}", sample_line)
+        prompt = base_prompt.replace("{sample_logs}", sample_block)
         if attempt > 1 and last_error:
             feedback = (
                 f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
                 f"- 上次错误：{last_error}\n"
                 f"- 上次正则：`{last_regex}`\n"
-                f"- 样例日志：`{sample_line[:200]}`\n"
+                f"- 本批有效日志数：{len(lines)}\n"
                 f"\n请仔细检查样例日志中各部分的实际分隔情况，重新生成。"
             )
             prompt += feedback
@@ -192,7 +252,9 @@ def _generate_kv_feature_identifier(logs_str: str) -> str:
         )
 
         # 验证正则
-        is_valid, err_msg, body_preview = _validate_regex(regex_str, sample_line)
+        is_valid, err_msg, body_preview = _validate_regex(
+            regex_str, lines, kv_delimit
+        )
         if is_valid:
             logger.info(
                 f"[_generate_kv_feature_identifier] 生成成功 (尝试 {attempt}/{max_attempts}): {regex_str}"
@@ -348,6 +410,9 @@ def classify_header_features(
     """
     is_kv = (format_type or "").lower() == "kv"
     kv_feature_identifier = ""
+    kv_delimit = "="
+    if is_kv and format_info:
+        kv_delimit = format_info.get("tab", "=")
 
     def _get_feature_identifier(fmt_type: str) -> str:
         return "" if (fmt_type or "").lower() == "kv" else _JSON_FEATURE_IDENTIFIER
@@ -375,16 +440,14 @@ def classify_header_features(
     # CHANGED: KV 格式时，用 LLM 生成 body 提取正则（feature_identifier）
     if is_kv:
         try:
-            kv_feature_identifier = _generate_kv_feature_identifier(logs_str)
+            kv_feature_identifier = _generate_kv_feature_identifier(
+                logs_str, kv_delimit
+            )
         except ValueError as e:
             logger.error(f"[classify_header_features] KV feature_identifier 生成失败: {e}")
             return _failed(f"KV feature_identifier 生成失败: {e}")
 
     # CHANGED: 确定 KV 格式的键值连接符，用于 header 提取
-    kv_delimit = "="
-    if is_kv and format_info:
-        kv_delimit = format_info.get("tab", "=")
-
     try:
         # 1) 结构样本：header 聚类降级为样本源，不再决定类型集合与计数（#190）
         clusters = aggregate_headers(
@@ -442,6 +505,8 @@ def classify_header_features(
                 header_end_marker=header_end_marker,
                 sample_format="kv" if is_kv else "json",
                 extractor_func=logtype_extractor,
+                feature_identifier=kv_feature_identifier,
+                feature_body_group=1 if kv_feature_identifier else 0,
             )
         except Exception as e:
             logger.error(
@@ -460,7 +525,7 @@ def classify_header_features(
             fail_reason = (
                 f"{unmatched_lines} 行未匹配任何类型"
                 if unmatched_lines
-                else "部分批次语义解释降级"
+                else fill.get("fail_reason") or "部分批次语义解释降级"
             )
 
         # 5) 组装结果：沿用 header 元数据契约 + coverage 四字段（format_info 优先）
