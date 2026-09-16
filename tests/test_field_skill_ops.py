@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from agent.shared.event_classify import apply_event_fields_to_sub_rules
 from contracts.planner_models import (
     AddFieldsStep,
     DeleteFieldsStep,
@@ -456,6 +457,75 @@ def test适配器事件名称自动联动绑定级别(event_name, expected_level
                 fields_written.update(filter_item.get("fields", {}))
     assert fields_written["事件名称"] == event_name
     assert fields_written["事件级别"] == expected_level
+
+
+def test适配器事件名称删除后重加保留标准元数据并撤销删除标记():
+    """回归 #152：合法改名沿用删加计划，不得降级事件 normalize 元数据。"""
+    entities = _sample_entities()
+    session = {
+        "decoded_data": apply_event_fields_to_sub_rules(
+            entities,
+            {entity["name"]: "登录事件" for entity in entities},
+        )
+    }
+    adapter = FieldSkillAdapter()
+
+    deleted = _run(
+        adapter,
+        DeleteFieldsStep(
+            step_id="d1",
+            type="delete_fields",
+            fields=("事件名称",),
+            config_ref="session.decoded_config",
+        ),
+        session,
+    )
+    assert deleted.status == StepStatus.SUCCESS, deleted
+
+    added = _run(
+        adapter,
+        AddFieldsStep(
+            step_id="a1",
+            type="add_fields",
+            field_name="事件名称",
+            field_value="终端告警",
+            config_ref="session.decoded_config",
+        ),
+        session,
+    )
+    assert added.status == StepStatus.SUCCESS
+
+    expected_metadata = {
+        "事件名称": {
+            "field": "event_name",
+            "entity": "事件",
+            "sim": True,
+            "core": False,
+        },
+        "事件级别": {
+            "field": "event_level",
+            "entity": "事件",
+            "sim": True,
+            "core": False,
+        },
+    }
+    for entity in session["decoded_data"]:
+        event_entries = {
+            item["index"]: item
+            for item in entity["normalize"]
+            if item.get("index") in expected_metadata
+        }
+        assert {
+            index: {key: entry[key] for key in ("field", "entity", "sim", "core")}
+            for index, entry in event_entries.items()
+        } == expected_metadata
+        assert all(
+            not (
+                item.get("name") == "removeFields"
+                and {"事件名称", "事件级别"}.intersection(item.get("fields", []))
+            )
+            for item in entity["parser"]["filter"]
+        )
 
 
 def test适配器事件级别已存在时阻止联动写入():
