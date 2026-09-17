@@ -178,10 +178,9 @@ def _classify_json_features(
 
     使用 :class:`extractors.JsonExtractor` 提取值，
     :mod:`common.aggregator` 分组，LLM 语义分组，
-    :mod:`common.llm_postprocessor` 清洗 + 知识库存储。
+    :mod:`common.llm_postprocessor` 清洗。
     """
     from agent.tools.pipeline.extractors.json_extractor import JsonExtractor
-    from agent.tools.pipeline.common.knowledge_store import store_classification_knowledge
 
     # 0. 校验输入
     if not logs_str or not logs_str.strip():
@@ -267,17 +266,6 @@ def _classify_json_features(
         "feature_value_group": 0,
     }
 
-    # 7. 存入知识库
-    if result["status"] == "SUCCESS":
-        _sample_logs = [l for l in logs_str.strip().split("\n") if l.strip()][:10]
-        store_classification_knowledge(
-            classify_result=result,
-            format_type=format_type,
-            format_detail=format_detail,
-            feature_field=feature_field,
-            sample_logs=_sample_logs,
-        )
-
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -297,10 +285,9 @@ def _classify_kv_features(
 
     使用 :class:`extractors.KvExtractor` 提取值，
     :mod:`common.aggregator` 分组，LLM 语义分组，
-    :mod:`common.llm_postprocessor` 清洗 + 知识库存储。
+    :mod:`common.llm_postprocessor` 清洗。
     """
     from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
-    from agent.tools.pipeline.common.knowledge_store import store_classification_knowledge
 
     # 0. 校验输入
     if not logs_str or not logs_str.strip():
@@ -489,15 +476,16 @@ def _classify_kv_features(
             logger.info(
                 f"[_classify_kv_features] feature_identifier 生成成功: {feature_identifier}"
             )
-        except ValueError as e:
+        except ValueError:
             # 符合规范 7：错误处理原则（立即报错，不兜底）
             logger.error(
-                f"[_classify_kv_features] feature_identifier 生成失败: {e}. "
-                f"logs_str 前 100 字符: {logs_str[:100]}"
+                "[_classify_kv_features] feature_identifier 生成失败; "
+                f"source_lines={len(source_lines)}, "
+                f"matched_lines={len(matched_source_lines)}"
             )
             # 快速失败：标记为 PARTIAL，而不是继续使用空字符串
             result["status"] = "PARTIAL"
-            result["fail_reason"] = f"feature_identifier 生成失败: {e}"
+            result["fail_reason"] = "feature_identifier 生成失败"
             result["feature_identifier"] = ""
             result["feature_body_group"] = 0
             result["feature_value_group"] = 0
@@ -506,17 +494,6 @@ def _classify_kv_features(
         result["feature_identifier"] = ""
         result["feature_body_group"] = 0
         result["feature_value_group"] = 0
-
-    # 7. 存入知识库
-    if result["status"] == "SUCCESS":
-        _sample_logs = [l for l in logs_str.strip().split("\n") if l.strip()][:10]
-        store_classification_knowledge(
-            classify_result=result,
-            format_type=format_type,
-            format_detail=format_detail,
-            feature_field=feature_field,
-            sample_logs=_sample_logs,
-        )
 
     return json.dumps(result, ensure_ascii=False)
 

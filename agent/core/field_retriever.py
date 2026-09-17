@@ -42,8 +42,8 @@ from agent.shared.logger import get_logger
 logger = get_logger("field_retriever")
 
 # 兼容接缝（#246）：以下划线名保留既有 patch/import 入口——
-# 现有测试 monkeypatch field_retriever._call_embedding_api / _get_api_key，
-# log_pattern_store 仍从本模块导入 _call_embedding_api（收口待 #202 系列协调）。
+# 现有测试 monkeypatch field_retriever._call_embedding_api / _get_api_key；
+# 这些兼容名仅服务标准字段候选检索。
 _call_embedding_api = call_embedding_api
 _get_api_key = get_api_key
 _QUERY_EMBEDDING_CACHE = QUERY_EMBEDDING_CACHE

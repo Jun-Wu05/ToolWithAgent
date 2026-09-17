@@ -104,7 +104,7 @@ def _validate_regex(
     regex_str: str,
     lines: list[str],
     kv_delimit: str = "=",
-) -> tuple[bool, str, str]:
+) -> tuple[bool, str, int]:
     """验证 KV body 正则：结构合法且覆盖本批全部有效日志。
 
     Args:
@@ -113,25 +113,25 @@ def _validate_regex(
         kv_delimit: KV 键值连接符。
 
     Returns:
-        (is_valid, error_msg, body_preview)
+        (is_valid, error_msg, body_length)
         - is_valid: 验证是否通过。
-        - error_msg: 失败原因（成功时为空字符串）。
-        - body_preview: 提取到的 body 前 100 字符（成功时）。
+        - error_msg: 稳定失败类别与计数（成功时为空字符串）。
+        - body_length: 首个成功提取 body 的长度。
     """
     # 编译检查
     try:
         pattern = _re.compile(regex_str)
-    except _re.error as e:
-        return False, f"正则编译失败: {e}", ""
+    except _re.error:
+        return False, "regex_compile_failed", 0
 
     # 捕获组检查
     if pattern.groups != 1:
-        return False, f"正则捕获组数≠1 (实际={pattern.groups})", ""
+        return False, f"regex_capture_group_count_invalid; groups={pattern.groups}", 0
 
     total = len(lines)
     matched = 0
     first_error = ""
-    body_preview = ""
+    body_length = 0
     kv_start = _re.compile(
         rf"^[\w.-]+(?:\(\d+\))?\s*{_re.escape(kv_delimit)}"
     )
@@ -140,25 +140,30 @@ def _validate_regex(
         body = (match.group(1) or "").strip() if match else ""
         error = ""
         if not match:
-            error = "正则未匹配"
+            error = "regex_no_match"
         elif not body:
-            error = "body 捕获为空"
+            error = "body_empty"
         elif body == line.strip() and extract_header(line, "kv", kv_delimit):
-            error = "body 仍是完整原始行"
+            error = "body_is_full_line"
         elif body.startswith("<") and _re.match(r"^<\d+>", body):
-            error = "body 仍包含 syslog PRI 头"
+            error = "body_contains_syslog_pri"
         elif not kv_start.match(body):
-            error = f"body 未以 KV 字段（连接符 {kv_delimit!r}）开头"
+            error = "body_not_kv"
         else:
             matched += 1
-            if not body_preview:
-                body_preview = body[:100]
+            if not body_length:
+                body_length = len(body)
         if error and not first_error:
-            first_error = f"{error}; 首个失败样本={line[:200]!r}"
+            first_error = error
 
     if matched != total:
-        return False, f"覆盖不完整: {matched}/{total}; {first_error}", ""
-    return True, "", body_preview
+        return (
+            False,
+            "kv_body_regex_validation_failed; "
+            f"matched={matched}; total={total}; reason={first_error}",
+            0,
+        )
+    return True, "", body_length
 
 
 def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str:
@@ -222,17 +227,17 @@ def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str
                 prompt, temperature=0.1, max_tokens=500, timeout=30, force_json=False
             )
         except Exception as e:
-            last_error = f"LLM API 调用失败: {e}"
+            last_error = "llm_call_failed"
             last_regex = ""
             logger.debug(
                 f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} "
-                f"LLM 调用异常: {e}"
+                f"LLM 调用失败; exception_type={type(e).__name__}"
             )
             continue
 
         logger.debug(
             f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} "
-            f"LLM 原始响应: {response[:200]}"
+            f"LLM 响应长度: {len(response)}"
         )
 
         # 解析 LLM 输出
@@ -248,29 +253,31 @@ def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str
 
         logger.debug(
             f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} "
-            f"解析得到正则: {regex_str}"
+            f"解析得到正则; regex_length={len(regex_str)}"
         )
 
         # 验证正则
-        is_valid, err_msg, body_preview = _validate_regex(
+        is_valid, err_msg, body_length = _validate_regex(
             regex_str, lines, kv_delimit
         )
         if is_valid:
             logger.info(
-                f"[_generate_kv_feature_identifier] 生成成功 (尝试 {attempt}/{max_attempts}): {regex_str}"
+                f"[_generate_kv_feature_identifier] 生成成功 "
+                f"(尝试 {attempt}/{max_attempts}); regex_length={len(regex_str)}, "
+                f"body_length={body_length}"
             )
-            logger.info(f"[_generate_kv_feature_identifier] body 提取: {body_preview}...")
             return regex_str
         else:
             last_error = err_msg
             last_regex = regex_str
             logger.debug(
                 f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} "
-                f"验证失败: {err_msg}（正则: {regex_str}）"
+                f"验证失败: {err_msg}; regex_length={len(regex_str)}"
             )
 
     raise ValueError(
-        f"正则生成失败（共尝试 {max_attempts} 次），最后错误: {last_error}"
+        f"kv_body_regex_generation_failed; attempts={max_attempts}; "
+        f"reason={last_error}"
     )
 
 
@@ -278,24 +285,37 @@ def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str
 _LOGTYPE_SAMPLE_LIMIT = 20
 
 
-def _validate_logtype_regex(regex_str: str, header_texts: list[str]) -> tuple[bool, str, str]:
+def _validate_logtype_regex(regex_str: str, header_texts: list[str]) -> tuple[bool, str, int]:
     """校验类型提取正则：编译 + 恰 1 捕获组 + 对全部结构样本提取非空值。"""
     try:
         pattern = _re.compile(regex_str)
-    except _re.error as e:
-        return False, f"正则编译失败: {e}", ""
+    except _re.error:
+        return False, "regex_compile_failed", 0
     if pattern.groups != 1:
-        return False, f"正则捕获组数≠1 (实际={pattern.groups})", ""
-    preview = ""
+        return False, f"regex_capture_group_count_invalid; groups={pattern.groups}", 0
+    matched = 0
+    first_error = ""
+    value_length = 0
     for text in header_texts:
         m = pattern.search(text)
         if not m:
-            return False, f"正则无法匹配结构样本: {text[:60]}", ""
+            first_error = first_error or "regex_no_match"
+            continue
         value = (m.group(1) or "").strip()
         if not value:
-            return False, f"捕获值为空: {text[:60]}", ""
-        preview = value[:100]
-    return True, "", preview
+            first_error = first_error or "captured_value_empty"
+            continue
+        matched += 1
+        if not value_length:
+            value_length = len(value)
+    if matched != len(header_texts):
+        return (
+            False,
+            "header_logtype_regex_validation_failed; "
+            f"matched={matched}; total={len(header_texts)}; reason={first_error}",
+            0,
+        )
+    return True, "", value_length
 
 
 def _generate_header_logtype_regex(
@@ -344,10 +364,10 @@ def _generate_header_logtype_regex(
                 prompt, temperature=0.1, max_tokens=500, timeout=30, force_json=False
             )
         except Exception as e:
-            last_error, last_regex = f"LLM API 调用失败: {e}", ""
+            last_error, last_regex = "llm_call_failed", ""
             logger.debug(
                 f"[_generate_header_logtype_regex] 尝试 {attempt}/{max_attempts} "
-                f"LLM 调用异常: {e}"
+                f"LLM 调用失败; exception_type={type(e).__name__}"
             )
             continue
 
@@ -356,21 +376,25 @@ def _generate_header_logtype_regex(
             last_error, last_regex = "LLM 输出无法解析为正则", response[:200]
             continue
 
-        is_valid, err_msg, preview = _validate_logtype_regex(regex_str, header_texts)
+        is_valid, err_msg, value_length = _validate_logtype_regex(
+            regex_str, header_texts
+        )
         if is_valid:
             logger.info(
                 f"[_generate_header_logtype_regex] 生成成功 "
-                f"(尝试 {attempt}/{max_attempts}): {regex_str}（示例值: {preview}）"
+                f"(尝试 {attempt}/{max_attempts}); "
+                f"regex_length={len(regex_str)}, value_length={value_length}"
             )
             return _re.compile(regex_str)
         last_error, last_regex = err_msg, regex_str
         logger.debug(
             f"[_generate_header_logtype_regex] 尝试 {attempt}/{max_attempts} "
-            f"验证失败: {err_msg}（正则: {regex_str}）"
+            f"验证失败: {err_msg}; regex_length={len(regex_str)}"
         )
 
     raise ValueError(
-        f"日志类型提取正则生成失败（共尝试 {max_attempts} 次），最后错误: {last_error}"
+        f"header_logtype_regex_generation_failed; attempts={max_attempts}; "
+        f"reason={last_error}"
     )
 
 
@@ -443,9 +467,12 @@ def classify_header_features(
             kv_feature_identifier = _generate_kv_feature_identifier(
                 logs_str, kv_delimit
             )
-        except ValueError as e:
-            logger.error(f"[classify_header_features] KV feature_identifier 生成失败: {e}")
-            return _failed(f"KV feature_identifier 生成失败: {e}")
+        except ValueError:
+            logger.error(
+                "[classify_header_features] kv_body_regex_validation_failed; "
+                f"valid_lines={len([line for line in logs_str.splitlines() if line.strip()])}"
+            )
+            return _failed("kv_body_regex_validation_failed")
 
     # CHANGED: 确定 KV 格式的键值连接符，用于 header 提取
     try:
@@ -465,9 +492,13 @@ def classify_header_features(
             logtype_pattern = _generate_header_logtype_regex(
                 sample_lines, format_type, kv_delimit
             )
-        except ValueError as e:
-            logger.error(f"[classify_header_features] {e}")
-            return _failed(f"日志类型提取正则生成失败: {e}")
+        except ValueError:
+            logger.error(
+                "[classify_header_features] "
+                "header_logtype_regex_validation_failed; "
+                f"sample_count={len(sample_lines)}"
+            )
+            return _failed("header_logtype_regex_validation_failed")
 
         # 3) 确定性全量枚举：正则只作用于日志头文本，不同主结构行自然落入 unmatched
         # ponytail: 正则仅从 top 结构样本习得；共主导结构的文件次结构会进
@@ -510,9 +541,13 @@ def classify_header_features(
             )
         except Exception as e:
             logger.error(
-                f"[classify_header_features] 语义解释失败: {type(e).__name__}: {e}"
+                "[classify_header_features] semantic_classification_failed; "
+                f"exception_type={type(e).__name__}; total_lines={total_lines}"
             )
-            return _failed(f"LLM 语义分类失败: {e}", total_valid_lines=total_lines)
+            return _failed(
+                "semantic_classification_failed",
+                total_valid_lines=total_lines,
+            )
 
         unmatched_lines = aggregation.get("unmatched_lines", 0)
         status = (
@@ -563,28 +598,11 @@ def classify_header_features(
             f"status={status}"
         )
 
-        if status == "SUCCESS":
-            try:
-                from agent.tools.log_pattern_store import (
-                    generate_structured_fingerprint,
-                    store_log_knowledge,
-                )
-                structured_fp = generate_structured_fingerprint(
-                    classify_result=result, format_detail=format_detail,
-                    feature_field="__header__",
-                )
-                if structured_fp:
-                    _sl = [l for l in logs_str.strip().split("\n") if l.strip()][:10]
-                    store_log_knowledge(
-                        fingerprint=structured_fp, format_type=format_type,
-                        meta=result, sample_logs=_sl,
-                    )
-                    logger.info(f"[classify_header_features] 知识库存储成功: {structured_fp[:80]}...")
-            except Exception as store_err:
-                logger.warning(f"[classify_header_features] 知识库存储失败: {store_err}")
-
         return json.dumps(result, ensure_ascii=False)
 
     except Exception as e:
-        logger.error(f"[classify_header_features] 异常: {type(e).__name__}: {e}")
-        return _failed(str(e))
+        logger.error(
+            "[classify_header_features] header_classification_failed; "
+            f"exception_type={type(e).__name__}"
+        )
+        return _failed("header_classification_failed")

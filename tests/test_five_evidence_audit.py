@@ -84,7 +84,7 @@ def test_仓库扫描结果与版本化内部证据一致() -> None:
             assert actual[category] == candidate["evidence"][category]
 
 
-def test_扫描器识别延迟导入避免_log_pattern_store_假阴性() -> None:
+def test_扫描器识别日志知识仓储的唯一兼容调用者() -> None:
     evidence = scan_module_usage(
         ROOT,
         module_names=("agent.tools.log_pattern_store",),
@@ -93,7 +93,16 @@ def test_扫描器识别延迟导入避免_log_pattern_store_假阴性() -> None
 
     imported_by = {item["path"] for item in evidence["production_imports"]}
     assert "agent/tools/pipeline/common/knowledge_store.py" in imported_by
-    assert "agent/tools/pipeline/log_header_processor.py" in imported_by
+
+    wrapper_evidence = scan_module_usage(
+        ROOT,
+        module_names=("agent.tools.pipeline.common.knowledge_store",),
+        module_paths=("agent/tools/pipeline/common/knowledge_store.py",),
+    ).as_dict()
+    wrapper_imported_by = {
+        item["path"] for item in wrapper_evidence["production_imports"]
+    }
+    assert wrapper_imported_by == set()
 
 
 def test_扫描器区分动态加载重导出与测试依赖() -> None:
