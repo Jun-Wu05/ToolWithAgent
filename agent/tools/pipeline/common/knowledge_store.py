@@ -51,14 +51,17 @@ def store_classification_knowledge(
             logger.info("[knowledge_store] Fingerprint is empty, skipping storage")
             return False
 
-        store_log_knowledge(
+        application_id = store_log_knowledge(
             fingerprint=structured_fp,
             format_type=format_type,
             meta=classify_result,
             sample_logs=sample_logs or [],
         )
+        if application_id is None:
+            logger.warning("[knowledge_store] Storage created no application")
+            return False
         logger.info(
-            f"[knowledge_store] Stored successfully: {structured_fp[:80]}..."
+            f"[knowledge_store] Stored application id={application_id}"
         )
         return True
     except Exception as store_err:

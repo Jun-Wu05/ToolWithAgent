@@ -171,6 +171,25 @@ def test_header_types_enumerated_deterministically_with_coverage(monkeypatch) ->
         assert detail["logtype"] in detail["sample"]
 
 
+def test_header_success_does_not_call_knowledge_storage(monkeypatch) -> None:
+    import agent.tools.pipeline.common.knowledge_store as knowledge_store
+
+    _mock_llm(monkeypatch)
+    monkeypatch.setattr(
+        knowledge_store,
+        "store_classification_knowledge",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("storage must not be called")
+        ),
+    )
+    logs = "\n".join(_h3c_line(t, i) for i, t in enumerate(H3C_TYPES[:2]))
+
+    result = _classify_header(logs)
+
+    assert result["status"] == "SUCCESS"
+    assert result["feature_count"] == 2
+
+
 def test_20k_lines_full_enumeration(monkeypatch) -> None:
     """20000 行 8 类型：feature_count=8、covered_lines=20000、SUCCESS。"""
     _mock_llm(monkeypatch)
@@ -204,7 +223,8 @@ def test_kv_body_regex_retries_until_mixed_boundaries_are_fully_covered(
     assert counters["body_regex_calls"] == 2
     assert "TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG" in counters["body_prompts"][0]
     assert "SSLVPN/5/SSLVPN_USER_LOGIN" in counters["body_prompts"][0]
-    assert "覆盖不完整: 1/2" in counters["body_prompts"][1]
+    assert "kv_body_regex_validation_failed" in counters["body_prompts"][1]
+    assert "matched=1; total=2" in counters["body_prompts"][1]
     details = {d["logtype"]: d for d in result["classification_details"]}
     assert details["TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG"]["real_samples"].startswith(
         "Src="
@@ -228,8 +248,7 @@ def test_kv_body_regex_returns_failed_when_retry_still_misses_a_variant(
     result = _classify_header("\n".join([spaced, tight]))
 
     assert result["status"] == "FAILED"
-    assert "feature_identifier" in result["error"]
-    assert "1/2" in result["error"]
+    assert result["error"] == "kv_body_regex_validation_failed"
     assert counters["body_regex_calls"] == 2
 
 
@@ -318,7 +337,7 @@ def test_regex_generation_failure_returns_failed_after_one_repair(monkeypatch) -
     result = _classify_header(logs)
 
     assert result["status"] == "FAILED"
-    assert "类型提取正则" in result["error"]
+    assert result["error"] == "header_logtype_regex_validation_failed"
     assert counters["regex_calls"] == 2
 
 

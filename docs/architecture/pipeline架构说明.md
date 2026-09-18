@@ -1,6 +1,6 @@
 # 日志解析 Pipeline 架构说明
 
-> **文档版本**：2026-06-03-v4  
+> **文档版本**：2026-09-17-v5
 > **对应目录**：`agent/tools/pipeline/`  
 > **调用方**：`web/chainlit_app.py`
 
@@ -80,7 +80,7 @@ agent/tools/pipeline/
 ├── common/
 │   ├── aggregator.py           (~96行)  特征值聚合引擎
 │   ├── json_utils.py           (~94行)  JSON 提取工具函数
-│   ├── knowledge_store.py      (~80行)  向量知识库存储
+│   ├── knowledge_store.py      (~80行)  日志知识仓储兼容门面（正常分类不调用）
 │   └── llm_postprocessor.py   (~244行) LLM 响应后处理
 │
 └── extractors/
@@ -105,7 +105,6 @@ chainlit_app.py
   │   │                              → llm_client.py
   │   │                           → extractors/json_extractor.py (JsonExtractor)
   │   │                           → common/llm_postprocessor.py
-  │   │                           → common/knowledge_store.py
   │   │                           → log_header_processor.py (Path A)
   │   │                              → extractors/header_extractor.py (aggregate_headers)
   │   │
@@ -275,7 +274,13 @@ Step 2 返回 JSON 字符串（结构不变）：
 | `_call_llm_direct(prompt, **kwargs)` | `llm_client.py` | 统一 LLM API 调用 |
 | `_try_parse_json(text)` | `llm_client.py` | 从 LLM 响应提取 JSON |
 
-### 5.5 Extractor 策略类
+### 5.5 日志知识持久化
+
+`agent/tools/log_pattern_store.py` 中的 `LogKnowledgeRepository` 以 SQLite 作为唯一运行时事实源，管理待审核/已批准/已拒绝申请、去重且最多 10 条的审核样例、竞争配方原子替代与旧 SQLite 迁移。路径默认为 `config/log_patterns.db`，可由 `LOG_KNOWLEDGE_DB_PATH` 覆盖。
+
+JSON、KV 与 Header 正常分类路径不调用该仓储，不会自动创建待审核申请。日志知识不再读写 NumPy 向量或 JSON metadata sidecar。本切片不包含用户显式提交、候选排序、确定性配方回放或审核 UI。
+
+### 5.6 Extractor 策略类
 
 | 类 | 文件 | 说明 | 状态 |
 |------|------|------|------|

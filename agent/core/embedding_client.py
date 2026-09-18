@@ -1,8 +1,8 @@
 """SiliconFlow 嵌入客户端 — 认证、请求、超时、重试与查询向量缓存（#246）。
 
-本模块是 embedding 的唯一 HTTP 出口：检索层（field_retriever）与日志知识库
-（log_pattern_store 经 field_retriever 的兼容接缝过渡）只调用这里的公共入口，
-不接触 URL/密钥/重试细节。embedding 固定走硅基流动、不属于提供商接入范围
+本模块是标准字段候选检索的 embedding 唯一 HTTP 出口。
+检索层（field_retriever）只调用这里的公共入口，不接触 URL/密钥/重试细节。
+embedding 固定走硅基流动、不属于提供商接入范围；日志解析知识不使用本模块。
 （ADR-0007 / CONTEXT.md「模型提供商」），本模块不提供多供应商抽象。
 """
 
