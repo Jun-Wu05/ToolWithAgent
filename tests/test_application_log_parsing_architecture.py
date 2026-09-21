@@ -128,6 +128,42 @@ def test_log_parse_adapter_preserves_call_order_session_and_progress() -> None:
     ]
 
 
+def test日志解析只生成提交资格快照且不会写知识库() -> None:
+    """正常分类成功路径只提交会话快照，显式按钮前不得触碰 SQLite。"""
+    from application.adapters.log_parse import LogParseAdapter
+    from application.execution import ExecutionContext
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import LogParseStep
+
+    lines = ["kind=a src=1", "kind=b src=2", "kind=c src=3"]
+    session = {"raw_log_lines": lines}
+    classification = {
+        "status": "SUCCESS",
+        "log_format": "kv",
+        "log_format_detail": "KV",
+        "feature_field": "kind",
+        "coverage": {"total_lines": 3, "matched_lines": 3},
+        "classification_details": [{"logtype": "a", "count": 1}],
+        "analysis": {"delimit": " ", "tab": "="},
+    }
+
+    result = asyncio.run(
+        LogParseAdapter(
+            format_identifier=lambda _: '{"format":"kv","feature_field":"kind"}',
+            classifier=lambda *args, **kwargs: json.dumps(classification),
+            sample_filler=lambda value, _: value,
+        ).execute(
+            LogParseStep(step_id="log", type="log_parse"),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status.value == "success"
+    assert session["log_knowledge_submission"].eligible is True
+    assert "log_knowledge_application" not in session
+
+
 def test重新提取日志类型原子清理映射派生状态并释放白板导出gate(monkeypatch) -> None:
     """新分类不得与旧映射、事件标注、手动调整或其枚举账本混用。"""
     import agent.tools.rule_generator as rule_generator

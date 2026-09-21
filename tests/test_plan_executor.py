@@ -624,3 +624,32 @@ def test事件名称引用型值在计划级拦截():
     assert "不支持引用型值" in (report.results[0].message or "")
     assert delete_adapter.calls == []
     assert add_adapter.calls == []
+
+
+def test确定性提交步骤复用同一执行器账本():
+    """按钮专用步骤不进入 Planner，但仍必须复用 PlanExecutor 的分派与账本。"""
+    from contracts.planner_models import DeterministicPlan, LogKnowledgeSubmitStep
+
+    step = LogKnowledgeSubmitStep(
+        step_id="submit-1", type="log_knowledge_submit", submission_token="snapshot-1"
+    )
+    plan = DeterministicPlan(plan_id="det-submit", steps=(step,))
+    adapter = RecordingAdapter(
+        [
+            StepResult(
+                step_id="submit-1",
+                operation_type="log_knowledge_submit",
+                status="success",
+            )
+        ]
+    )
+
+    report = asyncio.run(
+        create_plan_executor({"log_knowledge_submit": adapter}).execute_deterministic(
+            plan,
+            ExecutionContext(session={}, session_facts=SessionFacts()),
+        )
+    )
+
+    assert report.status == StepStatus.SUCCESS
+    assert adapter.calls[0][0] is step

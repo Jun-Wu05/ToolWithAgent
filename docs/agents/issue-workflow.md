@@ -58,10 +58,12 @@ copy D:\Agent\agent_design\toolswithagent\.env                             <work
 ### 3. 基线必须全绿
 
 ```bat
-cd /d <worktree> && python -X utf8 -m pytest -q
+cd /d <worktree> && python -X utf8 -m pytest -q --basetemp=.pytest-tmp-<NNN>-baseline
 ```
 
 基线不绿不许开工——先查环境（第 2 步漏复制是最常见原因）。
+
+在 Codex 的 `workspace-write` 沙箱中，独立 worktree 通常位于主 workspace 可写根之外。第一次运行 pytest 就必须申请该 worktree 的写权限，并显式传入位于 worktree 内的 `--basetemp`；不要先用受限权限试跑。若 `.pytest_cache`、`agent/logs` 或系统临时目录出现 `PermissionError`，应立即判定为环境失败并修正权限，不要把 Windows 临时目录探测造成的高 CPU/长时间等待误认为测试仍在正常执行。测试结束后只删除已核对绝对路径的本次 `.pytest-tmp-<NNN>-*` 目录。
 
 ### 4. 领取协议复核
 
@@ -124,5 +126,6 @@ git push github --delete <分支>
 | 新 worktree 3 个测试红（Bearer 空密钥 / coverage KeyError / 密钥解析） | 没复制 `.env` |
 | characterization 测试红（FileNotFoundError *.npy） | 没复制 3 个 embedding 缓存 |
 | test_documentation_architecture 红（行数不一致） | 改了生产文件没重新生成 source-code-analysis 快照 |
+| 独立 worktree 中 pytest 报 `.pytest_cache` / `agent/logs` / tempfile `PermissionError`，或高 CPU 久不结束 | 首次调用未取得 worktree 写权限；用获批权限并显式指定 worktree 内的 `--basetemp` 重跑，结束后清理该精确目录 |
 | `gh pr create` 报 No commits between master and ... | push 没成功，检查 `git ls-remote github` 后重推 |
 | CMD 下 `head`/`tail`/管道转义报错 | Windows CMD 无这些命令；grep 正则含引号/竖线时拆成单条 `git grep -n -E ...` 跑 |

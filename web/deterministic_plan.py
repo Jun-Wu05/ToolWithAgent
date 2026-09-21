@@ -12,17 +12,22 @@ from web.plan_renderer import (
     render_execution_report,
     update_execution_report_message,
 )
-from contracts.planner_models import ExecutionReport, PlanDecision, StepSpec, StepStatus
+from contracts.planner_models import (
+    DeterministicPlan,
+    ExecutableStep,
+    ExecutionReport,
+    StepStatus,
+)
 
 
 async def execute_deterministic_plan(
     user_session: Any,
     team: Any,
     plan_id: str,
-    steps: Sequence[StepSpec],
-) -> None:
+    steps: Sequence[ExecutableStep],
+) -> ExecutionReport:
     """执行确定性事件生成的计划；事件适配层必须事先提供全部参数。"""
-    decision = PlanDecision(decision="execute", plan_id=plan_id, steps=tuple(steps))
+    decision = DeterministicPlan(plan_id=plan_id, steps=tuple(steps))
     progress_ledger = get_session_progress_sink()
     progress_sink = progress_ledger.begin_request()
     primary_result_count = 0
@@ -60,6 +65,7 @@ async def execute_deterministic_plan(
                 ExecutionReport(plan_id=report.plan_id, results=follow_up_results),
                 session_facts=build_session_facts(user_session),
             )
+        return report
     finally:
         # 按钮执行异常时也必须停止心跳，避免旧任务继续更新界面。
         await progress_ledger.finish_request(progress_sink)

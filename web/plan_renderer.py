@@ -134,27 +134,37 @@ def _threat_chain_download_step_ids(
 
 def _build_result_actions(execution_report: ExecutionReport) -> list[cl.Action]:
     """根据成功产物挂载既有类型化动作，不在渲染器内执行领域逻辑。"""
-    action_specs: list[tuple[str, str, str]] = []
+    action_specs: list[tuple[str, str, str, dict[str, str]]] = []
     for result in execution_report.results:
         if result.status != StepStatus.SUCCESS or result.artifact is None:
             continue
         if result.artifact.artifact_type == "log_classification":
             action_specs.extend(
                 [
-                    ("apply_field_mapping", "标准字段映射", "基于已识别日志字段执行标准字段映射"),
-                    ("export_rules", "生成入口规则", "生成并下载日志入口解析规则"),
-                    ("export_sub_rules", "生成子规则", "生成并下载日志子解析规则"),
+                    ("apply_field_mapping", "标准字段映射", "基于已识别日志字段执行标准字段映射", {}),
+                    ("export_rules", "生成入口规则", "生成并下载日志入口解析规则", {}),
+                    ("export_sub_rules", "生成子规则", "生成并下载日志子解析规则", {}),
                 ]
             )
+            if result.artifact.submission_eligible:
+                # 申请是当前分类结果的次级动作，固定放在操作区末尾。
+                action_specs.append(
+                    (
+                        "submit_log_knowledge",
+                        "申请加入知识库",
+                        "提交当前可回放解析方法供管理员审核",
+                        {"submission_token": result.artifact.submission_token or ""},
+                    )
+                )
         elif result.artifact.artifact_type == "field_mapping":
             action_specs.append(
-                ("export_mapped_sub_rules", "生成映射后子规则", "生成并下载标准字段映射后的子规则")
+                ("export_mapped_sub_rules", "生成映射后子规则", "生成并下载标准字段映射后的子规则", {})
             )
 
     seen: set[str] = set()
     return [
-        cl.Action(name=name, label=label, description=description, payload={})
-        for name, label, description in action_specs
+        cl.Action(name=name, label=label, description=description, payload=payload)
+        for name, label, description, payload in action_specs
         if not (name in seen or seen.add(name))
     ]
 
@@ -230,8 +240,15 @@ def build_execution_report_content(
             pending_clarification = None
         if result.recovered:
             detail = f"{detail}（已自动重试）"
-        lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
         artifact = result.artifact
+        if (
+            artifact is not None
+            and artifact.artifact_type == "log_knowledge_submission"
+            and artifact.application_id is not None
+            and f"申请编号 {artifact.application_id}" not in detail
+        ):
+            detail = f"{detail}（申请编号 {artifact.application_id}）"
+        lines.append(f"- {status_icon[result.status]} `{result.step_id}`（{result.operation_type}）：{detail}")
         if artifact is None:
             continue
         if artifact.artifact_type == "field_mapping" and artifact.event_annotations:

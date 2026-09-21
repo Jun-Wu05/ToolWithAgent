@@ -407,6 +407,27 @@ def test步骤结果拒绝未知或无约束产物():
             }
         )
 
+
+def test日志知识提交步骤不属于Planner计划契约():
+    """提交只能由结果区按钮构造，Planner schema 不得暴露该能力。"""
+    from contracts.planner_models import LogKnowledgeSubmitStep, PlanDecision
+
+    step = LogKnowledgeSubmitStep(
+        step_id="submit-1", type="log_knowledge_submit", submission_token="snapshot-1"
+    )
+    assert step.type == "log_knowledge_submit"
+    with pytest.raises(ValidationError):
+        PlanDecision.model_validate(
+            {
+                "decision": "execute",
+                "plan_id": "planner-must-not-submit",
+                "steps": [step.model_dump()],
+            }
+        )
+    import json
+
+    assert "log_knowledge_submit" not in json.dumps(PlanDecision.model_json_schema())
+
 def test_session_facts集中汇总日志分类字段(monkeypatch):
     """证明 Planner 和执行器共享同一字段事实，不在各层重复解释日志状态。"""
     import application.field_source as field_source

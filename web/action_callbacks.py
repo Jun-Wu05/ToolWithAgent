@@ -165,3 +165,44 @@ async def on_export_mapped_sub_rules(action: cl.Action):
         steps=(step,),
     )
 
+
+@cl.action_callback("submit_log_knowledge")
+async def on_submit_log_knowledge(action: cl.Action):
+    """移除当前申请动作后，以按钮专用步骤复用统一执行器。"""
+    from web.deterministic_plan import execute_deterministic_plan
+    from contracts.planner_models import LogKnowledgeSubmitStep
+
+    user_session = cl.user_session.get("user_session")
+    action_message_id = getattr(action, "forId", None)
+    await action.remove()
+    submitting_message = await cl.Message(
+        content="⏳ 日志知识申请提交中，操作已暂时禁用。"
+    ).send()
+    logger.info('[ACTION] 用户点击"申请加入知识库"按钮')
+    step = LogKnowledgeSubmitStep(
+        step_id="submit-log-knowledge",
+        type="log_knowledge_submit",
+        submission_token=str(action.payload.get("submission_token", "")),
+    )
+    restore_action = False
+    try:
+        report = await execute_deterministic_plan(
+            user_session=user_session,
+            team=user_session.get("team"),
+            plan_id="button-submit-log-knowledge",
+            steps=(step,),
+        )
+        restore_action = any(
+            result.artifact is not None
+            and result.artifact.artifact_type == "log_knowledge_submission"
+            and result.artifact.submission_status == "error"
+            for result in report.results
+        )
+    except Exception:
+        restore_action = True
+        raise
+    finally:
+        await submitting_message.remove()
+        if restore_action and action_message_id:
+            await action.send(action_message_id)
+

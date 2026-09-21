@@ -10,6 +10,7 @@ from application.adapters.field_mapping import FieldMappingAdapter
 from application.adapters.field_skill import FIELD_SKILL_REGISTRY, FieldSkillAdapter
 from application.adapters.fill import FillAdapter
 from application.adapters.log_parse import LogParseAdapter
+from application.adapters.log_knowledge_submit import LogKnowledgeSubmitAdapter
 from application.adapters.remove_mapping import RemoveMappingAdapter
 from application.adapters.threat_mapping import ThreatMappingAdapter
 from application.execution import StepAdapter
@@ -20,6 +21,7 @@ def create_default_adapters(team: Any) -> dict[str, StepAdapter]:
     field_skill_adapter = FieldSkillAdapter()
     return {
         "log_parse": LogParseAdapter(),
+        "log_knowledge_submit": LogKnowledgeSubmitAdapter(),
         "field_mapping": FieldMappingAdapter(team),
         "enum_extract": EnumExtractAdapter(),
         "threat_mapping": ThreatMappingAdapter(team),

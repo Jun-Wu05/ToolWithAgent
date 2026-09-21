@@ -13,6 +13,7 @@ from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 from contracts.session_facts import ExecutionSummary
 from contracts.planner_models import PendingPlan, StepSpec
 from contracts.rule_source import RuleSourceFields
+from application.log_knowledge_submission import LogKnowledgeSubmissionSnapshot
 
 
 _MAPPED_SUB_RULE_CONFIG_REF = "session.mapped_sub_rules"
@@ -40,7 +41,11 @@ def _write_state_value(session: Any, key: str, value: Any) -> None:
     setattr(session, key, value)
 
 
-def commit_log_classification(session: Any, classification: Dict[str, Any]) -> bool:
+def commit_log_classification(
+    session: Any,
+    classification: Dict[str, Any],
+    submission: LogKnowledgeSubmissionSnapshot | None = None,
+) -> bool:
     """提交新日志分类并失效所有依赖旧分类的映射后子规则状态。
 
     返回是否实际清除了非空派生状态，供调用方决定是否向用户显示覆盖警告。
@@ -81,6 +86,7 @@ def commit_log_classification(session: Any, classification: Dict[str, Any]) -> b
     _write_state_value(session, "pending_plan", None)
     _write_state_value(session, "threat_source_field_override", None)
     _write_state_value(session, "log_classification", classification)
+    _write_state_value(session, "log_knowledge_submission", submission)
     return had_mapping_derivatives
 
 
@@ -191,6 +197,9 @@ class SessionState:
     log_classification: Optional[Dict[str, Any]] = None
     """日志解析 Pipeline 的分类结果，供规则导出使用"""
 
+    log_knowledge_submission: Optional[LogKnowledgeSubmissionSnapshot] = None
+    """绑定当前主数据与分类的日志知识申请资格快照。"""
+
     rule_source_fields: Optional[RuleSourceFields] = None
     """用户显式填写、绑定当前主数据和日志分类的规则来源字段"""
 
@@ -272,6 +281,7 @@ class SessionState:
         self.last_enum_extract_result = None
         self.latest_enum_artifact = None
         self.log_classification = None
+        self.log_knowledge_submission = None
         self.rule_source_fields = None
         self.pending_rule_source_step = None
         self.pending_plan = None
