@@ -52,6 +52,15 @@ class LogParseStep(StrictContract):
     depends_on: tuple[str, ...] = ()
 
 
+class LogKnowledgeSubmitStep(StrictContract):
+    """描述由结果区按钮创建的日志知识申请步骤；Planner 不得生成。"""
+
+    step_id: str = Field(min_length=1)
+    type: Literal["log_knowledge_submit"]
+    submission_token: str = Field(min_length=1)
+    depends_on: tuple[str, ...] = ()
+
+
 class FieldMappingStep(StrictContract):
     """描述字段映射步骤及其明确的数据来源。"""
 
@@ -306,6 +315,17 @@ StepSpec = Annotated[
     Field(discriminator="type"),
 ]
 
+# 确定性动作可以比 Planner 多拥有受控步骤，但不能反向扩大 Planner schema。
+ExecutableStep = Union[StepSpec, LogKnowledgeSubmitStep]
+
+
+class DeterministicPlan(StrictContract):
+    """按钮等可信入口构造的类型化计划，不经过 Planner 输出协议。"""
+
+    decision: Literal["execute"] = "execute"
+    plan_id: str = Field(min_length=1)
+    steps: tuple[ExecutableStep, ...] = Field(min_length=1)
+
 
 class PlanDecision(StrictContract):
     """表达 Planner 唯一允许返回的执行、授权控制、澄清或帮助决策。"""
@@ -481,6 +501,18 @@ class LogClassificationArtifact(ArtifactContract):
 
     artifact_type: Literal["log_classification"] = "log_classification"
     classification: dict[str, object]
+    submission_eligible: bool = False
+    submission_token: str | None = None
+
+
+class LogKnowledgeSubmissionArtifact(ArtifactContract):
+    """保存显式提交的稳定终态，不携带原始日志或样例。"""
+
+    artifact_type: Literal["log_knowledge_submission"] = "log_knowledge_submission"
+    submission_status: Literal[
+        "created", "pending_duplicate", "already_approved", "stale", "error"
+    ]
+    application_id: int | None = Field(default=None, ge=1)
 
 
 class ConfigExportArtifact(ArtifactContract):
@@ -497,6 +529,7 @@ StepArtifact = Annotated[
         ThreatMappingArtifact,
         FieldMappingArtifact,
         LogClassificationArtifact,
+        LogKnowledgeSubmissionArtifact,
         ConfigExportArtifact,
     ],
     Field(discriminator="artifact_type"),

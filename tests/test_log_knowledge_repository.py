@@ -79,6 +79,71 @@ def test_pending_application_round_trips_through_review_detail(tmp_path):
     assert detail.samples == ("Type=Auth; User=a",)
 
 
+def test_atomic_submission_is_idempotent_and_rejected_can_resubmit(tmp_path):
+    from agent.tools.log_pattern_store import (
+        LogKnowledgeApplicationInput,
+        LogKnowledgeRepository,
+    )
+
+    repository = LogKnowledgeRepository(tmp_path / "knowledge.db")
+    application = LogKnowledgeApplicationInput(
+        1, "structure-1", ("kv",), "kv", {}, "explicit", "type",
+        "field_path", {"path": "type"}, "alice",
+    )
+
+    created = repository.submit_application(application, ["type=a", "type=b"])
+    duplicate = repository.submit_application(application, ["type=b", "type=c"])
+
+    assert created.status == "created"
+    assert duplicate.status == "pending_duplicate"
+    assert duplicate.application_id == created.application_id
+    assert repository.get_review_detail(created.application_id).samples == (
+        "type=a", "type=b", "type=c",
+    )
+
+    repository.reject(created.application_id, reviewer="admin", reason="bad recipe")
+    resubmitted = repository.submit_application(application, ["type=d"])
+    assert resubmitted.status == "created"
+    assert resubmitted.application_id != created.application_id
+
+    repository.approve(resubmitted.application_id, reviewer="admin")
+    approved = repository.submit_application(application, ["type=secret"])
+    assert approved.status == "already_approved"
+    assert approved.application_id == resubmitted.application_id
+    assert "type=secret" not in repository.get_review_detail(
+        resubmitted.application_id
+    ).samples
+
+
+def test_concurrent_atomic_submission_recovers_to_one_pending_identity(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from agent.tools.log_pattern_store import (
+        LogKnowledgeApplicationInput,
+        LogKnowledgeRepository,
+    )
+
+    repository = LogKnowledgeRepository(tmp_path / "knowledge.db")
+    application = LogKnowledgeApplicationInput(
+        1, "structure-1", ("kv",), "kv", {}, "automatic", "",
+        "field_path", {"path": "type"}, "alice",
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda sample: repository.submit_application(application, [sample]),
+                ("type=a", "type=b"),
+            )
+        )
+
+    assert {result.status for result in results} == {"created", "pending_duplicate"}
+    assert len({result.application_id for result in results}) == 1
+    assert set(repository.get_review_detail(results[0].application_id).samples) == {
+        "type=a", "type=b",
+    }
+
+
 def test_samples_are_sha256_deduplicated_bounded_and_ordered(tmp_path):
     from agent.tools.log_pattern_store import (
         LogKnowledgeApplicationInput,

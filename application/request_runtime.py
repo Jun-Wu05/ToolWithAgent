@@ -28,6 +28,7 @@ from application.threat_chain import (
 )
 from contracts.planner_models import (
     ExecutionReport,
+    DeterministicPlan,
     PendingPlan,
     PlanDecision,
     StepStatus,
@@ -55,7 +56,7 @@ async def _execute_plan_with_threat_transaction(
     *,
     session: Any,
     team: Any,
-    plan: PlanDecision,
+    plan: PlanDecision | DeterministicPlan,
     progress_sink: ProgressSink,
     session_facts: SessionFacts | None = None,
 ) -> ExecutionReport:
@@ -297,6 +298,8 @@ def clear_session_data(session: Any) -> None:
         "last_enum_extract_result",
         "latest_threat_artifact",
         "latest_enum_artifact",
+        "log_classification",
+        "log_knowledge_submission",
         "rule_source_fields",
         "pending_rule_source_step",
         "pending_plan",
@@ -498,7 +501,7 @@ async def run_deterministic_plan(
     *,
     session: Any,
     team: Any,
-    plan: PlanDecision,
+    plan: DeterministicPlan,
     progress_sink: ProgressSink,
     on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None = None,
 ) -> ExecutionReport:
@@ -517,7 +520,7 @@ async def _run_deterministic_plan_scoped(
     *,
     session: Any,
     team: Any,
-    plan: PlanDecision,
+    plan: DeterministicPlan,
     progress_sink: ProgressSink,
     on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None,
 ) -> ExecutionReport:

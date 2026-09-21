@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from application.adapters.shared import _failed, _session_get, _success
 from application.execution import ExecutionContext
 from application.parsing import parse_json_safe
+from application.log_knowledge_submission import build_submission_snapshot
 from application.session_state import commit_log_classification
 from contracts.planner_models import (
     LogClassificationArtifact,
@@ -93,8 +94,14 @@ class LogParseAdapter:
             return _failed(step, "log_parse_failed", "日志类型提取没有生成有效结果")
 
         classification = self._sample_filler(classification, logs_text)
+        submission = build_submission_snapshot(
+            classification,
+            log_lines,
+            selection_mode="explicit" if step.feature_field is not None else "automatic",
+            feature_field=step.feature_field,
+        )
         cleared_mapping_derivatives = commit_log_classification(
-            context.session, classification
+            context.session, classification, submission
         )
         classification_details = classification.get("classification_details")
         item_count = (
@@ -113,6 +120,10 @@ class LogParseAdapter:
             LogClassificationArtifact(
                 classification=classification,
                 item_count=item_count,
+                submission_eligible=submission.eligible,
+                submission_token=(
+                    submission.submission_token if submission.eligible else None
+                ),
             ),
             message=message,
         )

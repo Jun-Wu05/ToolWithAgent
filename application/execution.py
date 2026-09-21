@@ -8,6 +8,7 @@ from typing import Any, Mapping, Protocol
 
 from contracts.planner_models import (
     EnumExtractStep,
+    DeterministicPlan,
     ExecutionReport,
     ExportStep,
     FieldMappingStep,
@@ -17,6 +18,7 @@ from contracts.planner_models import (
     RemoveMappingStep,
     StepResult,
     StepSpec,
+    ExecutableStep,
     StepStatus,
     THREAT_TYPE_FIELD,
     ThreatMappingStep,
@@ -48,7 +50,7 @@ class StepAdapter(Protocol):
 
     async def execute(
         self,
-        step: StepSpec,
+        step: ExecutableStep,
         context: ExecutionContext,
         dependencies: Mapping[str, StepResult],
     ) -> StepResult:
@@ -59,13 +61,13 @@ class ExecutionPolicy(Protocol):
     """在执行接缝注入领域预检，避免核心依赖具体领域实现。"""
 
     def validate_plan(
-        self, plan: PlanDecision, context: ExecutionContext
-    ) -> tuple[StepSpec, StepResult] | None:
+        self, plan: PlanDecision | DeterministicPlan, context: ExecutionContext
+    ) -> tuple[ExecutableStep, StepResult] | None:
         """在任何步骤写入前校验整份计划。"""
 
     def validate_step(
         self,
-        step: StepSpec,
+        step: ExecutableStep,
         context: ExecutionContext,
         ledger: Mapping[str, StepResult],
     ) -> StepResult | None:
@@ -76,13 +78,13 @@ class NullExecutionPolicy:
     """无额外领域规则时使用的框架无关策略。"""
 
     def validate_plan(
-        self, plan: PlanDecision, context: ExecutionContext
-    ) -> tuple[StepSpec, StepResult] | None:
+        self, plan: PlanDecision | DeterministicPlan, context: ExecutionContext
+    ) -> tuple[ExecutableStep, StepResult] | None:
         return None
 
     def validate_step(
         self,
-        step: StepSpec,
+        step: ExecutableStep,
         context: ExecutionContext,
         ledger: Mapping[str, StepResult],
     ) -> StepResult | None:
@@ -108,7 +110,7 @@ class PlanExecutor:
 
     async def execute(
         self,
-        plan: PlanDecision,
+        plan: PlanDecision | DeterministicPlan,
         context: ExecutionContext,
     ) -> ExecutionReport:
         """执行已校验计划并返回本次步骤账本，绝不回退到关键词路由。"""
@@ -314,10 +316,18 @@ class PlanExecutor:
         )
         return execution_report
 
+    async def execute_deterministic(
+        self,
+        plan: DeterministicPlan,
+        context: ExecutionContext,
+    ) -> ExecutionReport:
+        """执行可信按钮构造的计划，并复用同一校验、进度、账本和分派链。"""
+        return await self.execute(plan, context)
+
     @staticmethod
     async def _publish_step_terminal(
         plan_id: str,
-        step: StepSpec,
+        step: ExecutableStep,
         result: StepResult,
         progress_sink: ProgressSink,
     ) -> None:
@@ -343,7 +353,7 @@ class PlanExecutor:
 
     def _validate_step(
         self,
-        step: StepSpec,
+        step: ExecutableStep,
         session_facts: SessionFacts,
         ledger: Mapping[str, StepResult],
     ) -> StepResult | None:
@@ -455,7 +465,7 @@ class PlanExecutor:
                     )
         return None
 
-    def _validate_result(self, step: StepSpec, result: StepResult) -> StepResult:
+    def _validate_result(self, step: ExecutableStep, result: StepResult) -> StepResult:
         """验证适配器结果属于当前步骤，并阻止填充零变更被静默报告成功。"""
         if result.step_id != step.step_id or result.operation_type != step.type:
             return self._error_result(step, "invalid_step_result", "适配器返回了不匹配的步骤结果")
@@ -464,7 +474,7 @@ class PlanExecutor:
         return result
 
     @staticmethod
-    def _error_result(step: StepSpec, error_code: str, message: str) -> StepResult:
+    def _error_result(step: ExecutableStep, error_code: str, message: str) -> StepResult:
         """构造稳定失败结果，不携带敏感输入原值。"""
         return StepResult(
             step_id=step.step_id,
@@ -475,7 +485,7 @@ class PlanExecutor:
         )
 
     @staticmethod
-    def _needs_input_result(step: StepSpec, error_code: str, message: str) -> StepResult:
+    def _needs_input_result(step: ExecutableStep, error_code: str, message: str) -> StepResult:
         """构造待输入结果，使调用层明确追问而不是猜测参数。"""
         return StepResult(
             step_id=step.step_id,

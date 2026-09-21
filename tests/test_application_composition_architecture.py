@@ -8,6 +8,7 @@ from pathlib import Path
 
 EXPECTED_STEP_TYPES = {
     "log_parse",
+    "log_knowledge_submit",
     "field_mapping",
     "enum_extract",
     "threat_mapping",
@@ -49,12 +50,14 @@ def test_default_composition_uses_application_adapters_and_one_field_skill_insta
     from application.adapters.field_skill import FIELD_SKILL_REGISTRY, FieldSkillAdapter
     from application.adapters.fill import FillAdapter
     from application.adapters.log_parse import LogParseAdapter
+    from application.adapters.log_knowledge_submit import LogKnowledgeSubmitAdapter
     from application.adapters.remove_mapping import RemoveMappingAdapter
     from application.adapters.threat_mapping import ThreatMappingAdapter
 
     adapters = create_default_adapters(None)
     expected_types = {
         "log_parse": LogParseAdapter,
+        "log_knowledge_submit": LogKnowledgeSubmitAdapter,
         "field_mapping": FieldMappingAdapter,
         "enum_extract": EnumExtractAdapter,
         "threat_mapping": ThreatMappingAdapter,

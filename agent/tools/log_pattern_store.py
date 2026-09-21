@@ -103,6 +103,14 @@ class LogKnowledgeReviewDetail:
     replaced_by_application_id: int | None
 
 
+@dataclass(frozen=True)
+class LogKnowledgeSubmissionResult:
+    """Atomic explicit-submission outcome without review sample contents."""
+
+    status: str
+    application_id: int
+
+
 class LogKnowledgeError(RuntimeError):
     """Stable, non-sensitive repository failure."""
 
@@ -221,6 +229,80 @@ class LogKnowledgeRepository:
             ).fetchone()
         return int(row[0]) if row is not None else None
 
+    def submit_application(
+        self,
+        application: LogKnowledgeApplicationInput,
+        samples: list[str] | tuple[str, ...] = (),
+    ) -> LogKnowledgeSubmissionResult:
+        """Atomically create or reuse an active application by recipe identity."""
+        if application.selection_mode not in {"automatic", "explicit"}:
+            raise ValueError("invalid log knowledge selection mode")
+        if application.extractor_type not in {"regex", "field_path"}:
+            raise ValueError("invalid log knowledge extractor type")
+        if application.recipe_version < 1:
+            raise ValueError("invalid log knowledge recipe version")
+
+        identity = _application_identity(application)
+        feature_field = (
+            "" if application.selection_mode == "automatic" else application.feature_field
+        )
+        now = _utc_now()
+        try:
+            with self.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                active = connection.execute(
+                    """
+                    SELECT id, status FROM log_knowledge_applications
+                    WHERE identity_hash = ? AND status IN ('pending', 'approved')
+                    """,
+                    (identity,),
+                ).fetchone()
+                if active is not None:
+                    application_id, status = int(active[0]), str(active[1])
+                    if status == "pending":
+                        self._add_samples_bounded(connection, application_id, samples)
+                        connection.commit()
+                        return LogKnowledgeSubmissionResult(
+                            "pending_duplicate", application_id
+                        )
+                    connection.commit()
+                    return LogKnowledgeSubmissionResult(
+                        "already_approved", application_id
+                    )
+
+                cursor = connection.execute(
+                    """
+                    INSERT INTO log_knowledge_applications (
+                        identity_hash, recipe_version, structure_hash,
+                        structure_tokens_json, format_type, format_spec_json,
+                        selection_mode, feature_field, extractor_type,
+                        extractor_spec_json, status, submitter,
+                        submission_note, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                    """,
+                    (
+                        identity,
+                        application.recipe_version,
+                        application.structure_hash,
+                        _stable_json(application.structure_tokens),
+                        application.format_type,
+                        _stable_json(application.format_spec),
+                        application.selection_mode,
+                        feature_field,
+                        application.extractor_type,
+                        _stable_json(application.extractor_spec),
+                        application.submitter,
+                        application.submission_note,
+                        now,
+                    ),
+                )
+                application_id = int(cursor.lastrowid)
+                self._add_samples_bounded(connection, application_id, samples)
+                connection.commit()
+                return LogKnowledgeSubmissionResult("created", application_id)
+        except sqlite3.Error as exc:
+            raise LogKnowledgeError("log knowledge submission failed") from exc
+
     @staticmethod
     def _insert_samples(
         connection: sqlite3.Connection,
@@ -244,6 +326,37 @@ class LogKnowledgeRepository:
                 """,
                 (application_id, digest, sample, now),
             )
+
+    @staticmethod
+    def _add_samples_bounded(
+        connection: sqlite3.Connection,
+        application_id: int,
+        samples: list[str] | tuple[str, ...],
+    ) -> None:
+        """Add deduplicated review samples inside the caller's transaction."""
+        existing = {
+            row[0]
+            for row in connection.execute(
+                "SELECT sample_hash FROM log_knowledge_samples WHERE application_id = ?",
+                (application_id,),
+            )
+        }
+        now = _utc_now()
+        for sample in samples:
+            digest = sha256(sample.encode("utf-8")).hexdigest()
+            if digest in existing:
+                continue
+            if len(existing) >= 10:
+                break
+            connection.execute(
+                """
+                INSERT INTO log_knowledge_samples (
+                    application_id, sample_hash, sample_log, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (application_id, digest, sample, now),
+            )
+            existing.add(digest)
 
     def get_review_detail(self, application_id: int) -> LogKnowledgeReviewDetail:
         with self.connect() as connection:

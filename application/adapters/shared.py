@@ -23,6 +23,7 @@ from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
 from contracts.planner_models import (
     ConfigDownloadKind,
     ConfigExportArtifact,
+    ExecutableStep,
     StepArtifact,
     StepResult,
     StepSpec,
@@ -235,7 +236,7 @@ async def run_member_stream(
     return getattr(response, "content", response)
 
 
-def _success(step: StepSpec, artifact: StepArtifact, message: str | None = None) -> StepResult:
+def _success(step: ExecutableStep, artifact: StepArtifact, message: str | None = None) -> StepResult:
     """把已验证的类型化领域产物转换为统一成功结果。"""
     return StepResult(
         step_id=step.step_id,
@@ -246,7 +247,7 @@ def _success(step: StepSpec, artifact: StepArtifact, message: str | None = None)
     )
 
 
-def _failed(step: StepSpec, error_code: str, message: str) -> StepResult:
+def _failed(step: ExecutableStep, error_code: str, message: str) -> StepResult:
     """把领域失败转换为稳定错误码，不携带敏感原值。"""
     return StepResult(
         step_id=step.step_id,
@@ -257,7 +258,7 @@ def _failed(step: StepSpec, error_code: str, message: str) -> StepResult:
     )
 
 
-def _needs_input(step: StepSpec, error_code: str, message: str) -> StepResult:
+def _needs_input(step: ExecutableStep, error_code: str, message: str) -> StepResult:
     """把缺失输入转换为待输入结果，阻止执行器继续后续步骤。"""
     return StepResult(
         step_id=step.step_id,

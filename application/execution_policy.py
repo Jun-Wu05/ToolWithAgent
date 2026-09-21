@@ -10,11 +10,13 @@ from application.execution import ExecutionContext, PlanExecutor, StepAdapter
 from application.field_source import extract_log_body_keys
 from contracts.planner_models import (
     AddFieldsStep,
+    DeterministicPlan,
     EnumExtractStep,
     LogParseStep,
     PlanDecision,
     StepResult,
     StepSpec,
+    ExecutableStep,
     StepStatus,
 )
 
@@ -54,8 +56,8 @@ class DefaultExecutionPolicy:
     """集中事件名称与显式点名字段的计划级守卫。"""
 
     def validate_plan(
-        self, plan: PlanDecision, context: ExecutionContext
-    ) -> tuple[StepSpec, StepResult] | None:
+        self, plan: PlanDecision | DeterministicPlan, context: ExecutionContext
+    ) -> tuple[ExecutableStep, StepResult] | None:
         """非法事件名称必须在任何步骤写入前拦截。"""
         for step in plan.steps:
             if not (
@@ -81,7 +83,7 @@ class DefaultExecutionPolicy:
 
     def validate_step(
         self,
-        step: StepSpec,
+        step: ExecutableStep,
         context: ExecutionContext,
         ledger: Mapping[str, StepResult],
     ) -> StepResult | None:

@@ -209,6 +209,7 @@ _PRIMARY_DATASET_STATE_KEYS = (
     "latest_threat_artifact",
     "latest_enum_artifact",
     "log_classification",
+    "log_knowledge_submission",
     "rule_source_fields",
     "pending_rule_source_step",
     "pending_plan",
