@@ -79,6 +79,7 @@ def test_action_callbacks_are_registered_once() -> None:
         "export_mapped_sub_rules",
         "submit_rule_source_fields",
         "cancel_rule_source_fields",
+        "submit_log_knowledge",
     }
     registrations = _chainlit_decorators(root / "web/action_callbacks.py")
     names = [value for decorator, value in registrations if decorator == "action_callback"]
