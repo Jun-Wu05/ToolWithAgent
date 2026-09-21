@@ -9,8 +9,7 @@
 
 ## UI 模式
 
-本项目为后端 Agent 系统（Agno + Chainlit Web 界面），无面向用户的可视化 UI 设计需求。
-UI 模式判定为 **headless**：跳过 `docs/design/` 门禁；不适用 Design Issue / UI issue 模板。
+当前生产入口仍为 Chainlit；V2 已确定新增 React/FastAPI 用户入口、会话页、任务中心和管理/诊断页面，因此项目不再按 **headless** 处理。涉及 V2 页面结构、交互或视觉实现的 PRD / issue 必须消费 `docs/design/` 中的现有设计资料并执行 UI 门禁；纯业务运行时、Agent 或 Chainlit 兼容改动可按非 UI 工作处理。V2 的详细视觉设计在独立设计讨论中确定，不得因视觉方案尚未冻结而擅自扩展本轮 PRD 的业务范围。
 
 如果这些文件中的任何一个不存在，**静默继续**。不要指出它们缺失，也不要建议提前创建它们。
 生产者 skill（`/grill-with-docs`）会在术语或决策实际确定时，再按需创建它们。
