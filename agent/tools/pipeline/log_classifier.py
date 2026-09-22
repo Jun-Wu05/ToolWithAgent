@@ -327,7 +327,8 @@ def _classify_kv_features(
                     # 日志体为空，保留原始行（兼容性）
                     body_lines.append(line)
                     logger.warning(
-                        f"[_classify_kv_features] 日志体为空，保留原始行: {line[:100]}"
+                        "[_classify_kv_features] 日志体为空，保留原始行; "
+                        f"line_length={len(line)}"
                     )
             body_logs = '\n'.join(body_lines)
 
@@ -347,11 +348,12 @@ def _classify_kv_features(
                 )
                 body_lines = lines
                 body_logs = logs_str
+                header_end_marker = ""
 
             logger.info(
-                f"[_classify_kv_features] 使用 header_end_marker='{header_end_marker}' 提取日志体: "
-                f"成功={extracted_count}/{len(lines)}, "
-                f"日志体示例（前50字符）: {body_logs[:50]}"
+                "[_classify_kv_features] header_end_marker 提取日志体完成: "
+                f"marker_length={len(header_end_marker)}, "
+                f"成功={extracted_count}/{len(lines)}, body_length={len(body_logs)}"
             )
 
     # 2. 使用 KvExtractor 提取 + 聚合（使用新参数名）
@@ -417,6 +419,7 @@ def _classify_kv_features(
             format_detail=format_detail or format_type,
             feature_field=feature_field,
             header_end_marker=header_end_marker,
+            sample_format="kv",
             extractor_func=extractor.extract_value,
         )
     except httpx.HTTPStatusError as e:
@@ -655,9 +658,9 @@ def _do_classify_log_features(
             header_end_marker=header_end_marker,
         )
 
-    # ---- 确定性路由：特征键作为日志体键覆盖绝大多数行时，跳过头部路由与剥离 ----
+    # ---- 确定性路由：特征键作为日志体键覆盖绝大多数行时，跳过头部路由 ----
     # 特征键明明是日志体键时不走 Step 2a 头部聚类采样（避免采样覆盖丢失），
-    # 也不应用任何 header_end_marker 剥离；真头部特征（键不在行内）保持原路由。
+    # 有效 marker 由 KV 探针确认后剥头，无效 marker 回退整行；真头部特征保持原路由。
     if feature_field and feature_field.strip() and feature_field != "__header__":
         routing_info = _parse_format_info_dict(format_info) or {}
         if is_kv:
@@ -681,7 +684,7 @@ def _do_classify_log_features(
                     format_detail=format_detail,
                     feature_field=feature_field,
                     format_info=routing_info,
-                    header_end_marker="",
+                    header_end_marker=header_end_marker,
                 )
         else:
             coverage = _json_key_line_coverage(logs_str, feature_field)

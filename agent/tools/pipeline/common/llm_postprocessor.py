@@ -144,13 +144,15 @@ def match_real_samples(
         extractor_func:    可调用对象 ``(line, feature_field) -> value``。
         feature_field:     字段名覆盖；回退使用 ``parsed["feature_field"]``。
         header_end_marker: 头部与 body 的分隔符。
-        sample_format:     调用方确认的样本格式；``json`` 不依赖 marker 提取 body。
+        sample_format:     调用方确认的样本格式；``json`` 不依赖 marker 提取 body，
+                           ``kv`` 按 marker 确定性剥离头部。
 
     Returns:
         同一个 ``parsed`` 字典（为方便链式调用而原地修改并返回）。
     """
     ff = feature_field or parsed.get("feature_field", "log_type")
     is_json_sample = sample_format.strip().lower() == "json"
+    is_kv_sample = sample_format.strip().lower() == "kv"
     log_lines = [l for l in logs_str.strip().split("\n") if l.strip()]
     details = parsed.get("classification_details", [])
     
@@ -196,11 +198,13 @@ def match_real_samples(
                 else:
                     body = line
         elif header_end_marker:
-            # 无 feature_identifier，JSON 格式：优先用 {...} 提取 body，
-            # 避免 syslog 头多空格时 split(marker, 1) 从首个空格误切断
+            # KV 按 marker 确定性剥头，避免 body 内嵌 JSON 被贪婪截断；
+            # 未声明格式的既有调用仍保留 JSON body 提取行为。
             from agent.tools.pipeline.common.json_utils import strip_header_to_body
 
-            body = strip_header_to_body(line, header_end_marker, is_json=True)
+            body = strip_header_to_body(
+                line, header_end_marker, is_json=not is_kv_sample
+            )
 
         feature_val = extractor_func(body, ff)
         if feature_val is None and body != line:
@@ -242,12 +246,12 @@ def match_real_samples(
                 detail["real_samples"] = "[匹配失败]"
                 body_extraction_failures.append(lt or "<unknown>")
         elif header_end_marker and matched_line:
-            # 无 feature_identifier，JSON 格式：优先用 {...} 提取 body，
-            # 避免 syslog 头多空格时 split(marker, 1) 从首个空格误切断
+            # KV 按 marker 确定性剥头，避免 body 内嵌 JSON 被贪婪截断；
+            # 未声明格式的既有调用仍保留 JSON body 提取行为。
             from agent.tools.pipeline.common.json_utils import strip_header_to_body
 
             detail["real_samples"] = strip_header_to_body(
-                matched_line, header_end_marker, is_json=True
+                matched_line, header_end_marker, is_json=not is_kv_sample
             )
         elif matched_line and matched_line.lstrip().startswith("{"):
             # fallback: 无 header_end_marker 时，仅当整行以 { 开头（纯 JSON 日志）
