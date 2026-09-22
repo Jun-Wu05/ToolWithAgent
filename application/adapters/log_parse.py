@@ -92,6 +92,14 @@ class LogParseAdapter:
         classification = parse_json_safe(classification_text)
         if not isinstance(classification, dict) or not classification:
             return _failed(step, "log_parse_failed", "日志类型提取没有生成有效结果")
+        if classification.get("status") == "FAILED":
+            # 分类器已明确失败（如特征字段零匹配）：以稳定错误上报步骤失败，
+            # 不提交空分类产物，会话保留上一次成功结果（#259）。
+            return _failed(
+                step,
+                "log_parse_failed",
+                f"日志类型提取失败：{classification.get('error') or '分类器未提供失败原因'}",
+            )
 
         classification = self._sample_filler(classification, logs_text)
         submission = build_submission_snapshot(

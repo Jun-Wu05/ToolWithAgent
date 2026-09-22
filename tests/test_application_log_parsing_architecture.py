@@ -366,13 +366,18 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
 
 
 def test_nonempty_failed_classification_preserves_historical_success_result() -> None:
-    """零行为迁移不改变非空 FAILED 分类字典仍被提交的历史语义。"""
+    """非空 FAILED 分类字典与空字典同语义：步骤失败、不提交空产物、会话保留历史结果（#259）。"""
     from application.adapters.log_parse import LogParseAdapter
     from application.execution import ExecutionContext
     from application.session_projection import build_session_facts
     from contracts.planner_models import LogParseStep, StepStatus
 
-    session = {"raw_log_lines": ["kind=attack"]}
+    previous = {"classification_details": [{"logtype": "old"}]}
+    session = {
+        "raw_log_lines": ["kind=attack"],
+        "log_classification": previous,
+        "mapped_sub_rules": [{"name": "old-mapped"}],
+    }
     result = asyncio.run(
         LogParseAdapter(
             format_identifier=lambda _: '{"format":"kv"}',
@@ -385,11 +390,11 @@ def test_nonempty_failed_classification_preserves_historical_success_result() ->
         )
     )
 
-    assert result.status == StepStatus.SUCCESS
-    assert session["log_classification"] == {
-        "status": "FAILED",
-        "error": "历史失败结构",
-    }
+    assert result.status == StepStatus.FAILED
+    assert result.error_code == "log_parse_failed"
+    assert "历史失败结构" in (result.message or "")
+    assert session["log_classification"] is previous
+    assert session["mapped_sub_rules"] == [{"name": "old-mapped"}]
 
 
 def test_legacy_json_prompt_and_adapter_paths_reexport_identical_objects() -> None:
