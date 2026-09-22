@@ -42,8 +42,12 @@ HALLUCINATED_MARKER_INFO = json.dumps(
 )
 
 
-def _mock_classifier_llm(monkeypatch, logtypes=EXPECTED_TYPES):
-    """固定分类 LLM 输出；非分类提示词（特征正则生成）返回全行正则。
+def _mock_classifier_llm(
+    monkeypatch,
+    logtypes=EXPECTED_TYPES,
+    feature_identifier_regex=r"^(.*)$",
+):
+    """固定分类 LLM 输出，并允许测试指定特征 body 正则。
 
     log_header_processor 模块有独立的 LLM 导入，需一并替换，避免测试触网。
     """
@@ -64,7 +68,7 @@ def _mock_classifier_llm(monkeypatch, logtypes=EXPECTED_TYPES):
                 },
                 ensure_ascii=False,
             )
-        return "r'^(.*)$'"
+        return f"r'{feature_identifier_regex}'"
 
     monkeypatch.setattr(log_classifier, "_call_llm_direct", _fake_llm)
     monkeypatch.setattr(log_header_processor, "_call_llm_direct", _fake_llm)
@@ -94,7 +98,7 @@ def test显式特征字段在幻觉marker下不剥离首字段(monkeypatch):
 
 
 def test自动模式特征键全行出现时跳过定位器直接聚合(monkeypatch):
-    """特征键覆盖绝大多数行（日志体键）时确定性行路由：不走 Step 2a、不剥离。"""
+    """特征键覆盖绝大多数行时跳过 Step 2a；无效 marker 仍由探针回退。"""
     _mock_classifier_llm(monkeypatch)
     locator_calls = []
 
@@ -251,3 +255,75 @@ def test剥离使特征键存在率骤降时回退不剥离(monkeypatch):
     assert result["status"] == "SUCCESS"
     assert result["coverage"]["matched_lines"] == 2
     assert {d["logtype"] for d in result["classification_details"]} == {"AuthLog", "Mail"}
+    assert all(
+        detail["real_samples"].startswith("Type=")
+        for detail in result["classification_details"]
+    )
+
+
+def test_header_kv_real_sample去头且不误截内嵌json(monkeypatch):
+    """RFC5424-ish Header + KV 的真实样例应从 msg_type 开始。"""
+    _mock_classifier_llm(
+        monkeypatch,
+        logtypes={"cloudwalker-suspicious-command"},
+        feature_identifier_regex=r"^.*? - (.*)$",
+    )
+    body = (
+        'msg_type="cloudwalker-suspicious-command" '
+        'process_tree=[{"pname":"init","pid":1}] src_ip="10.0.0.1"'
+    )
+    line = (
+        "<14>1 2026-04-14T05:57:55Z sensor01 cloudwalker 123 ID47"
+        f" - {body}"
+    )
+
+    result = json.loads(
+        classify_log_features_headless(
+            line,
+            "kv",
+            "日志头+KV",
+            "msg_type",
+            json.dumps({"delimit": " ", "tab": "="}),
+            " - ",
+        )
+    )
+
+    detail = result["classification_details"][0]
+    assert result["status"] == "SUCCESS"
+    assert result["coverage"]["matched_lines"] == 1
+    assert result["coverage"]["unmatched_lines"] == 0
+    assert detail["sample"] == line
+    assert detail["real_samples"].startswith("msg_type=")
+    assert detail["real_samples"] == body
+    assert 'process_tree=[{"pname":"init","pid":1}]' in detail["real_samples"]
+
+
+def test_header_kv分类运行日志不泄露原始样例(monkeypatch, caplog):
+    """运行日志只能记录计数和结构信息，不得记录原始日志内容。"""
+    secret = "S258LEAK"
+    lines = (
+        "<14>1 2026-04-14T05:57:55Z sensor01 app 123 ID47 - "
+        f'msg_type="AuthLog" token="{secret}"'
+    )
+    _mock_classifier_llm(
+        monkeypatch,
+        logtypes={"AuthLog"},
+        feature_identifier_regex=r"^.*? - (.*)$",
+    )
+    caplog.set_level("INFO", logger="log_parser_pipeline")
+
+    result = json.loads(
+        classify_log_features_headless(
+            lines,
+            "kv",
+            "日志头+KV",
+            "msg_type",
+            json.dumps({"delimit": " ", "tab": "="}),
+            " - ",
+        )
+    )
+
+    assert result["status"] == "SUCCESS"
+    assert result["coverage"]["matched_lines"] == 1
+    assert result["coverage"]["unmatched_lines"] == 0
+    assert secret not in caplog.text
