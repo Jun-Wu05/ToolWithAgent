@@ -150,11 +150,13 @@ def _enforce_format_consistency(parsed: dict, sampled: str) -> list[dict]:
     kv_like = sum(1 for body in bodies if _DEFAULT_KV_PATTERN.search(body))
     if kv_like < max(1, len(bodies) // 2):
         return []
-    # 确定性检测分隔符：键值分隔符（= 或 :），字段分隔符（space / || / ;）。
+    # 确定性检测分隔符：键值分隔符（= 或 :），字段分隔符（space / || / | / ;）。
     text = " ".join(bodies)
     tab = ":" if text.count(":") > text.count("=") else "="
     if "||" in text:
         delimit = "||"
+    elif text.count("|") >= 2:
+        delimit = "|"
     elif text.count(";") >= 2:
         delimit = ";"
     else:
@@ -255,7 +257,11 @@ def _do_identify_log_format(logs_str: str) -> str:
             "tab": "\t",
         }
         if "kv_separator" in parsed and parsed["kv_separator"] in separator_map:
-            parsed["delimit"] = separator_map[parsed["kv_separator"]]  # 字段分隔符
+            normalized_separator = separator_map[parsed["kv_separator"]]  # 字段分隔符
+            # 词表塌缩不得销毁精确观察：pipe 族的单/双竖线由 LLM 原样 delimiter 决定（#259）
+            if normalized_separator == "||" and parsed.get("delimiter") in ("|", "||"):
+                normalized_separator = parsed["delimiter"]
+            parsed["delimit"] = normalized_separator
         elif "kv_separator" in parsed and parsed["kv_separator"] is not None:
             parsed["delimit"] = parsed["kv_separator"]
         else:

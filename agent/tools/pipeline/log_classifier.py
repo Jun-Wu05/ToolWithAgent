@@ -28,7 +28,10 @@ from agent.tools.pipeline.llm_client import (
     _call_llm_direct,
     normalize_log_format,
 )
-from agent.tools.pipeline.classification_policy import decide_body_key_route
+from agent.tools.pipeline.classification_policy import (
+    BODY_KEY_COVERAGE_THRESHOLD,
+    decide_body_key_route,
+)
 
 logger = get_logger("log_parser_pipeline")
 
@@ -387,6 +390,44 @@ def _classify_kv_features(
             logger.info(f"[_classify_kv_features] 等号分隔符成功，匹配到 {matched_lines} 行")
 
     if matched_lines == 0:
+        # 数据裁决兜底（#259）："LLM 提议、数据裁决"——声称分隔符零匹配时，
+        # 对候选集（声称值 + LLM 原样 delimiter + 常见符号 + 数据派生）逐个用
+        # 特征键行覆盖率探针打分，取最高且达阈值者重试聚合；全不达阈值才失败。
+        candidates: list[str] = []
+        raw_delimiter = (format_info or {}).get("delimiter")
+        for candidate in (
+            field_delimit,
+            raw_delimiter,
+            "||",
+            "|",
+            ";",
+            ",",
+            "\t",
+            "space",
+            *_derive_separator_candidates(body_logs),
+        ):
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+        best_delimit = None
+        best_coverage = 0.0
+        for candidate in candidates:
+            coverage = _kv_key_line_coverage(
+                body_logs, feature_field, candidate, kv_delimit
+            )
+            if coverage > best_coverage:
+                best_delimit, best_coverage = candidate, coverage
+        if best_delimit is not None and best_coverage >= BODY_KEY_COVERAGE_THRESHOLD:
+            logger.warning(
+                f"[_classify_kv_features] 声称分隔符 '{field_delimit}' 零匹配，"
+                f"探针裁决改用 '{best_delimit}'（特征键行覆盖率 {best_coverage:.0%}）重试聚合"
+            )
+            field_delimit = best_delimit
+            extractor = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
+            aggregation = extractor.extract_and_aggregate(body_logs, feature_field)
+            total_lines = aggregation.get("total_lines", total_lines)
+            matched_lines = aggregation.get("matched_lines", 0)
+
+    if matched_lines == 0:
         logger.warning(
             f"[_classify_kv_features] 未匹配到任何 feature_field='{feature_field}' 的日志行"
         )
@@ -539,6 +580,31 @@ def _kv_key_line_coverage(
         return 0.0
     hit = sum(1 for line in lines if probe.extract_value(line, feature_field) is not None)
     return hit / len(lines)
+
+
+# 派生候选排除的结构/噪声字符：kv 连接符、引号、JSON/时间戳/IP/URL 结构符号
+_DERIVED_SEPARATOR_EXCLUDE = set('=: \t"\'`{}[]()<>.-/\\_+')
+
+
+def _derive_separator_candidates(logs_str: str, max_lines: int = 50) -> list[str]:
+    """从采样行统计高频结构符号，派生候选字段分隔符（#259 盲发现通道）。
+
+    字段分隔符在多字段行中天然高频（N 个字段出现 N-1 次），只把平均每行
+    出现 ≥2 次的符号交给覆盖率探针裁决；错误候选会被
+    BODY_KEY_COVERAGE_THRESHOLD 阈值否决，因此宁可多派生、不靠枚举厂商。
+    """
+    from collections import Counter
+
+    lines = [l for l in logs_str.strip().split("\n") if l.strip()][:max_lines]
+    if not lines:
+        return []
+    freq = Counter(
+        ch
+        for line in lines
+        for ch in line
+        if not ch.isalnum() and ch not in _DERIVED_SEPARATOR_EXCLUDE
+    )
+    return [ch for ch, count in freq.most_common(8) if count >= 2 * len(lines)]
 
 
 def _json_key_line_coverage(logs_str: str, feature_field: str, max_lines: int = 50) -> float:
