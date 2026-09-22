@@ -322,3 +322,99 @@ Admin 可以查看全部 Run，取消排队任务，或强制停止异常运行�
 - 复杂 Artifact DAG、在线 Prompt/标准字段编辑和自定义仪表盘。
 
 这些延后项不得成为首版会话、任务、Run、草稿和产物数据模型中的隐式前提。
+
+## 13. 用户故事索引
+
+以下编号是 V2 首版需求的稳定引用。后续 Issue 可以缩小实现切片，但不得改变故事语义。
+
+| 用户故事 | 角色 | 目标 |
+|---|---|---|
+| US-1 | User | 创建持久化会话、上传受支持文件，并在刷新或服务重启后继续工作。 |
+| US-2 | User | 创建 Task/Run，查看进度、确认、失败、取消和重跑结果。 |
+| US-3 | User | 从日志主数据提取日志类型并生成解析规则，失败时不发布伪造或部分结果。 |
+| US-4 | User | 对符合准入条件的日志解析结果提交日志知识申请，并看到稳定终态。 |
+| US-5 | User | 执行字段映射并在对话中查看摘要，必要时原位放大检查结果。 |
+| US-6 | User | 编辑字段映射 Draft，处理占用冲突和跨子规则联动，并原子应用为新 Artifact。 |
+| US-7 | User | 对五类字段调整进行预览、确认、应用与版本化撤销。 |
+| US-8 | User | 执行枚举提取、威胁类型映射、填充和取消映射，并保持目标字段血缘。 |
+| US-9 | User | 在当前主数据内复用最近兼容产物，主数据替换后旧引用失效。 |
+| US-10 | User | 导出当前解析规则，保持 JSON/Base64、中文编码、文件名和平台导入兼容。 |
+| US-11 | User | 查看自己的任务、Run 与等待事项，并返回原会话和消息。 |
+| US-12 | User | 查看 Artifact 版本、来源、过期状态、预览和下载。 |
+| US-13 | Developer | 只读查看全部 Run 的时间线、调用、日志、Artifact 和脱敏诊断包。 |
+| US-14 | Admin | 查看系统与队列，取消或强停 Run，并阻止迟到结果发布。 |
+| US-15 | Admin | 管理 Provider、密钥版本、用户角色和审计记录。 |
+| US-16 | Admin | 审核日志知识申请，安全完成批准、拒绝、竞争替代、回放和清理。 |
+| US-17 | 全部 | 在主题、Loading、Empty、Error、Offline 和 Forbidden 状态下获得一致反馈。 |
+| US-18 | 维护者 | 用同一脱敏样本验证 Chainlit 与 V2 的稳定能力、导出和平台导入一致。 |
+
+## 14. 页面清单
+
+| page-id | 角色 | 主任务与壳层关系 | 覆盖故事 |
+|---|---|---|---|
+| `app-shell` | 全部 | 左侧导航、中间工作区、固定 Composer、单实例右侧抽屉和角色入口。 | US-1、US-17 |
+| `workbench` | User | 继承 app-shell，承载上传、对话、日志解析、知识申请、字段映射、枚举/威胁处理、填充、跨轮续接和导出。 | US-1～US-5、US-8～US-10 |
+| `tasks` | User | 继承 app-shell，查看本人 Task、等待事项并定位回会话。 | US-2、US-11 |
+| `runs` | User | 继承 app-shell，查看本人 Run、失败摘要、取消与重跑入口。 | US-2、US-11、US-12 |
+| `mapping-editor` | User | 只替换中间区域，左栏和 Composer 保留。 | US-5、US-6 |
+| `field-changes` | User | 预览字段变更组，应用后返回原消息流。 | US-7 |
+| `developer-run-detail` | Developer/Admin | 独立完整诊断页，不提供业务写操作。 | US-13 |
+| `admin` | Admin | 唯一 V2 管理入口；不建设第二套管理 Web。 | US-14～US-16 |
+
+## 15. 状态策略
+
+| 状态 | 统一行为 |
+|---|---|
+| default | 展示当前能力；后端返回能力与禁用原因，前端不复制业务校验。 |
+| loading | 只在相关区域局部 Loading，保持壳层和已加载内容稳定。 |
+| empty | 使用当前页面任务对应的空态，不展示未进入首版的占位功能。 |
+| error | 保留旧正式 Artifact，显示稳定原因；不伪装成功。 |
+| offline/reconnecting | 明示断线并从最后 sequence 补取，不猜测 Run 终态。 |
+| forbidden | 在读取资源前完成权限过滤，不泄露资源存在性或敏感计数。 |
+| queued/running/waiting | 显示排队、当前任务或唯一待确认事项，并支持刷新恢复。 |
+| succeeded/failed | 只有完整成功发布正式 Artifact；失败只保留诊断证据。 |
+| cancelling/cancelled | 禁止重复取消和迟到发布，保留历史与审计。 |
+
+## 16. 实现决策索引
+
+### 实现决策：V2 独立入口与运行拓扑
+
+V2 使用独立 API、Worker、React、SQLite 和数据目录；Chainlit 不依赖 V2。两端只共享 Application 业务源码和只读标准字段表。
+
+### 实现决策：完整稳定能力继承
+
+V2 首版继承当前 Application 生产组合中的稳定能力，而不是只迁移字段映射。日志解析与知识申请由 #275 承接；枚举、威胁、填充、取消映射、跨轮产物和导出由 #276 承接；五类字段调整由 #268 承接。#108、#189、#206/#207 继续独立排期。
+
+### 实现决策：Task、Run 与 Worker
+
+命令创建持久化 Task/Run；全局 Worker leader 按 FIFO 领取。确认从类型化 checkpoint 续跑；取消、强停和 leader epoch 阻止迟到发布。Worker 不增加第二层业务重试。
+
+### 实现决策：Artifact、Draft 与可引用产物
+
+正式 Artifact 不可变；Draft 只有 apply 后的新 Artifact 能进入后续 SessionFacts。最近可引用产物按类型和当前主数据保存，失败不覆盖成功结果，主数据替换或清空使其失效。
+
+### 实现决策：日志知识唯一管理入口
+
+日志知识继续以 ADR-0012 的 SQLite 为事实源；审核、替代和样例清理由 #271 的 V2 Admin 承接，不建设 #204/#205 的第二套本机管理 Web。
+
+### 实现决策：双入口与发布边界
+
+V2 不迁移、不读取、不双写 Chainlit 会话。#258/#259 必须在 #275 前修复，#60 在首个真实 V2 业务切片前建立 Chainlit 黄金基线。
+
+## 17. 测试决策索引
+
+### 测试决策：基础持久化 tracer bullet
+
+用真实临时 SQLite 与 Blob 目录覆盖会话、上传、Task/Run、Worker、outbox/SSE、刷新与进程重启恢复。
+
+### 测试决策：Application 能力契约
+
+每项继承能力必须同时指向根仓 contract/回归测试和 V2 contract/E2E；V2 通过 Application 公共入口执行，不复制实现。
+
+### 测试决策：故障恢复与并发 fencing
+
+真实 SQLite 集成测试覆盖 leader 接管、checkpoint 续跑、幂等 receipt、outbox、Blob crash point、取消、强停和迟到结果丢弃。
+
+### 测试决策：首版验收与兼容矩阵
+
+#272 以历史能力继承矩阵为清单，使用与 #60 相同的脱敏样本比较 Chainlit/V2 的结果、Artifact、导出命名和平台导入；十八条产品场景是补充而不是替代。

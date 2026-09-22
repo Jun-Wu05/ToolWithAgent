@@ -723,3 +723,49 @@ Admin 完整控制面、字段变更与全量双入口验收属于后续切片�
 - 枚举手工编辑器与更复杂 Artifact 关系可视化。
 
 这些事项不得以“未来会解决”为由削弱首版的权限、原子性、血缘、脱敏和可恢复性。
+
+## 16. 历史能力继承矩阵与 Issue 门禁
+
+V2 首版按 `application/adapters/composition.py::create_default_adapters` 的生产组合继承全部 13 类 Step。V2 只通过 Application 公共契约调用这些能力，不在 API、Worker 或 React 中复制业务实现。表中的根仓测试是继承基线；对应 V2 contract/E2E 是 #272 放行所需的新增证据。
+
+| 能力 / Step | Application 事实源与公共缝 | V2 Issue | 根仓契约 / 回归基线 | V2 contract / E2E 门禁 | 处置 |
+|---|---|---|---|---|---|
+| `log_parse` | `LogParseAdapter`、日志类型检测与规则生成 | #275 | `test_application_log_parsing_architecture.py`、`test_log_type_full_enumeration.py`、`test_log_parser_marker_fix.py` | 上传真实脱敏日志，验证类型、解析规则、稳定错误及失败不发布 Artifact | 首版继承；#258/#259 先修 |
+| `log_knowledge_submit` | `LogKnowledgeSubmitAdapter`、ADR-0012 store/repository | #275、#271 | `test_log_knowledge_submission.py`、`test_log_knowledge_store_contract.py`、`test_log_knowledge_repository.py` | 申请资格、幂等提交、终态，以及 Admin 审核/替代/回放/安全展示 | 首版继承；审核只进 #271 |
+| `field_mapping` | `FieldMappingAdapter`、batch/input/conflict policy、event classifier | #266、#267 | `test_application_field_mapping_architecture.py`、`test_event_classify.py`、`test_standard_field_entity_validation.py`、`test_syslog_json_body_key_regression.py` | 上传→映射→事件名称标注→Draft→冲突处理→原子应用→新 Artifact | 首版继承并增强编辑体验 |
+| `enum_extract` | `EnumExtractAdapter`、枚举提取工具与 Prompt | #276 | `test_application_enum_architecture.py`、`test_single_intent_execution.py` | 指定目标字段提取；空结果稳定失败；成功产物可被下一轮引用 | 首版继承 |
+| `threat_mapping` | `ThreatMappingAdapter`、threat chain policy | #276 | `test_application_threat_architecture.py`、`test_threat_chain.py`、`test_threat_chain_policy.py` | 来源覆盖、一次复核、映射产物与证据；#277 修复后纳入回归 | 首版继承；#277 阻塞 #276 |
+| `fill` | `FillAdapter`、枚举填充契约 | #276 | `test_single_intent_execution.py`、`test_threat_chain.py` | 基于冻结来源 Artifact 填充；冲突或失败不覆盖旧成功版本 | 首版继承 |
+| `remove_mapping` | `RemoveMappingAdapter` | #276 | `test_application_config_architecture.py`、`test_single_intent_execution.py` | 取消指定映射、保留血缘并生成新版本 | 首版继承 |
+| `export` | `ExportAdapter`、现有下载命名与编码约定 | #276、#272 | `test_candidate_table_export.py`、`test_plan_renderer.py` | JSON/Base64、中文编码、文件名和平台导入与 Chainlit 一致 | 首版继承；发布硬门禁 |
+| `add_fields` | `FieldSkillAdapter` + add-fields skill | #268 | `test_application_field_skill_architecture.py`、`test_field_skill_ops.py` | 变更组预览、应用、版本化撤销 | 首版继承 |
+| `delete_fields` | `FieldSkillAdapter` + delete-fields skill | #268 | `test_field_skill_ops.py`、`test_rule_targeting.py` | 保留字段校验、一次删除确认、原子回滚 | 首版继承 |
+| `merge_fields` | `FieldSkillAdapter` + merge-fields skill | #268 | `test_field_skill_extensions.py`、`test_rule_targeting.py` | 多字段关联操作不可拆分，失败不发布 | 首版继承 |
+| `decode_fields` | `FieldSkillAdapter` + base64-decode-fields skill | #268 | `test_field_skill_extensions.py`、`test_rule_targeting.py` | 多目标选择、预览、原子应用与回滚 | 首版继承 |
+| `regex_extract` | `FieldSkillAdapter` + regex-extract skill | #268 | `test_field_skill_extensions.py`、`test_field_skill_reference_policy.py` | 来源引用、生成/执行失败分层和产物版本 | 首版继承 |
+| proposal / confirm / cancel | `PlanExecutor`、类型化 checkpoint、确认 token | #265、#267、#268 | `test_plan_executor.py`、`test_application_request_runtime.py`、`test_execution_recovery.py` | 刷新/重启后确认续跑；旧 revision/token 拒绝；取消阻止迟到发布 | 首版横切契约 |
+| 可引用跨轮产物 | Session artifact catalog 与来源绑定 | #265、#276 | `test_referenceable_session_artifacts.py` | 只引用当前主数据的最近兼容成功 Artifact；替换/清空主数据后失效 | 首版横切契约 |
+| 有界自恢复 | `RecoveryOrchestrator`、既有计划与 execution ledger | #265、#276 | `test_execution_recovery.py` | 仅允许瞬时重试、结构修正、系统推导参数重推导；按计划计数预算，不改用户点名参数；覆盖手工产物时升级追问并留审计 | 首版横切契约 |
+| 最近执行摘要 | `recent_execution` 安全目录 | #265、#276 | `test_recent_execution_summary.py` | 仅保存当前与上一计划的步骤状态、错误类别、产物目录和计数；主数据替换时失效 | 首版横切契约 |
+| `SessionFacts` | `contracts/session_facts.py` 的安全投影 | #264、#265 | `test_application_request_runtime.py`、`test_referenceable_session_artifacts.py` | 持久化事实可重建；Planner 只收到投影，不收到 UI Session | 首版横切契约 |
+| 事件名称标注 | event classifier、字段映射产物、21 值分类表与事件级别确定性绑定 | #266 | `test_event_classify.py`、`test_application_field_mapping_architecture.py`、`test_application_session_projection.py`、`test_rule_targeting.py` | 每条子规则仅写合法分类名，事件级别确定性联动；判定失败宁缺勿错并标记待人工确认 | 首版继承 |
+| 进度与 Run 事件 | Application progress sink、Run/conversation outbox | #265、#269 | `test_progress_reporting.py`、`test_plan_renderer.py` | 事件带 Run/Step/Artifact 关联，SSE 断线按 sequence 补取 | 首版横切契约 |
+| Provider 管理 | Provider registry 与冻结配置 revision | #271、#272 | `test_provider_registry.py` | Provider 切换只影响新 Run，密钥不回显，三条调用链一致 | 首版发布契约 |
+| 导出兼容 | `ExportAdapter`、下载命名与编码约定 | #276、#272 | `test_single_intent_execution.py`、`test_application_config_architecture.py`、`test_execution_adapters.py`、`test_plan_renderer.py` | JSON/Base64、中文编码、根类型键顺序、命名和目标平台导入在双入口一致 | 首版发布契约 |
+
+### 16.1 Issue 实施顺序
+
+1. #262 固化本矩阵、PRD 索引和门禁；#227/#221/#80 关闭，#204/#205 的有效规格迁入 #271 后关闭。
+2. #258、#259 修复共享日志解析缺陷；两项根仓回归通过前，#275 不得开始业务接入。
+3. #264 提供独立入口，#265 提供持久化 Run、Worker、checkpoint、Artifact 和 fencing。
+4. #263 在首个规格驱动的 UI 切片前完成人工设计基线验收；可与 #264/#265 的非 UI 基础设施并行。
+5. #60 在首个真实 V2 业务切片 #275 前完成剩余 Chainlit 黄金基线；它不阻塞 #264/#265。
+6. #275 交付日志解析与知识申请；#266/#267 交付字段映射与 Draft；#277 修复后 #276 才可交付枚举、威胁、填充、取消映射、跨轮产物与导出；#268 交付五类字段调整。
+7. #269 完成用户 Task/Run/Artifact 抽屉，#270 完成 Developer 只读诊断，#271 完成 Provider、权限、队列和日志知识审核的唯一 Admin；#271 复用 ADR-0012 数据，不建设第二套日志知识审核台。
+8. #272 对矩阵每一行收集根仓 contract、V2 contract/E2E 和同样本双入口证据；任一首版行缺失、共享业务差异未解释或平台导入失败均阻止发布。
+
+### 16.2 范围边界
+
+- #108 的多字段跨轮增强、#189 的自动枚举增强、#206/#207 的知识维护增强尚未进入稳定 Application 能力，不得暗中塞入 V2 首版。
+- 这些增强后续进入主线时必须新增或更新对应矩阵行，并由 #272 的同类门禁覆盖。
+- Chainlit 与 V2 旁路并行，不迁移、不读取、不双写旧会话；共享部分仅限 Application 业务源码和只读标准字段表。
