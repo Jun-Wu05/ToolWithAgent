@@ -279,6 +279,13 @@ def test_more_than_20_types_batched_meaning_all_kept(monkeypatch) -> None:
     assert len({d["logtype"] for d in result["classification_details"]}) == 21
     assert counters["meaning_calls"] == 2
     assert result["status"] == "SUCCESS"
+    # #281：每批（尤其第 2 批仅 TYPE20）的每个类型都要拿到真实样例行；
+    # 旧逻辑按"任意不同值"计数提前退出，第 2 扫描收集 1 个干扰值即停。
+    for detail in result["classification_details"]:
+        assert detail["logtype"] in detail["sample"], (
+            f"{detail['logtype']} 样例缺失（sample={detail['sample']!r}），"
+            "分批扫描不得因干扰值提前退出"
+        )
 
 
 def test_meaning_batch_failure_downgrades_partial_not_deleting_types(monkeypatch) -> None:
