@@ -140,6 +140,55 @@ class TestRealSamplesPureKV:
         )
 
 
+class TestScanCollectsOnlyWantedLogtypes:
+    """#281：扫描只收集本批 logtype 的命中行，不因干扰值凑数提前退出。
+
+    分批分类（#190）后 details 仅含本批值；旧逻辑按"任意不同值"计数提前
+    退出，扫描收集满 len(details) 个干扰值即 break，首次出现较晚的本批
+    类型永远扫不到（线上 36/55 类型 sample 为空）。
+    """
+
+    def test_late_first_occurrence_types_still_match(self):
+        """目标类型首次出现排在干扰值之后时，仍能扫到并取得真实样例。"""
+        wanted_lines = [
+            "seq=1|name=高频晚现类型|sev=high",
+            "seq=2|name=低频晚现类型|sev=low",
+        ]
+        logs = "\n".join(
+            [
+                "seq=9|name=干扰甲|sev=info",
+                "seq=8|name=干扰乙|sev=info",
+                "seq=7|name=干扰丙|sev=info",
+                *wanted_lines,
+            ]
+        )
+
+        def extractor(line, field):
+            for part in line.split("|"):
+                if part.startswith("name="):
+                    return part[len("name="):]
+            return None
+
+        parsed = {
+            "feature_field": "name",
+            "feature_identifier": "",
+            "feature_body_group": 0,
+            "classification_details": [
+                {"logtype": "高频晚现类型"},
+                {"logtype": "低频晚现类型"},
+            ],
+        }
+        result = match_real_samples(
+            parsed, logs, extractor, feature_field="name", header_end_marker=""
+        )
+        details = result["classification_details"]
+        assert details[0]["sample"] == wanted_lines[0], (
+            "首现晚于干扰值的类型应扫到首个命中行（旧逻辑在收集满 "
+            "len(details) 个干扰值后提前退出）"
+        )
+        assert details[1]["sample"] == wanted_lines[1]
+
+
 class TestRealSamplesKVHeaderFailure:
     """已声明 KV body 正则时，意外失配必须失败关闭。"""
 

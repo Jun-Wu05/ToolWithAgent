@@ -174,9 +174,13 @@ def match_real_samples(
         except _re.error as e:
             logger.warning(f"[llm_postprocessor] feature_identifier 正则编译失败: {e}")
 
+    # 只收集本批 logtype 的首个命中行；分批后 details 仅含本批值（#190），
+    # 若按"任意不同值"计数提前退出，频次序分批与文件序扫描错位会漏掉
+    # 首次出现较晚的类型（#281）。
+    wanted = {d.get("logtype", "") for d in details if d.get("logtype")}
     sample_matched: dict[str, str] = {}
     for line in log_lines:
-        if len(sample_matched) >= len(details):
+        if len(sample_matched) >= len(wanted):
             break
         body = line
         
@@ -211,7 +215,7 @@ def match_real_samples(
             feature_val = extractor_func(line, ff)
         if feature_val is not None:
             val_str = str(feature_val)
-            if val_str not in sample_matched:
+            if val_str in wanted and val_str not in sample_matched:
                 sample_matched[val_str] = line
 
     unmatched: list[str] = []
@@ -276,7 +280,8 @@ def match_real_samples(
         )
     if unmatched:
         logger.warning(
-            f"[llm_postprocessor] Unmatched logtypes: {unmatched[:10]}"
+            f"[llm_postprocessor] Unmatched logtypes ({len(unmatched)}): "
+            f"{unmatched[:10]}"
         )
     if body_extraction_failures:
         reason = (
