@@ -1,9 +1,10 @@
-"""威胁类型链路纯策略（#173）：触发判定、来源字段 X 判定、链路构造与值全覆盖校验。
+"""威胁类型链路纯策略（#173 / #277）：触发判定、来源字段 X 判定、链路构造与统一来源覆盖校验。
 
 全部为纯函数（不 IO、不 LLM、不读 session），风险集中点先做先测；
 编排（执行后续跑、六阶段日志）在 application/threat_chain.py。
 领域决策见 issue #173 定稿：双入口触发、X=相似度最高且覆盖全部威胁子规则、
 降级固定值「其他」、存量条目跳过加字段、威胁映射产物填充目标固定为威胁类型。
+issue #277 把「未覆盖即补兜底行」收紧为「LLM 提议、数据裁决」的统一覆盖校验。
 """
 
 from __future__ import annotations
@@ -433,7 +434,7 @@ def is_safe_rederive_plan(steps: Iterable[StepSpec]) -> bool:
     return True
 
 
-# 值全覆盖校验（S3 后、S5 前的确定性兜底）
+# 统一来源覆盖校验（#277）：LLM 提议、数据裁决的确定性边界
 
 
 def _row_covers_value(row: Mapping[str, Any], value: str) -> bool:
@@ -462,26 +463,53 @@ def resolve_threat_mapping_value(
     return None
 
 
-def ensure_threat_mapping_coverage(
-    values: Iterable[str], rows: list[Mapping[str, Any]]
-) -> list[Mapping[str, Any]]:
-    """确定性全覆盖校验：未被任何映射行覆盖的提取值补「其他」兜底行。
+# 无语义数字代码（#277）：数字 + 常见代码分隔符，输入不含任何语义证据
+_CODE_ONLY_SEPARATORS = "-_.:/"
 
-    不依赖提示词自觉（issue #173 领域决策 5）；原地追加到 rows 副本并返回。
+
+def is_code_only_value(value: str) -> bool:
+    """去空白后仅由数字与常见代码分隔符组成，即无语义证据，不允许模型猜测。"""
+    stripped = "".join(str(value).split())
+    if not stripped:
+        return False
+    return all(char.isdigit() or char in _CODE_ONLY_SEPARATORS for char in stripped)
+
+
+def validate_threat_mapping_coverage(
+    declared_inputs: Iterable[str],
+    rows: Iterable[Mapping[str, Any]],
+    valid_target_values: Collection[str],
+) -> str | None:
+    """对声明输入集合做确定性覆盖校验；通过返回 None，否则返回稳定规则标识。
+
+    规则（issue #277）：mappingValue 必须属于标准枚举；每个声明输入恰好被
+    一条结果命中（复用 _row_covers_value 的 REGULAR/EQUAL 语义）；每条结果
+    至少命中一个声明输入。一条正则可以合法覆盖多个输入；重叠正则不依赖
+    行序裁决——同一输入命中多条即整体拒绝。
+    返回值仅为固定规则标识，不携带任何真实输入值或映射值。
     """
-    covered_rows = list(rows)
-    for value in values:
-        value = str(value)
-        if any(_row_covers_value(row, value) for row in covered_rows):
-            continue
-        covered_rows.append(
-            {
-                "mappingType": "REGULAR",
-                "orgValue": f"(?i).*{re.escape(value)}.*",
-                "mappingValue": DEGRADED_THREAT_VALUE,
-            }
-        )
-    return covered_rows
+    valid_targets = {str(target).strip() for target in valid_target_values}
+    row_list = list(rows)
+    for row in row_list:
+        mapped_value = str(row.get("mappingValue") or "").strip()
+        if mapped_value not in valid_targets:
+            return "mapping_value_out_of_enum"
+    hit_counts = [0] * len(row_list)
+    for declared in declared_inputs:
+        value = str(declared)
+        matches = [
+            index
+            for index, row in enumerate(row_list)
+            if _row_covers_value(row, value)
+        ]
+        if not matches:
+            return "declared_input_uncovered"
+        if len(matches) > 1:
+            return "declared_input_multi_matched"
+        hit_counts[matches[0]] += 1
+    if any(count == 0 for count in hit_counts):
+        return "row_out_of_source"
+    return None
 
 
 __all__ = [
@@ -501,11 +529,12 @@ __all__ = [
     "collect_threat_field_pools",
     "degraded_mapping_ratio",
     "determine_source_field",
-    "ensure_threat_mapping_coverage",
     "evaluate_chain_trigger",
     "inspect_threat_field_state",
+    "is_code_only_value",
     "is_safe_rederive_plan",
     "read_entity_event_name",
     "resolve_threat_mapping_value",
     "should_rederive",
+    "validate_threat_mapping_coverage",
 ]

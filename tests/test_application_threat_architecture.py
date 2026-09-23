@@ -78,7 +78,7 @@ def test威胁映射精确调用一次并按顺序提交双槽() -> None:
             self.calls.append(model_input)
             return json.dumps({"items": [{
                 "mappingType": "REGULAR", "orgValue": "攻击",
-                "mappingValue": "恶意活动", "ignored": "drop",
+                "mappingValue": "恶意程序", "ignored": "drop",
             }]}, ensure_ascii=False)
 
     class Session(dict):
@@ -110,6 +110,175 @@ def test威胁映射精确调用一次并按顺序提交双槽() -> None:
     assert result.artifact.source_field == "event_type"
     assert result.artifact.mappings[0].mapping_type == "REGULAR"
     assert session.writes == ["last_threat_data", "latest_threat_artifact"]
+
+
+class _CoverageMember:
+    """返回固定三列威胁映射的同步 ThreatAgent 替身（#277 失败关闭测试）。"""
+
+    name = "ThreatAgent"
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.calls: list[str] = []
+
+    def run(self, model_input: str):
+        self.calls.append(model_input)
+        return self.response
+
+
+class _RecordingSession(dict):
+    """记录写入顺序的 Session 替身。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.writes: list[str] = []
+
+    def __setitem__(self, key, value):
+        self.writes.append(key)
+        super().__setitem__(key, value)
+
+
+def _run_threat_mapping(member, session, step) -> object:
+    from application.adapters.threat_mapping import ThreatMappingAdapter
+    from application.execution import ExecutionContext
+    from application.session_projection import build_session_facts
+
+    return asyncio.run(ThreatMappingAdapter(
+        type("Team", (), {"members": [member]})()
+    ).execute(
+        step,
+        ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        {},
+    ))
+
+
+def test威胁映射来源外结果失败关闭不提交会话() -> None:
+    """结构合法但来源外的结果必须拒绝，且不写入 Session 双槽（#277）。"""
+    from contracts.planner_models import StepStatus, ThreatMappingStep
+    from contracts.session_artifacts import ThreatArtifactSlot
+    from contracts.planner_models import ThreatMappingArtifact, ThreatMappingRow
+
+    member = _CoverageMember(json.dumps({"items": [
+        {"mappingType": "EQUAL", "orgValue": "攻击", "mappingValue": "暴力破解"},
+        {"mappingType": "EQUAL", "orgValue": "无关来源", "mappingValue": "端口扫描"},
+    ]}, ensure_ascii=False))
+    previous = ThreatArtifactSlot(
+        artifact=ThreatMappingArtifact(
+            mappings=(ThreatMappingRow.model_validate({
+                "mappingType": "EQUAL", "orgValue": "old", "mappingValue": "暴力破解",
+            }),),
+            item_count=1,
+            source_field="old_field",
+        ),
+        source_field="old_field",
+    )
+    session = _RecordingSession(latest_threat_artifact=previous)
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="user.values", values=("攻击",),
+    )
+
+    result = _run_threat_mapping(member, session, step)
+
+    assert result.status == StepStatus.FAILED
+    assert result.error_code == "threat_mapping_coverage_rejected"
+    assert len(member.calls) == 1
+    assert session.writes == []
+    assert session["latest_threat_artifact"] is previous
+
+
+def test威胁映射缺项结果失败关闭不提交会话() -> None:
+    """缺项结果不允许补「其他」兜底洗白为成功（#277）。"""
+    from contracts.planner_models import StepStatus, ThreatMappingStep
+
+    member = _CoverageMember(json.dumps({"items": [
+        {"mappingType": "EQUAL", "orgValue": "攻击", "mappingValue": "暴力破解"},
+    ]}, ensure_ascii=False))
+    session = _RecordingSession()
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="user.values", values=("攻击", "扫描"),
+    )
+
+    result = _run_threat_mapping(member, session, step)
+
+    assert result.status == StepStatus.FAILED
+    assert result.error_code == "threat_mapping_coverage_rejected"
+    assert session.writes == []
+
+
+def test威胁映射全数字代码输入needs_input且不调用模型() -> None:
+    """无语义数字代码不允许模型猜测：先于调用返回稳定错误码（#277）。"""
+    from contracts.planner_models import StepStatus, ThreatMappingStep
+
+    member = _CoverageMember("[]")
+    session = _RecordingSession()
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="user.values", values=("30", "10"),
+    )
+
+    result = _run_threat_mapping(member, session, step)
+
+    assert result.status == StepStatus.NEEDS_INPUT
+    assert result.error_code == "threat_mapping_source_context_required"
+    assert member.calls == []
+    assert session.writes == []
+    assert "语义" in result.message and "代码表" in result.message
+
+
+def test威胁映射混合输入仍调用模型并按覆盖校验裁决() -> None:
+    """混合输入不提前拒绝：照常调用并走统一覆盖校验（#277）。"""
+    from contracts.planner_models import StepStatus, ThreatMappingStep
+
+    member = _CoverageMember(json.dumps({"items": [
+        {"mappingType": "REGULAR", "orgValue": "(?:30|攻击)", "mappingValue": "暴力破解"},
+    ]}, ensure_ascii=False))
+    session = _RecordingSession()
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="user.values", values=("30", "攻击"),
+    )
+
+    result = _run_threat_mapping(member, session, step)
+
+    assert result.status == StepStatus.SUCCESS
+    assert len(member.calls) == 1
+    assert session.writes == ["last_threat_data", "latest_threat_artifact"]
+
+
+def test威胁映射依赖来源同样执行统一校验语义() -> None:
+    """step:<id> 依赖来源的数字代码输入与直接值同码 needs_input（#277）。"""
+    from application.adapters.threat_mapping import ThreatMappingAdapter
+    from application.execution import ExecutionContext
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import (
+        EnumValuesArtifact, StepResult, StepStatus, ThreatMappingStep,
+    )
+
+    member = _CoverageMember("[]")
+    session = _RecordingSession()
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="step:enum-a", depends_on=("enum-a",),
+    )
+    dependency = StepResult(
+        step_id="enum-a", operation_type="enum_extract",
+        status=StepStatus.SUCCESS,
+        artifact=EnumValuesArtifact(values=("30-10",), item_count=1, field="event_type"),
+    )
+
+    result = asyncio.run(ThreatMappingAdapter(
+        type("Team", (), {"members": [member]})()
+    ).execute(
+        step,
+        ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        {"enum-a": dependency},
+    ))
+
+    assert result.status == StepStatus.NEEDS_INPUT
+    assert result.error_code == "threat_mapping_source_context_required"
+    assert member.calls == []
 
 
 def test威胁填充base64解码文本保持中文根结构键顺序与默认空格() -> None:

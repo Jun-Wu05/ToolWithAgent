@@ -1169,8 +1169,8 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
         _ThreatMember(
             json.dumps(
                 [
-                    {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "恶意活动"},
-                    {"mappingType": "EQUAL", "orgValue": "scan", "mappingValue": "扫描"},
+                    {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "恶意程序"},
+                    {"mappingType": "EQUAL", "orgValue": "scan", "mappingValue": "端口扫描"},
                 ],
                 ensure_ascii=False,
             )

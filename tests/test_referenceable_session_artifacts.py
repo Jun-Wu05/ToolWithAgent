@@ -225,7 +225,7 @@ def test上轮枚举产物可直接用于本轮威胁映射():
     """ThreatAgent 消费类型化枚举槽，不重新执行枚举提取。"""
     member = _ThreatMember(
         json.dumps(
-            [{"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "恶意活动"}],
+            [{"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "恶意程序"}],
             ensure_ascii=False,
         )
     )
@@ -273,6 +273,72 @@ def test威胁映射失败保留上次成功产物():
     )
 
     assert result.status == StepStatus.FAILED
+    assert session["latest_threat_artifact"] == previous
+
+
+def test威胁映射覆盖校验失败保留上次成功产物():
+    """结构合法但来源外的映射结果必须拒绝，旧成功产物继续可引用（#277）。"""
+    previous = _threat_slot("old_field")
+    session = {
+        "latest_enum_artifact": _enum_slot(),
+        "latest_threat_artifact": previous,
+    }
+    member = _ThreatMember(
+        json.dumps(
+            [
+                {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "暴力破解"},
+                {"mappingType": "EQUAL", "orgValue": "out-of-source", "mappingValue": "端口扫描"},
+            ],
+            ensure_ascii=False,
+        )
+    )
+    adapter = ProfessionalAgentAdapter(_Team(member))
+    step = ThreatMappingStep(
+        step_id="threat",
+        type="threat_mapping",
+        source_ref="session.artifacts.enum_values",
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.FAILED
+    assert result.error_code == "threat_mapping_coverage_rejected"
+    assert session["latest_threat_artifact"] == previous
+    assert "last_threat_data" not in session
+
+
+def test全数字枚举产物触发needs_input不覆盖旧产物():
+    """无语义数字代码不允许模型猜测：needs_input 且不污染旧成功产物（#277）。"""
+    previous = _threat_slot("old_field")
+    session = {
+        "latest_enum_artifact": _enum_slot(value="30"),
+        "latest_threat_artifact": previous,
+    }
+    member = _ThreatMember("[]")
+    adapter = ProfessionalAgentAdapter(_Team(member))
+    step = ThreatMappingStep(
+        step_id="threat",
+        type="threat_mapping",
+        source_ref="session.artifacts.enum_values",
+    )
+
+    result = asyncio.run(
+        adapter.execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.NEEDS_INPUT
+    assert result.error_code == "threat_mapping_source_context_required"
+    assert member.calls == []
     assert session["latest_threat_artifact"] == previous
 
 
@@ -372,7 +438,7 @@ def test多字段同轮选择B后血缘仍记录但填充目标固定():
     跨轮填充目标固定为威胁类型（#173），血缘只作展示与追溯。"""
     member = _ThreatMember(
         json.dumps(
-            [{"mappingType": "EQUAL", "orgValue": "b-value", "mappingValue": "恶意活动"}],
+            [{"mappingType": "EQUAL", "orgValue": "b-value", "mappingValue": "恶意程序"}],
             ensure_ascii=False,
         )
     )
