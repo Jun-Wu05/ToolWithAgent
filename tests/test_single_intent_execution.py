@@ -487,7 +487,7 @@ def test威胁类型映射单步可运行():
                 {
                     "mappingType": "EQUAL",
                     "orgValue": "attack",
-                    "mappingValue": "恶意活动",
+                    "mappingValue": "恶意程序",
                 }
             ],
             ensure_ascii=False,

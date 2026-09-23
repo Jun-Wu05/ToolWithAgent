@@ -45,7 +45,7 @@ def _threat_rule(name: str) -> dict:
         "name": name,
         "normalize": [
             {"index": "attack_type", "mappings": []},
-            {"index": "src_ip", "mappings": []},
+            {"index": "event_desc", "mappings": []},
         ],
         "parser": {
             "filter": [
@@ -179,8 +179,8 @@ def _chain_session() -> dict:
     """链路可运行的会话：原始日志 + 已标注威胁子规则。"""
     return {
         "raw_log_lines": [
-            "attack_type=暴力破解 src_ip=1.1.1.1",
-            "attack_type=端口扫描 src_ip=2.2.2.2",
+            "attack_type=暴力破解 event_desc=暴力破解告警",
+            "attack_type=端口扫描 event_desc=端口扫描告警",
         ],
         "mapped_sub_rules": [_threat_rule("威胁A"), _threat_rule("威胁B")],
     }
@@ -347,7 +347,7 @@ def test重跑幂等先删后加整体替换(monkeypatch):
 
 
 def test连续换源后只保留新绑定与完整标准元数据(monkeypatch):
-    """从 attack_type 换为 src_ip 后，旧引用消失且生成条目保持规范形态。"""
+    """从 attack_type 换为 event_desc 后，旧引用消失且生成条目保持规范形态。"""
     _mock_retrieval(monkeypatch)
     _mock_enum_llm(monkeypatch)
     team = _Team(_ThreatMember(_FULL_MAPPING))
@@ -355,13 +355,13 @@ def test连续换源后只保留新绑定与完整标准元数据(monkeypatch):
 
     first = _run(_mapping_report(), session, team)
     assert first.results[-1].message.startswith("🔗")
-    session[SESSION_OVERRIDE_KEY] = "src_ip"
+    session[SESSION_OVERRIDE_KEY] = "event_desc"
 
     second = _run(_mapping_report(), session, team)
 
     assert second.results[-1].message.startswith("🔗")
     for rule in session["mapped_sub_rules"]:
-        assert _all_threat_bindings(rule) == ["%{src_ip}"]
+        assert _all_threat_bindings(rule) == ["%{event_desc}"]
         generated = [
             entry
             for entry in rule["normalize"]
@@ -429,7 +429,7 @@ def test换源填充失败时回滚到替换前配置(monkeypatch):
     first = _run(_mapping_report(), session, team)
     assert first.results[-1].message.startswith("🔗")
     before = copy.deepcopy(session["mapped_sub_rules"])
-    session[SESSION_OVERRIDE_KEY] = "src_ip"
+    session[SESSION_OVERRIDE_KEY] = "event_desc"
 
     async def _fail_fill(self, step, context, dependencies):
         return StepResult(
@@ -456,7 +456,7 @@ def test换源威胁类型映射失败时保留替换前配置(monkeypatch):
     first = _run(_mapping_report(), session, _Team(_ThreatMember(_FULL_MAPPING)))
     assert first.results[-1].message.startswith("🔗")
     before = copy.deepcopy(session["mapped_sub_rules"])
-    session[SESSION_OVERRIDE_KEY] = "src_ip"
+    session[SESSION_OVERRIDE_KEY] = "event_desc"
 
     failed = _run(_mapping_report(), session, _Team(_ThreatMember("[]")))
 
@@ -493,7 +493,7 @@ def test旧配置多绑定换源只清理威胁链产物(monkeypatch):
             [
                 entry
                 for entry in rule["normalize"]
-                if entry.get("index") in {"attack_type", "src_ip"}
+                if entry.get("index") in {"attack_type", "event_desc"}
             ]
         )
         for rule in session["mapped_sub_rules"]
@@ -505,17 +505,17 @@ def test旧配置多绑定换源只清理威胁链产物(monkeypatch):
     }
     non_threat_before = copy.deepcopy(non_threat)
     session["mapped_sub_rules"].append(non_threat)
-    session[SESSION_OVERRIDE_KEY] = "src_ip"
+    session[SESSION_OVERRIDE_KEY] = "event_desc"
 
     replaced = _run(_mapping_report(), session, team)
 
     assert replaced.results[-1].message.startswith("🔗")
     for index, rule in enumerate(session["mapped_sub_rules"][:2]):
-        assert _all_threat_bindings(rule) == ["%{src_ip}"]
+        assert _all_threat_bindings(rule) == ["%{event_desc}"]
         assert source_entries_before[index] == [
             entry
             for entry in rule["normalize"]
-            if entry.get("index") in {"attack_type", "src_ip"}
+            if entry.get("index") in {"attack_type", "event_desc"}
         ]
         assert any(
             filter_item.get("fields") == {"备注": "保留"}
@@ -537,15 +537,15 @@ def test结构化会话换源失败同样保持原配置(monkeypatch):
     team = _Team(_ThreatMember(_FULL_MAPPING))
     session = SessionState(
         raw_log_lines=[
-            "attack_type=暴力破解 src_ip=1.1.1.1",
-            "attack_type=端口扫描 src_ip=2.2.2.2",
+            "attack_type=暴力破解 event_desc=暴力破解告警",
+            "attack_type=端口扫描 event_desc=端口扫描告警",
         ],
         mapped_sub_rules=[_threat_rule("威胁A"), _threat_rule("威胁B")],
     )
     first = _run(_mapping_report(), session, team)
     assert first.results[-1].message.startswith("🔗")
     before = copy.deepcopy(session.mapped_sub_rules)
-    session.threat_source_field_override = "src_ip"
+    session.threat_source_field_override = "event_desc"
 
     async def _fail_fill(self, step, context, dependencies):
         return StepResult(
@@ -577,7 +577,7 @@ def test显式指令全链填充失败时回滚到替换前配置(monkeypatch):
     before = copy.deepcopy(session["mapped_sub_rules"])
 
     explicit = build_threat_chain_steps(
-        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        SourceFieldDecision("event_desc", 1.0, 2, "explicit"),
         config_ref="session.mapped_sub_rules",
         threat_field_state=THREAT_FIELD_CHAIN,
     )
@@ -622,7 +622,7 @@ def test显式指令全链成功后一次提交新配置(monkeypatch):
     assert first.results[-1].message.startswith("🔗")
 
     explicit = build_threat_chain_steps(
-        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        SourceFieldDecision("event_desc", 1.0, 2, "explicit"),
         config_ref="session.mapped_sub_rules",
         threat_field_state=THREAT_FIELD_CHAIN,
     )
@@ -640,9 +640,9 @@ def test显式指令全链成功后一次提交新配置(monkeypatch):
     )
 
     assert report.status == StepStatus.SUCCESS
-    assert session[SESSION_OVERRIDE_KEY] == "src_ip"
+    assert session[SESSION_OVERRIDE_KEY] == "event_desc"
     for rule in session["mapped_sub_rules"]:
-        assert _all_threat_bindings(rule) == ["%{src_ip}"]
+        assert _all_threat_bindings(rule) == ["%{event_desc}"]
         for filter_item in rule["parser"]["filter"]:
             if filter_item.get("name") == "removeFields":
                 assert "威胁类型" not in filter_item.get("fields", [])
@@ -678,7 +678,7 @@ def test显式来源已有删除步骤时重新编译但不重复删除():
         rule["normalize"].append({"index": "威胁类型", "mappings": []})
         rule["parser"]["filter"][0]["fields"]["威胁类型"] = "其他"
     skeleton = build_threat_chain_steps(
-        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        SourceFieldDecision("event_desc", 1.0, 2, "explicit"),
         config_ref="session.mapped_sub_rules",
         threat_field_state=THREAT_FIELD_CHAIN,
     )
@@ -708,7 +708,7 @@ def test待确认威胁提案在保存前完成相同编译():
         rule["normalize"].append({"index": "威胁类型", "mappings": []})
         rule["parser"]["filter"][0]["fields"]["威胁类型"] = "其他"
     skeleton = build_threat_chain_steps(
-        SourceFieldDecision("src_ip", 1.0, 2, "explicit"),
+        SourceFieldDecision("event_desc", 1.0, 2, "explicit"),
         config_ref="session.mapped_sub_rules",
     )
     proposal = PlanDecision(
@@ -776,15 +776,15 @@ def test会话覆盖优先于相似度判定(monkeypatch):
     _mock_retrieval(monkeypatch)
     _mock_enum_llm(monkeypatch)
     session = _chain_session()
-    session[SESSION_OVERRIDE_KEY] = "src_ip"
+    session[SESSION_OVERRIDE_KEY] = "event_desc"
     report = _mapping_report()
 
     extended = _run(report, session, _Team(_ThreatMember(_FULL_MAPPING)))
 
     summary = extended.results[-1]
-    assert "来源字段=src_ip" in summary.message
+    assert "来源字段=event_desc" in summary.message
     for rule in session["mapped_sub_rules"]:
-        assert _threat_binding(rule) == "%{src_ip}"
+        assert _threat_binding(rule) == "%{event_desc}"
 
 
 def test非执行决策原样返回():
@@ -811,17 +811,16 @@ _OTHER_ONLY_MAPPING = json.dumps(
     [
         {"mappingType": "EQUAL", "orgValue": "暴力破解", "mappingValue": "其他"},
         {"mappingType": "EQUAL", "orgValue": "端口扫描", "mappingValue": "其他"},
-        {"mappingType": "EQUAL", "orgValue": "1.1.1.1", "mappingValue": "其他"},
-        {"mappingType": "EQUAL", "orgValue": "2.2.2.2", "mappingValue": "其他"},
     ],
     ensure_ascii=False,
 )
 
 
 class _SwitchingThreatMember:
-    """按输入值区分来源：attack_type 值全落「其他」，src_ip 值得到有效映射。
+    """按输入值区分来源：attack_type 值全落「其他」，event_desc 值得到有效映射。
 
-    run_also_other=True 时 src_ip 分支同样全落「其他」（第二次仍无信息量场景）。
+    run_also_other=True 时 event_desc 分支同样全落「其他」（第二次仍无信息量
+    场景）。全「其他」行按当次声明输入逐值生成，符合统一覆盖校验契约（#277）。
     """
 
     name = "ThreatAgent"
@@ -832,19 +831,26 @@ class _SwitchingThreatMember:
 
     def run(self, model_input: str) -> str:
         self.inputs.append(model_input)
-        if "1.1.1.1" in model_input and not self.run_also_other:
+        values = list(json.loads(model_input).get("values", ()))
+        if "告警" in model_input and not self.run_also_other:
             return json.dumps(
                 [
-                    {"mappingType": "EQUAL", "orgValue": "1.1.1.1", "mappingValue": "暴力破解"},
-                    {"mappingType": "EQUAL", "orgValue": "2.2.2.2", "mappingValue": "端口扫描"},
+                    {"mappingType": "EQUAL", "orgValue": "暴力破解告警", "mappingValue": "暴力破解"},
+                    {"mappingType": "EQUAL", "orgValue": "端口扫描告警", "mappingValue": "端口扫描"},
                 ],
                 ensure_ascii=False,
             )
-        return _OTHER_ONLY_MAPPING
+        return json.dumps(
+            [
+                {"mappingType": "EQUAL", "orgValue": value, "mappingValue": "其他"}
+                for value in values
+            ],
+            ensure_ascii=False,
+        )
 
 
 def test首跑全落其他时自动改选下一候选重跑并注明(monkeypatch, caplog):
-    """attack_type 全「其他」→ 改选 src_ip 重跑成功；报告注明改选且不写会话覆盖。"""
+    """attack_type 全「其他」→ 改选 event_desc 重跑成功；报告注明改选且不写会话覆盖。"""
     _mock_retrieval(monkeypatch)
     _mock_enum_llm(monkeypatch)
     member = _SwitchingThreatMember()
@@ -855,10 +861,10 @@ def test首跑全落其他时自动改选下一候选重跑并注明(monkeypatch
 
     summary = extended.results[-1]
     assert summary.message.startswith("🔗 威胁类型链路已自动完成")
-    assert "来源字段=src_ip" in summary.message
-    assert "来源字段已自动改选 attack_type → src_ip" in summary.message
+    assert "来源字段=event_desc" in summary.message
+    assert "来源字段已自动改选 attack_type → event_desc" in summary.message
     for rule in session["mapped_sub_rules"]:
-        assert _threat_binding(rule) == "%{src_ip}"
+        assert _threat_binding(rule) == "%{event_desc}"
     # 会话级来源覆盖只有用户显式纠正才写（CONTEXT.md「不代用户改参」）
     assert session.get(SESSION_OVERRIDE_KEY) is None
     # 恰好两次威胁映射调用：首跑 + 改选重跑，无第三次
@@ -866,9 +872,9 @@ def test首跑全落其他时自动改选下一候选重跑并注明(monkeypatch
     audit = [record.message for record in caplog.records if "type=rederive" in record.message]
     assert len(audit) == 1
     assert "old_source=attack_type" in audit[0]
-    assert "new_source=src_ip" in audit[0]
+    assert "new_source=event_desc" in audit[0]
     annotations = extended.results[0].artifact.event_annotations
-    assert [row.threat_source_field for row in annotations] == ["src_ip", "src_ip"]
+    assert [row.threat_source_field for row in annotations] == ["event_desc", "event_desc"]
 
 
 def test改选重跑仍全落其他时保持降级不再重试(monkeypatch):
@@ -883,10 +889,10 @@ def test改选重跑仍全落其他时保持降级不再重试(monkeypatch):
 
     summary = extended.results[-1]
     assert summary.message.startswith("🔗 威胁类型链路已自动完成")
-    assert "来源字段已自动改选 attack_type → src_ip" in summary.message
+    assert "来源字段已自动改选 attack_type → event_desc" in summary.message
     assert "结果仍全为「其他」，保持降级" in summary.message
     for rule in session["mapped_sub_rules"]:
-        assert _threat_binding(rule) == "%{src_ip}"
+        assert _threat_binding(rule) == "%{event_desc}"
         threat_entries = [
             entry for entry in rule["normalize"] if entry.get("index") == "威胁类型"
         ]

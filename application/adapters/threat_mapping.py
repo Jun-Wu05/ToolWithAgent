@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from agent.core.standard_field_catalog import get_standard_field_catalog
 from agent.shared.logger import get_logger
 from application.adapters.shared import (
     _failed,
@@ -17,8 +18,12 @@ from application.adapters.shared import (
 )
 from application.execution import ExecutionContext
 from application.parsing import parse_json_threat_result
-from application.threat_chain_policy import ensure_threat_mapping_coverage
+from application.threat_chain_policy import (
+    is_code_only_value,
+    validate_threat_mapping_coverage,
+)
 from contracts.planner_models import (
+    THREAT_TYPE_FIELD,
     EnumValuesArtifact,
     StepResult,
     StepSpec,
@@ -29,6 +34,14 @@ from contracts.planner_models import (
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 
 logger = get_logger("execution_adapters")
+
+
+def _standard_threat_targets() -> set[str]:
+    """解析威胁类型标准枚举集合；数据源为 config/标准字段.txt（单一事实源）。"""
+    field = get_standard_field_catalog().lookup(THREAT_TYPE_FIELD)
+    if field is None or not field.enum_values:
+        return set()
+    return {value.strip() for value in field.enum_values.split(",") if value.strip()}
 
 
 class ThreatMappingAdapter:
@@ -43,7 +56,7 @@ class ThreatMappingAdapter:
         context: ExecutionContext,
         dependencies: Mapping[str, StepResult],
     ) -> StepResult:
-        """只消费声明来源，调用一次 ThreatAgent，并在成功后提交双槽。"""
+        """只消费声明来源，调用一次 ThreatAgent，通过统一覆盖校验后提交双槽。"""
         if not isinstance(step, ThreatMappingStep):
             raise TypeError("ThreatMappingAdapter 只接受 ThreatMappingStep")
 
@@ -75,24 +88,43 @@ class ThreatMappingAdapter:
             values = list(artifact.values)
             source_field = artifact.field or None
 
+        # 无语义数字代码（#277）：输入不含任何语义证据时先于模型调用安全
+        # 失败，不调用也不采信模型猜测；混合输入不提前拒绝，仍走统一覆盖校验。
+        if values and all(is_code_only_value(value) for value in values):
+            return _needs_input(
+                step,
+                "threat_mapping_source_context_required",
+                "输入全部为无语义数字代码，无法可靠映射威胁类型；"
+                "请改用含语义的来源字段，或提供代码表后重试",
+            )
+
+        valid_targets = _standard_threat_targets()
+        if not valid_targets:
+            return _failed(
+                step,
+                "threat_mapping_reference_unavailable",
+                "威胁类型标准枚举不可用，无法校验映射结果",
+            )
+
         model_input = json.dumps({"values": values}, ensure_ascii=False)
         content = await run_member_stream(self._team, "ThreatAgent", model_input)
         mapping_rows = parse_json_threat_result(content)
         if not mapping_rows:
             return _failed(step, "threat_mapping_empty", "威胁映射未生成有效结果")
-        # 值全覆盖兜底（#173 决策 5）：未被任何映射行覆盖的提取值确定性补
-        # 「其他」兜底行，不依赖提示词自觉；跨轮/手输路径同样受益。
-        rows_before = len(mapping_rows)
-        mapping_rows = ensure_threat_mapping_coverage(values, mapping_rows)
-        appended = len(mapping_rows) - rows_before
-        if appended:
+        # 统一来源覆盖校验（#277）：三种声明来源共用同一校验与错误语义；
+        # 来源外、缺项、重叠或枚举外结果整体拒绝，不再补「其他」兜底行洗白。
+        violation = validate_threat_mapping_coverage(values, mapping_rows, valid_targets)
+        if violation:
             logger.info(
-                "[THREAT_MAPPING] 全覆盖兜底补行: value_count=%s "
-                "row_count=%s->%s appended=%s",
+                "[THREAT_MAPPING] 统一覆盖校验拒绝: rule=%s value_count=%s row_count=%s",
+                violation,
                 len(values),
-                rows_before,
                 len(mapping_rows),
-                appended,
+            )
+            return _failed(
+                step,
+                "threat_mapping_coverage_rejected",
+                f"威胁映射结果未通过统一覆盖校验（{violation}），已拒绝提交",
             )
 
         typed_mappings = tuple(ThreatMappingRow.model_validate(row) for row in mapping_rows)

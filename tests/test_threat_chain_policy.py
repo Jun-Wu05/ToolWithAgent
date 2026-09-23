@@ -18,11 +18,12 @@ from application.threat_chain_policy import (
     collect_threat_field_pools,
     degraded_mapping_ratio,
     determine_source_field,
-    ensure_threat_mapping_coverage,
     evaluate_chain_trigger,
     inspect_threat_field_state,
+    is_code_only_value,
     is_safe_rederive_plan,
     should_rederive,
+    validate_threat_mapping_coverage,
 )
 from agent.shared.event_classify import THREAT_TYPE_FIELD
 
@@ -288,25 +289,98 @@ def test构造器降级单步固定值其他():
 
 
 # ---------------------------------------------------------------------------
-# 值全覆盖校验
+# 统一来源覆盖校验（#277）
+# ---------------------------------------------------------------------------
+
+_COVERAGE_TARGETS = {"暴力破解", "端口扫描", "信息泄露", "其他"}
+
+
+def test覆盖校验完整结果通过():
+    rows = [
+        {"mappingType": "EQUAL", "orgValue": "brute", "mappingValue": "暴力破解"},
+        {"mappingType": "REGULAR", "orgValue": "(?i).*scan.*", "mappingValue": "端口扫描"},
+    ]
+    assert (
+        validate_threat_mapping_coverage(
+            ["brute", "slow scan"], rows, _COVERAGE_TARGETS
+        )
+        is None
+    )
+
+
+def test覆盖校验合法分组正则覆盖多个输入():
+    rows = [
+        {"mappingType": "REGULAR", "orgValue": "(?:暴力破解|撞库)", "mappingValue": "暴力破解"},
+    ]
+    assert (
+        validate_threat_mapping_coverage(["暴力破解", "撞库"], rows, _COVERAGE_TARGETS)
+        is None
+    )
+
+
+def test覆盖校验缺项拒绝():
+    rows = [{"mappingType": "EQUAL", "orgValue": "brute", "mappingValue": "暴力破解"}]
+    violation = validate_threat_mapping_coverage(
+        ["brute", "phish"], rows, _COVERAGE_TARGETS
+    )
+    assert violation == "declared_input_uncovered"
+
+
+def test覆盖校验来源外结果拒绝():
+    rows = [
+        {"mappingType": "EQUAL", "orgValue": "brute", "mappingValue": "暴力破解"},
+        {"mappingType": "EQUAL", "orgValue": "unknown", "mappingValue": "端口扫描"},
+    ]
+    violation = validate_threat_mapping_coverage(["brute"], rows, _COVERAGE_TARGETS)
+    assert violation == "row_out_of_source"
+
+
+def test覆盖校验正则重叠多行命中同一输入拒绝():
+    rows = [
+        {"mappingType": "EQUAL", "orgValue": "brute", "mappingValue": "暴力破解"},
+        {"mappingType": "REGULAR", "orgValue": "(?i).*brute.*", "mappingValue": "端口扫描"},
+    ]
+    violation = validate_threat_mapping_coverage(["brute"], rows, _COVERAGE_TARGETS)
+    assert violation == "declared_input_multi_matched"
+
+
+def test覆盖校验重复结果拒绝():
+    row = {"mappingType": "EQUAL", "orgValue": "brute", "mappingValue": "暴力破解"}
+    violation = validate_threat_mapping_coverage(
+        ["brute"], [dict(row), dict(row)], _COVERAGE_TARGETS
+    )
+    assert violation == "declared_input_multi_matched"
+
+
+def test覆盖校验枚举外映射值拒绝():
+    rows = [{"mappingType": "EQUAL", "orgValue": "brute", "mappingValue": "不存在类型"}]
+    violation = validate_threat_mapping_coverage(["brute"], rows, _COVERAGE_TARGETS)
+    assert violation == "mapping_value_out_of_enum"
+
+
+def test覆盖校验返回值不含真实输入或映射值():
+    rows = [
+        {"mappingType": "EQUAL", "orgValue": "真实输入甲", "mappingValue": "不存在类型乙"},
+    ]
+    violation = validate_threat_mapping_coverage(["真实输入甲"], rows, _COVERAGE_TARGETS)
+    assert violation == "mapping_value_out_of_enum"
+    assert "真实输入甲" not in violation
+    assert "不存在类型乙" not in violation
+
+
+# ---------------------------------------------------------------------------
+# 无语义数字代码判定（#277）
 # ---------------------------------------------------------------------------
 
 
-def test全覆盖校验为未覆盖值补其他兜底行():
-    rows = [
-        {"mappingType": "REGULAR", "orgValue": "(?i).*暴力破解.*", "mappingValue": "暴力破解"},
-    ]
-    ensured = ensure_threat_mapping_coverage(["暴力破解", "未知告警"], rows)
-    assert len(ensured) == 2
-    appended = ensured[-1]
-    assert appended["mappingValue"] == "其他"
-    assert appended["mappingType"] == "REGULAR"
+def test数字代码判定纯数字与常见代码分隔符():
+    for value in ["30", "10", "30-10", "30_10", "30.10", "30:10", "30/10", " 30 10 "]:
+        assert is_code_only_value(value), value
 
 
-def test全覆盖校验已覆盖值不重复补行():
-    rows = [{"mappingType": "EQUAL", "orgValue": "扫描", "mappingValue": "端口扫描"}]
-    ensured = ensure_threat_mapping_coverage(["扫描", "扫描"], list(rows))
-    assert ensured == rows
+def test数字代码判定含字母或文字即非代码():
+    for value in ["", "30a", "攻击30", "信息", "attack", "30级"]:
+        assert not is_code_only_value(value), value
 
 
 # ---------------------------------------------------------------------------
