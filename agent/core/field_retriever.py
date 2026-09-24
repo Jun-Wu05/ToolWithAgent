@@ -24,6 +24,8 @@ from typing import Optional
 import numpy as np
 
 from agent.core.embedding_client import (
+    EMBEDDING_BATCH_SIZE,
+    EMBEDDING_BATCH_SLEEP,
     EMBEDDING_DIM,
     EMBEDDING_MODEL,
     QUERY_EMBEDDING_CACHE,
@@ -885,6 +887,61 @@ def batch_retrieve_candidates(raw_field_names: list[str], top_k: int = 6) -> str
     return render_candidates_markdown(
         batch_retrieve_candidates_table(raw_field_names, top_k=top_k), top_k=top_k
     )
+
+
+def render_candidates_enriched(table: CandidateTable, top_k: int) -> str:
+    """把结构化候选表渲染为含目录元数据的增强候选块（#189 第一阶段证据增强）。
+
+    与 :func:`render_candidates_markdown` 的区别：每个候选附加对象、属性类型、
+    描述与枚举白名单（白名单直接来自标准字段目录，不在 Prompt 中维护第二份）。
+    旧渲染函数保持逐字节不变；本函数仅供枚举自动映射链路的第一阶段输入使用。
+    """
+    if not table:
+        return ""
+    records = {
+        record.get("系统属性名称", ""): record
+        for record in get_standard_field_catalog().records()
+    }
+
+    def _enrich_row(row: CandidateRow) -> str:
+        name, score, english, variant = row
+        record = records.get(name, {})
+        meta: list[str] = []
+        obj = str(record.get("对象", "") or "")
+        data_type = str(record.get("属性类型", "") or "")
+        enum_values = str(record.get("枚举值", "") or "")
+        description = str(record.get("描述", "") or "")
+        if obj:
+            meta.append(f"对象:{obj}")
+        if data_type:
+            meta.append(f"类型:{data_type}")
+        if enum_values:
+            meta.append(f"枚举:{enum_values}")
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+            description = description[:MAX_DESCRIPTION_LENGTH] + "..."
+        if description:
+            meta.append(f"描述:{description}")
+        suffix = f", by_stripped={variant}" if variant else ""
+        meta_text = f" | {' · '.join(meta)}" if meta else ""
+        return f"{name}({score:.2f}, {english}{suffix}{meta_text})"
+
+    lines = [
+        f"{field_name} → {' | '.join(_enrich_row(row) for row in rows)}"
+        for field_name, rows in table.items()
+    ]
+    raw_output = (
+        f"## 标准字段候选（语义检索 top-{top_k}，按相似度降序，含目录元数据）："
+        + "\n"
+        + "\n".join(lines)
+    )
+    for old, new in [
+        ("{", "&#123;"),
+        ("}", "&#125;"),
+        ("[", "&#91;"),
+        ("]", "&#93;"),
+    ]:
+        raw_output = raw_output.replace(old, new)
+    return raw_output
 
 
 def _debug_lookup(keyword: str, top_k: int = 6) -> str:

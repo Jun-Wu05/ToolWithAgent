@@ -12,7 +12,9 @@ from __future__ import annotations
 import copy
 import json
 from collections import Counter
-from typing import Any
+from typing import Any, Iterator
+
+_ENUM_EXCLUDED_INDEXES = frozenset({"original_log", "日志类型", "事件名称", "事件级别"})
 
 
 def _is_reference_value(value: Any) -> bool:
@@ -113,6 +115,47 @@ def append_mappings_to_normalize(normalize_item: dict, mappings: list[dict]) -> 
             existing_org.add(org_value)
             added += 1
     return added
+
+
+def apply_enum_outcomes(structure: Any, outcomes: dict) -> int:
+    """把 #189 枚举画像结果写入对应 normalize 条目，返回写入数。
+
+    键为 ``application.standard_enum_mapping.iter_normalize_owners`` 的结构
+    路径键；只处理本轮新映射（field 已是目标字段）且既有 mappings 为空的
+    条目，已有不明 mappings 拒绝写入。本模块不反向依赖 application，
+    遍历语义与该函数保持一致。
+    """
+
+    def _walk(node: Any, path: tuple) -> Iterator[tuple[tuple, dict]]:
+        """递归收集 (结构路径+index, 条目)，元字段不参与枚举写回。"""
+        if isinstance(node, dict):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for entry in normalize:
+                    if isinstance(entry, dict):
+                        index = str(entry.get("index") or "").strip()
+                        if index and index not in _ENUM_EXCLUDED_INDEXES:
+                            yield (*path, index), entry
+            for key, value in node.items():
+                if key != "normalize":
+                    yield from _walk(value, (*path, str(key)))
+        elif isinstance(node, list):
+            for position, item in enumerate(node):
+                yield from _walk(item, (*path, str(position)))
+
+    written = 0
+    for key, entry in _walk(structure, ()):
+        outcome = outcomes.get(key)
+        if outcome is None or not outcome.mappings:
+            continue
+        if entry.get("field") != outcome.policy.system_property_name:
+            continue
+        if entry.get("mappings"):
+            continue
+        append_mappings_to_normalize(entry, [dict(item) for item in outcome.mappings])
+        entry["value"] = outcome.policy.default_value
+        written += 1
+    return written
 
 
 def apply_fill_to_config(

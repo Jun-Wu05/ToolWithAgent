@@ -15,6 +15,7 @@ PROMPT_LOADERS = {
     "load_clarification_prompt": "clarification.md",
     "load_enum_extract_prompt": "enum_extract.md",
     "load_enum_field_prompt": "enum_field.md",
+    "load_enum_value_review_prompt": "enum_value_review.md",
     "load_event_classify_prompt": "event_classify.md",
     "load_field_strong_prompt": "field_strong.md",
     "load_field_weak_prompt": "field_weak.md",

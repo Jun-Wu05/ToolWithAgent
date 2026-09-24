@@ -10,6 +10,7 @@ __all__ = [
     "load_clarification_prompt",
     "load_enum_extract_prompt",
     "load_enum_field_prompt",
+    "load_enum_value_review_prompt",
     "load_event_classify_prompt",
     "load_field_strong_prompt",
     "load_field_weak_prompt",
@@ -101,6 +102,11 @@ def load_threat_type_prompt() -> str:
 def load_enum_field_prompt() -> str:
     """加载普通字段枚举处理提示词"""
     return _load_md_or_fail("enum_field.md", "枚举字段处理")
+
+
+def load_enum_value_review_prompt() -> str:
+    """加载标准枚举值第二阶段归类提示词（#189）"""
+    return _load_md_or_fail("enum_value_review.md", "标准枚举值归类")
 
 
 def load_standard_fields() -> str:

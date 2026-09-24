@@ -113,6 +113,7 @@ class FieldMappingBatchRunner:
         batch_number: int,
         total_batches: int,
         semaphore: asyncio.Semaphore,
+        value_profiles: dict | None = None,
     ) -> list[dict[str, Any]]:
         """去重、过滤批次外结果、补查缺失字段，并严格恢复输入顺序。"""
         fields_set = set(fields_batch)
@@ -154,6 +155,7 @@ class FieldMappingBatchRunner:
                     batch_number,
                     total_batches,
                     prequery=self._candidate_retriever,
+                    value_profiles=value_profiles,
                 )
                 async with semaphore:
                     content = await asyncio.wait_for(
@@ -215,6 +217,7 @@ class FieldMappingBatchRunner:
         plan_id: str,
         step_id: str,
         publish_progress: ProgressCallback,
+        value_profiles: dict | None = None,
     ) -> list[dict[str, Any]]:
         """执行完整批次策略；任一原始批失败时取消其余任务并原子失败。"""
         available_fields = list(fields)
@@ -257,6 +260,7 @@ class FieldMappingBatchRunner:
                     batch_number,
                     total_batches,
                     prequery=self._candidate_retriever,
+                    value_profiles=value_profiles,
                 )
             except Exception as error:
                 elapsed = time.monotonic() - retrieval_started_at
@@ -434,6 +438,7 @@ class FieldMappingBatchRunner:
                     batch_number=batch_number,
                     total_batches=total_batches,
                     semaphore=semaphore,
+                    value_profiles=value_profiles,
                 )
 
             raise FieldMappingBatchError(
