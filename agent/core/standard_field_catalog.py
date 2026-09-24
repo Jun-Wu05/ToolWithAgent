@@ -224,6 +224,122 @@ def _freeze_synonyms(
     return MappingProxyType(frozen)
 
 
+# ---------------------------------------------------------------------------
+# 标准枚举自动映射策略（#189）
+# ---------------------------------------------------------------------------
+
+ENUM_AUTO_MAPPING_TARGETS: Mapping[str, str] = MappingProxyType({
+    "HTTP请求方法": "其他",
+    "操作系统平台": "others",
+    "事件状态": "未知",
+    "事件结果": "未知",
+    "威胁等级": "提醒",
+    "攻击结果": "未知",
+    "登录系统": "未知",
+    "事件动作": "未知",
+})
+"""参与标准枚举自动映射的标准字段 → 外层 value 默认值。
+
+白名单唯一来源仍是标准字段表的「枚举值」列；本表不复制枚举集合。
+"""
+
+ENUM_AUTO_MAPPING_EXCLUSIONS: tuple[str, ...] = ("操作类型", "威胁类型")
+"""显式排除的标准字段：操作类型待独立 issue，威胁类型走 #173 独立链路。"""
+
+ENUM_UNIQUE_VALUE_LIMIT = 10
+"""单个值画像允许的唯一值上限：第 11 个出现即整体拒绝，不截断。"""
+
+
+@dataclass(frozen=True, slots=True)
+class EnumMappingPolicy:
+    """一个标准枚举字段的自动映射策略。"""
+
+    system_property_name: str
+    field_name: str
+    default_value: str
+    whitelist: tuple[str, ...]
+
+
+def enum_auto_mapping_policies() -> dict[str, EnumMappingPolicy]:
+    """从目录事实解析 8 个目标字段的枚举策略，配置漂移时立即失败。
+
+    校验：目标行存在、属性类型为「枚举」、白名单非空、默认值属于白名单、
+    排除字段不得出现在目标集合中（启动/测试期验证默认值合法性的唯一入口）。
+    """
+    catalog = get_standard_field_catalog()
+    overlap = ENUM_AUTO_MAPPING_EXCLUSIONS and set(ENUM_AUTO_MAPPING_EXCLUSIONS) & set(
+        ENUM_AUTO_MAPPING_TARGETS
+    )
+    if overlap:
+        raise ValueError(f"枚举自动映射排除字段与目标重叠: {sorted(overlap)}")
+    policies: dict[str, EnumMappingPolicy] = {}
+    for system_name, default_value in ENUM_AUTO_MAPPING_TARGETS.items():
+        field = next(
+            (item for item in catalog.fields if item.system_property_name == system_name),
+            None,
+        )
+        if field is None:
+            raise ValueError(f"枚举自动映射目标字段不存在: {system_name}")
+        if field.data_type != "枚举":
+            raise ValueError(
+                f"枚举自动映射目标 {system_name} 属性类型为 {field.data_type!r}，应为「枚举」"
+            )
+        whitelist = tuple(
+            value.strip() for value in field.enum_values.split(",") if value.strip()
+        )
+        if not whitelist:
+            raise ValueError(f"枚举自动映射目标 {system_name} 白名单为空")
+        if default_value not in whitelist:
+            raise ValueError(
+                f"枚举自动映射目标 {system_name} 默认值 {default_value!r} 不在白名单内"
+            )
+        policies[system_name] = EnumMappingPolicy(
+            system_property_name=system_name,
+            field_name=field.field_name,
+            default_value=default_value,
+            whitelist=whitelist,
+        )
+    return policies
+
+
+def resolve_enum_field(raw_field_name: str) -> tuple[str, str] | None:
+    """确定性解析原始字段名是否命中 8 个枚举自动映射目标之一。
+
+    返回 ``(系统属性名称, 来源)``，来源为 ``exact``（规范化名/紧凑名等于目标
+    英文字段名）或 ``synonym``（目录中文别名或 field_synonyms 的 en 同义词指向
+    目标英文名）；未命中目标（含命中其他标准字段）返回 None，字段继续走
+    既有候选检索 + LLM 主路径。
+    """
+    policies = enum_auto_mapping_policies()
+    catalog = get_standard_field_catalog()
+    record = catalog.lookup(raw_field_name)
+    if record is not None and record.system_property_name in policies:
+        if (
+            normalize_field_name(raw_field_name) == normalize_field_name(record.field_name)
+            or compact_field_name(raw_field_name) == compact_field_name(record.field_name)
+        ):
+            return record.system_property_name, "exact"
+        return record.system_property_name, "synonym"
+
+    normalized = normalize_field_name(raw_field_name)
+    compact = compact_field_name(raw_field_name)
+    for synonym_key, entry in catalog.synonyms.items():
+        target = next(
+            (
+                policy
+                for policy in policies.values()
+                if policy.field_name == str(entry.get("en", ""))
+            ),
+            None,
+        )
+        if target is None:
+            continue
+        key_normalized = normalize_field_name(str(synonym_key))
+        if normalized == key_normalized or compact == compact_field_name(str(synonym_key)):
+            return target.system_property_name, "synonym"
+    return None
+
+
 @lru_cache(maxsize=1)
 def get_standard_field_catalog() -> StandardFieldCatalog:
     """Return the process-wide immutable default catalog."""

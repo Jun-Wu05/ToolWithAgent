@@ -37,9 +37,38 @@ def _pre_query_field_candidates(fields_list: list) -> str:
     return ""
 
 
+def _render_value_profiles(value_profiles: dict, fields_batch: list) -> str:
+    """把按字段分组的值画像渲染为紧凑文本块（#189 第一阶段证据增强）。
+
+    画像对象鸭子类型：owner/field/values/empty_count/scanned_lines/hit_lines/source。
+    只渲染当前批次字段；块内只含去重值与计数，不包含任何原始日志行。
+    """
+    lines: list[str] = []
+    for name in fields_batch:
+        profiles = value_profiles.get(name) or []
+        if not profiles:
+            continue
+        entries = []
+        for profile in profiles:
+            values_text = ", ".join(
+                f"{value}×{count}" for value, count in list(profile.values.items())[:10]
+            )
+            entries.append(
+                f"  · {profile.owner}（来源 {profile.source}，扫描 {profile.scanned_lines} 行，"
+                f"命中 {profile.hit_lines} 行，空值 {profile.empty_count} 个）：{values_text}"
+            )
+        lines.append(f"- 字段 {name}：\n" + "\n".join(entries))
+    if not lines:
+        return ""
+    return (
+        "📋 字段值画像（按日志类型分组，由代码全量扫描提供，"
+        "仅用于辅助判断字段语义与值域）：\n" + "\n".join(lines)
+    )
+
+
 def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list,
                           batch_idx: int, total_batches: int,
-                          prequery=None) -> str:
+                          prequery=None, value_profiles=None) -> str:
     """
     构建分批字段的 LLM 输入（用于 >50 字段场景，每批独立调用 Team）
 
@@ -51,9 +80,11 @@ def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list
         total_batches: 总批次数
         prequery: 可选候选检索函数（Issue #88 注入接缝）；缺省用模块默认
             ``_pre_query_field_candidates``，测试可构造注入假件替代 monkeypatch
+        value_profiles: 可选字段值画像（#189 注入接缝）：{原始字段名: [画像, ...]}。
+            缺省 None 时输出与历史逐字节一致；传入时只为批次内字段追加画像块
 
     Returns:
-        完整 LLM 输入字符串（字段批次 + 语义候选 + 原始日志样本）
+        完整 LLM 输入字符串（字段批次 + 语义候选 + 值画像 + 原始日志样本）
     """
     simplified_data = user_session.get("simplified_data", {})
     original_log_sample = simplified_data.get("original_log_sample", "")
@@ -75,6 +106,11 @@ def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list
 
     if pre_query_candidates:
         full_input += f"\n\n{pre_query_candidates}\n"
+
+    if value_profiles:
+        profiles_block = _render_value_profiles(value_profiles, fields_batch)
+        if profiles_block:
+            full_input += f"\n{profiles_block}\n"
 
     if original_log_sample:
         sample_str = (original_log_sample

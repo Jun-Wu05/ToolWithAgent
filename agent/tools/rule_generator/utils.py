@@ -119,6 +119,21 @@ def split_kv_line_quote_aware(
     Returns:
         去重后的 key 列表（保持首次出现顺序）。
     """
+    keys: list[str] = []
+    seen: set[str] = set()
+    for key, _value in extract_kv_pairs(text, delimit, tab):
+        if key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return keys
+
+
+def _split_kv_segments(text: str, delimit: str = " ", tab: str = "=") -> list[str]:
+    """按字段分隔符拆分 KV 文本为原始 segment 列表（引号/括号感知）。
+
+    与 :func:`extract_kv_pairs` 共享同一状态机：仅在深度全 0 且不在引号内
+    时，分隔符才视为字段边界。
+    """
     # 语义化名称 → 实际字符
     _DELIMIT_MAP: dict[str, str] = {
         "space": " ",
@@ -203,21 +218,39 @@ def split_kv_line_quote_aware(
     if current_segment:
         segments.append("".join(current_segment))
 
-    # --- 从每个 segment 提取 key ---
-    keys: list[str] = []
-    seen: set[str] = set()
-    for seg in segments:
-        seg = seg.strip()
-        if not seg:
-            continue
-        idx = seg.find(tab)
-        if idx > 0:
-            key = seg[:idx].strip()
-            if key and key not in seen:
-                seen.add(key)
-                keys.append(key)
+    return segments
 
-    return keys
+
+def extract_kv_pairs(
+    text: str,
+    delimit: str = " ",
+    tab: str = "=",
+) -> list[tuple[str, str]]:
+    """从 KV 文本提取全部 ``(key, value)`` 对（保留重复出现，供值画像计数）。
+
+    与 :func:`split_kv_line_quote_aware` 共享同一引号/括号感知状态机；
+    值语义与解析器一致：segment 内第一个 ``tab`` 之前为 key（去除首尾空白），
+    之后为值并**原样保留**（不 trim、不去引号），无 ``tab`` 的 segment 跳过。
+
+    Args:
+        text: KV 格式文本（单行或多行）。
+        delimit: 字段分隔符（``"space"`` / ``"comma"`` / ``"semicolon"`` 或实际字符）。
+        tab: 键值分隔符（如 ``"="`` ``":"``）。
+
+    Returns:
+        ``(key, value)`` 列表（按出现顺序，不去重）。
+    """
+    pairs: list[tuple[str, str]] = []
+    for segment in _split_kv_segments(text, delimit, tab):
+        stripped = segment.strip()
+        if not stripped:
+            continue
+        index = stripped.find(tab)
+        if index > 0:
+            key = stripped[:index].strip()
+            if key:
+                pairs.append((key, stripped[index + len(tab):]))
+    return pairs
 
 
 def extract_kv_keys(text: str, delimit: str = " ", tab: str = "=") -> list[str]:

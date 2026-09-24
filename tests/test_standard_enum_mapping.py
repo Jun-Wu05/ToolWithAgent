@@ -1,0 +1,647 @@
+"""#189 标准字段映射自动补全枚举值：36 个验收场景的聚焦测试（全离线假件）。
+
+分组：目录与策略（1-4）、提取与隔离（5-13）、字段判断（14-20）、
+模型输出校验（21-29）、写回与回归（30-36）。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+
+from application.execution import ExecutionContext
+from application.session_projection import build_session_facts
+from application.standard_enum_mapping import (
+    FieldValueProfile,
+    build_review_prompt,
+    build_value_profiles_from_config,
+    build_value_profiles_from_logs,
+    review_enum_profile,
+)
+from agent.shared.mapping_utils import apply_enum_outcomes
+from contracts.planner_models import FieldMappingStep, StepStatus
+from contracts.session_facts import SessionFacts
+
+POLICY_RESULT_WHITELIST = ("失败", "成功", "未知")
+
+
+def _policies():
+    from agent.core.standard_field_catalog import enum_auto_mapping_policies
+
+    return enum_auto_mapping_policies()
+
+
+def _result_policy():
+    return _policies()["事件结果"]
+
+
+def _kv_rule(name: str, logtype: str, indexes: list[str]) -> dict:
+    """构造 KV 子规则：addFields 日志类型过滤 + 指定 index 的 normalize。"""
+    return {
+        "name": name,
+        "parser": {
+            "name": "delimitWithKeyMap",
+            "tab": "=",
+            "delimit": "\\s",
+            "filter": [{"name": "addFields", "fields": {"日志类型": logtype}}],
+        },
+        "normalize": [
+            {
+                "index": index,
+                "mappings": [],
+                "field": None,
+                "sim": None,
+                "result": [],
+                "info": None,
+                "entity": None,
+                "required": False,
+                "core": None,
+                "value": None,
+            }
+            for index in indexes
+        ],
+    }
+
+
+def _model_reply(rows: list[dict]):
+    """构造返回固定映射行的二阶段假件（兼容 call_model 协议）。"""
+    async def call_model(prompt: str) -> str:
+        return json.dumps(rows, ensure_ascii=False)
+
+    return call_model
+
+
+# ---------------------------------------------------------------------------
+# 组 1：目录与策略（场景 1-4）
+# ---------------------------------------------------------------------------
+
+def test场景1_目录仅识别8个自动枚举字段():
+    policies = _policies()
+    assert len(policies) == 8
+    assert all(policy.whitelist for policy in policies.values())
+
+
+def test场景2_事件动作白名单为放行拦截未知():
+    policy = _policies()["事件动作"]
+    assert policy.field_name == "event_action"
+    assert policy.whitelist == ("放行", "拦截", "未知")
+
+
+def test场景3_默认值均属于各自白名单():
+    for policy in _policies().values():
+        assert policy.default_value in policy.whitelist, policy.system_property_name
+
+
+def test场景4_操作类型与威胁类型明确排除():
+    from agent.core.standard_field_catalog import (
+        ENUM_AUTO_MAPPING_EXCLUSIONS,
+        resolve_enum_field,
+    )
+
+    targets = set(_policies())
+    assert not targets & set(ENUM_AUTO_MAPPING_EXCLUSIONS)
+    assert resolve_enum_field("threat_type") is None
+    assert resolve_enum_field("操作类型") is None
+
+
+# ---------------------------------------------------------------------------
+# 组 2：提取与隔离（场景 5-13）
+# ---------------------------------------------------------------------------
+
+def test场景5_万行日志5个唯一值全部提取不依赖样本():
+    lines = [f"FW logtype=X result=success seq={i}" for i in range(5_000)]
+    lines += [f"FW logtype=X result=timeout seq={i}" for i in range(5_000)]
+    rule = _kv_rule("X_kv_子规则", "X", ["result"])
+    profiles = build_value_profiles_from_logs([rule], lines)
+    profile = next(iter(profiles.values()))
+    assert profile.status == "ok"
+    assert set(profile.values) == {"success", "timeout"}
+    assert profile.values["success"] == 5_000
+    assert profile.scanned_lines == 10_000
+
+
+def test场景6_不同日志类型数据严格隔离():
+    lines = [
+        "AUDIT type=login result=success",
+        "IPS type=block result=drop",
+    ]
+    rules = [
+        _kv_rule("AUDIT_kv_子规则", "AUDIT", ["result"]),
+        _kv_rule("IPS_kv_子规则", "IPS", ["result"]),
+    ]
+    profiles = build_value_profiles_from_logs(rules, lines)
+    by_owner = {profile.owner: profile for profile in profiles.values()}
+    assert set(by_owner["AUDIT_kv_子规则"].values) == {"success"}
+    assert set(by_owner["IPS_kv_子规则"].values) == {"drop"}
+
+
+def test场景7_共有字段在多个日志类型均有画像():
+    lines = ["AUDIT result=success", "IPS result=block"]
+    rules = [
+        _kv_rule("AUDIT_kv_子规则", "AUDIT", ["result"]),
+        _kv_rule("IPS_kv_子规则", "IPS", ["result"]),
+    ]
+    profiles = build_value_profiles_from_logs(rules, lines)
+    assert len(profiles) == 2  # 两条子规则各有 (owner, result) 画像
+
+
+def test场景8_相同原值在不同日志类型保持独立画像():
+    lines = ["AUDIT result=0", "IPS result=0"]
+    rules = [
+        _kv_rule("AUDIT_kv_子规则", "AUDIT", ["result"]),
+        _kv_rule("IPS_kv_子规则", "IPS", ["result"]),
+    ]
+    profiles = build_value_profiles_from_logs(rules, lines)
+    owners = {profile.owner for profile in profiles.values()}
+    assert owners == {"AUDIT_kv_子规则", "IPS_kv_子规则"}
+
+
+def test场景9_重复原值正确去重并计数():
+    lines = ["AUDIT result=a", "AUDIT result=a", "AUDIT result=b"]
+    profiles = build_value_profiles_from_logs(
+        [_kv_rule("AUDIT_kv_子规则", "AUDIT", ["result"])], lines
+    )
+    profile = next(iter(profiles.values()))
+    assert profile.values == {"a": 2, "b": 1}
+
+
+def test场景10_配置样本模式处理并标记来源():
+    config = [{"name": "r", "normalize": [{"index": "result", "result": ["success"]}]}]
+    profiles = build_value_profiles_from_config(config)
+    profile = next(iter(profiles.values()))
+    assert profile.source == "config-sample"
+    assert set(profile.values) == {"success"}
+
+
+def test场景11_缺失null空字符串只计数不生成值():
+    rule = _kv_rule("R", "AUDIT", ["result", "missing_field"])
+    rule["normalize"][0]["result"] = ["success", "", None]
+    profiles = build_value_profiles_from_config([rule])
+    values = {profile.field: profile for profile in profiles.values()}
+    assert values["result"].values == {"success": 1}
+    assert values["result"].empty_count == 2
+
+
+def test场景12_数组或对象导致整画像拒绝():
+    config = [{"name": "r", "normalize": [{"index": "result", "result": [["a"]]}]}]
+    profile = next(iter(build_value_profiles_from_config(config).values()))
+    assert profile.status == "rejected"
+    assert "数组或对象" in profile.reject_reason
+
+
+def test场景13_十个唯一值允许第十一个拒绝不截断():
+    ok_lines = [f"AUDIT result=v{i}" for i in range(10)]
+    rule = _kv_rule("AUDIT_kv_子规则", "AUDIT", ["result"])
+    ok = next(iter(build_value_profiles_from_logs([rule], ok_lines).values()))
+    assert ok.status == "ok" and len(ok.values) == 10
+    bad_lines = ok_lines + ["AUDIT result=v10"]
+    bad = next(iter(build_value_profiles_from_logs([rule], bad_lines).values()))
+    assert bad.status == "rejected"
+    assert "上限" in bad.reject_reason
+
+
+# ---------------------------------------------------------------------------
+# 组 3：字段判断（场景 14-20）
+# ---------------------------------------------------------------------------
+
+class _RecordingRunner:
+    """记录收到的字段并按原样返回机械结果的批处理假件。"""
+
+    def __init__(self) -> None:
+        self.fields: list[str] = []
+        self.value_profiles = None
+
+    async def run(self, fields, **kwargs):
+        self.fields = list(fields)
+        self.value_profiles = kwargs.get("value_profiles")
+        return [
+            {"原始字段名": field, "系统属性名称": f"标准_{field}", "匹配状态": "匹配成功"}
+            for field in fields
+        ]
+
+
+class _EnumReviewMember:
+    """按值画像返回合法归类结果的二阶段成员假件。"""
+
+    name = "FieldMappingAgent"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def run(self, prompt: str):
+        """从二阶段输入解析值列表并全部映射到「成功」。"""
+        self.calls.append(prompt)
+        values_block = prompt.split("## 唯一非空值", 1)[1].split("## 白名单", 1)[0]
+        payload = json.loads(values_block.strip().split("\n", 1)[1])
+        return json.dumps(
+            [
+                {"原始字段名": item["orgValue"], "系统属性名称": "成功", "匹配状态": "匹配成功"}
+                for item in payload
+            ],
+            ensure_ascii=False,
+        )
+
+
+class _Team:
+    """最小专业 Agent 注册表假件。"""
+
+    def __init__(self, member) -> None:
+        self.members = [member]
+
+
+def _enum_adapter_session(log_lines: list[str]) -> dict:
+    rule = _kv_rule("AUDIT_kv_子规则", "AUDIT", ["result", "zzz"])
+    return {
+        "mapped_sub_rules": [rule],
+        "raw_log_lines": log_lines,
+    }
+
+
+def _run_enum_adapter(session, runner, team, event_classifier):
+    from application.adapters.field_mapping import FieldMappingAdapter
+
+    facts = SessionFacts(
+        available_fields=("result", "zzz"),
+        mappable_fields=("result", "zzz"),
+    )
+    return asyncio.run(
+        FieldMappingAdapter(
+            team=team, batch_runner=runner, event_classifier=event_classifier
+        ).execute(
+            FieldMappingStep(
+                step_id="mapping", type="field_mapping", source_ref="session.fields"
+            ),
+            ExecutionContext(session=session, session_facts=facts),
+            {},
+        )
+    )
+
+
+def test场景14_精确英文字段名绕过LLM字段猜测():
+    runner = _RecordingRunner()
+    session = _enum_adapter_session(["AUDIT result=success zzz=1"])
+    result = _run_enum_adapter(
+        session, runner, _Team(_EnumReviewMember()), lambda prompt: "[]"
+    )
+    assert result.status == StepStatus.SUCCESS
+    assert runner.fields == ["zzz"]  # result 被确定性摘出，不进 LLM 批次
+    rows = {row["原始字段名"]: row for row in session["last_mapping_data"]}
+    assert rows["result"]["系统属性名称"] == "事件结果"
+    assert rows["result"]["匹配状态"] == "匹配成功"
+
+
+def test场景15_已登记同义词确定性命中():
+    from agent.core.standard_field_catalog import resolve_enum_field
+
+    assert resolve_enum_field("威胁等级") == ("威胁等级", "synonym")
+
+
+def test场景16_值画像进入第一阶段输入且默认路径不变():
+    from application.field_mapping_input import build_batch_llm_input
+
+    session = {"simplified_data": {"original_log_sample": "AUDIT result=success"}}
+    legacy = build_batch_llm_input(
+        "执行标准字段映射", session, ["zzz"], 1, 1,
+        prequery=lambda fields: "",
+    )
+    profile = FieldValueProfile(
+        owner="AUDIT_kv_子规则", field="zzz",
+        values={"1": 3}, empty_count=0, scanned_lines=3, hit_lines=3,
+    )
+    enhanced = build_batch_llm_input(
+        "执行标准字段映射", session, ["zzz"], 1, 1,
+        prequery=lambda fields: "",
+        value_profiles={"zzz": [profile]},
+    )
+    assert "字段值画像" in enhanced
+    assert "AUDIT_kv_子规则" in enhanced and "1×3" in enhanced
+    assert enhanced.startswith(legacy.split("📋 原始日志样本")[0].rstrip())
+    assert legacy == build_batch_llm_input(
+        "执行标准字段映射", session, ["zzz"], 1, 1, prequery=lambda fields: ""
+    )
+
+
+def test场景17_增强候选携带白名单与目录元数据():
+    from agent.core.field_retriever import render_candidates_enriched
+
+    table = {"result": [("事件结果", 1.0, "result", "")]}
+    rendered = render_candidates_enriched(table, top_k=5)
+    assert "事件结果" in rendered and "枚举:失败,成功,未知" in rendered
+    assert "对象:" in rendered and "类型:枚举" in rendered
+
+
+def test场景18_值语义不兼容时复核拒绝():
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
+    call_model = _model_reply(
+        [{"原始字段名": "success", "系统属性名称": "未匹配", "匹配状态": "未匹配"}]
+    )
+    outcome = asyncio.run(
+        review_enum_profile(("R", "result"), profile, _result_policy(), "llm", call_model)
+    )
+    assert outcome.mappings == ()
+    assert outcome.reject_reason
+
+
+def test场景19_全部原值落默认值时降级未匹配():
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
+    call_model = _model_reply(
+        [{"原始字段名": "success", "系统属性名称": "未知", "匹配状态": "匹配成功"}]
+    )
+    outcome = asyncio.run(
+        review_enum_profile(("R", "result"), profile, _result_policy(), "llm", call_model)
+    )
+    assert outcome.mappings == ()
+    assert "证据不足" in outcome.reject_reason
+
+
+def test场景20_一对一占用冲突裁决不回归():
+    from application.field_mapping_conflicts import resolve_field_mapping_conflicts
+
+    rows = [
+        {"原始字段名": "result", "系统属性名称": "事件结果", "匹配状态": "匹配成功"},
+        {"原始字段名": "op_result", "系统属性名称": "事件结果", "匹配状态": "匹配成功"},
+    ]
+
+    def retriever(fields):
+        return {"result": [("事件结果", 1.0, "result", "")]}
+
+    outcome = resolve_field_mapping_conflicts(rows, candidate_retriever=retriever)
+    final = {row["原始字段名"]: row for row in outcome.rows}
+    assert final["result"]["匹配状态"] == "匹配成功"
+    assert final["op_result"]["匹配状态"] == "未匹配"
+
+
+# ---------------------------------------------------------------------------
+# 组 4：模型输出校验（场景 21-29）
+# ---------------------------------------------------------------------------
+
+def _review(rows):
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 2, "timeout": 1})
+    return asyncio.run(
+        review_enum_profile(
+            ("R", "result"), profile, _result_policy(), "exact", _model_reply(rows)
+        )
+    )
+
+
+def test场景21_全部非空原值均有且仅有一条EQUAL映射():
+    outcome = _review(
+        [
+            {"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"},
+            {"原始字段名": "timeout", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+        ]
+    )
+    assert outcome.mappings == (
+        {"mappingType": "EQUAL", "orgValue": "success", "mappingValue": "成功"},
+        {"mappingType": "EQUAL", "orgValue": "timeout", "mappingValue": "未知"},
+    )
+    assert outcome.default_mapped_count == 1
+
+
+def test场景22_缺少任一原值时拒绝():
+    outcome = _review(
+        [{"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"}]
+    )
+    assert outcome.mappings == () and "不一致" in outcome.reject_reason
+
+
+def test场景23_重复orgValue时拒绝():
+    outcome = _review(
+        [
+            {"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"},
+            {"原始字段名": "success", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+            {"原始字段名": "timeout", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+        ]
+    )
+    assert outcome.mappings == () and "重复" in outcome.reject_reason
+
+
+def test场景24_幻觉新增orgValue时拒绝():
+    outcome = _review(
+        [
+            {"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"},
+            {"原始字段名": "timeout", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+            {"原始字段名": "phantom", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+        ]
+    )
+    assert outcome.mappings == () and "不一致" in outcome.reject_reason
+
+
+def test场景25_orgValue大小写与内部空格逐字保留():
+    profile = FieldValueProfile(owner="R", field="result", values={"Success Case": 1, "success": 1})
+    outcome = asyncio.run(
+        review_enum_profile(
+            ("R", "result"), profile, _result_policy(), "llm",
+            _model_reply(
+                [
+                    {"原始字段名": "Success Case", "系统属性名称": "成功", "匹配状态": "匹配成功"},
+                    {"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"},
+                ]
+            ),
+        )
+    )
+    assert {item["orgValue"] for item in outcome.mappings} == {"Success Case", "success"}
+
+
+def test场景27_白名单外mappingValue拒绝():
+    outcome = _review(
+        [
+            {"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"},
+            {"原始字段名": "timeout", "系统属性名称": "非法定值", "匹配状态": "匹配成功"},
+        ]
+    )
+    assert outcome.mappings == () and "白名单" in outcome.reject_reason
+
+
+def test场景28_非法输出按既有策略重试一次仍失败则局部拒绝():
+    calls = []
+
+    async def call_model(prompt: str) -> str:
+        calls.append(prompt)
+        return "not-json"
+
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
+    outcome = asyncio.run(
+        review_enum_profile(("R", "result"), profile, _result_policy(), "llm", call_model)
+    )
+    assert len(calls) == 2
+    assert outcome.mappings == () and "调用失败" in outcome.reject_reason
+
+
+def test场景29_无法归类的兼容值显式映射到默认值():
+    outcome = _review(
+        [
+            {"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"},
+            {"原始字段名": "timeout", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+        ]
+    )
+    assert outcome.mappings
+    assert outcome.default_mapped_count == 1
+
+
+def test场景26_二阶段输入包含白名单与逐字值约束():
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 2})
+    prompt = build_review_prompt(profile, _result_policy())
+    assert '"失败"' in prompt and '"成功"' in prompt and '"未知"' in prompt  # 白名单目录注入
+    assert '{"orgValue": "success", "count": 2}' in prompt
+
+
+# ---------------------------------------------------------------------------
+# 组 5：写回与回归（场景 30-36）
+# ---------------------------------------------------------------------------
+
+def _rules_with_result(mappings=None, field=None, value=None):
+    entry = {
+        "index": "result", "mappings": mappings or [], "field": field,
+        "sim": True, "result": ["success"], "info": None, "entity": "事件",
+        "required": False, "core": False, "value": value,
+    }
+    return [{"name": "R", "normalize": [entry]}]
+
+
+def _ok_outcome(key=("0", "result")):
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
+    return asyncio.run(
+        review_enum_profile(
+            key, profile, _result_policy(), "exact",
+            _model_reply(
+                [{"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"}]
+            ),
+        )
+    )
+
+
+def test场景30_写入正确mappings与外层默认值():
+    rules = _rules_with_result(field="事件结果")
+    written = apply_enum_outcomes(rules, {("0", "result"): _ok_outcome()})
+    assert written == 1
+    entry = rules[0]["normalize"][0]
+    assert entry["mappings"] == [
+        {"mappingType": "EQUAL", "orgValue": "success", "mappingValue": "成功"}
+    ]
+    assert entry["value"] == "未知"
+
+
+def test场景31_已映射字段不自动补写或覆盖():
+    rules = _rules_with_result(
+        field="事件结果",
+        mappings=[{"mappingType": "EQUAL", "orgValue": "success", "mappingValue": "成功"}],
+        value="成功",
+    )
+    written = apply_enum_outcomes(rules, {(("0",), "result"): _ok_outcome()})
+    assert written == 0
+    assert rules[0]["normalize"][0]["mappings"] == [
+        {"mappingType": "EQUAL", "orgValue": "success", "mappingValue": "成功"}
+    ]
+
+
+def test场景32_已有不明mappings的条目失败关闭():
+    rules = _rules_with_result(
+        field="事件结果",
+        mappings=[{"mappingType": "REGULAR", "orgValue": "x", "mappingValue": "y"}],
+    )
+    written = apply_enum_outcomes(rules, {(("0",), "result"): _ok_outcome()})
+    assert written == 0
+    assert rules[0]["normalize"][0]["mappings"] == [
+        {"mappingType": "REGULAR", "orgValue": "x", "mappingValue": "y"}
+    ]
+
+
+def test场景33_单个画像失败不影响其他字段映射成功():
+    import copy as _copy
+
+    rules = _rules_with_result(field="事件结果")
+    rules[0]["normalize"].append(_copy.deepcopy(rules[0]["normalize"][0]))
+    rules[0]["normalize"][1]["index"] = "http_method"
+    ok = _ok_outcome()
+    failed_profile = FieldValueProfile(owner="R", field="http_method", status="rejected",
+                                       reject_reason="唯一值超过 10 个上限，拒绝整个画像")
+    failed = asyncio.run(
+        review_enum_profile(
+            ("0", "http_method"), failed_profile,
+            _policies()["HTTP请求方法"], "llm", _model_reply([]),
+        )
+    )
+    written = apply_enum_outcomes(rules, {("0", "result"): ok, ("0", "http_method"): failed})
+    assert written == 1
+    assert rules[0]["normalize"][1]["mappings"] == []
+
+
+def test场景34_失败画像不产生部分写入():
+    rules = _rules_with_result(field="事件结果")
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
+    outcome = asyncio.run(
+        review_enum_profile(
+            ("0", "result"), profile, _result_policy(), "llm",
+            _model_reply(
+                [{"原始字段名": "success", "系统属性名称": "未匹配", "匹配状态": "未匹配"}]
+            ),
+        )
+    )
+    assert apply_enum_outcomes(rules, {(("0",), "result"): outcome}) == 0
+    assert rules[0]["normalize"][0]["mappings"] == []
+    assert rules[0]["normalize"][0]["value"] is None
+
+
+def test场景35_写回保持JSON根结构与键语义():
+    rules = _rules_with_result(field="事件结果")
+    rules.append({"name": "other", "parser": {"name": "json"}, "normalize": []})
+    apply_enum_outcomes(rules, {(("0",), "result"): _ok_outcome()})
+    assert [rule["name"] for rule in rules] == ["R", "other"]
+    assert set(rules[0]["normalize"][0]) == {
+        "index", "mappings", "field", "sim", "result", "info", "entity",
+        "required", "core", "value",
+    }
+
+
+def test场景36_重复执行不产生重复mappings():
+    rules = _rules_with_result(field="事件结果")
+    outcome = _ok_outcome()
+    apply_enum_outcomes(rules, {("0", "result"): outcome})
+    apply_enum_outcomes(rules, {("0", "result"): _ok_outcome()})
+    assert rules[0]["normalize"][0]["mappings"] == [
+        {"mappingType": "EQUAL", "orgValue": "success", "mappingValue": "成功"}
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 集成：局部失败关闭在子规则内把字段降级为未匹配（场景 18/19 的端到端面）
+# ---------------------------------------------------------------------------
+
+def test集成_二阶段失败时子规则内字段降级未匹配且其他字段成功():
+    class _RejectMember(_EnumReviewMember):
+        def run(self, prompt):
+            self.calls.append(prompt)
+            return json.dumps(
+                [{"原始字段名": "success", "系统属性名称": "未匹配", "匹配状态": "未匹配"}],
+                ensure_ascii=False,
+            )
+
+    runner = _RecordingRunner()
+    session = _enum_adapter_session(["AUDIT result=success zzz=1"])
+    result = _run_enum_adapter(session, runner, _Team(_RejectMember()), lambda p: "[]")
+    assert result.status == StepStatus.SUCCESS
+    entry = {
+        item["index"]: item for item in session["mapped_sub_rules"][0]["normalize"]
+    }
+    assert entry["result"]["field"] is None  # 局部失败关闭 → 降级未匹配
+    assert entry["result"].get("mappings") == []
+    assert "证据不足" in result.message
+
+
+def test集成_二阶段成功时通过FieldMappingAgent写入mappings与默认值():
+    runner = _RecordingRunner()
+    member = _EnumReviewMember()
+    session = _enum_adapter_session(["AUDIT result=success zzz=1"])
+    result = _run_enum_adapter(session, runner, _Team(member), lambda p: "[]")
+    assert result.status == StepStatus.SUCCESS
+    assert member.calls, "第二阶段应通过 FieldMappingAgent 成员调用"
+    entry = {
+        item["index"]: item for item in session["mapped_sub_rules"][0]["normalize"]
+    }
+    assert entry["result"]["field"] == "事件结果"
+    assert entry["result"]["mappings"] == [
+        {"mappingType": "EQUAL", "orgValue": "success", "mappingValue": "成功"}
+    ]
+    assert entry["result"]["value"] == "未知"
+    assert "枚举值映射" in result.message

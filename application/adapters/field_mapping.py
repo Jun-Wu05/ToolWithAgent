@@ -11,7 +11,7 @@ from agent.shared.logger import get_logger
 from application.adapters.shared import (
     REPO_ROOT, _build_config_artifact, _count_tagged_normalize, _failed,
     _publish_progress, _retry_delay_seconds, _needs_input, _session_get,
-    _session_set, _success,
+    _session_set, _success, run_member_stream,
 )
 from application.execution import ExecutionContext
 from application.field_mapping_batch import (
@@ -47,6 +47,7 @@ class FieldMappingAdapter:
         self._mapping_policy = mapping_policy or FieldMappingExecutionPolicy()
         self._candidate_retriever = candidate_retriever
         self._event_classifier = event_classifier
+        self._team = team
         self._batch_runner = (
             batch_runner
             if batch_runner is not None
@@ -58,23 +59,26 @@ class FieldMappingAdapter:
         )
 
     def _build_prompt_prequery(self) -> Any | None:
-        """把结构化候选检索器适配成 prompt 注入需要的 markdown 文本检索器。
+        """把结构化候选检索器适配成 prompt 注入需要的增强候选文本检索器。
 
-        未注入时返回 None，批处理走 field_mapping_input 的模块默认真实检索，
-        生产 prompt 字节不变；注入假件时每批只调用一次检索器。
+        未注入时回落结构化默认检索（batch_retrieve_candidates_table）；
+        渲染使用 #189 的 ``render_candidates_enriched``（附对象/属性类型/
+        描述/枚举白名单）。注入假件时每批只调用一次检索器。
         """
         retriever = self._candidate_retriever
         if retriever is None:
-            return None
+            from agent.core.field_retriever import batch_retrieve_candidates_table
+
+            retriever = batch_retrieve_candidates_table
 
         def prequery(fields: list[str]) -> str:
-            """取结构化候选表并渲染为 prompt 注入用的 markdown 文本。"""
+            """取结构化候选表并渲染为 prompt 注入用的增强候选文本。"""
             table = retriever(fields)
             if not table:
                 return ""
-            from agent.core.field_retriever import render_candidates_markdown
+            from agent.core.field_retriever import render_candidates_enriched
 
-            return render_candidates_markdown(table, top_k=5)
+            return render_candidates_enriched(table, top_k=5)
 
         return prequery
 
@@ -130,6 +134,55 @@ class FieldMappingAdapter:
             simplified_data.get("original_log_sample", "")
             if isinstance(simplified_data, Mapping) else ""
         )
+        decoded_data = _session_get(context.session, "decoded_data")
+
+        # 子规则获取前置（#189）：语义与原先后置获取一致（session 优先，缺失时生成）。
+        had_existing_mapped_rules = bool(_session_get(context.session, "mapped_sub_rules"))
+        sub_rules = copy.deepcopy(_session_get(context.session, "mapped_sub_rules") or [])
+        raw_log_lines = _session_get(context.session, "raw_log_lines", []) or []
+        if not sub_rules:
+            if isinstance(classification, dict) and classification:
+                from agent.tools.rule_generator import generate_sub_rules
+
+                sub_rules = generate_sub_rules(
+                    classification,
+                    all_logs_str="\n".join(str(line) for line in raw_log_lines),
+                    rule_source_fields=rule_source_fields,
+                )
+
+        # #189 确定性字段名命中：精确/同义词命中 8 个枚举目标的字段绕过 LLM
+        # 字段判断，直接作为已匹配行；其余字段进入批处理主路径（行为不变）。
+        resolved_enum_fields: dict[str, tuple[str, str]] = {}
+        llm_fields: list[str] = []
+        from agent.core.standard_field_catalog import resolve_enum_field
+
+        for field_name in mappable_fields:
+            hit = resolve_enum_field(field_name)
+            if hit is not None:
+                resolved_enum_fields[field_name] = hit
+            else:
+                llm_fields.append(field_name)
+
+        # 值画像（代码全量扫描）：第一阶段输入注入，第二阶段复用同一份
+        value_profiles_by_field: dict[str, list] = {}
+        enum_profiles_sub: dict = {}
+        enum_profiles_config: dict = {}
+        if llm_fields or resolved_enum_fields:
+            from application.standard_enum_mapping import (
+                build_value_profiles_from_config,
+                build_value_profiles_from_logs,
+            )
+
+            if sub_rules:
+                enum_profiles_sub = build_value_profiles_from_logs(
+                    sub_rules,
+                    [str(line) for line in raw_log_lines],
+                    classification if isinstance(classification, dict) else None,
+                )
+            if isinstance(decoded_data, (dict, list)) and decoded_data:
+                enum_profiles_config = build_value_profiles_from_config(decoded_data)
+            for profile in (*enum_profiles_sub.values(), *enum_profiles_config.values()):
+                value_profiles_by_field.setdefault(profile.field, []).append(profile)
 
         async def publish_batch_progress(
             phase: ProgressPhase, status: ProgressStatus, message_code: str, **details: Any
@@ -138,12 +191,13 @@ class FieldMappingAdapter:
             await _publish_progress(context, step, phase, status, message_code, **details)
 
         try:
-            mapping_rows = await self._batch_runner.run(
-                mappable_fields,
+            runner_rows = await self._batch_runner.run(
+                llm_fields,
                 original_log_sample=original_log_sample,
                 plan_id=context.plan_id,
                 step_id=step.step_id,
                 publish_progress=publish_batch_progress,
+                value_profiles=value_profiles_by_field or None,
             )
         except FieldMappingBatchError as error:
             logger.error(
@@ -152,6 +206,17 @@ class FieldMappingAdapter:
                 context.plan_id, step.step_id, error.batch_number, error.error_code,
             )
             return _failed(step, error.error_code, str(error))
+        mapping_rows = runner_rows + [
+            {
+                "原始字段名": field_name,
+                "系统属性名称": target,
+                "匹配状态": "匹配成功",
+            }
+            for field_name, (target, _source) in resolved_enum_fields.items()
+        ]
+        # 恢复输入字段顺序，保持展示与既有行为一致
+        rows_by_field = {str(row.get("原始字段名", "")): row for row in mapping_rows}
+        mapping_rows = [rows_by_field[field] for field in mappable_fields if field in rows_by_field]
 
         await _publish_progress(
             context, step, ProgressPhase.VALIDATION, ProgressStatus.RUNNING,
@@ -166,7 +231,6 @@ class FieldMappingAdapter:
             resolve_field_mapping_conflicts,
         )
 
-        decoded_data = _session_get(context.session, "decoded_data")
         conflict_outcome = resolve_field_mapping_conflicts(
             mapping_rows,
             decoded_data=decoded_data,
@@ -177,22 +241,45 @@ class FieldMappingAdapter:
         log_field_mapping_conflicts(
             conflict_outcome.details, plan_id=context.plan_id, step_id=step.step_id
         )
+
+        # #189 第二阶段：仅对本轮新命中 8 类枚举字段的画像调用一次受约束归类，
+        # 之后全部硬校验；失败画像局部关闭（零写入 + 对应子规则内降级未匹配）。
+        from application.standard_enum_mapping import (
+            run_enum_review_stage,
+            summarize_enum_outcomes,
+        )
+
+        async def call_enum_model(prompt: str) -> str:
+            """第二阶段归类调用：复用 FieldMappingAgent 与既有看门狗超时。"""
+            return await asyncio.wait_for(
+                run_member_stream(
+                    self._team, "FieldMappingAgent", prompt,
+                    plan_id=context.plan_id, step_id=step.step_id,
+                ),
+                timeout=self._mapping_policy.watchdog_timeout_seconds,
+            )
+
+        enum_outcomes_sub, enum_outcomes_config = await run_enum_review_stage(
+            mapping_rows,
+            profiles_sub=enum_profiles_sub,
+            profiles_config=enum_profiles_config,
+            resolved_enum_fields=resolved_enum_fields,
+            call_model=call_enum_model,
+        )
+        enum_summary = summarize_enum_outcomes({
+            **{("sub", *key): outcome for key, outcome in enum_outcomes_sub.items()},
+            **{("cfg", *key): outcome for key, outcome in enum_outcomes_config.items()},
+        })
+
         typed_mappings = tuple(FieldMappingRow.model_validate(row) for row in mapping_rows)
-        staged_sub_rule_results = None
-        staged_mapped_sub_rules = None
+        staged_sub_rule_results = staged_mapped_sub_rules = None
         event_annotation_summary: str | None = None
         event_annotation_rows: tuple = ()
-        had_existing_mapped_rules = bool(_session_get(context.session, "mapped_sub_rules"))
-        sub_rules = copy.deepcopy(_session_get(context.session, "mapped_sub_rules") or [])
-        if not sub_rules:
-            raw_log_lines = _session_get(context.session, "raw_log_lines", []) or []
-            if isinstance(classification, dict) and classification:
-                from agent.tools.rule_generator import generate_sub_rules
-                sub_rules = generate_sub_rules(
-                    classification,
-                    all_logs_str="\n".join(str(line) for line in raw_log_lines),
-                    rule_source_fields=rule_source_fields,
-                )
+        failed_enum_pairs = {
+            (outcome.profile.owner, outcome.profile.field)
+            for outcome in enum_outcomes_sub.values()
+            if not outcome.mappings
+        }
         if sub_rules:
             from agent.tools.rule_generator.field_mapping import (
                 apply_field_mapping_to_sub_rules,
@@ -205,12 +292,20 @@ class FieldMappingAdapter:
                     for item in sub_rule.get("normalize", []) or []
                     if isinstance(item, dict)
                 }
+                rule_name = str(sub_rule.get("name", ""))
+                staged_rows = []
+                for row in mapping_rows:
+                    field = str(row.get("原始字段名", ""))
+                    if field not in rule_fields:
+                        continue
+                    staged = dict(row)
+                    if (rule_name, field) in failed_enum_pairs:
+                        staged["系统属性名称"] = "未匹配"
+                        staged["匹配状态"] = "未匹配"
+                    staged_rows.append(staged)
                 staged_sub_rule_results.append({
-                    "rule_name": str(sub_rule.get("name", "")),
-                    "mappings": [
-                        row for row in mapping_rows
-                        if str(row.get("原始字段名", "")) in rule_fields
-                    ],
+                    "rule_name": rule_name,
+                    "mappings": staged_rows,
                 })
             # #177：标准字段目录是对象归属 SSOT（名称/对象由目录确定性解析），
             # 不再加载 对象.xlsx（加载失败静默空表 + 未知名称默认「事件」的
@@ -218,6 +313,10 @@ class FieldMappingAdapter:
             staged_mapped_sub_rules = apply_field_mapping_to_sub_rules(
                 sub_rules, staged_sub_rule_results
             )
+            if enum_outcomes_sub:
+                from agent.shared.mapping_utils import apply_enum_outcomes
+
+                apply_enum_outcomes(staged_mapped_sub_rules, enum_outcomes_sub)
             annotation_outcome = await self._annotate_event_names(
                 step, context, staged_mapped_sub_rules
             )
@@ -249,6 +348,10 @@ class FieldMappingAdapter:
             staged_decoded_data = apply_field_mapping_to_config(
                 copy.deepcopy(decoded_data), mapping_rows
             )
+            if enum_outcomes_config:
+                from agent.shared.mapping_utils import apply_enum_outcomes
+
+                apply_enum_outcomes(staged_decoded_data, enum_outcomes_config)
             download_kind = "mapped_config"
             download_content = _build_config_artifact(
                 staged_decoded_data, len(typed_mappings)
@@ -310,6 +413,8 @@ class FieldMappingAdapter:
                 f"跳过已映射 {context.session_facts.decoded_mapped_field_count} 个"
                 "（保留原映射）"
             )
+        if enum_summary:
+            message = f"{message}；{enum_summary}"
         if conflict_summary:
             message = f"{message}；{conflict_summary}"
         if event_annotation_summary:
