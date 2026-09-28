@@ -275,12 +275,19 @@ async def review_enum_profile(
     selection_source: str,
     call_model: ModelCaller,
 ) -> EnumProfileOutcome:
-    """执行第二阶段归类并做全部硬校验；失败即局部失败关闭，不产生部分写入。"""
+    """执行第二阶段归类并做结构性硬校验（不能缺语义，2026-09-28 契约调整）。
+
+    值无法归类（含模型输出「未匹配」）一律按默认值兜底写入；仅结构性失败
+    （画像拒绝、集合不一致、白名单外、调用失败）才整画像拒绝、零写入。
+    空画像（无非空值）不调用模型、无 mappings、不算失败。
+    """
     outcome = EnumProfileOutcome(
         key=key, profile=profile, policy=policy, selection_source=selection_source
     )
-    if profile.status != "ok" or not profile.values:
-        outcome.reject_reason = profile.reject_reason or "画像无可用非空值"
+    if profile.status != "ok":
+        outcome.reject_reason = profile.reject_reason or "画像校验失败"
+        return outcome
+    if not profile.values:
         return outcome
 
     from application.parsing import parse_json_mapping_result
@@ -306,16 +313,16 @@ async def review_enum_profile(
         if not org_value or org_value in classified:
             outcome.reject_reason = "输出原值缺失或重复"
             return outcome
-        classified[org_value] = str(row.get("系统属性名称") or "")
+        mapping_value = str(row.get("系统属性名称") or "")
+        if not mapping_value or mapping_value == "未匹配":
+            mapping_value = policy.default_value
+        classified[org_value] = mapping_value
 
     if set(classified) != set(profile.values):
         outcome.reject_reason = "输出原值集合与画像不一致（缺失或幻觉新增）"
         return outcome
     if any(value not in policy.whitelist for value in classified.values()):
         outcome.reject_reason = "存在白名单外的 mappingValue"
-        return outcome
-    if all(value == policy.default_value for value in classified.values()):
-        outcome.reject_reason = "全部原值落默认值，字段证据不足"
         return outcome
 
     outcome.mappings = tuple(
@@ -339,8 +346,9 @@ async def run_enum_review_stage(
     """对冲突裁决后的映射行执行完整第二阶段；就地做全局降级并返回两份结果。
 
     策略表校验失败或无目标命中时返回空结果且不改 ``mapping_rows``。
-    某字段在两份画像中全部失败时，把该字段的全局行降级为「未匹配」；
-    逐子规则的降级由适配层基于返回结果按 (owner, field) 执行。
+    跨子规则字段一致性（2026-09-28 契约调整）：字段名映射结果全局统一，
+    仅当某字段**全部画像结构性失败**（无任何成功写入）时才把全局行降级为
+    「未匹配」；成功与失败并存的字段保持映射，各子规则写各自的值映射。
     """
     from agent.core.standard_field_catalog import enum_auto_mapping_policies
 
@@ -378,14 +386,15 @@ async def run_enum_review_stage(
         for outcome in (*outcomes_sub.values(), *outcomes_config.values())
         if outcome.mappings
     }
-    any_fields = {
+    failed_fields = {
         outcome.profile.field
         for outcome in (*outcomes_sub.values(), *outcomes_config.values())
+        if outcome.reject_reason
     }
     for row in mapping_rows:
         field = str(row.get("原始字段名") or "")
         if (
-            field in any_fields
+            field in failed_fields
             and field not in ok_fields
             and str(row.get("系统属性名称") or "") in policies
         ):
@@ -409,11 +418,13 @@ def summarize_enum_outcomes(outcomes: dict[ProfileKey, EnumProfileOutcome]) -> s
             profile.source, item.selection_source, profile.scanned_lines,
             profile.hit_lines, len(profile.values), profile.empty_count,
             len(item.mappings), item.default_mapped_count,
-            "ok" if item.mappings else "rejected", item.reject_reason,
+            "ok" if item.mappings else ("rejected" if item.reject_reason else "empty"),
+            item.reject_reason,
         )
     parts = [f"枚举值映射 {len(success)} 个画像成功"]
-    if len(outcomes) - len(success):
-        parts.append(f"{len(outcomes) - len(success)} 个画像证据不足已降级未匹配")
+    rejected = sum(1 for item in outcomes.values() if item.reject_reason)
+    if rejected:
+        parts.append(f"{rejected} 个画像未通过结构校验已全局未匹配")
     return "；".join(parts)
 
 

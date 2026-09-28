@@ -330,28 +330,40 @@ def test场景17_增强候选携带白名单与目录元数据():
     assert "对象:" in rendered and "类型:枚举" in rendered
 
 
-def test场景18_值语义不兼容时复核拒绝():
-    profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
+def test场景18_值语义不兼容时按默认值兜底写入():
+    """契约调整（不能缺）：未匹配行按默认值落库，不再整画像拒绝。"""
+    profile = FieldValueProfile(owner="R", field="result", values={"success": 2, "timeout": 1})
     call_model = _model_reply(
-        [{"原始字段名": "success", "系统属性名称": "未匹配", "匹配状态": "未匹配"}]
+        [
+            {"原始字段名": "success", "系统属性名称": "未匹配", "匹配状态": "未匹配"},
+            {"原始字段名": "timeout", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+        ]
     )
     outcome = asyncio.run(
         review_enum_profile(("R", "result"), profile, _result_policy(), "llm", call_model)
     )
-    assert outcome.mappings == ()
-    assert outcome.reject_reason
-
-
-def test场景19_全部原值落默认值时降级未匹配():
-    profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
-    call_model = _model_reply(
-        [{"原始字段名": "success", "系统属性名称": "未知", "匹配状态": "匹配成功"}]
+    assert outcome.mappings == (
+        {"mappingType": "EQUAL", "orgValue": "success", "mappingValue": "未知"},
+        {"mappingType": "EQUAL", "orgValue": "timeout", "mappingValue": "未知"},
     )
+    assert not outcome.reject_reason
+
+
+def test场景19_全部原值落默认值时正常写入():
+    """契约调整（不能缺）：删除全默认否决，默认值是合法落库结果。"""
+    profile = FieldValueProfile(owner="R", field="result", values={"仅记录": 3})
     outcome = asyncio.run(
-        review_enum_profile(("R", "result"), profile, _result_policy(), "llm", call_model)
+        review_enum_profile(
+            ("R", "result"), profile, _result_policy(), "llm",
+            _model_reply(
+                [{"原始字段名": "仅记录", "系统属性名称": "未知", "匹配状态": "匹配成功"}]
+            ),
+        )
     )
-    assert outcome.mappings == ()
-    assert "证据不足" in outcome.reject_reason
+    assert outcome.mappings == (
+        {"mappingType": "EQUAL", "orgValue": "仅记录", "mappingValue": "未知"},
+    )
+    assert outcome.default_mapped_count == 1
 
 
 def test场景20_一对一占用冲突裁决不回归():
@@ -567,18 +579,18 @@ def test场景33_单个画像失败不影响其他字段映射成功():
     assert rules[0]["normalize"][1]["mappings"] == []
 
 
-def test场景34_失败画像不产生部分写入():
+def test场景34_结构性失败画像不产生部分写入():
     rules = _rules_with_result(field="事件结果")
     profile = FieldValueProfile(owner="R", field="result", values={"success": 1})
     outcome = asyncio.run(
         review_enum_profile(
             ("0", "result"), profile, _result_policy(), "llm",
             _model_reply(
-                [{"原始字段名": "success", "系统属性名称": "未匹配", "匹配状态": "未匹配"}]
+                [{"原始字段名": "phantom", "系统属性名称": "成功", "匹配状态": "匹配成功"}]
             ),
         )
     )
-    assert apply_enum_outcomes(rules, {(("0",), "result"): outcome}) == 0
+    assert apply_enum_outcomes(rules, {("0", "result"): outcome}) == 0
     assert rules[0]["normalize"][0]["mappings"] == []
     assert rules[0]["normalize"][0]["value"] is None
 
@@ -605,28 +617,32 @@ def test场景36_重复执行不产生重复mappings():
 
 
 # ---------------------------------------------------------------------------
-# 集成：局部失败关闭在子规则内把字段降级为未匹配（场景 18/19 的端到端面）
+# 集成：全局降级与成功写入（场景 18/19 的端到端面，2026-09-28 契约调整）
 # ---------------------------------------------------------------------------
 
-def test集成_二阶段失败时子规则内字段降级未匹配且其他字段成功():
-    class _RejectMember(_EnumReviewMember):
-        def run(self, prompt):
+def test集成_全部画像结构失败时字段全局未匹配():
+    class _BrokenMember:
+        name = "FieldMappingAgent"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def run(self, prompt: str):
+            """持续返回非法 JSON，触发调用失败的结构性拒绝。"""
             self.calls.append(prompt)
-            return json.dumps(
-                [{"原始字段名": "success", "系统属性名称": "未匹配", "匹配状态": "未匹配"}],
-                ensure_ascii=False,
-            )
+            return "not-json"
 
     runner = _RecordingRunner()
     session = _enum_adapter_session(["AUDIT result=success zzz=1"])
-    result = _run_enum_adapter(session, runner, _Team(_RejectMember()), lambda p: "[]")
+    result = _run_enum_adapter(session, runner, _Team(_BrokenMember()), lambda p: "[]")
     assert result.status == StepStatus.SUCCESS
+    assert len(runner.fields) == 1  # 只 zzz 进 LLM 批次，result 被 exact 摘出
     entry = {
         item["index"]: item for item in session["mapped_sub_rules"][0]["normalize"]
     }
-    assert entry["result"]["field"] is None  # 局部失败关闭 → 降级未匹配
+    assert entry["result"]["field"] is None  # 唯一画像结构失败 → 全局未匹配
     assert entry["result"].get("mappings") == []
-    assert "证据不足" in result.message
+    assert "未通过结构校验" in result.message
 
 
 def test集成_二阶段成功时通过FieldMappingAgent写入mappings与默认值():
@@ -743,3 +759,103 @@ def test修复_syslogJSON路径不回归():
     profile = profiles[("0", "result")]
     assert profile.source == "full-logs"
     assert profile.values == {"block": 2, "pass": 1}
+
+
+# ---------------------------------------------------------------------------
+# 契约调整（2026-09-28）：不能缺 + 跨子规则字段一致性 + 数值不猜测
+# ---------------------------------------------------------------------------
+
+def test契约_数值语义不明时按默认值落库():
+    """0/1 等数值画像：模型按禁猜测指令归默认值 → 正常写入，不缺映射。"""
+    profile = FieldValueProfile(owner="R", field="result", values={"0": 5, "1": 3})
+    outcome = asyncio.run(
+        review_enum_profile(
+            ("R", "result"), profile, _result_policy(), "llm",
+            _model_reply(
+                [
+                    {"原始字段名": "0", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+                    {"原始字段名": "1", "系统属性名称": "未知", "匹配状态": "匹配成功"},
+                ]
+            ),
+        )
+    )
+    assert outcome.mappings == (
+        {"mappingType": "EQUAL", "orgValue": "0", "mappingValue": "未知"},
+        {"mappingType": "EQUAL", "orgValue": "1", "mappingValue": "未知"},
+    )
+    assert outcome.default_mapped_count == 2
+
+
+def test契约_空画像不算失败不参与全局降级():
+    """无值画像：不调用模型、无 mappings、无拒绝原因（field 照写）。"""
+    profile = FieldValueProfile(owner="R", field="result")
+    outcome = asyncio.run(
+        review_enum_profile(
+            ("R", "result"), profile, _result_policy(), "llm", _model_reply([])
+        )
+    )
+    assert outcome.mappings == ()
+    assert not outcome.reject_reason
+
+
+def test契约_跨子规则字段一致性_A成功B结构失败():
+    """A 画像成功、B 结构性失败：字段行保持匹配成功，两子规则都写 field。"""
+    from application.standard_enum_mapping import run_enum_review_stage
+
+    rows = [{"原始字段名": "result", "系统属性名称": "事件结果", "匹配状态": "匹配成功"}]
+    profiles_sub = {
+        ("0", "result"): FieldValueProfile(
+            owner="A_子规则", field="result", values={"success": 1}
+        ),
+        ("1", "result"): FieldValueProfile(
+            owner="B_子规则", field="result",
+            values={f"v{index}": 1 for index in range(11)},
+            status="rejected", reject_reason="唯一值超过 10 个上限，拒绝整个画像",
+        ),
+    }
+
+    async def call_model(prompt: str) -> str:
+        """只为 A 画像服务（B 已在画像层拒绝，不会调用）。"""
+        return json.dumps(
+            [{"原始字段名": "success", "系统属性名称": "成功", "匹配状态": "匹配成功"}],
+            ensure_ascii=False,
+        )
+
+    outcomes_sub, outcomes_config = asyncio.run(
+        run_enum_review_stage(
+            rows,
+            profiles_sub=profiles_sub,
+            profiles_config={},
+            resolved_enum_fields={"result": ("事件结果", "exact")},
+            call_model=call_model,
+        )
+    )
+    assert rows[0]["匹配状态"] == "匹配成功"  # 存在成功 → 不全局降级
+    assert outcomes_sub[("0", "result")].mappings
+    assert outcomes_sub[("1", "result")].reject_reason
+
+
+def test契约_全部结构失败时字段全局未匹配():
+    """字段的所有画像都结构性失败 → 全局行降级未匹配（高基数诚实拒绝）。"""
+    from application.standard_enum_mapping import run_enum_review_stage
+
+    rows = [{"原始字段名": "result", "系统属性名称": "事件结果", "匹配状态": "匹配成功"}]
+    profiles_sub = {
+        ("0", "result"): FieldValueProfile(
+            owner="A_子规则", field="result",
+            values={f"v{index}": 1 for index in range(12)},
+            status="rejected", reject_reason="唯一值超过 10 个上限，拒绝整个画像",
+        ),
+    }
+    outcomes_sub, _ = asyncio.run(
+        run_enum_review_stage(
+            rows,
+            profiles_sub=profiles_sub,
+            profiles_config={},
+            resolved_enum_fields={"result": ("事件结果", "exact")},
+            call_model=_model_reply([]),
+        )
+    )
+    assert rows[0]["系统属性名称"] == "未匹配"
+    assert rows[0]["匹配状态"] == "未匹配"
+    assert outcomes_sub[("0", "result")].reject_reason
