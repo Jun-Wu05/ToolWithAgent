@@ -645,3 +645,101 @@ def test集成_二阶段成功时通过FieldMappingAgent写入mappings与默认�
     ]
     assert entry["result"]["value"] == "未知"
     assert "枚举值映射" in result.message
+
+
+# ---------------------------------------------------------------------------
+# 修复回归：纯 JSON 子规则 logtype 恢复与降级（#285 验收发现 scanned=0）
+# ---------------------------------------------------------------------------
+
+def _pure_json_rule() -> dict:
+    """模拟 generate_sub_rule 对纯 JSON（非 syslog+JSON）的产物：无日志类型元数据。"""
+    return {
+        "name": "EDR_alert_json_子规则",
+        "parser": {"name": "json", "filter": []},
+        "normalize": [
+            {"index": "result", "mappings": [], "field": None, "sim": None,
+             "result": ["已放行"], "info": None, "entity": None,
+             "required": False, "core": None, "value": None},
+            {"index": "original_log", "mappings": [], "field": "original_log",
+             "sim": True, "result": ["{}"], "info": None, "entity": "日志",
+             "required": False, "core": False, "value": None},
+        ],
+    }
+
+
+_JSON_FI = r'(\{.*?"type":"(\w+)".*?\})'
+_JSON_LINES = [
+    '{"type":"EDR_alert","result":"已放行"}',
+    '{"type":"EDR_alert","result":"已放行"}',
+    '{"type":"EDR_alert","result":"仅记录"}',
+]
+
+
+def test修复_纯JSON子规则从classification恢复logtype并全量扫描():
+    """logtype 不在 rule 结构里（纯 JSON），应按序号回查 classification_details。"""
+    classification = {
+        "feature_identifier": _JSON_FI,
+        "feature_body_group": 1,
+        "feature_value_group": 2,
+        "classification_details": [{"logtype": "EDR_alert"}],
+    }
+    profiles = build_value_profiles_from_logs(
+        [_pure_json_rule()], _JSON_LINES, classification
+    )
+    profile = profiles[("0", "result")]
+    assert profile.source == "full-logs"
+    assert profile.scanned_lines == 3
+    assert profile.values == {"已放行": 2, "仅记录": 1}
+
+
+def test修复_logtype彻底不可得时降级configsample():
+    """无 classification_details 可回查时降级 config-sample，不再产出静默空画像。"""
+    classification = {
+        "feature_identifier": _JSON_FI,
+        "feature_body_group": 1,
+        "feature_value_group": 2,
+    }
+    profiles = build_value_profiles_from_logs(
+        [_pure_json_rule()], _JSON_LINES, classification
+    )
+    profile = profiles[("0", "result")]
+    assert profile.source == "config-sample"
+    assert profile.values == {"已放行": 1}
+    assert profile.scanned_lines == 1
+
+
+def test修复_严格匹配零命中时降级configsample():
+    """logtype 存在但没有任何行归属时，降级 config-sample 而非空画像。"""
+    classification = {
+        "feature_identifier": _JSON_FI,
+        "feature_body_group": 1,
+        "feature_value_group": 2,
+        "classification_details": [{"logtype": "OTHER_type"}],
+    }
+    profiles = build_value_profiles_from_logs(
+        [_pure_json_rule()], _JSON_LINES, classification
+    )
+    profile = profiles[("0", "result")]
+    assert profile.source == "config-sample"
+    assert profile.values == {"已放行": 1}
+
+
+def test修复_syslogJSON路径不回归():
+    """syslog+JSON 的 addFields 日志类型仍在 rule 内，继续走严格行归属。"""
+    rule = _pure_json_rule()
+    rule["parser"]["filter"] = [{"name": "addFields", "fields": {"日志类型": "IPS"}}]
+    classification = {
+        "feature_identifier": _JSON_FI,
+        "feature_body_group": 1,
+        "feature_value_group": 2,
+        "classification_details": [{"logtype": "IPS"}],
+    }
+    lines = [
+        '<134>Sep 24 10:00:00 host app: {"type":"IPS","result":"block"}',
+        '<134>Sep 24 10:00:01 host app: {"type":"IPS","result":"block"}',
+        '<134>Sep 24 10:00:02 host app: {"type":"IPS","result":"pass"}',
+    ]
+    profiles = build_value_profiles_from_logs([rule], lines, classification)
+    profile = profiles[("0", "result")]
+    assert profile.source == "full-logs"
+    assert profile.values == {"block": 2, "pass": 1}
