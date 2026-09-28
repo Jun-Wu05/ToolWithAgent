@@ -12,14 +12,16 @@ from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
 from toolwithagent_v2.infrastructure.store import Store
+from toolwithagent_v2.runtime.fake_application import FakeApplication
 from toolwithagent_v2.settings import Settings
 
 
 class Worker:
-    def __init__(self, store: Store, worker_id: str | None = None, lease_seconds: float = 30):
+    def __init__(self, store: Store, worker_id: str | None = None, lease_seconds: float = 30, application: FakeApplication | None = None):
         self.store = store
         self.worker_id = worker_id or str(uuid4())
         self.lease_seconds = lease_seconds
+        self.application = application or FakeApplication()
 
     def _validate(self, snapshot):
         key = snapshot["storage_key"]
@@ -74,11 +76,22 @@ class Worker:
         keeper = threading.Thread(target=heartbeat, daemon=True)
         keeper.start()
         try:
-            error = self._validate(claim["input"])
+            if "scenario" in claim["input"]:
+                if self.store.settings.development:
+                    outcome = self.application.execute(claim["input"], self.store.continuation(claim["id"]))
+                else:
+                    outcome = {"error": "fake_runs_disabled"}
+            else:
+                outcome = {"error": self._validate(claim["input"])}
+            if "continuation" in outcome:
+                return self.store.wait_for_confirmation(self.worker_id, claim, outcome["continuation"],
+                                                        payload=outcome.get("confirmation")) is not None
+            if "artifact" in outcome:
+                return self.store.publish(self.worker_id, claim, outcome["artifact"])
+            return self.store.finish(self.worker_id, claim, outcome.get("error"))
         finally:
             stop.set()
             keeper.join()
-        return self.store.finish(self.worker_id, claim, error)
 
     def run_forever(self, poll_seconds: float = 0.5):
         while True:
