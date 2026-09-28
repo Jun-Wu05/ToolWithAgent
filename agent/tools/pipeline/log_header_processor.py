@@ -47,18 +47,18 @@ _KV_BODY_SAMPLE_MAX_CHARS = 600
 
 def _parse_regex_response(response: str) -> str:
     """从 LLM 响应中鲁棒提取正则字符串。
-    
+
     支持格式:
     - r'...' 或 r"..."
     - <regex>（纯字符串）
     - ```<regex>```（markdown 围栏）
     - 带解释文字的混合输出
-    
+
     Returns:
         提取出的正则字符串，失败返回空字符串。
     """
     text = response.strip()
-    
+
     # 尝试提取 r'...' 格式
     m = _re.search(r"r['\"](.+?)['\"]", text)
     if m:
@@ -81,6 +81,66 @@ def _parse_regex_response(response: str) -> str:
         return text
     
     return ""
+
+
+def _observe_kv_header_facts(lines: list[str], header_end_marker: str = "") -> str:
+    """代码预观察日志头结构事实，注入 prompt 供 LLM 直接采用（#290）。
+
+    观察错误（空格假设、冒号误判）是历史多次正则翻车点；这些事实由代码
+    确定性统计，LLM 只负责组合，不负责观察。无事实时返回空串。
+    """
+    facts: list[str] = []
+    pri_gaps: list[bool] = []
+    for line in lines:
+        pri = _re.match(r"^<\d+>", line)
+        if not pri:
+            continue
+        nxt = line[pri.end():pri.end() + 1]
+        pri_gaps.append(nxt.isspace())
+    if pri_gaps:
+        facts.append("样例行以 syslog 优先级 `<数字>` 开头")
+        if all(pri_gaps):
+            facts.append("优先级 `>` 之后紧跟一个空格（正则应写 `<\\d+>\\s`）")
+        elif not any(pri_gaps):
+            facts.append(
+                "优先级 `>` 之后**没有空格**（正则应写 `<\\d+>\\w`，禁止插入 `\\s+`）"
+            )
+        else:
+            facts.append(
+                "优先级 `>` 之后有的行有空格、有的行没有（正则必须写 `<\\d+>\\s*` 可选空白）"
+            )
+    if any(_re.search(r"\d{2}:\d{2}:\d{2}", line) for line in lines):
+        facts.append("存在 HH:MM:SS 时间戳（其中的冒号属于时间，不是分隔符）")
+    if header_end_marker:
+        facts.append(
+            f"格式识别已确定日志头结束标记为 {header_end_marker!r}"
+            "（捕获组应从其后的 KV body 开始）"
+        )
+    if not facts:
+        return ""
+    block = "\n\n# 代码观察到的确定事实（必须直接采用，禁止与事实冲突的假设）\n"
+    return block + "\n".join(f"- {fact}" for fact in facts)
+
+
+def _failing_sample_block(regex_str: str, texts: list[str], limit: int = 2) -> str:
+    """取前几条未被正则匹配（或捕获为空）的真实样例，供重试反馈展示（#290）。"""
+    try:
+        pattern = _re.compile(regex_str)
+    except _re.error:
+        pattern = None
+    shown: list[str] = []
+    for text in texts:
+        if len(shown) >= limit:
+            break
+        match = pattern.search(text) if pattern is not None else None
+        if match is None or not (match.group(1) or "").strip():
+            shown.append(f"- `{text[:80]}`")
+    if not shown:
+        return ""
+    return (
+        "\n以下真实样例未能被上次正则匹配（或捕获为空），"
+        "请逐字符对照其真实结构：\n" + "\n".join(shown)
+    )
 
 
 def _select_kv_body_samples(logs_str: str, kv_delimit: str) -> list[str]:
@@ -166,15 +226,21 @@ def _validate_regex(
     return True, "", body_length
 
 
-def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str:
+def _generate_kv_feature_identifier(
+    logs_str: str, kv_delimit: str = "=", header_end_marker: str = ""
+) -> str:
     """用 LLM 生成 KV body 提取正则（单个捕获组，Group1 = KV body）。
 
     CHANGED (2026-06-18): 增加重试机制（最多 1 次重试），重试时将错误反馈
                           拼入 prompt，并输出详细调试日志。失败仍抛出异常，
                           不使用兜底策略。
+    CHANGED (#290): 注入代码预观察的结构事实（PRI 后空格、时间戳、
+                    header_end_marker），失败反馈附带真实失配样例。
 
     Args:
         logs_str: 原始日志字符串（多行）。
+        kv_delimit: KV 键值连接符。
+        header_end_marker: 格式识别确定的日志头结束标记（可为空）。
 
     Returns:
         正则字符串，失败抛出 ValueError。
@@ -197,6 +263,7 @@ def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str
     sample_lines = _select_kv_body_samples(valid_logs_str, kv_delimit)
     sample_block = "\n".join(f"- `{line}`" for line in sample_lines)
     base_prompt = load_kv_feature_identifier_prompt()
+    observed_facts = _observe_kv_header_facts(lines, header_end_marker)
 
     max_attempts = 2  # 初次 + 1 次重试
     last_error = ""
@@ -207,6 +274,7 @@ def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str
 
         # CHANGED: 重试时附加错误反馈
         prompt = base_prompt.replace("{sample_logs}", sample_block)
+        prompt = prompt.replace("{observed_facts}", observed_facts)
         if attempt > 1 and last_error:
             feedback = (
                 f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
@@ -215,6 +283,7 @@ def _generate_kv_feature_identifier(logs_str: str, kv_delimit: str = "=") -> str
                 f"- 本批有效日志数：{len(lines)}\n"
                 f"\n请仔细检查样例日志中各部分的实际分隔情况，重新生成。"
             )
+            feedback += _failing_sample_block(last_regex, lines)
             prompt += feedback
             logger.debug(
                 f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} "
@@ -353,12 +422,14 @@ def _generate_header_logtype_regex(
             "{sample_logs}", "\n".join(header_texts[:_LOGTYPE_SAMPLE_LIMIT])
         )
         if attempt > 1 and last_error:
-            prompt += (
+            feedback = (
                 f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
                 f"- 上次错误：{last_error}\n"
                 f"- 上次正则：`{last_regex}`\n"
                 f"\n请重新观察样例结构，生成泛化的类型路径提取正则。"
             )
+            feedback += _failing_sample_block(last_regex, header_texts)
+            prompt += feedback
         try:
             response = _call_llm_direct(
                 prompt, temperature=0.1, max_tokens=500, timeout=30, force_json=False
@@ -465,7 +536,7 @@ def classify_header_features(
     if is_kv:
         try:
             kv_feature_identifier = _generate_kv_feature_identifier(
-                logs_str, kv_delimit
+                logs_str, kv_delimit, header_end_marker=header_end_marker
             )
         except ValueError:
             logger.error(
