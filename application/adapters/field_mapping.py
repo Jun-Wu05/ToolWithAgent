@@ -275,11 +275,6 @@ class FieldMappingAdapter:
         staged_sub_rule_results = staged_mapped_sub_rules = None
         event_annotation_summary: str | None = None
         event_annotation_rows: tuple = ()
-        failed_enum_pairs = {
-            (outcome.profile.owner, outcome.profile.field)
-            for outcome in enum_outcomes_sub.values()
-            if not outcome.mappings
-        }
         if sub_rules:
             from agent.tools.rule_generator.field_mapping import (
                 apply_field_mapping_to_sub_rules,
@@ -292,20 +287,12 @@ class FieldMappingAdapter:
                     for item in sub_rule.get("normalize", []) or []
                     if isinstance(item, dict)
                 }
-                rule_name = str(sub_rule.get("name", ""))
-                staged_rows = []
-                for row in mapping_rows:
-                    field = str(row.get("原始字段名", ""))
-                    if field not in rule_fields:
-                        continue
-                    staged = dict(row)
-                    if (rule_name, field) in failed_enum_pairs:
-                        staged["系统属性名称"] = "未匹配"
-                        staged["匹配状态"] = "未匹配"
-                    staged_rows.append(staged)
                 staged_sub_rule_results.append({
-                    "rule_name": rule_name,
-                    "mappings": staged_rows,
+                    "rule_name": str(sub_rule.get("name", "")),
+                    "mappings": [
+                        dict(row) for row in mapping_rows
+                        if str(row.get("原始字段名", "")) in rule_fields
+                    ],
                 })
             # #177：标准字段目录是对象归属 SSOT（名称/对象由目录确定性解析），
             # 不再加载 对象.xlsx（加载失败静默空表 + 未知名称默认「事件」的
