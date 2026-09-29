@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from toolwithagent_v2.infrastructure.store import Store
 from toolwithagent_v2.settings import Settings
@@ -19,6 +19,24 @@ class ConversationInput(BaseModel):
 
 class MessageInput(BaseModel):
     content: str
+
+
+class FakeRunInput(BaseModel):
+    scenario: str = "success"
+    session_facts: dict = Field(default_factory=dict)
+
+
+class TokenInput(BaseModel):
+    token: str
+
+
+class ConfirmInput(BaseModel):
+    token: str
+    checkpoint_revision: int
+
+
+class ForceStopInput(BaseModel):
+    reason: str
 
 
 class SessionInput(BaseModel):
@@ -65,7 +83,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(ValueError)
     async def invalid(request: Request, exc: ValueError):
         code = str(exc)
-        status = 413 if code == "file_too_large" else (409 if code == "idempotency_key_reused" else 400)
+        status = 413 if code == "file_too_large" else (409 if code in {
+            "idempotency_key_reused", "run_not_retryable", "task_has_active_run",
+            "run_not_cancellable", "run_not_stoppable", "run_not_waiting",
+            "invalid_confirmation_token", "confirmation_expired",
+        } else 400)
         return JSONResponse(status_code=status, content={"error": {"code": code, "message": code, "details": {}, "request_id": request.state.request_id}})
 
     @app.exception_handler(RequestValidationError)
@@ -117,6 +139,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return store.upload(user_writer(request)["id"], conversation_id, file, idempotency_key)
         finally:
             file.file.close()
+
+    if settings.development:
+        @app.post("/api/v2/dev/conversations/{conversation_id}/fake-runs", status_code=201)
+        def enqueue_fake(request: Request, conversation_id: str, payload: FakeRunInput):
+            return store.enqueue_fake(user_writer(request)["id"], conversation_id, payload.scenario, payload.session_facts)
+
+    @app.post("/api/v2/runs/{run_id}/retry", status_code=201)
+    def retry_run(request: Request, run_id: str, idempotency_key: str | None = Header(None)):
+        return store.retry(user_writer(request)["id"], run_id, idempotency_key)
+
+    @app.post("/api/v2/runs/{run_id}/cancel-token")
+    def cancel_token(request: Request, run_id: str):
+        return store.issue_cancel_token(user_writer(request)["id"], run_id)
+
+    @app.post("/api/v2/runs/{run_id}/cancel")
+    def cancel_run(request: Request, run_id: str, payload: TokenInput):
+        return store.cancel(user_writer(request)["id"], run_id, payload.token)
+
+    @app.post("/api/v2/runs/{run_id}/confirmation-token")
+    def confirmation_token(request: Request, run_id: str):
+        return store.issue_resume_token(user_writer(request)["id"], run_id)
+
+    @app.post("/api/v2/runs/{run_id}/confirm")
+    def confirm_run(request: Request, run_id: str, payload: ConfirmInput):
+        return store.confirm(user_writer(request)["id"], run_id, payload.token, payload.checkpoint_revision)
+
+    @app.post("/api/v2/admin/runs/{run_id}/force-stop")
+    def force_stop(request: Request, run_id: str, payload: ForceStopInput):
+        user = principal(request)
+        if user["role"] != "admin":
+            raise HTTPException(403, "insufficient_capability")
+        return store.force_stop(user["id"], run_id, payload.reason)
 
     @app.get("/api/v2/runs/{run_id}")
     def get_run(request: Request, run_id: str):

@@ -5,6 +5,8 @@ from uuid import uuid4
 import hashlib
 import json
 import os
+import secrets
+import time
 
 from .db import connect, migrate
 from toolwithagent_v2.settings import Settings
@@ -29,11 +31,14 @@ class Store:
         self.path = self.root / "v2.sqlite3"
         migrate(self.path)
         (self.root / "uploads").mkdir(parents=True, exist_ok=True)
+        (self.root / "artifacts").mkdir(parents=True, exist_ok=True)
+        (self.root / "staging").mkdir(parents=True, exist_ok=True)
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             for user_id, name, role in (("dev-user", "演示用户", "user"), ("dev-other", "开发者", "developer"), ("dev-admin", "管理员", "admin")):
                 db.execute("INSERT OR IGNORE INTO users(id,display_name,role,is_active,created_at) VALUES(?,?,?,?,?)", (user_id, name, role, 1, now()))
             db.commit()
+        self.reconcile_blobs()
 
     def users(self):
         with connect(self.path) as db:
@@ -189,16 +194,20 @@ class Store:
             if lease["owner_id"] != worker_id and lease["lease_expires_at"] and lease["lease_expires_at"] > timestamp:
                 db.commit()
                 return None
-            epoch = lease["epoch"] + (1 if lease["owner_id"] != worker_id else 0)
+            expired = not lease["lease_expires_at"] or lease["lease_expires_at"] <= timestamp
+            epoch = lease["epoch"] + (1 if lease["owner_id"] != worker_id or expired else 0)
             db.execute("UPDATE worker_leases SET owner_id=?,lease_expires_at=?,epoch=? WHERE id='v2-primary'", (worker_id, deadline, epoch))
-            stale = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running' AND r.lease_expires_at<=?", (timestamp,)).fetchall()
+            stale = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running' AND (r.lease_expires_at<=? OR r.leader_epoch<>?)", (timestamp, epoch)).fetchall()
             for abandoned in stale:
                 db.execute("UPDATE runs SET status='failed',error_code='worker_lost',finished_at=?,updated_at=?,lease_owner=NULL,lease_expires_at=NULL,fence_token=NULL,revision=revision+1 WHERE id=? AND status='running'", (timestamp, timestamp, abandoned["id"]))
                 db.execute("UPDATE tasks SET status='failed',updated_at=?,revision=revision+1 WHERE id=?", (timestamp, abandoned["task_id"]))
                 snapshot = json.loads(abandoned["input_snapshot_json"])
-                db.execute("UPDATE files SET parse_status='failed',updated_at=? WHERE id=?", (timestamp, snapshot["file_id"]))
+                db.execute("UPDATE files SET parse_status='failed',updated_at=? WHERE id=?", (timestamp, snapshot.get("file_id", "")))
                 self._run_event(db, abandoned["id"], "run_failed", "failed")
                 self._event(db, abandoned["conversation_id"], "run_failed", "run", abandoned["id"], {"run_id": abandoned["id"], "status": "failed", "error_code": "worker_lost"})
+            if db.execute("SELECT 1 FROM runs WHERE status='running' LIMIT 1").fetchone():
+                db.commit()
+                return None
             row = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='queued' ORDER BY r.queued_at,r.id LIMIT 1").fetchone()
             if row is None:
                 db.commit()
@@ -217,8 +226,8 @@ class Store:
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             lease = db.execute("SELECT owner_id,epoch,lease_expires_at FROM worker_leases WHERE id='v2-primary'").fetchone()
-            run = db.execute("SELECT status,lease_owner,fence_token FROM runs WHERE id=?", (claim["id"],)).fetchone()
-            if (lease["owner_id"] != worker_id or lease["epoch"] != claim["epoch"] or lease["lease_expires_at"] <= timestamp or run is None or run["status"] != "running" or run["lease_owner"] != worker_id or run["fence_token"] != claim["fence"]):
+            run = db.execute("SELECT status,lease_owner,fence_token,leader_epoch,lease_expires_at FROM runs WHERE id=?", (claim["id"],)).fetchone()
+            if (lease["owner_id"] != worker_id or lease["epoch"] != claim["epoch"] or lease["lease_expires_at"] <= timestamp or run is None or run["status"] != "running" or run["lease_owner"] != worker_id or run["fence_token"] != claim["fence"] or run["leader_epoch"] != claim["epoch"] or run["lease_expires_at"] <= timestamp):
                 db.rollback()
                 return False
             db.execute("UPDATE worker_leases SET lease_expires_at=? WHERE id='v2-primary'", (deadline,))
@@ -227,19 +236,319 @@ class Store:
             return True
 
     def finish(self, worker_id, claim, error_code=None):
-        status = "failed" if error_code else "succeeded"
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._valid_claim(db, worker_id, claim)
+            if row is None:
+                db.rollback()
+                return False
+            self._record_state(db, row, "failed" if error_code else "succeeded", error_code)
+            db.commit()
+            return True
+
+    def _owned_run(self, db, owner_id, run_id):
+        row = db.execute("SELECT r.*,t.owner_id,t.conversation_id,t.current_run_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND t.owner_id=?", (run_id, owner_id)).fetchone()
+        if row is None:
+            raise LookupError("run_not_found")
+        return row
+
+    def _record_state(self, db, row, status, error_code=None):
+        timestamp = now()
+        terminal = status in ("succeeded", "failed", "cancelled")
+        db.execute("UPDATE runs SET status=?,error_code=?,updated_at=?,finished_at=CASE WHEN ? THEN ? ELSE finished_at END,lease_owner=NULL,lease_expires_at=NULL,fence_token=NULL,revision=revision+1 WHERE id=?",
+                   (status, error_code, timestamp, terminal, timestamp, row["id"]))
+        db.execute("UPDATE tasks SET status=?,updated_at=?,revision=revision+1 WHERE id=? AND current_run_id=?",
+                   (status, timestamp, row["task_id"], row["id"]))
+        if row["input_snapshot_json"]:
+            snapshot = json.loads(row["input_snapshot_json"])
+            if snapshot.get("file_id"):
+                db.execute("UPDATE files SET parse_status=?,updated_at=? WHERE id=?", (status, timestamp, snapshot["file_id"]))
+        self._run_event(db, row["id"], "run_" + status, status)
+        self._event(db, row["conversation_id"], "run_" + status, "run", row["id"],
+                    {"run_id": row["id"], "status": status, "error_code": error_code})
+
+    def retry(self, owner_id, run_id, idempotency_key=None):
         timestamp = now()
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
-            lease = db.execute("SELECT owner_id,epoch,lease_expires_at FROM worker_leases WHERE id='v2-primary'").fetchone()
-            run = db.execute("SELECT status,lease_owner,fence_token,leader_epoch FROM runs WHERE id=?", (claim["id"],)).fetchone()
-            if (lease["owner_id"] != worker_id or lease["epoch"] != claim["epoch"] or lease["lease_expires_at"] <= timestamp or run["status"] != "running" or run["lease_owner"] != worker_id or run["fence_token"] != claim["fence"]):
-                db.rollback()
-                return False
-            db.execute("UPDATE runs SET status=?,error_code=?,finished_at=?,updated_at=?,revision=revision+1 WHERE id=?", (status, error_code, timestamp, timestamp, claim["id"]))
-            db.execute("UPDATE tasks SET status=?,updated_at=?,revision=revision+1 WHERE id=?", (status, timestamp, claim["task_id"]))
-            db.execute("UPDATE files SET parse_status=?,updated_at=? WHERE id=?", (status, timestamp, claim["input"]["file_id"]))
-            self._run_event(db, claim["id"], "run_" + status, status)
-            self._event(db, claim["conversation_id"], "run_" + status, "run", claim["id"], {"run_id": claim["id"], "status": status, "error_code": error_code})
+            source = self._owned_run(db, owner_id, run_id)
+            scope = "retry:" + run_id
+            if idempotency_key:
+                receipt = db.execute("SELECT result_json FROM idempotency_receipts WHERE principal_id=? AND operation_scope=? AND key=?",
+                                     (owner_id, scope, idempotency_key)).fetchone()
+                if receipt:
+                    return json.loads(receipt["result_json"])
+            if source["status"] not in ("succeeded", "failed", "cancelled"):
+                raise ValueError("run_not_retryable")
+            current = db.execute("SELECT status FROM runs WHERE id=?", (source["current_run_id"],)).fetchone()
+            if current and current["status"] not in ("succeeded", "failed", "cancelled"):
+                raise ValueError("task_has_active_run")
+            attempt = db.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM runs WHERE task_id=?", (source["task_id"],)).fetchone()[0]
+            new_id = uid()
+            db.execute("""INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,provider_config_revision,prompt_version,standard_field_version,queued_at,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                       (new_id, source["task_id"], attempt, "queued", source["input_snapshot_json"],
+                        source["provider_config_revision"], source["prompt_version"], source["standard_field_version"],
+                        timestamp, timestamp, timestamp))
+            db.execute("UPDATE tasks SET status='queued',current_run_id=?,updated_at=?,revision=revision+1 WHERE id=?",
+                       (new_id, timestamp, source["task_id"]))
+            snapshot = json.loads(source["input_snapshot_json"])
+            if snapshot.get("file_id"):
+                db.execute("UPDATE files SET parse_status='queued',updated_at=? WHERE id=?", (timestamp, snapshot["file_id"]))
+            self._run_event(db, new_id, "run_queued", "queued")
+            self._event(db, source["conversation_id"], "run_queued", "run", new_id,
+                        {"run_id": new_id, "status": "queued", "attempt": attempt, "source_run_id": run_id})
+            result = {"id": new_id, "task_id": source["task_id"], "status": "queued", "attempt": attempt}
+            if idempotency_key:
+                db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                           (uid(), owner_id, scope, idempotency_key, hashlib.sha256(run_id.encode()).hexdigest(), "completed", json.dumps(result), timestamp))
             db.commit()
-            return True
+            return result
+
+    def issue_cancel_token(self, owner_id, run_id):
+        token = secrets.token_urlsafe(32)
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_run(db, owner_id, run_id)
+            if row["current_run_id"] != run_id or row["status"] not in ("queued", "running", "waiting_confirmation"):
+                raise ValueError("run_not_cancellable")
+            db.execute("UPDATE confirmations SET status='superseded',rotated_at=? WHERE run_id=? AND kind='cancel' AND status='pending'", (now(), run_id))
+            db.execute("INSERT INTO confirmations(id,task_id,run_id,checkpoint_id,checkpoint_revision,token_sha256,kind,payload_json,status,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                       (uid(), row["task_id"], run_id, "", row["revision"], hashlib.sha256(token.encode()).hexdigest(),
+                        "cancel", "{}", "pending", (datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat(), now()))
+            db.commit()
+        return {"token": token, "run_id": run_id, "revision": row["revision"]}
+
+    def cancel(self, owner_id, run_id, token):
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_run(db, owner_id, run_id)
+            if row["current_run_id"] != run_id or row["status"] not in ("queued", "running", "waiting_confirmation"):
+                raise ValueError("run_not_cancellable")
+            confirmation = db.execute("SELECT * FROM confirmations WHERE run_id=? AND kind='cancel' AND status='pending' AND token_sha256=? ORDER BY created_at DESC LIMIT 1", (run_id, digest)).fetchone()
+            if confirmation is None or confirmation["expires_at"] <= now() or confirmation["checkpoint_revision"] != row["revision"]:
+                raise ValueError("invalid_confirmation_token")
+            db.execute("UPDATE confirmations SET status='consumed',consumed_at=? WHERE id=?", (now(), confirmation["id"]))
+            db.execute("UPDATE confirmations SET status='superseded',rotated_at=? WHERE run_id=? AND kind='resume' AND status='pending'", (now(), run_id))
+            if row["status"] != "queued":
+                self._record_state(db, row, "cancelling")
+            self._record_state(db, row, "cancelled")
+            db.commit()
+            return {"id": run_id, "status": "cancelled"}
+
+    def force_stop(self, admin_id, run_id, reason):
+        if not reason or not reason.strip() or len(reason.strip()) > 1000:
+            raise ValueError("reason_required")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT r.*,t.conversation_id,t.current_run_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (run_id,)).fetchone()
+            if row is None:
+                raise LookupError("run_not_found")
+            if row["current_run_id"] != run_id or row["status"] not in ("queued", "running", "waiting_confirmation"):
+                raise ValueError("run_not_stoppable")
+            db.execute("UPDATE confirmations SET status='superseded',rotated_at=? WHERE run_id=? AND status='pending'", (now(), run_id))
+            if row["status"] != "queued":
+                self._record_state(db, row, "cancelling", "force_stopped")
+            self._record_state(db, row, "cancelled", "force_stopped")
+            db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason) VALUES(?,?,?,?,?,?,?)",
+                       (uid(), admin_id, "force_stop", "run", run_id, now(), reason.strip()))
+            db.commit()
+            return {"id": run_id, "status": "cancelled", "error_code": "force_stopped"}
+
+    def _valid_claim(self, db, worker_id, claim):
+        timestamp = now()
+        lease = db.execute("SELECT * FROM worker_leases WHERE id='v2-primary'").fetchone()
+        row = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (claim["id"],)).fetchone()
+        if (row is None or row["status"] != "running" or row["lease_owner"] != worker_id
+            or row["lease_expires_at"] is None or row["lease_expires_at"] <= timestamp
+            or row["leader_epoch"] != claim["epoch"] or row["fence_token"] != claim["fence"]
+            or lease["owner_id"] != worker_id or lease["epoch"] != claim["epoch"]
+            or lease["lease_expires_at"] is None or lease["lease_expires_at"] <= timestamp):
+            return None
+        return row
+
+    def wait_for_confirmation(self, worker_id, claim, continuation, kind="fake_approval", payload=None):
+        from application.execution_continuation import ExecutionContinuation
+        if not isinstance(continuation, ExecutionContinuation):
+            raise TypeError("continuation_required")
+        token = secrets.token_urlsafe(32)
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._valid_claim(db, worker_id, claim)
+            if row is None:
+                db.rollback()
+                return None
+            revision = db.execute("SELECT COALESCE(MAX(revision),0)+1 FROM execution_checkpoints WHERE run_id=?", (row["id"],)).fetchone()[0]
+            checkpoint_id = uid()
+            db.execute("INSERT INTO execution_checkpoints(id,run_id,continuation_json,revision,created_at) VALUES(?,?,?,?,?)",
+                       (checkpoint_id, row["id"], continuation.to_json(), revision, now()))
+            db.execute("INSERT INTO confirmations(id,task_id,run_id,checkpoint_id,checkpoint_revision,token_sha256,kind,payload_json,status,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                       (uid(), row["task_id"], row["id"], checkpoint_id, revision, hashlib.sha256(token.encode()).hexdigest(),
+                        kind, json.dumps(payload or {}), "pending", (datetime.now(timezone.utc)+timedelta(hours=24)).isoformat(), now()))
+            self._record_state(db, row, "waiting_confirmation")
+            db.commit()
+            return {"run_id": row["id"], "checkpoint_revision": revision, "token": token}
+
+    def issue_resume_token(self, owner_id, run_id):
+        token = secrets.token_urlsafe(32)
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_run(db, owner_id, run_id)
+            if row["current_run_id"] != run_id or row["status"] != "waiting_confirmation":
+                raise ValueError("run_not_waiting")
+            prior = db.execute("SELECT * FROM confirmations WHERE run_id=? AND kind<>'cancel' AND status='pending' ORDER BY created_at DESC LIMIT 1", (run_id,)).fetchone()
+            if prior is None or prior["expires_at"] <= now():
+                raise ValueError("confirmation_expired")
+            db.execute("UPDATE confirmations SET status='superseded',rotated_at=? WHERE id=?", (now(), prior["id"]))
+            db.execute("INSERT INTO confirmations(id,task_id,run_id,checkpoint_id,checkpoint_revision,token_sha256,kind,payload_json,status,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                       (uid(), row["task_id"], run_id, prior["checkpoint_id"], prior["checkpoint_revision"], hashlib.sha256(token.encode()).hexdigest(),
+                        prior["kind"], prior["payload_json"], "pending", prior["expires_at"], now()))
+            db.commit()
+            return {"token": token, "run_id": run_id, "checkpoint_revision": prior["checkpoint_revision"],
+                    "kind": prior["kind"], "payload": json.loads(prior["payload_json"]), "expires_at": prior["expires_at"]}
+
+    def confirm(self, owner_id, run_id, token, checkpoint_revision):
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_run(db, owner_id, run_id)
+            if row["current_run_id"] != run_id or row["status"] != "waiting_confirmation":
+                raise ValueError("run_not_waiting")
+            latest = db.execute("SELECT * FROM execution_checkpoints WHERE run_id=? ORDER BY revision DESC LIMIT 1", (run_id,)).fetchone()
+            confirmation = db.execute("SELECT * FROM confirmations WHERE run_id=? AND status='pending' AND kind<>'cancel' AND token_sha256=?", (run_id, digest)).fetchone()
+            if (latest is None or confirmation is None or latest["revision"] != checkpoint_revision
+                or confirmation["checkpoint_id"] != latest["id"] or confirmation["checkpoint_revision"] != checkpoint_revision
+                or confirmation["expires_at"] <= now()):
+                raise ValueError("invalid_confirmation_token")
+            db.execute("UPDATE confirmations SET status='consumed',consumed_at=? WHERE id=?", (now(), confirmation["id"]))
+            db.execute("UPDATE runs SET status='queued',queued_at=?,updated_at=?,revision=revision+1 WHERE id=?", (now(), now(), run_id))
+            db.execute("UPDATE tasks SET status='queued',updated_at=?,revision=revision+1 WHERE id=?", (now(), row["task_id"]))
+            self._run_event(db, run_id, "run_queued", "queued")
+            self._event(db, row["conversation_id"], "run_queued", "run", run_id, {"run_id": run_id, "status": "queued", "resumed": True})
+            db.commit()
+            return {"id": run_id, "status": "queued"}
+
+    def continuation(self, run_id):
+        from application.execution_continuation import ExecutionContinuation
+        with connect(self.path) as db:
+            row = db.execute("SELECT continuation_json FROM execution_checkpoints WHERE run_id=? ORDER BY revision DESC LIMIT 1", (run_id,)).fetchone()
+            return ExecutionContinuation.from_json(row["continuation_json"]) if row else None
+
+    def publish(self, worker_id, claim, content: bytes, kind="fake_result"):
+        if not isinstance(content, bytes):
+            raise TypeError("artifact_content_must_be_bytes")
+        sha = hashlib.sha256(content).hexdigest()
+        key = f"artifacts/{sha[:2]}/{sha}"
+        stage = self.root / "staging" / (uid() + ".stage")
+        final = self.root / key
+        try:
+            with stage.open("wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if hashlib.sha256(stage.read_bytes()).hexdigest() != sha:
+                raise OSError("staging_hash_mismatch")
+            # The final Blob and its database reference share the same write lock
+            # with startup reconciliation. A crash after rename may leave an orphan,
+            # but a committed Artifact can never lose its Blob to reconciliation.
+            with connect(self.path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = self._valid_claim(db, worker_id, claim)
+                if row is None:
+                    db.rollback()
+                    return False
+                final.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(stage, final)
+                # The rename is short, but fail closed if the lease expired while
+                # the database lock was held.
+                if self._valid_claim(db, worker_id, claim) is None:
+                    db.rollback()
+                    return False
+                version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE task_id=? AND kind=?", (row["task_id"], kind)).fetchone()[0]
+                artifact_id = uid()
+                db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                           (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, "{}", now(), len(content)))
+                self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id,
+                            {"artifact_id": artifact_id, "run_id": row["id"], "kind": kind, "version": version})
+                self._record_state(db, row, "succeeded")
+                db.commit()
+                return True
+        finally:
+            stage.unlink(missing_ok=True)
+
+    def reconcile_blobs(self, retention_seconds=3600):
+        cutoff = time.time() - retention_seconds
+        for stage in (self.root / "staging").glob("*.stage"):
+            try:
+                if stage.stat().st_mtime <= cutoff:
+                    stage.unlink(missing_ok=True)
+            except FileNotFoundError:
+                pass
+
+        def identity(path):
+            try:
+                stat = path.stat()
+                return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            except OSError:
+                return None
+
+        # Hashes and directory traversal are read-only and can be slow. Keep
+        # them outside SQLite write transactions so a live Worker can renew.
+        with connect(self.path) as db:
+            published = db.execute("SELECT id,storage_key,sha256 FROM artifacts WHERE status='published'").fetchall()
+        for row in published:
+            path = self.root / row["storage_key"] if row["storage_key"] else None
+            before = identity(path) if path else None
+            try:
+                valid = bool(path and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == row["sha256"])
+            except OSError:
+                valid = False
+            if valid:
+                continue
+            with connect(self.path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute("SELECT status,storage_key,sha256 FROM artifacts WHERE id=?", (row["id"],)).fetchone()
+                if (current and current["status"] == "published"
+                    and current["storage_key"] == row["storage_key"]
+                    and current["sha256"] == row["sha256"]
+                    and (identity(path) if path else None) == before):
+                    db.execute("UPDATE artifacts SET status='corrupt' WHERE id=?", (row["id"],))
+                db.commit()
+
+        for path in (self.root / "artifacts").rglob("*"):
+            try:
+                if not path.is_file() or path.stat().st_mtime > cutoff:
+                    continue
+            except FileNotFoundError:
+                continue
+            key = path.relative_to(self.root).as_posix()
+            with connect(self.path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                referenced = db.execute("SELECT 1 FROM artifacts WHERE storage_key=? LIMIT 1", (key,)).fetchone()
+                try:
+                    if not referenced and path.is_file() and path.stat().st_mtime <= cutoff:
+                        path.unlink(missing_ok=True)
+                except FileNotFoundError:
+                    pass
+                db.commit()
+
+    def enqueue_fake(self, owner_id, conversation_id, scenario="success", session_facts=None):
+        if not self.settings.development:
+            raise ValueError("fake_runs_disabled")
+        if scenario not in ("success", "confirm", "fail"):
+            raise ValueError("invalid_scenario")
+        timestamp = now()
+        task_id, run_id = uid(), uid()
+        snapshot = {"scenario": scenario, "session_facts": session_facts or {}}
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.owns(db, conversation_id, owner_id)
+            db.execute("INSERT INTO tasks(id,conversation_id,owner_id,type,status,current_run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                       (task_id, conversation_id, owner_id, "fake_application", "queued", run_id, timestamp, timestamp))
+            db.execute("INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,queued_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                       (run_id, task_id, 1, "queued", json.dumps(snapshot, sort_keys=True), timestamp, timestamp, timestamp))
+            self._run_event(db, run_id, "run_queued", "queued")
+            self._event(db, conversation_id, "run_queued", "run", run_id, {"run_id": run_id, "status": "queued"})
+            db.commit()
+        return {"task": {"id": task_id, "status": "queued"}, "run": {"id": run_id, "status": "queued"}}
