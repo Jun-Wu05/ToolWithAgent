@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re as _re
 from collections import defaultdict
-from typing import Any
+from typing import Any, Callable
 
 from agent.tools.pipeline.extractors.base import ValueExtractor
 
@@ -79,6 +79,7 @@ def aggregate_headers(
     delimit: str = "=",
     max_clusters: int = 50,
     max_header_len: int = 3000,
+    header_fn: Callable[[str], str] | None = None,
 ) -> dict:
     """提取、脱敏并聚类日志头部。
 
@@ -88,6 +89,9 @@ def aggregate_headers(
         delimit:        KV 格式的 key-value 连接符。
         max_clusters:   最大唯一头部聚类数。
         max_header_len: 每条头部样本的最大字符数。
+        header_fn:      可选的自定义单行 header 切分函数，``None`` 时用
+                        ``extract_header`` 按分隔符切分。调用方持有更可靠的
+                        边界依据（如已验证 body 正则的捕获起点，#294）时注入。
 
     Returns:
         {
@@ -110,7 +114,7 @@ def aggregate_headers(
         if len(cluster_map) >= max_clusters:
             break
 
-        header = extract_header(line, format_type, delimit)
+        header = header_fn(line) if header_fn else extract_header(line, format_type, delimit)
         if not header:
             continue
 

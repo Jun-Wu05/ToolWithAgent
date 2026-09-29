@@ -13,6 +13,9 @@ CHANGED (2026-05-29): 集成 HeaderExtractor 消除重复代码；
 CHANGED (2026-06-02): 支持 KV 格式，feature_identifier 和 analysis 动态设置。
 CHANGED (2026-06-18): _generate_kv_feature_identifier 增加重试机制（最多1次），
                        失败时将错误反馈拼入 prompt 并输出详细调试日志。
+CHANGED (#294): KV body 正则校验删除形态假设（body 不要求是键值对，
+                自然语言/冒号键值都合法）；header/body 边界统一以已验证
+                body 正则的捕获起点为唯一权威，不再依赖分隔符猜测。
 """
 
 from __future__ import annotations
@@ -122,8 +125,53 @@ def _observe_kv_header_facts(lines: list[str], header_end_marker: str = "") -> s
     return block + "\n".join(f"- {fact}" for fact in facts)
 
 
-def _failing_sample_block(regex_str: str, texts: list[str], limit: int = 2) -> str:
-    """取前几条未被正则匹配（或捕获为空）的真实样例，供重试反馈展示（#290）。"""
+def _classify_body_error(
+    pattern: _re.Pattern, line: str, kv_delimit: str = "="
+) -> tuple[str, str]:
+    """单行 body 判定：校验与失配反馈共用的唯一判定源（#294）。
+
+    只做与日志格式无关的结构检查（命中、捕获非空、非整行、不含 syslog
+    PRI），不假设 body 的内容形态——键值对与自然语言都是合法 body。
+
+    Returns:
+        (失败类别, 捕获内容)；通过时类别为空串。
+    """
+    match = pattern.search(line)
+    body = (match.group(1) or "").strip() if match else ""
+    if not match:
+        return "regex_no_match", body
+    if not body:
+        return "body_empty", body
+    if body == line.strip() and extract_header(line, "kv", kv_delimit):
+        return "body_is_full_line", body
+    if body.startswith("<") and _re.match(r"^<\d+>", body):
+        return "body_contains_syslog_pri", body
+    return "", body
+
+
+def _failing_sample_block(
+    regex_str: str,
+    texts: list[str],
+    classify=None,
+    limit: int = 2,
+) -> str:
+    """取前几条未通过判定的真实样例（附上次捕获内容），供重试反馈展示。
+
+    Args:
+        regex_str: 上次生成的正则字符串。
+        texts:     待判定的真实文本（原始行或日志头文本）。
+        classify:  单行判定函数 ``(pattern, text) -> (失败类别, 捕获内容)``；
+                   缺省只判断"未命中或捕获为空"（类型正则链路），
+                   KV body 链路传入 :func:`_classify_body_error` 的绑定版本。
+        limit:     展示样例上限。
+    """
+    if classify is None:
+
+        def classify(pattern: _re.Pattern | None, text: str) -> tuple[str, str]:
+            match = pattern.search(text) if pattern is not None else None
+            body = (match.group(1) or "").strip() if match else ""
+            return ("", body) if body else ("regex_no_match", body)
+
     try:
         pattern = _re.compile(regex_str)
     except _re.error:
@@ -132,24 +180,34 @@ def _failing_sample_block(regex_str: str, texts: list[str], limit: int = 2) -> s
     for text in texts:
         if len(shown) >= limit:
             break
-        match = pattern.search(text) if pattern is not None else None
-        if match is None or not (match.group(1) or "").strip():
-            shown.append(f"- `{text[:80]}`")
+        error, body = classify(pattern, text)
+        if error:
+            shown.append(f"- `{text[:160]}` → 上次捕获 `{body[:80]}`（{error}）")
     if not shown:
         return ""
     return (
-        "\n以下真实样例未能被上次正则匹配（或捕获为空），"
+        "\n以下真实样例未能被上次正则匹配（或校验未通过），"
         "请逐字符对照其真实结构：\n" + "\n".join(shown)
     )
 
 
-def _select_kv_body_samples(logs_str: str, kv_delimit: str) -> list[str]:
-    """按日志头结构选择有界 KV 样本，避免只观察首行。"""
+def _select_kv_body_samples(
+    logs_str: str, kv_delimit: str, header_end_marker: str = ""
+) -> list[str]:
+    """按日志头结构选择有界 KV 样本，避免只观察首行。
+
+    聚类边界优先用格式识别给出的 header_end_marker（首次出现处之前），
+    避免分隔符猜测在冒号类数据上被时间戳冒号误导、全部行塌缩成单簇（#294）。
+    """
+    header_fn = None
+    if header_end_marker:
+        header_fn = lambda line: line.split(header_end_marker, 1)[0]
     clusters = aggregate_headers(
         logs_str,
         format_type="kv",
         delimit=kv_delimit,
         max_clusters=_KV_BODY_SAMPLE_LIMIT,
+        header_fn=header_fn,
     ).get("clusters", [])
     samples = [c.get("raw_sample", "") for c in clusters if c.get("raw_sample")]
     if not samples:
@@ -166,6 +224,10 @@ def _validate_regex(
     kv_delimit: str = "=",
 ) -> tuple[bool, str, int]:
     """验证 KV body 正则：结构合法且覆盖本批全部有效日志。
+
+    只做与格式无关的结构校验（命中、捕获非空、非整行、不含 syslog PRI），
+    不假设 body 形态——键值对与自然语言 body 都合法（#294 删除 kv_start
+    形态硬校验：自然语言 body 的数据（如山石 KvHeadShanshi）此前必败）。
 
     Args:
         regex_str: 待验证的正则字符串。
@@ -192,29 +254,14 @@ def _validate_regex(
     matched = 0
     first_error = ""
     body_length = 0
-    kv_start = _re.compile(
-        rf"^[\w.-]+(?:\(\d+\))?\s*{_re.escape(kv_delimit)}"
-    )
     for line in lines:
-        match = pattern.search(line)
-        body = (match.group(1) or "").strip() if match else ""
-        error = ""
-        if not match:
-            error = "regex_no_match"
-        elif not body:
-            error = "body_empty"
-        elif body == line.strip() and extract_header(line, "kv", kv_delimit):
-            error = "body_is_full_line"
-        elif body.startswith("<") and _re.match(r"^<\d+>", body):
-            error = "body_contains_syslog_pri"
-        elif not kv_start.match(body):
-            error = "body_not_kv"
-        else:
-            matched += 1
-            if not body_length:
-                body_length = len(body)
-        if error and not first_error:
-            first_error = error
+        error, body = _classify_body_error(pattern, line, kv_delimit)
+        if error:
+            first_error = first_error or error
+            continue
+        matched += 1
+        if not body_length:
+            body_length = len(body)
 
     if matched != total:
         return (
@@ -236,6 +283,9 @@ def _generate_kv_feature_identifier(
                           不使用兜底策略。
     CHANGED (#290): 注入代码预观察的结构事实（PRI 后空格、时间戳、
                     header_end_marker），失败反馈附带真实失配样例。
+    CHANGED (#294): 校验删除 kv_start 形态假设（body 不要求是键值对）；
+                    行过滤不再"零行即抛"——整批不含 KV 对时契约扩大到
+                    全部行；失配反馈携带上次捕获内容，覆盖全部失败类别。
 
     Args:
         logs_str: 原始日志字符串（多行）。
@@ -252,15 +302,15 @@ def _generate_kv_feature_identifier(
     if not all_lines:
         raise ValueError("日志内容为空，无法生成 feature_identifier")
 
-    kv_pair = _re.compile(
-        rf"[\w.-]+(?:\(\d+\))?\s*{_re.escape(kv_delimit)}"
-    )
-    lines = [line for line in all_lines if kv_pair.search(line)]
-    if not lines:
-        raise ValueError("没有可识别的 KV 日志行，无法生成 feature_identifier")
+    # 校验契约限定在"参与 KV 结构"的行：混入批次的少数异构行（如管道格式）
+    # 不属于 body 正则的覆盖范围，由后续全量扫描计入 unmatched 降级 PARTIAL；
+    # 整批不含 KV 对时（自然语言 body 等，#294）契约扩大到全部行。
+    kv_pair = _re.compile(rf"[\w.-]+(?:\(\d+\))?\s*{_re.escape(kv_delimit)}")
+    lines = [line for line in all_lines if kv_pair.search(line)] or all_lines
 
-    valid_logs_str = "\n".join(lines)
-    sample_lines = _select_kv_body_samples(valid_logs_str, kv_delimit)
+    sample_lines = _select_kv_body_samples(
+        "\n".join(lines), kv_delimit, header_end_marker
+    )
     sample_block = "\n".join(f"- `{line}`" for line in sample_lines)
     base_prompt = load_kv_feature_identifier_prompt()
     observed_facts = _observe_kv_header_facts(lines, header_end_marker)
@@ -283,7 +333,11 @@ def _generate_kv_feature_identifier(
                 f"- 本批有效日志数：{len(lines)}\n"
                 f"\n请仔细检查样例日志中各部分的实际分隔情况，重新生成。"
             )
-            feedback += _failing_sample_block(last_regex, lines)
+            feedback += _failing_sample_block(
+                last_regex,
+                lines,
+                classify=lambda p, t: _classify_body_error(p, t, kv_delimit),
+            )
             prompt += feedback
             logger.debug(
                 f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} "
@@ -387,8 +441,26 @@ def _validate_logtype_regex(regex_str: str, header_texts: list[str]) -> tuple[bo
     return True, "", value_length
 
 
+def _kv_header_cut(
+    line: str, body_pattern: _re.Pattern | None, kv_delimit: str
+) -> str:
+    """KV Path A 的 header/body 边界以已验证 body 正则为唯一权威（#294）。
+
+    header = 捕获组之前的文本：天然保留类型标签、不受时间戳冒号等分隔符
+    误判影响；body 正则未命中时退回分隔符猜测（该行后续自然落入 unmatched）。
+    """
+    if body_pattern is not None:
+        match = body_pattern.search(line)
+        if match and match.start(1) > 0:
+            return line[:match.start(1)].strip()
+    return extract_header(line, "kv", kv_delimit)
+
+
 def _generate_header_logtype_regex(
-    sample_lines: list[str], format_type: str, delimit: str
+    sample_lines: list[str],
+    format_type: str,
+    delimit: str,
+    body_pattern: _re.Pattern | None = None,
 ) -> _re.Pattern:
     """用 LLM 生成日志类型路径提取正则（1 捕获组，≤2 次尝试，#190）。
 
@@ -399,6 +471,8 @@ def _generate_header_logtype_regex(
         sample_lines: header 聚类分层的原始日志行样本。
         format_type:  日志格式（大小写无关）。
         delimit:      KV 键值分隔符（用于从样本行提取日志头）。
+        body_pattern: 已验证的 KV body 正则；提供时 header 边界以其捕获
+                      起点为准（#294），否则退回分隔符猜测。
 
     Returns:
         编译后的正则对象。
@@ -406,8 +480,18 @@ def _generate_header_logtype_regex(
     Raises:
         ValueError: 全部尝试均失败。
     """
+    is_kv = (format_type or "").lower() == "kv"
     header_texts = [
-        h for h in (extract_header(l, format_type, delimit) or l for l in sample_lines)
+        h
+        for h in (
+            (
+                _kv_header_cut(l, body_pattern, delimit)
+                if is_kv
+                else extract_header(l, format_type, delimit)
+            )
+            or l
+            for l in sample_lines
+        )
         if h.strip()
     ]
     if not header_texts:
@@ -469,15 +553,25 @@ def _generate_header_logtype_regex(
     )
 
 
-def _make_header_logtype_extractor(pattern: _re.Pattern, format_type: str, delimit: str):
+def _make_header_logtype_extractor(
+    pattern: _re.Pattern,
+    format_type: str,
+    delimit: str,
+    body_pattern: _re.Pattern | None = None,
+):
     """构造类型提取器：正则只作用于日志头文本（#190）。
 
+    KV 格式的 header 边界以已验证 body 正则的捕获起点为准（#294）。
     不同主结构的行（如管道格式）在日志头中匹配不到类型路径，
     由聚合器计入 unmatched，不参与分类。
     """
+    is_kv = (format_type or "").lower() == "kv"
 
     def extract(line: str, feature_field: str):
-        header = extract_header(line, format_type, delimit)
+        if is_kv:
+            header = _kv_header_cut(line, body_pattern, delimit)
+        else:
+            header = extract_header(line, format_type, delimit)
         if not header:
             return None
         m = pattern.search(header)
@@ -547,9 +641,24 @@ def classify_header_features(
 
     # CHANGED: 确定 KV 格式的键值连接符，用于 header 提取
     try:
+        # KV 的 header/body 边界以已验证 body 正则为唯一权威（#294）：
+        # header = 捕获组之前的文本，天然保留类型标签、不受时间戳冒号等
+        # 分隔符误判影响；JSON 等其余格式维持 extract_header 分隔符切分。
+        body_pattern = (
+            _re.compile(kv_feature_identifier) if kv_feature_identifier else None
+        )
+        header_fn = (
+            (lambda line: _kv_header_cut(line, body_pattern, kv_delimit))
+            if is_kv and body_pattern is not None
+            else None
+        )
+
         # 1) 结构样本：header 聚类降级为样本源，不再决定类型集合与计数（#190）
         clusters = aggregate_headers(
-            logs_str, format_type=format_type, delimit=kv_delimit
+            logs_str,
+            format_type=format_type,
+            delimit=kv_delimit,
+            header_fn=header_fn,
         )["clusters"]
         sample_lines = [
             c["raw_sample"] for c in clusters if c.get("raw_sample")
@@ -561,7 +670,7 @@ def classify_header_features(
         # 2) 类型提取正则：失败自动附错误反馈修复一次，再败即 FAILED（无自由枚举兜底）
         try:
             logtype_pattern = _generate_header_logtype_regex(
-                sample_lines, format_type, kv_delimit
+                sample_lines, format_type, kv_delimit, body_pattern=body_pattern
             )
         except ValueError:
             logger.error(
@@ -575,7 +684,7 @@ def classify_header_features(
         # ponytail: 正则仅从 top 结构样本习得；共主导结构的文件次结构会进
         # unmatched 并报 PARTIAL，升级路径 = 按 cluster 迭代生成多个类型正则
         logtype_extractor = _make_header_logtype_extractor(
-            logtype_pattern, format_type, kv_delimit
+            logtype_pattern, format_type, kv_delimit, body_pattern=body_pattern
         )
         aggregation = aggregate_by_field(
             logs_str,
