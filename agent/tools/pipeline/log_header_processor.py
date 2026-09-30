@@ -16,6 +16,9 @@ CHANGED (2026-06-18): _generate_kv_feature_identifier 增加重试机制（最�
 CHANGED (#294): KV body 正则校验删除形态假设（body 不要求是键值对，
                 自然语言/冒号键值都合法）；header/body 边界统一以已验证
                 body 正则的捕获起点为唯一权威，不再依赖分隔符猜测。
+CHANGED (#296): 增加以 header_end_marker 为唯一证据源的边界下限守卫
+                （body_starts_in_header），拦截捕获起点切在日志头中段的
+                正则——否则错误边界会被静默接受并聚成单类型伪 SUCCESS。
 """
 
 from __future__ import annotations
@@ -125,13 +128,31 @@ def _observe_kv_header_facts(lines: list[str], header_end_marker: str = "") -> s
     return block + "\n".join(f"- {fact}" for fact in facts)
 
 
+def _header_boundary_floor(line: str, header_end_marker: str) -> int:
+    """返回捕获组起点不得早于的位置（该行"日志头已结束"的确定性证据）。
+
+    唯一证据源是格式识别给出的 header_end_marker 的首次出现位置；行内不含
+    marker 时不设下限（返回 0），边界判断交给提示词与重试反馈（#296 用户
+    决策：不做连接符兜底）。下限语义对不完美证据安全：marker 过早出现只会
+    减弱守卫，不会误拒（捕获只需不早于 marker，可晚于它）。
+    """
+    if not header_end_marker:
+        return 0
+    return max(line.find(header_end_marker), 0)
+
+
 def _classify_body_error(
-    pattern: _re.Pattern, line: str, kv_delimit: str = "="
+    pattern: _re.Pattern,
+    line: str,
+    kv_delimit: str = "=",
+    header_end_marker: str = "",
 ) -> tuple[str, str]:
     """单行 body 判定：校验与失配反馈共用的唯一判定源（#294）。
 
-    只做与日志格式无关的结构检查（命中、捕获非空、非整行、不含 syslog
-    PRI），不假设 body 的内容形态——键值对与自然语言都是合法 body。
+    只做与格式无关的结构检查（命中、捕获非空、非整行、不含 syslog
+    PRI），不假设 body 的内容形态——键值对与自然语言都是合法 body；
+    另以 header_end_marker 为下限拦截"捕获起点切在日志头中段"的边界错位
+    （#296：H3C 正则把 VsysId:1 的内部冒号当边界，20000 行静默聚成单类型）。
 
     Returns:
         (失败类别, 捕获内容)；通过时类别为空串。
@@ -146,6 +167,8 @@ def _classify_body_error(
         return "body_is_full_line", body
     if body.startswith("<") and _re.match(r"^<\d+>", body):
         return "body_contains_syslog_pri", body
+    if match.start(1) < _header_boundary_floor(line, header_end_marker):
+        return "body_starts_in_header", body
     return "", body
 
 
@@ -196,18 +219,23 @@ def _select_kv_body_samples(
 ) -> list[str]:
     """按日志头结构选择有界 KV 样本，避免只观察首行。
 
-    聚类边界优先用格式识别给出的 header_end_marker（首次出现处之前），
-    避免分隔符猜测在冒号类数据上被时间戳冒号误导、全部行塌缩成单簇（#294）。
+    聚类键按行判定：行内含 header_end_marker 时取其首次出现之前的前缀
+    （Step 1 的边界判定，不受时间戳冒号干扰，#294）；不含 marker 的行退回
+    extract_header 分隔符切分（#296：marker 不出现的行若整行作键，会把
+    聚类撞上限、样本退化为整行 blob）。
     """
-    header_fn = None
-    if header_end_marker:
-        header_fn = lambda line: line.split(header_end_marker, 1)[0]
+
+    def _cluster_key(line: str) -> str:
+        if header_end_marker and header_end_marker in line:
+            return line.split(header_end_marker, 1)[0]
+        return extract_header(line, "kv", kv_delimit)
+
     clusters = aggregate_headers(
         logs_str,
         format_type="kv",
         delimit=kv_delimit,
         max_clusters=_KV_BODY_SAMPLE_LIMIT,
-        header_fn=header_fn,
+        header_fn=_cluster_key,
     ).get("clusters", [])
     samples = [c.get("raw_sample", "") for c in clusters if c.get("raw_sample")]
     if not samples:
@@ -222,17 +250,20 @@ def _validate_regex(
     regex_str: str,
     lines: list[str],
     kv_delimit: str = "=",
+    header_end_marker: str = "",
 ) -> tuple[bool, str, int]:
     """验证 KV body 正则：结构合法且覆盖本批全部有效日志。
 
     只做与格式无关的结构校验（命中、捕获非空、非整行、不含 syslog PRI），
     不假设 body 形态——键值对与自然语言 body 都合法（#294 删除 kv_start
-    形态硬校验：自然语言 body 的数据（如山石 KvHeadShanshi）此前必败）。
+    形态硬校验：自然语言 body 的数据（如山石 KvHeadShanshi）此前必败）；
+    另以 header_end_marker 为下限拦截边界切在日志头中段的正则（#296）。
 
     Args:
         regex_str: 待验证的正则字符串。
         lines: 本批全部有效日志行。
         kv_delimit: KV 键值连接符。
+        header_end_marker: 格式识别确定的日志头结束标记（可为空）。
 
     Returns:
         (is_valid, error_msg, body_length)
@@ -255,7 +286,7 @@ def _validate_regex(
     first_error = ""
     body_length = 0
     for line in lines:
-        error, body = _classify_body_error(pattern, line, kv_delimit)
+        error, body = _classify_body_error(pattern, line, kv_delimit, header_end_marker)
         if error:
             first_error = first_error or error
             continue
@@ -336,7 +367,9 @@ def _generate_kv_feature_identifier(
             feedback += _failing_sample_block(
                 last_regex,
                 lines,
-                classify=lambda p, t: _classify_body_error(p, t, kv_delimit),
+                classify=lambda p, t: _classify_body_error(
+                    p, t, kv_delimit, header_end_marker
+                ),
             )
             prompt += feedback
             logger.debug(
@@ -381,7 +414,7 @@ def _generate_kv_feature_identifier(
 
         # 验证正则
         is_valid, err_msg, body_length = _validate_regex(
-            regex_str, lines, kv_delimit
+            regex_str, lines, kv_delimit, header_end_marker
         )
         if is_valid:
             logger.info(
