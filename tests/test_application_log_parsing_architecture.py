@@ -164,6 +164,44 @@ def test日志解析只生成提交资格快照且不会写知识库() -> None:
     assert "log_knowledge_application" not in session
 
 
+def test非KV_JSON格式以稳定错误明确告知且不产生伪成功() -> None:
+    """UNSUPPORTED 分类必须转为明确失败（#298），不得走 _success 显示
+    "步骤执行成功"并挂空结果表与后续操作按钮；文案包含 Step 1 的判定。"""
+    from application.adapters.log_parse import LogParseAdapter
+    from application.execution import ExecutionContext
+    from application.recovery import is_transient
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import LogParseStep
+
+    session = {"raw_log_lines": ["<190>Aug 10 12:44:51 2026 AC %%10STAMGR/6/X: Client MAC: 1"]}
+    unsupported = json.dumps(
+        {"status": "UNSUPPORTED", "error": "不支持的日志格式: unknown"}
+    )
+
+    result = asyncio.run(
+        LogParseAdapter(
+            format_identifier=lambda _: (
+                '{"format":"space","format_detail":"日志头+空格分隔"}'
+            ),
+            classifier=lambda *args, **kwargs: unsupported,
+            sample_filler=lambda value, _: value,
+        ).execute(
+            LogParseStep(step_id="log", type="log_parse"),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status.value == "failed"
+    assert result.error_code == "log_format_unsupported"
+    assert "日志头+空格分隔" in result.message
+    assert "space" in result.message
+    assert "KV/JSON" in result.message
+    assert result.artifact is None
+    # 格式判定是数据本身的确定性属性：不得触发计划级重试。
+    assert not is_transient(result)
+
+
 def test重新提取日志类型原子清理映射派生状态并释放白板导出gate(monkeypatch) -> None:
     """新分类不得与旧映射、事件标注、手动调整或其枚举账本混用。"""
     import agent.tools.rule_generator as rule_generator

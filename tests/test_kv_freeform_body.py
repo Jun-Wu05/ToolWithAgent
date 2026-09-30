@@ -354,3 +354,98 @@ def test_端到端_H3C边界错位_反馈重试后成功(monkeypatch) -> None:
     assert details["SSLVPN/5/SSLVPN_USER_LOGIN"]["real_samples"].startswith(
         "Context(1257)=SSLVPN"
     )
+
+
+# ---------- #298：生成门过半覆盖，异构行交由 unmatched 降级 ----------
+
+# KvHeadH3C.xlsx 中的管道异构行（0.95%，无 syslog 头与类型标签）。
+PIPE_LINE = "H3C|*0|*0|*10.10.88.5|*|*2026-06-11 15:55:08|*V7.1.064|*34"
+
+
+def _h3c_headers() -> list[str]:
+    body_pattern = _re.compile(H3C_GOOD_REGEX)
+    return [lhp._kv_header_cut(line, body_pattern, "=") for line in H3C_LINES]
+
+
+def test_validate_logtype_过半覆盖被接受_异构样本放行() -> None:
+    """5/6 命中（唯一未命中是无类型标签的管道行）→ 接受（#298 前必拒）。"""
+    headers = _h3c_headers() + [PIPE_LINE]
+    is_valid, err_msg, _ = lhp._validate_logtype_regex(H3C_LOGTYPE_REGEX, headers)
+    assert is_valid, err_msg
+
+
+def test_validate_logtype_不过半被拒() -> None:
+    """只命中 1/6（未抓住主导结构）→ 拒绝并进入重试。"""
+    narrow_regex = r"(TRAFFICLOG\/6\/[A-Za-z0-9_]+)"
+    headers = _h3c_headers() + [PIPE_LINE]
+    is_valid, err_msg, _ = lhp._validate_logtype_regex(narrow_regex, headers)
+    assert not is_valid
+    assert "matched=1; total=6" in err_msg
+
+
+def test_端到端_混合批异构行进unmatched降级PARTIAL(monkeypatch) -> None:
+    """复刻 KvHeadH3C：5 行 syslog+KV + 1 行管道异构 → 类型正则 5/6 过半
+    接受 → 全量扫描管道行 unmatched → PARTIAL + "1 行未匹配任何类型"（#298 前
+    生成门 100% 卡死整批 FAILED，unmatched 计数从未执行）。"""
+    mixed_logs = "\n".join(H3C_LINES + [PIPE_LINE])
+
+    def _header_llm(prompt, *args, **kwargs):
+        if "日志头样例" in prompt:
+            return f"r'{H3C_LOGTYPE_REGEX}'"
+        if "分隔符" in prompt:
+            return f"r'{H3C_GOOD_REGEX}'"
+        raise AssertionError(f"意外的日志头路径 LLM 调用: {prompt[:80]}")
+
+    monkeypatch.setattr(lhp, "_call_llm_direct", _header_llm)
+    monkeypatch.setattr(
+        log_classifier, "_call_llm_direct", lambda *a, **kw: _meaning_response(a[0] if a else "")
+    )
+    monkeypatch.setattr(
+        log_pattern_store, "generate_structured_fingerprint", lambda **kw: ""
+    )
+    monkeypatch.setattr(log_pattern_store, "store_log_knowledge", lambda **kw: True)
+
+    result = json.loads(
+        lhp.classify_header_features(
+            mixed_logs,
+            format_type="KV",
+            format_detail="日志头+KV",
+            header_end_marker=": ",
+            format_info={"delimit": ";", "tab": "="},
+        )
+    )
+
+    assert result["status"] == "PARTIAL"
+    assert result["feature_count"] == 5
+    assert result["covered_lines"] == 5
+    assert result["coverage"]["unmatched_lines"] == 1
+    assert any("|" in s for s in result["coverage"]["unmatched_samples"])
+    assert "1 行未匹配任何类型" in result["fail_reason"]
+    assert {d["logtype"] for d in result["classification_details"]} == set(H3C_TYPES)
+
+
+def test_端到端_类型正则不过半两轮仍FAILED(monkeypatch) -> None:
+    """未抓住主导结构的正则：重试一次后仍不过半 → FAILED（严格契约不变）。"""
+    narrow = f"r'(TRAFFICLOG\\/6\\/[A-Za-z0-9_]+)'"
+
+    def _header_llm(prompt, *args, **kwargs):
+        if "日志头样例" in prompt:
+            return narrow
+        if "分隔符" in prompt:
+            return f"r'{H3C_GOOD_REGEX}'"
+        raise AssertionError(f"意外的日志头路径 LLM 调用: {prompt[:80]}")
+
+    monkeypatch.setattr(lhp, "_call_llm_direct", _header_llm)
+
+    result = json.loads(
+        lhp.classify_header_features(
+            "\n".join(H3C_LINES + [PIPE_LINE]),
+            format_type="KV",
+            format_detail="日志头+KV",
+            header_end_marker=": ",
+            format_info={"delimit": ";", "tab": "="},
+        )
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["error"] == "header_logtype_regex_validation_failed"

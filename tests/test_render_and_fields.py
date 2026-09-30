@@ -53,3 +53,14 @@ class TestRenderRealSamplesNotTruncated:
         result = render_log_parser_result(classification, None)
         # 样例应以代码块形式出现（``` 包裹），而非裸表格行
         assert "```" in result, "KV 样例应用代码块包裹，避免 | 被当表格列分隔符"
+
+
+def test_unsupported分类不按成功模板渲染空结果表():
+    """UNSUPPORTED 分类渲染为明确提醒，不出现"分类数量 0"的成功模板（#298）。"""
+    result = render_log_parser_result(
+        {"status": "UNSUPPORTED", "error": "不支持的日志格式: unknown"}, None
+    )
+    assert "KV/JSON" in result
+    assert "不支持的日志格式" in result
+    assert "分类数量" not in result
+    assert "🔍 日志解析结果" not in result
