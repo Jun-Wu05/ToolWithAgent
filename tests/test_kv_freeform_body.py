@@ -48,6 +48,30 @@ def _classify_shanshi(logs: str) -> dict:
     )
 
 
+def _meaning_response(prompt: str) -> str:
+    """meaning 分批的标准成功响应（按 prompt 中 aggregation_statistics 回显类型）。"""
+    m = _re.search(
+        r"<aggregation_statistics>\s*(.*?)\s*</aggregation_statistics>",
+        prompt,
+        _re.S,
+    )
+    values = list(json.loads(m.group(1)).keys()) if m else []
+    return json.dumps(
+        {
+            "status": "SUCCESS",
+            "categorical_features": "__header__",
+            "Diversion_method": "日志头特征分类",
+            "log_format": "KV",
+            "feature_field": "__header__",
+            "feature_count": len(values),
+            "classification_details": [
+                {"logtype": v, "meaning": f"{v} 业务含义"} for v in values
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
 def _mock_llm(monkeypatch) -> dict:
     """打桩三处 LLM：body 正则 / 类型正则 / meaning 分批（沿用 #190 测试模式）。"""
     counters = {"body_calls": 0, "logtype_calls": 0, "meaning_calls": 0}
@@ -63,26 +87,7 @@ def _mock_llm(monkeypatch) -> dict:
 
     def _meaning_llm(prompt, *args, **kwargs):
         counters["meaning_calls"] += 1
-        m = _re.search(
-            r"<aggregation_statistics>\s*(.*?)\s*</aggregation_statistics>",
-            prompt,
-            _re.S,
-        )
-        values = list(json.loads(m.group(1)).keys()) if m else []
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "categorical_features": "__header__",
-                "Diversion_method": "日志头特征分类",
-                "log_format": "KV",
-                "feature_field": "__header__",
-                "feature_count": len(values),
-                "classification_details": [
-                    {"logtype": v, "meaning": f"{v} 业务含义"} for v in values
-                ],
-            },
-            ensure_ascii=False,
-        )
+        return _meaning_response(prompt)
 
     monkeypatch.setattr(lhp, "_call_llm_direct", _header_llm)
     monkeypatch.setattr(log_classifier, "_call_llm_direct", _meaning_llm)
@@ -205,3 +210,147 @@ def test_端到端_body正则两轮失败仍严格FAILED(monkeypatch) -> None:
 
     assert result["status"] == "FAILED"
     assert result["error"] == "kv_body_regex_validation_failed"
+
+
+# ---------- #296：marker 边界下限守卫（H3C出口防火墙20000条 回归） ----------
+
+# 真实行取自 H3C出口防火墙20000条 .xlsx：年份后有 4 个 token
+# （主机 %%前缀 VsysId:1 类型路径:），SSLVPN 两类标签冒号后无空格（无 ': '）。
+H3C_LINES = [
+    '<6> Sep 04 17:00:09 2026 OA_OUT_F5000 %%10 VsysId:1 TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG: Protocol(1001)=TCP;Application(1002)=https;Category(1174)=Protocol;SrcIPAddr(1003)=10.20.109.9;SrcPort(1004)=57160',
+    '<6> Sep 04 17:00:09 2026 OA_OUT_F5000 %%10 VsysId:1 session/6/SESSION_IPV4_FLOW: Protocol(1001)=TCP;Application(1002)=https;Category(1174)=Protocol;SrcIPAddr(1003)=10.31.248.248;SrcPort(1004)=56912',
+    '<6> Sep 04 17:00:09 2026 OA_OUT_F5000 %%10 VsysId:1 LB/6/OUTBOUND_LLB: SrcIPAddr(1003)=10.20.185.1;SrcPort(1004)=57802;DstIPAddr(1007)=116.130.220.34;DstPort(1008)=443',
+    '<189> Sep 04 16:58:18 2026 OA_OUT_F5000 %%10 VsysId:1 SSLVPN/5/SSLVPN_USER_LOGIN:Context(1257)=SSLVPN; Username(1113)=91370113MABXRLNQ0E; LoginIPAddr(1247)=112.224.142.83',
+    '<188> Sep 04 17:00:06 2026 OA_OUT_F5000 %%10 VsysId:1 WAF/4/WAF_IPV4_INTERZONE: Protocol(1001)=TCP; Application(1002)=baidu; SrcIPAddr(1003)=10.20.184.107; SrcPort(1004)=55590',
+]
+H3C_LOGS = "\n".join(H3C_LINES)
+H3C_TYPES = [
+    "TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG",
+    "session/6/SESSION_IPV4_FLOW",
+    "LB/6/OUTBOUND_LLB",
+    "SSLVPN/5/SSLVPN_USER_LOGIN",
+    "WAF/4/WAF_IPV4_INTERZONE",
+]
+# 用户验收运行（app_20260929_111822.log）中 LLM 实际生成的边界错位正则：
+# 年份后只有 3 个 \S+，回溯后把 VsysId:1 的内部冒号当边界。
+H3C_WRONG_REGEX = r"<\d+>\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+\S+\s+\S+\s+\S+:\s*(.*)"
+# 正确边界：4 个 token（%%前缀、标识:数字、类型路径）。
+H3C_GOOD_REGEX = r"<\d+>\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+\S+\s+%%\d+\s+\S+:\d+\s+\S+:\s*(.*)"
+H3C_LOGTYPE_REGEX = r"([A-Za-z]+\/\d+\/[A-Za-z0-9_]+)"
+
+
+def test_validate_边界切在头部中段被marker下限拒绝() -> None:
+    """#296 回归现场：错位正则捕获 VsysId: 内部冒号之后，起点早于 marker。"""
+    is_valid, err_msg, _ = lhp._validate_regex(
+        H3C_WRONG_REGEX, H3C_LINES, "=", header_end_marker=": "
+    )
+    assert not is_valid
+    assert "reason=body_starts_in_header" in err_msg
+
+
+def test_validate_H3C正确4token正则通过() -> None:
+    r"""正确边界（含 %%\d+ 与 标识:\d+ token）全部行通过。"""
+    is_valid, err_msg, _ = lhp._validate_regex(
+        H3C_GOOD_REGEX, H3C_LINES, "=", header_end_marker=": "
+    )
+    assert is_valid, err_msg
+
+
+def test_validate_无marker行不设下限() -> None:
+    """用户决策：marker 不出现的行不做连接符兜底（错位正则也放行，
+    交给提示词与重试反馈）；锁定该语义防回归。"""
+    sslvpn_only = [H3C_LINES[3]]
+    is_valid, _, _ = lhp._validate_regex(H3C_WRONG_REGEX, sslvpn_only, "=")
+    assert is_valid
+
+
+def test_validate_山石时间戳冒号切法被marker下限拒绝() -> None:
+    """守卫与分隔符无关：冒号世界（tab=':'）切在时间戳冒号的正则同样被拒。"""
+    ts_cut_regex = r"<\d+>\w+\s+\d+\s+\d{2}:(.*)"
+    is_valid, err_msg, _ = lhp._validate_regex(
+        ts_cut_regex, SHANSHI_LINES, ":", header_end_marker=": "
+    )
+    assert not is_valid
+    assert "reason=body_starts_in_header" in err_msg
+
+
+def test_failing_sample_block_边界错位反馈上次捕获() -> None:
+    """重试反馈携带捕获内容，LLM 可据此发现捕到了头部残片。"""
+    block = lhp._failing_sample_block(
+        H3C_WRONG_REGEX,
+        H3C_LINES[:1],
+        classify=lambda p, t: lhp._classify_body_error(p, t, "=", ": "),
+    )
+    assert "body_starts_in_header" in block
+    assert "上次捕获 `1 TRAFFICLOG" in block
+
+
+def test_select_kv_body_samples_无marker行退回extract切分() -> None:
+    """H3C 混合批：有 ': ' 的行按 marker 分簇、SSLVPN 行退 extract 切分，
+    5 类各成一簇（marker-only 聚类会把 SSLVPN 行退化为整行键）。"""
+    samples = lhp._select_kv_body_samples(H3C_LOGS, "=", ": ")
+    assert len(samples) == len(H3C_LINES)
+    for tag in H3C_TYPES:
+        assert any(tag in s for s in samples), tag
+
+
+def test_prompt资产_示例3存在() -> None:
+    """#296：恢复 24f29bc 的 H3C 专项 few-shot（含 %%前缀/标识:数字/年份）。"""
+    from agent.prompts import load_kv_feature_identifier_prompt
+
+    prompt = load_kv_feature_identifier_prompt()
+    assert "示例3" in prompt
+    assert "%%\\d+" in prompt
+    assert "VsysId" in prompt
+    assert "\\d{4}" in prompt
+
+
+def test_端到端_H3C边界错位_反馈重试后成功(monkeypatch) -> None:
+    """复刻用户失败路径：首轮错位正则被拒 → 反馈携带上次捕获 → 修正通过，
+    5 类全路径类型、全覆盖（#296 修复前：错位被静默接受、聚成单类型伪 SUCCESS）。"""
+    prompts: list[str] = []
+    body_responses = [f"r'{H3C_WRONG_REGEX}'", f"r'{H3C_GOOD_REGEX}'"]
+
+    def _header_llm(prompt, *args, **kwargs):
+        prompts.append(prompt)
+        if "日志头样例" in prompt:
+            return f"r'{H3C_LOGTYPE_REGEX}'"
+        if "分隔符" in prompt:
+            return body_responses.pop(0)
+        raise AssertionError(f"意外的日志头路径 LLM 调用: {prompt[:80]}")
+
+    monkeypatch.setattr(lhp, "_call_llm_direct", _header_llm)
+    monkeypatch.setattr(
+        log_classifier,
+        "_call_llm_direct",
+        lambda *a, **kw: _meaning_response(a[0] if a else ""),
+    )
+    monkeypatch.setattr(
+        log_pattern_store, "generate_structured_fingerprint", lambda **kw: ""
+    )
+    monkeypatch.setattr(log_pattern_store, "store_log_knowledge", lambda **kw: True)
+
+    result = json.loads(
+        lhp.classify_header_features(
+            H3C_LOGS,
+            format_type="KV",
+            format_detail="日志头+KV",
+            header_end_marker=": ",
+            format_info={"delimit": ";", "tab": "="},
+        )
+    )
+
+    assert result["status"] == "SUCCESS", result.get("fail_reason")
+    assert result["feature_count"] == 5
+    assert result["covered_lines"] == len(H3C_LINES)
+    assert {d["logtype"] for d in result["classification_details"]} == set(H3C_TYPES)
+    # 重试反馈携带边界错位类别与上次捕获内容
+    assert "body_starts_in_header" in prompts[1]
+    assert "上次捕获 `1 TRAFFICLOG" in prompts[1]
+    details = {d["logtype"]: d for d in result["classification_details"]}
+    assert details["TRAFFICLOG/6/TRAFFICLOG_IPV4_LOG"]["real_samples"].startswith(
+        "Protocol(1001)=TCP"
+    )
+    assert details["SSLVPN/5/SSLVPN_USER_LOGIN"]["real_samples"].startswith(
+        "Context(1257)=SSLVPN"
+    )
