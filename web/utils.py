@@ -33,6 +33,11 @@ def render_log_parser_result(
     if status == "FAILED":
         error = classification.get("error", "未知错误")
         return f"❌ 日志解析失败: {error}"
+    if status == "UNSUPPORTED":
+        # 防御分支（#298）：UNSUPPORTED 分类不应按成功模板渲染空结果表；
+        # 适配层已将其转为步骤失败，正常流程到不了这里。
+        error = classification.get("error", "不支持的日志格式")
+        return f"⚠️ 该数据不符合支持的 KV/JSON 日志格式：{error}"
 
     log_format = classification.get("log_format", "未知")
     feature_field = classification.get("feature_field", "log_type")

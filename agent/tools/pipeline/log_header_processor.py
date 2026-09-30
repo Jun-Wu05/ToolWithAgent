@@ -19,6 +19,9 @@ CHANGED (#294): KV body 正则校验删除形态假设（body 不要求是键值
 CHANGED (#296): 增加以 header_end_marker 为唯一证据源的边界下限守卫
                 （body_starts_in_header），拦截捕获起点切在日志头中段的
                 正则——否则错误边界会被静默接受并聚成单类型伪 SUCCESS。
+CHANGED (#298): 类型正则生成门从"样本 100% 命中"放宽为"过半覆盖"，
+                未命中的异构行交由全量扫描计入 unmatched 降级 PARTIAL，
+                使"N 行未匹配任何类型"语义对混合结构文件真正生效。
 """
 
 from __future__ import annotations
@@ -442,7 +445,13 @@ _LOGTYPE_SAMPLE_LIMIT = 20
 
 
 def _validate_logtype_regex(regex_str: str, header_texts: list[str]) -> tuple[bool, str, int]:
-    """校验类型提取正则：编译 + 恰 1 捕获组 + 对全部结构样本提取非空值。"""
+    """校验类型提取正则：编译 + 恰 1 捕获组 + 覆盖主导结构样本（#298）。
+
+    CHANGED (#298): 接受标准从"命中全部结构样本"放宽为"命中过半"——混入
+    批次的异构行（无 syslog 头与类型标签，如管道格式）无法被任何正则命中，
+    此前整批在生成阶段 FAILED，全量扫描的 unmatched→PARTIAL 降级
+    （"N 行未匹配任何类型"）从未执行。未命中的异构行现在交由全量扫描计数。
+    """
     try:
         pattern = _re.compile(regex_str)
     except _re.error:
@@ -464,7 +473,7 @@ def _validate_logtype_regex(regex_str: str, header_texts: list[str]) -> tuple[bo
         matched += 1
         if not value_length:
             value_length = len(value)
-    if matched != len(header_texts):
+    if matched * 2 < len(header_texts):
         return (
             False,
             "header_logtype_regex_validation_failed; "

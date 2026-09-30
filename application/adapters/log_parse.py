@@ -100,6 +100,19 @@ class LogParseAdapter:
                 "log_parse_failed",
                 f"日志类型提取失败：{classification.get('error') or '分类器未提供失败原因'}",
             )
+        if classification.get("status") == "UNSUPPORTED":
+            # 数据不属于 KV/JSON 范畴：明确告知判定结果而不是伪成功
+            # （#298：此前 UNSUPPORTED 走 _success，界面显示"步骤执行成功"
+            # + 空结果表 + 后续操作按钮）。错误码不进重试白名单——格式
+            # 判定是数据本身的确定性属性，计划级重跑不会改变结论。
+            fmt = str(format_info.get("format") or "unknown")
+            fmt_detail = str(format_info.get("format_detail") or "") or fmt
+            return _failed(
+                step,
+                "log_format_unsupported",
+                f"日志格式识别为「{fmt_detail}」（{fmt}），"
+                "不属于支持的 KV/JSON 范畴，无法进行日志类型提取",
+            )
 
         classification = self._sample_filler(classification, logs_text)
         submission = build_submission_snapshot(
