@@ -587,3 +587,103 @@ def test计划已携带feature_field时守卫不干预():
 
     assert decision.decision == "execute"
     assert decision.steps[0].feature_field == "category"
+
+
+def test已有共同威胁来源不得被模型错误声明为不存在(caplog) -> None:
+    """真实JSON的安全事实已含desc，模型猜测不能覆盖确定性字段存在性。"""
+    import logging
+    from agent.core.planner import PlannerService
+
+    caplog.set_level(logging.INFO, logger="planner")
+    calls = []
+    user_text = "改用 desc 作为威胁类型来源，验收私有标记"
+    facts = SessionFacts(
+        has_mapped_sub_rules=True,
+        available_fields=("desc", "事件描述", "event_str", "事件标签", "字段池私有标记"),
+        threat_source_fields=("desc", "event_str", "字段池私有标记"),
+    )
+
+    async def runner(planner_input: str):
+        calls.append(planner_input)
+        return PlanDecision(
+            decision="clarification", plan_id="source-fact-conflict",
+            reason_code="threat_source_not_found", question="placeholder",
+            parameters={"requested_field": "desc"},
+        )
+
+    decision = asyncio.run(PlannerService(runner=runner).plan(
+        user_text=user_text, conversation_history=(), session_facts=facts,
+    ))
+
+    assert len(calls) == 1
+    assert decision.decision == "clarification"
+    assert decision.steps == ()
+    assert decision.reason_code == "planner_source_fact_conflict"
+    assert "不存在" not in decision.question
+    assert decision.choices == ()
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "planner_source_fact_conflict" in messages
+    assert user_text not in messages
+    assert "验收私有标记" not in messages
+    assert "字段池私有标记" not in messages
+    assert "事件描述" not in messages
+
+
+def test仅部分规则存在来源字段时仍拒绝且不得提升为执行() -> None:
+    """available_fields是点名词典，不能代替所有威胁规则共同来源资格。"""
+    from agent.core.planner import PlannerService
+    calls = []
+
+    async def runner(planner_input: str):
+        calls.append(planner_input)
+        return PlanDecision(
+            decision="clarification", plan_id="partial-source",
+            reason_code="threat_source_not_found", question="placeholder",
+            parameters={"requested_field": "desc"},
+        )
+
+    decision = asyncio.run(PlannerService(runner=runner).plan(
+        user_text="改用 desc 作为威胁类型来源", conversation_history=(),
+        session_facts=SessionFacts(available_fields=("desc", "event_str"),
+                                  threat_source_fields=("event_str",)),
+    ))
+
+    assert len(calls) == 1
+    assert decision.decision == "clarification"
+    assert decision.steps == ()
+    assert decision.reason_code == "threat_source_not_found"
+
+
+@pytest.mark.parametrize("decision_kind", ("proposal", "cancel"))
+def test共同来源字段事实不能改写提案或取消授权(decision_kind: str) -> None:
+    """来源字段确实存在也不构成执行授权。"""
+    from agent.core.planner import PlannerService
+    if decision_kind == "proposal":
+        chain = build_threat_chain_steps(
+            SourceFieldDecision("desc", 1.0, 1, "explicit"),
+            config_ref="session.mapped_sub_rules",
+        )
+        original = PlanDecision(
+            decision="proposal", plan_id="proposal-desc", steps=chain.steps,
+            reason_code="confirmation_required", question="确认换源？",
+            choices=("确认执行", "取消"),
+        )
+        user_text = "先给出改用 desc 作为威胁类型来源的方案，等我确认"
+    else:
+        original = PlanDecision(decision="cancel", plan_id="cancel-desc",
+                                pending_plan_id="proposal-desc")
+        user_text = "取消"
+    calls = []
+
+    async def runner(planner_input: str):
+        calls.append(planner_input)
+        return original
+
+    decision = asyncio.run(PlannerService(runner=runner).plan(
+        user_text=user_text, conversation_history=(),
+        session_facts=SessionFacts(available_fields=("desc", "event_str"),
+                                  threat_source_fields=("desc", "event_str")),
+    ))
+
+    assert len(calls) == 1
+    assert decision == original
