@@ -115,6 +115,21 @@ describe('V2 workbench', () => {
     expect(screen.queryByRole('button', { name: '提取日志类型' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
   })
+  it('offers retry for a cancelled knowledge submission and calls the retry endpoint', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail, runs: [{ id: 'r3', status: 'cancelled', kind: 'log_knowledge_submit' }],
+      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published',
+        summary: { log_types: [], coverage: { matched_lines: 3, total_lines: 3 }, rule_summary: '按 kind 区分' },
+        submission_eligible: true, submission_status: 'cancelled' }]
+    })
+    vi.mocked(api.retryRun).mockResolvedValue({ id: 'r4', status: 'queued' })
+    render(<App />)
+    await screen.findByRole('heading', { name: '日志任务' })
+    fireEvent.click(screen.getByText('执行详情 ›'))
+    expect(screen.getByLabelText('执行详情')).toHaveTextContent('已取消')
+    fireEvent.click(screen.getByRole('button', { name: '重新执行' }))
+    await waitFor(() => expect(api.retryRun).toHaveBeenCalledWith('r3'))
+  })
   it('updates an open run drawer when SSE refreshes its status', async () => {
     vi.mocked(api.conversation)
       .mockResolvedValueOnce({ ...detail, runs: [{ id: 'run-1', status: 'queued' }] })

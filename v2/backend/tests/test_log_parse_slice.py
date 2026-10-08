@@ -1,3 +1,5 @@
+import pytest
+
 from fastapi.testclient import TestClient
 
 from toolwithagent_v2.api.app import create_app
@@ -84,8 +86,11 @@ def test_submission_stale_and_owner_guard(tmp_path):
     assert client.post(f"/api/v2/conversations/{conversation}/log-parse", json={"file_id": file_id}).status_code == 201
     assert worker.once()
     artifact_id = store.get_conversation("dev-user", conversation)["artifacts"][0]["id"]
+    replacement = client.post(f"/api/v2/conversations/{conversation}/files",
+                              files={"file": ("replacement.txt", b"kind=replacement\n")})
+    assert replacement.status_code == 201, replacement.text
     assert client.post(f"/api/v2/artifacts/{artifact_id}/submit-log-knowledge").status_code == 201
-    upload(client, conversation, worker)
+    assert worker.once()  # 先校验排队的新主数据，再执行旧分类的申请。
     assert worker.once()
     detail = store.get_conversation("dev-user", conversation)
     assert detail["artifacts"][0]["submission_status"] == "stale"
@@ -205,3 +210,64 @@ def test_submission_blob_failure_rolls_back_knowledge_write(tmp_path, monkeypatc
     with connect(store.path) as db:
         assert db.execute("SELECT COUNT(*) FROM audit_events WHERE id='rollback-probe'").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM artifacts WHERE run_id=?", (queued["run"]["id"],)).fetchone()[0] == 0
+
+
+def pending_replacement(client, store, conversation, worker, status):
+    content = b"invalid json" if status == "failed" else b'{"kind":"replacement"}'
+    response = client.post(f"/api/v2/conversations/{conversation}/files",
+                           files={"file": ("replacement.json", content)})
+    assert response.status_code == 201, response.text
+    run_id = response.json()["run"]["id"]
+    if status == "running":
+        assert store.claim(worker.worker_id)["id"] == run_id
+    elif status == "failed":
+        assert worker.once()
+    elif status == "cancelled":
+        token = client.post(f"/api/v2/runs/{run_id}/cancel-token").json()["token"]
+        assert client.post(f"/api/v2/runs/{run_id}/cancel", json={"token": token}).status_code == 200
+    assert store.get_run("dev-user", run_id)["status"] == status
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "failed", "cancelled"])
+def test_unsuccessful_replacement_preserves_submission_eligibility(tmp_path, status):
+    client, store, conversation, worker = setup(tmp_path)
+    file_id = upload(client, conversation, worker)
+    assert client.post(f"/api/v2/conversations/{conversation}/log-parse",
+                       json={"file_id": file_id}).status_code == 201
+    assert worker.once()
+    artifact_id = store.get_conversation("dev-user", conversation)["artifacts"][0]["id"]
+    pending_replacement(client, store, conversation, worker, status)
+    artifact = store.get_conversation("dev-user", conversation)["artifacts"][0]
+    assert artifact["id"] == artifact_id
+    assert artifact["submission_eligible"]
+    response = client.post(f"/api/v2/artifacts/{artifact_id}/submit-log-knowledge")
+    assert response.status_code == 201, response.text
+    if status in ("failed", "cancelled"):
+        assert worker.once()
+        assert store.get_run("dev-user", response.json()["run"]["id"])["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("status", ["queued", "cancelled"])
+def test_unsuccessful_replacement_preserves_claimed_submission(tmp_path, status):
+    client, store, conversation, worker = setup(tmp_path)
+    file_id = upload(client, conversation, worker)
+    assert client.post(f"/api/v2/conversations/{conversation}/log-parse",
+                       json={"file_id": file_id}).status_code == 201
+    assert worker.once()
+    artifact_id = store.get_conversation("dev-user", conversation)["artifacts"][0]["id"]
+    response = client.post(f"/api/v2/artifacts/{artifact_id}/submit-log-knowledge")
+    assert response.status_code == 201, response.text
+    claim = store.claim(worker.worker_id)
+    assert claim["id"] == response.json()["run"]["id"]
+    pending_replacement(client, store, conversation, worker, status)
+    calls = []
+
+    def producer(db):
+        calls.append("knowledge_write")
+        return {"submission_status": "created", "application_id": 42}
+
+    assert store.publish_submission(worker.worker_id, claim, producer)
+    assert calls == ["knowledge_write"]
+    assert store.get_run("dev-user", claim["id"])["status"] == "succeeded"
+    artifact = store.get_conversation("dev-user", conversation)["artifacts"][0]
+    assert artifact["submission_status"] == "created"

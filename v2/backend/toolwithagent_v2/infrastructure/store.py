@@ -203,7 +203,7 @@ class Store:
             metadata = json.loads(artifact["metadata_json"])
             if not metadata.get("submission_eligible"):
                 raise ValueError("submission_not_eligible")
-            latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
+            latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
             latest_artifact = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='log_classification' AND status='published' ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
             if (not latest_file or latest_file["id"] != json.loads(artifact["input_snapshot_json"])["file_id"]
                 or not latest_artifact or latest_artifact["id"] != artifact_id):
@@ -223,7 +223,7 @@ class Store:
 
     def _submission_is_current_db(self, db, claim):
         snapshot = claim["input"]
-        file = db.execute("SELECT id FROM files WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
+        file = db.execute("SELECT id FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1",
                           (claim["conversation_id"],)).fetchone()
         artifact = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='log_classification' AND status='published' ORDER BY created_at DESC,id DESC LIMIT 1",
                               (claim["conversation_id"],)).fetchone()
@@ -262,7 +262,7 @@ class Store:
             AND a.kind='log_classification' AND a.status='published' ORDER BY a.created_at,a.id""",
             (conversation_id,)).fetchall()
         result = []
-        latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
+        latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
         latest_artifact_id = rows[-1]["id"] if rows else None
         for row in rows:
             metadata = json.loads(row["metadata_json"])
