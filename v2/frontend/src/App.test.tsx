@@ -6,7 +6,7 @@ import { api } from './api'
 vi.mock('./api', () => ({
   api: {
     me: vi.fn(), identities: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(),
-    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), run: vi.fn(), eventsUrl: vi.fn()
+    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn()
   }
 }))
 class FakeEventSource {
@@ -28,6 +28,10 @@ beforeEach(() => {
   vi.mocked(api.createConversation).mockResolvedValue(summary)
   vi.mocked(api.sendMessage).mockResolvedValue({ id: 'm1', content: '检查日志', actor: 'user' })
   vi.mocked(api.uploadFile).mockResolvedValue({ file: { id: 'f1', name: 'log.txt' }, task: { id: 't1', status: 'queued' }, run: { id: 'r1', status: 'queued' } })
+  vi.mocked(api.logParse).mockResolvedValue({ task: { id: 't2', status: 'queued' }, run: { id: 'r2', status: 'queued' } })
+  vi.mocked(api.submitLogKnowledge).mockResolvedValue({ task: { id: 't3', status: 'queued' }, run: { id: 'r3', status: 'queued' } })
+  vi.mocked(api.cancelToken).mockResolvedValue({ token: 'cancel-token' })
+  vi.mocked(api.cancelRun).mockResolvedValue({ id: 'r2', status: 'cancelled' })
   vi.mocked(api.eventsUrl).mockImplementation((id, after) => '/events/' + id + '?after=' + after)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
@@ -59,6 +63,57 @@ describe('V2 workbench', () => {
     render(<App />)
     expect(await screen.findByText('你')).toBeInTheDocument()
     expect(screen.getByText('已完成')).toBeInTheDocument()
+  })
+  it('starts log extraction from a validated file with an explicit feature field', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail, files: [{ id: 'f1', name: 'events.log', parse_status: 'succeeded' }]
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '日志任务' })
+    fireEvent.change(screen.getByRole('textbox', { name: 'events.log 分类特征字段' }), { target: { value: 'kind' } })
+    fireEvent.click(screen.getByRole('button', { name: '提取日志类型' }))
+    await waitFor(() => expect(api.logParse).toHaveBeenCalledWith('conv-1', 'f1', 'kind'))
+  })
+  it('shows a safe result and submits eligible knowledge explicitly', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail,
+      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published',
+        summary: { log_types: [{ name: '登录事件', count: 3 }], coverage: { matched_lines: 3, total_lines: 4 }, rule_summary: '按 kind 区分' },
+        submission_eligible: true }]
+    })
+    render(<App />)
+    await screen.findByText('登录事件 · 3')
+    expect(screen.getByText('覆盖率：3 / 4')).toBeInTheDocument()
+    expect(screen.queryByText('raw secret')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '申请加入知识库' }))
+    await waitFor(() => expect(api.submitLogKnowledge).toHaveBeenCalledWith('a1'))
+  })
+  it('hides submission for an ineligible result and confirms stop before cancelling', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail, runs: [{ id: 'r2', status: 'running', kind: 'log_parse' }],
+      artifacts: [{ id: 'a1', run_id: 'r1', file_id: 'f1', kind: 'log_classification', status: 'published',
+        summary: { log_types: [], coverage: { matched_lines: 1, total_lines: 3 }, rule_summary: '' },
+        submission_eligible: false }]
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '日志任务' })
+    expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '停止' }))
+    await waitFor(() => expect(api.cancelRun).toHaveBeenCalledWith('r2', 'cancel-token'))
+  })
+  it('does not show user write actions to Developer', async () => {
+    vi.mocked(api.me).mockResolvedValue({ id: 'dev', display_name: '开发者', role: 'developer' })
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail, files: [{ id: 'f1', name: 'events.log', parse_status: 'succeeded' }],
+      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published',
+        summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' },
+        submission_eligible: true }]
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '日志任务' })
+    expect(screen.queryByRole('button', { name: '提取日志类型' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
   })
   it('updates an open run drawer when SSE refreshes its status', async () => {
     vi.mocked(api.conversation)
@@ -122,4 +177,5 @@ describe('V2 workbench', () => {
     await waitFor(() => expect(drawer).toHaveTextContent('已完成'))
     await act(async () => resolveOld(queued))
     expect(drawer).toHaveTextContent('已完成')
-  })})
+  })
+})

@@ -43,6 +43,11 @@ class SessionInput(BaseModel):
     user_id: str
 
 
+class LogParseInput(BaseModel):
+    file_id: str
+    feature_field: str | None = None
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     store = Store(settings)
@@ -139,6 +144,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return store.upload(user_writer(request)["id"], conversation_id, file, idempotency_key)
         finally:
             file.file.close()
+
+    @app.post("/api/v2/conversations/{conversation_id}/log-parse", status_code=201)
+    def enqueue_log_parse(request: Request, conversation_id: str, payload: LogParseInput):
+        return store.enqueue_log_parse(user_writer(request)["id"], conversation_id, payload.file_id, payload.feature_field)
+
+    @app.post("/api/v2/artifacts/{artifact_id}/submit-log-knowledge", status_code=201)
+    def submit_log_knowledge(request: Request, artifact_id: str):
+        return store.enqueue_log_knowledge(user_writer(request)["id"], artifact_id)
 
     if settings.development:
         @app.post("/api/v2/dev/conversations/{conversation_id}/fake-runs", status_code=201)

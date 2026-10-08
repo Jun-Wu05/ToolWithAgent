@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type Conversation, type ConversationSummary, type Identity } from './api'
+import { api, type ClassificationArtifact, type Conversation, type ConversationSummary, type FileRecord, type Identity } from './api'
 
 const statusName: Record<string, string> = {
-  queued: '排队中', pending: '排队中', running: '正在校验', succeeded: '已完成',
+  queued: '排队中', pending: '排队中', running: '运行中', succeeded: '已完成',
   completed: '已完成', failed: '失败', cancelled: '已取消'
 }
 const runningStatus = new Set(['queued', 'pending', 'running'])
@@ -20,6 +20,8 @@ export function App() {
   const [drawerId, setDrawerId] = useState<string | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [featureFields, setFeatureFields] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -149,6 +151,43 @@ export function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : '上传失败，请检查文件后重试。') }
     finally { setBusy(false); if (fileInput.current) fileInput.current.value = '' }
   }
+  const parseLog = async (file: FileRecord) => {
+    if (!activeId || actionBusy) return
+    setActionBusy(file.id); setError('')
+    try {
+      await api.logParse(activeId, file.id, featureFields[file.id]?.trim() || undefined)
+      setNotice('日志类型提取已排队。')
+      await refreshActive(activeId)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '日志类型提取未能启动。') }
+    finally { setActionBusy(null) }
+  }
+  const submitKnowledge = async (artifact: ClassificationArtifact) => {
+    if (!activeId || actionBusy) return
+    setActionBusy(artifact.id); setError('')
+    try {
+      await api.submitLogKnowledge(artifact.id)
+      setNotice('日志知识申请已排队。')
+      await refreshActive(activeId)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '日志知识申请未能启动。') }
+    finally { setActionBusy(null) }
+  }
+  const retryRun = async (runId: string) => {
+    if (!activeId || actionBusy) return
+    setActionBusy(runId); setError('')
+    try { await api.retryRun(runId); await refreshActive(activeId) }
+    catch (caught) { setError(caught instanceof Error ? caught.message : '重新执行失败。') }
+    finally { setActionBusy(null) }
+  }
+  const stopRun = async (runId: string) => {
+    if (!activeId || actionBusy || !window.confirm('确认停止这次执行？已完成的正式结果会保留。')) return
+    setActionBusy(runId); setError('')
+    try {
+      const { token } = await api.cancelToken(runId)
+      await api.cancelRun(runId, token)
+      await refreshActive(activeId)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '停止执行失败。') }
+    finally { setActionBusy(null) }
+  }
   const switchIdentity = async (userId: string) => {
     ++viewToken.current
     setBusy(true); setError('')
@@ -184,15 +223,16 @@ export function App() {
         {loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>开始一项日志规则任务</h2><p>上传日志或规则文件，或者先描述要处理的内容。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button></div> : <>
           {conversation.messages.length === 0 && conversation.files.length === 0 && <div className="empty-state compact"><h2>这段会话还没有内容</h2><p>发送消息或上传文件，工作台会在这里显示进展。</p></div>}
           <div className="timeline">{conversation.messages.map(message => <article className={'message ' + (message.actor === 'user' ? 'from-user' : '')} key={message.id}><div className="message-head"><strong>{message.actor === 'user' ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p></article>)}
-            {conversation.files.length > 0 && <section className="activity-section"><h2>输入文件</h2>{conversation.files.map(file => <div className="file-row" key={file.id}><span className="file-icon">▤</span><div><strong>{file.name}</strong><small>{file.size != null ? (file.size / 1024).toFixed(1) + ' KB' : '已上传'}</small></div><span className="file-status">{statusName[file.parse_status || ''] || '已登记'}</span></div>)}</section>}
+            {conversation.files.length > 0 && <section className="activity-section"><h2>输入文件</h2>{conversation.files.map(file => <div className="file-row" key={file.id}><span className="file-icon">▤</span><div className="file-main"><strong>{file.name}</strong><small>{file.size != null ? (file.size / 1024).toFixed(1) + ' KB' : '已上传'}</small>{identity?.role === 'user' && file.parse_status === 'succeeded' && /\.(txt|log|json|jsonl|csv|xlsx)$/i.test(file.name) && <div className="file-actions"><label>分类特征字段（可选）<input aria-label={file.name + ' 分类特征字段'} placeholder="自动识别" value={featureFields[file.id] || ''} onChange={event => setFeatureFields({ ...featureFields, [file.id]: event.target.value })} disabled={!!actionBusy} /></label><button className="button-secondary" onClick={() => void parseLog(file)} disabled={!!actionBusy}>{actionBusy === file.id ? '启动中…' : '提取日志类型'}</button></div>}</div><span className="file-status">{statusName[file.parse_status || ''] || '已登记'}</span></div>)}</section>}
+            {!!conversation.artifacts?.length && <section className="activity-section"><h2>日志解析结果</h2>{conversation.artifacts.filter(artifact => artifact.kind === 'log_classification' && artifact.status === 'published').map(artifact => <article className="result-card" key={artifact.id}><div className="result-heading"><strong>日志类型提取完成</strong><span>{readableTime(artifact.created_at)}</span></div><p>覆盖率：{artifact.summary.coverage.matched_lines} / {artifact.summary.coverage.total_lines}</p><div className="result-types">{artifact.summary.log_types.map((item, index) => <span key={item.name + index}>{item.name} · {item.count}</span>)}</div><p className="rule-summary">解析规则：{artifact.summary.rule_summary}</p>{artifact.submission_status && <p role="status">申请状态：{{ created: '待审核', pending_duplicate: '已有待审核申请', already_approved: '已批准', stale: '结果已过期', error: '提交失败' }[artifact.submission_status] || artifact.submission_status}{artifact.application_id ? '（申请编号 ' + artifact.application_id + '）' : ''}</p>}{identity?.role === 'user' && artifact.submission_eligible && (!artifact.submission_status || artifact.submission_status === 'error') && <button className="button-secondary" onClick={() => void submitKnowledge(artifact)} disabled={!!actionBusy}>{actionBusy === artifact.id ? '提交中…' : '申请加入知识库'}</button>}</article>)}</section>}
             {conversation.runs.length > 0 && <section className="activity-section"><h2>执行记录</h2>{conversation.runs.map(run => <button className="run-row" key={run.id} onClick={() => setDrawerId(run.id)}><span className={'status-dot status-' + run.status}></span><span className="run-label">{run.kind || run.type || '文件校验'}</span><span className="run-status">{statusName[run.status] || run.status}</span><span className="run-detail">执行详情 ›</span></button>)}</section>}
           </div>
         </>}
       </div>
-      <div className="composer-region">{activeRun && <div className="active-run"><span className="pulse"></span><span>文件校验{statusName[activeRun.status] === '排队中' ? '排队中' : '进行中'}</span><button onClick={() => setDrawerId(activeRun.id)}>查看执行详情</button></div>}
+      <div className="composer-region">{activeRun && <div className="active-run"><span className="pulse"></span><span>{activeRun.kind === 'log_parse' ? '日志类型提取' : activeRun.kind === 'log_knowledge_submit' ? '日志知识申请' : '文件校验'}{statusName[activeRun.status] === '排队中' ? '排队中' : '进行中'}</span><button onClick={() => setDrawerId(activeRun.id)}>查看执行详情</button>{identity?.role === 'user' && <button onClick={() => void stopRun(activeRun.id)} disabled={!!actionBusy}>停止</button>}</div>}
         <div className="composer"><textarea aria-label="消息内容" placeholder="描述要处理的日志、字段或规则…" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} rows={2} disabled={busy || loading} /><div className="composer-toolbar"><div><input ref={fileInput} type="file" hidden aria-label="选择文件" onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file) }} /><button className="attach-button" onClick={() => fileInput.current?.click()} disabled={busy || loading}>＋ 添加文件</button><span className="composer-hint">Enter 发送 · Shift+Enter 换行</span></div><button className="button-primary send-button" onClick={() => void send()} disabled={!draft.trim() || busy || loading}>{busy ? '处理中…' : '发送'}</button></div></div>
       </div>
     </main>
-    {drawer && <><div className="drawer-backdrop" onClick={() => setDrawerId(null)}></div><aside className="drawer" aria-label="执行详情"><header><div><small>执行详情</small><h2>文件校验</h2></div><button className="icon-button" aria-label="关闭执行详情" onClick={() => setDrawerId(null)}>关闭</button></header><dl><dt>状态</dt><dd>{statusName[drawer.status] || drawer.status}</dd><dt>Run ID</dt><dd className="mono">{drawer.id}</dd>{drawer.task_id && <><dt>Task ID</dt><dd className="mono">{drawer.task_id}</dd></>}{drawer.error_code && <><dt>错误代码</dt><dd className="mono">{drawer.error_code}</dd></>}{drawer.error_message && <><dt>原因</dt><dd>{drawer.error_message}</dd></>}</dl><button className="button-secondary" onClick={async () => { try { if (activeId) await refreshActive(activeId) } catch { setNotice('执行详情刷新失败。') } }}>刷新状态</button></aside></>}
+    {drawer && <><div className="drawer-backdrop" onClick={() => setDrawerId(null)}></div><aside className="drawer" aria-label="执行详情"><header><div><small>执行详情</small><h2>{drawer.kind === 'log_parse' ? '日志类型提取' : drawer.kind === 'log_knowledge_submit' ? '日志知识申请' : '文件校验'}</h2></div><button className="icon-button" aria-label="关闭执行详情" onClick={() => setDrawerId(null)}>关闭</button></header><dl><dt>状态</dt><dd>{statusName[drawer.status] || drawer.status}</dd><dt>Run ID</dt><dd className="mono">{drawer.id}</dd>{drawer.task_id && <><dt>Task ID</dt><dd className="mono">{drawer.task_id}</dd></>}{drawer.error_code && <><dt>错误代码</dt><dd className="mono">{drawer.error_code}</dd></>}{drawer.error_message && <><dt>原因</dt><dd>{drawer.error_message}</dd></>}</dl>{identity?.role === 'user' && drawer.status === 'failed' && <button className="button-secondary" onClick={() => void retryRun(drawer.id)} disabled={!!actionBusy}>重新执行</button>}<button className="button-secondary" onClick={async () => { try { if (activeId) await refreshActive(activeId) } catch { setNotice('执行详情刷新失败。') } }}>刷新状态</button></aside></>}
   </div>
 }

@@ -75,8 +75,8 @@ class Store:
             for m in messages:
                 m["content"] = json.loads(m.pop("content_json"))["text"]
             files = [self._file(r) for r in db.execute("SELECT * FROM files WHERE conversation_id=? ORDER BY created_at,id", (conversation_id,))]
-            runs = [self._run(r) for r in db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? ORDER BY r.queued_at,r.id", (conversation_id,))]
-            return {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs}
+            runs = [self._run(r) for r in db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? ORDER BY r.queued_at,r.id", (conversation_id,))]
+            return {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs, "artifacts": self._artifacts(db, conversation_id)}
 
     def create_message(self, owner_id, conversation_id, content, idempotency_key=None):
         content = content.strip()
@@ -159,15 +159,146 @@ class Store:
         finally:
             stage.unlink(missing_ok=True)
 
+    def _enqueue_task(self, db, owner_id, conversation_id, kind, snapshot):
+        timestamp = now()
+        task_id, run_id = uid(), uid()
+        db.execute("INSERT INTO tasks(id,conversation_id,owner_id,type,status,current_run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                   (task_id, conversation_id, owner_id, kind, "queued", run_id, timestamp, timestamp))
+        db.execute("INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,queued_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                   (run_id, task_id, 1, "queued", json.dumps(snapshot, ensure_ascii=False, sort_keys=True), timestamp, timestamp, timestamp))
+        self._run_event(db, run_id, "run_queued", "queued")
+        self._event(db, conversation_id, "run_queued", "run", run_id, {"run_id": run_id, "status": "queued"})
+        return {"task": {"id": task_id, "status": "queued"}, "run": {"id": run_id, "status": "queued"}}
+
+    def enqueue_log_parse(self, owner_id, conversation_id, file_id, feature_field=None):
+        if feature_field is not None:
+            feature_field = feature_field.strip()
+            if not feature_field or len(feature_field) > 160:
+                raise ValueError("invalid_feature_field")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.owns(db, conversation_id, owner_id)
+            file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=?", (file_id, conversation_id, owner_id)).fetchone()
+            if file is None:
+                raise LookupError("file_not_found")
+            if file["parse_status"] != "succeeded":
+                raise ValueError("file_not_validated")
+            if file["media_type"] not in {"text/plain", "application/json", "application/x-ndjson", "text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}:
+                raise ValueError("unsupported_log_type")
+            snapshot = {key: file[key] for key in ("sha256", "storage_key", "media_type")}
+            snapshot.update({"file_id": file_id, "feature_field": feature_field})
+            result = self._enqueue_task(db, owner_id, conversation_id, "log_parse", snapshot)
+            db.commit()
+            return result
+
+    def enqueue_log_knowledge(self, owner_id, artifact_id):
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            artifact = db.execute("""SELECT a.*,t.owner_id,r.input_snapshot_json
+                FROM artifacts a JOIN tasks t ON t.id=a.task_id JOIN runs r ON r.id=a.run_id
+                WHERE a.id=? AND a.kind='log_classification' AND a.status='published' AND t.owner_id=?""",
+                (artifact_id, owner_id)).fetchone()
+            if artifact is None:
+                raise LookupError("artifact_not_found")
+            metadata = json.loads(artifact["metadata_json"])
+            if not metadata.get("submission_eligible"):
+                raise ValueError("submission_not_eligible")
+            latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
+            latest_artifact = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='log_classification' AND status='published' ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
+            if (not latest_file or latest_file["id"] != json.loads(artifact["input_snapshot_json"])["file_id"]
+                or not latest_artifact or latest_artifact["id"] != artifact_id):
+                raise ValueError("submission_stale")
+            source = json.loads(artifact["input_snapshot_json"])
+            latest = db.execute("""SELECT id,status FROM runs WHERE task_id IN
+                (SELECT id FROM tasks WHERE type='log_knowledge_submit' AND conversation_id=?)
+                AND json_extract(input_snapshot_json,'$.source_artifact_id')=?
+                ORDER BY created_at DESC LIMIT 1""", (artifact["conversation_id"], artifact_id)).fetchone()
+            if latest and latest["status"] in ("queued", "running", "waiting_confirmation"):
+                raise ValueError("task_has_active_run")
+            result = self._enqueue_task(db, owner_id, artifact["conversation_id"], "log_knowledge_submit",
+                {**source, "source_artifact_id": artifact_id, "source_sha256": artifact["sha256"],
+                 "source_storage_key": artifact["storage_key"]})
+            db.commit()
+            return result
+
+    def _submission_is_current_db(self, db, claim):
+        snapshot = claim["input"]
+        file = db.execute("SELECT id FROM files WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
+                          (claim["conversation_id"],)).fetchone()
+        artifact = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='log_classification' AND status='published' ORDER BY created_at DESC,id DESC LIMIT 1",
+                              (claim["conversation_id"],)).fetchone()
+        return bool(file and artifact and file["id"] == snapshot["file_id"]
+                    and artifact["id"] == snapshot["source_artifact_id"])
+
+    def read_classification(self, claim):
+        snapshot = claim["input"]
+        with connect(self.path) as db:
+            artifact = db.execute("""SELECT a.* FROM artifacts a WHERE a.id=? AND a.conversation_id=?
+                AND a.kind='log_classification' AND a.status='published'""",
+                (snapshot["source_artifact_id"], claim["conversation_id"])).fetchone()
+            if artifact is None or artifact["sha256"] != snapshot["source_sha256"] or artifact["storage_key"] != snapshot["source_storage_key"]:
+                raise ValueError("submission_stale")
+        key = artifact["storage_key"]
+        if not key.startswith("artifacts/") or ".." in key.split("/"):
+            raise ValueError("submission_stale")
+        path = (self.root / key).resolve()
+        if not path.is_relative_to((self.root / "artifacts").resolve()):
+            raise ValueError("submission_stale")
+        try:
+            content = path.read_bytes()
+        except OSError:
+            raise ValueError("submission_stale") from None
+        if hashlib.sha256(content).hexdigest() != artifact["sha256"]:
+            raise ValueError("submission_stale")
+        return json.loads(content)
+
+    def submission_is_current(self, claim):
+        with connect(self.path) as db:
+            return self._submission_is_current_db(db, claim)
+
+    def _artifacts(self, db, conversation_id):
+        rows = db.execute("""SELECT a.*,r.input_snapshot_json FROM artifacts a
+            JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=?
+            AND a.kind='log_classification' AND a.status='published' ORDER BY a.created_at,a.id""",
+            (conversation_id,)).fetchall()
+        result = []
+        latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
+        latest_artifact_id = rows[-1]["id"] if rows else None
+        for row in rows:
+            metadata = json.loads(row["metadata_json"])
+            latest = db.execute("""SELECT r.status,r.error_code,a.metadata_json FROM runs r
+                JOIN tasks t ON t.id=r.task_id LEFT JOIN artifacts a ON a.run_id=r.id
+                WHERE t.type='log_knowledge_submit' AND
+                json_extract(r.input_snapshot_json,'$.source_artifact_id')=?
+                ORDER BY r.created_at DESC LIMIT 1""", (row["id"],)).fetchone()
+            status = None
+            application_id = None
+            if latest:
+                if latest["metadata_json"]:
+                    terminal = json.loads(latest["metadata_json"])
+                    status = terminal.get("submission_status")
+                    application_id = terminal.get("application_id")
+                elif latest["error_code"] and latest["error_code"].startswith("log_knowledge_submission_"):
+                    status = latest["error_code"].removeprefix("log_knowledge_submission_")
+                else:
+                    status = latest["status"]
+            result.append({"id": row["id"], "run_id": row["run_id"],
+                "file_id": json.loads(row["input_snapshot_json"])["file_id"],
+                "kind": row["kind"], "status": row["status"], "summary": metadata.get("summary", {}),
+                "submission_eligible": bool(metadata.get("submission_eligible")) and bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
+                "submission_status": status, "application_id": application_id,
+                "created_at": row["created_at"]})
+        return result
+
     def _file(self, row):
         return {"id": row["id"], "name": row["original_name"], "media_type": row["media_type"], "size": row["size"], "sha256": row["sha256"], "parse_status": row["parse_status"], "created_at": row["created_at"]}
 
     def _run(self, row):
-        return {"id": row["id"], "task_id": row["task_id"], "status": row["status"], "attempt": row["attempt"], "queued_at": row["queued_at"], "started_at": row["started_at"], "finished_at": row["finished_at"], "error_code": row["error_code"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+        return {"id": row["id"], "task_id": row["task_id"], "kind": row["task_type"], "file_id": json.loads(row["input_snapshot_json"]).get("file_id"), "status": row["status"], "attempt": row["attempt"], "queued_at": row["queued_at"], "started_at": row["started_at"], "finished_at": row["finished_at"], "error_code": row["error_code"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     def get_run(self, owner_id, run_id):
         with connect(self.path) as db:
-            row = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND t.owner_id=?", (run_id, owner_id)).fetchone()
+            row = db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND t.owner_id=?", (run_id, owner_id)).fetchone()
             if row is None:
                 raise LookupError("run_not_found")
             return self._run(row)
@@ -197,18 +328,19 @@ class Store:
             expired = not lease["lease_expires_at"] or lease["lease_expires_at"] <= timestamp
             epoch = lease["epoch"] + (1 if lease["owner_id"] != worker_id or expired else 0)
             db.execute("UPDATE worker_leases SET owner_id=?,lease_expires_at=?,epoch=? WHERE id='v2-primary'", (worker_id, deadline, epoch))
-            stale = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running' AND (r.lease_expires_at<=? OR r.leader_epoch<>?)", (timestamp, epoch)).fetchall()
+            stale = db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running' AND (r.lease_expires_at<=? OR r.leader_epoch<>?)", (timestamp, epoch)).fetchall()
             for abandoned in stale:
                 db.execute("UPDATE runs SET status='failed',error_code='worker_lost',finished_at=?,updated_at=?,lease_owner=NULL,lease_expires_at=NULL,fence_token=NULL,revision=revision+1 WHERE id=? AND status='running'", (timestamp, timestamp, abandoned["id"]))
                 db.execute("UPDATE tasks SET status='failed',updated_at=?,revision=revision+1 WHERE id=?", (timestamp, abandoned["task_id"]))
                 snapshot = json.loads(abandoned["input_snapshot_json"])
-                db.execute("UPDATE files SET parse_status='failed',updated_at=? WHERE id=?", (timestamp, snapshot.get("file_id", "")))
+                if abandoned["task_type"] == "file_ingest":
+                    db.execute("UPDATE files SET parse_status='failed',updated_at=? WHERE id=?", (timestamp, snapshot.get("file_id", "")))
                 self._run_event(db, abandoned["id"], "run_failed", "failed")
                 self._event(db, abandoned["conversation_id"], "run_failed", "run", abandoned["id"], {"run_id": abandoned["id"], "status": "failed", "error_code": "worker_lost"})
             if db.execute("SELECT 1 FROM runs WHERE status='running' LIMIT 1").fetchone():
                 db.commit()
                 return None
-            row = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='queued' ORDER BY r.queued_at,r.id LIMIT 1").fetchone()
+            row = db.execute("SELECT r.*,t.conversation_id,t.owner_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='queued' ORDER BY r.queued_at,r.id LIMIT 1").fetchone()
             if row is None:
                 db.commit()
                 return None
@@ -218,7 +350,7 @@ class Store:
             self._run_event(db, row["id"], "run_started", "running")
             self._event(db, row["conversation_id"], "run_started", "run", row["id"], {"run_id": row["id"], "status": "running"})
             db.commit()
-            return {"id": row["id"], "task_id": row["task_id"], "conversation_id": row["conversation_id"], "input": json.loads(row["input_snapshot_json"]), "fence": fence, "epoch": epoch}
+            return {"id": row["id"], "task_id": row["task_id"], "conversation_id": row["conversation_id"], "input": json.loads(row["input_snapshot_json"]), "task_type": row["task_type"], "owner_id": row["owner_id"], "fence": fence, "epoch": epoch}
 
     def renew(self, worker_id, claim, lease_seconds=30):
         timestamp = now()
@@ -235,19 +367,27 @@ class Store:
             db.commit()
             return True
 
-    def finish(self, worker_id, claim, error_code=None):
+    def finish(self, worker_id, claim, error_code=None, message=None):
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._valid_claim(db, worker_id, claim)
             if row is None:
                 db.rollback()
                 return False
+            if message:
+                self._assistant_message(db, row["conversation_id"], message)
             self._record_state(db, row, "failed" if error_code else "succeeded", error_code)
             db.commit()
             return True
 
+    def _assistant_message(self, db, conversation_id, message):
+        message_id = uid()
+        db.execute("INSERT INTO messages(id,conversation_id,actor,kind,content_json,created_at) VALUES(?,?,?,?,?,?)",
+                   (message_id, conversation_id, "assistant", "text", json.dumps({"text": message}, ensure_ascii=False), now()))
+        self._event(db, conversation_id, "message_created", "message", message_id, {"actor": "assistant"})
+
     def _owned_run(self, db, owner_id, run_id):
-        row = db.execute("SELECT r.*,t.owner_id,t.conversation_id,t.current_run_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND t.owner_id=?", (run_id, owner_id)).fetchone()
+        row = db.execute("SELECT r.*,t.owner_id,t.conversation_id,t.current_run_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND t.owner_id=?", (run_id, owner_id)).fetchone()
         if row is None:
             raise LookupError("run_not_found")
         return row
@@ -261,7 +401,7 @@ class Store:
                    (status, timestamp, row["task_id"], row["id"]))
         if row["input_snapshot_json"]:
             snapshot = json.loads(row["input_snapshot_json"])
-            if snapshot.get("file_id"):
+            if row["task_type"] == "file_ingest" and snapshot.get("file_id"):
                 db.execute("UPDATE files SET parse_status=?,updated_at=? WHERE id=?", (status, timestamp, snapshot["file_id"]))
         self._run_event(db, row["id"], "run_" + status, status)
         self._event(db, row["conversation_id"], "run_" + status, "run", row["id"],
@@ -293,7 +433,7 @@ class Store:
             db.execute("UPDATE tasks SET status='queued',current_run_id=?,updated_at=?,revision=revision+1 WHERE id=?",
                        (new_id, timestamp, source["task_id"]))
             snapshot = json.loads(source["input_snapshot_json"])
-            if snapshot.get("file_id"):
+            if source["task_type"] == "file_ingest" and snapshot.get("file_id"):
                 db.execute("UPDATE files SET parse_status='queued',updated_at=? WHERE id=?", (timestamp, snapshot["file_id"]))
             self._run_event(db, new_id, "run_queued", "queued")
             self._event(db, source["conversation_id"], "run_queued", "run", new_id,
@@ -342,7 +482,7 @@ class Store:
             raise ValueError("reason_required")
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT r.*,t.conversation_id,t.current_run_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (run_id,)).fetchone()
+            row = db.execute("SELECT r.*,t.conversation_id,t.current_run_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (run_id,)).fetchone()
             if row is None:
                 raise LookupError("run_not_found")
             if row["current_run_id"] != run_id or row["status"] not in ("queued", "running", "waiting_confirmation"):
@@ -359,7 +499,7 @@ class Store:
     def _valid_claim(self, db, worker_id, claim):
         timestamp = now()
         lease = db.execute("SELECT * FROM worker_leases WHERE id='v2-primary'").fetchone()
-        row = db.execute("SELECT r.*,t.conversation_id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (claim["id"],)).fetchone()
+        row = db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (claim["id"],)).fetchone()
         if (row is None or row["status"] != "running" or row["lease_owner"] != worker_id
             or row["lease_expires_at"] is None or row["lease_expires_at"] <= timestamp
             or row["leader_epoch"] != claim["epoch"] or row["fence_token"] != claim["fence"]
@@ -435,7 +575,7 @@ class Store:
             row = db.execute("SELECT continuation_json FROM execution_checkpoints WHERE run_id=? ORDER BY revision DESC LIMIT 1", (run_id,)).fetchone()
             return ExecutionContinuation.from_json(row["continuation_json"]) if row else None
 
-    def publish(self, worker_id, claim, content: bytes, kind="fake_result"):
+    def publish(self, worker_id, claim, content: bytes, kind="fake_result", metadata=None, message=None):
         if not isinstance(content, bytes):
             raise TypeError("artifact_content_must_be_bytes")
         sha = hashlib.sha256(content).hexdigest()
@@ -468,9 +608,68 @@ class Store:
                 version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE task_id=? AND kind=?", (row["task_id"], kind)).fetchone()[0]
                 artifact_id = uid()
                 db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                           (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, "{}", now(), len(content)))
+                           (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata or {}, ensure_ascii=False), now(), len(content)))
                 self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id,
                             {"artifact_id": artifact_id, "run_id": row["id"], "kind": kind, "version": version})
+                if message:
+                    self._assistant_message(db, row["conversation_id"], message)
+                self._record_state(db, row, "succeeded")
+                db.commit()
+                return True
+        finally:
+            stage.unlink(missing_ok=True)
+
+    def publish_submission(self, worker_id, claim, producer, lease_seconds=30):
+        """Commit knowledge application and terminal Run/Artifact in one SQLite transaction."""
+        stage = self.root / "staging" / (uid() + ".stage")
+        try:
+            with connect(self.path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = self._valid_claim(db, worker_id, claim)
+                if row is None:
+                    db.rollback()
+                    return False
+                if not self._submission_is_current_db(db, claim):
+                    self._assistant_message(db, row["conversation_id"], "主数据或分类结果已变化，请重新提取")
+                    self._record_state(db, row, "failed", "log_knowledge_submission_stale")
+                    db.commit()
+                    return True
+                db.execute("SAVEPOINT knowledge_submission")
+                outcome = producer(db)
+                status = outcome.get("submission_status")
+                if status not in {"created", "pending_duplicate", "already_approved"}:
+                    db.execute("ROLLBACK TO knowledge_submission")
+                    db.execute("RELEASE knowledge_submission")
+                    code = "log_knowledge_submission_stale" if status == "stale" else "log_knowledge_submission_error"
+                    self._assistant_message(db, row["conversation_id"], "知识申请未提交，请检查结果后重试")
+                    self._record_state(db, row, "failed", code)
+                    db.commit()
+                    return True
+                db.execute("RELEASE knowledge_submission")
+                content = json.dumps(outcome, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                sha = hashlib.sha256(content).hexdigest()
+                with stage.open("wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                key = f"artifacts/{sha[:2]}/{sha}"
+                final = self.root / key
+                final.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(stage, final)
+                # The write lock prevented cancellation/takeover while the producer ran.
+                deadline = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+                db.execute("UPDATE worker_leases SET lease_expires_at=? WHERE id='v2-primary'", (deadline,))
+                db.execute("UPDATE runs SET lease_expires_at=? WHERE id=?", (deadline, claim["id"]))
+                version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE task_id=? AND kind=?",
+                                     (row["task_id"], "log_knowledge_submission")).fetchone()[0]
+                artifact_id = uid()
+                db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                           (artifact_id, row["conversation_id"], row["task_id"], row["id"], "log_knowledge_submission",
+                            version, "published", key, sha,
+                            json.dumps({"submission_status": status, "application_id": outcome.get("application_id")}), now(), len(content)))
+                self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id,
+                            {"artifact_id": artifact_id, "run_id": row["id"], "kind": "log_knowledge_submission", "version": version})
+                self._assistant_message(db, row["conversation_id"], "日志知识申请已处理")
                 self._record_state(db, row, "succeeded")
                 db.commit()
                 return True
