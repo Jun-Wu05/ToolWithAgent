@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-dp="a" data-tint="ref" data-shell="w320" data-radius="r6" data-text="t900" data-accent="on">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ToolWithAgent V2 · 视觉融入原型 · 工作台</title>
+<!--
+  PROTOTYPE（一次性，回答设计问题，不是实现承诺）
+  问题：DESIGN.md 基线 + agent-console-suite 吸收候选（docs/design/agent-console-suite-analysis.md §8.4 建议值）
+        融入后的 V2 视觉长什么样？待决项 D-VA-2/3/4/5/6/7 以底部决策条实时 A/B。
+  基线：docs/design/DESIGN.md（#263 定稿）+ 参考快照 a35bdb1 的深色/Token 体系。
+  用法：双击打开；底部决策条切换各待决项；明暗切换在右上角。
+-->
+<style>
+/* ===== 合并 Token 集（DESIGN.md + 吸收候选）=====
+   浅色=DESIGN 定稿值；深色=参考仓库整套（D-VA-2/5 建议值）；
+   新增层：--faint 三级文字、--border/--border-subtle 两档分隔线（吸收候选 2/3） */
+:root{
+  color-scheme:light;
+  --surface-base:#F8FAFC; --surface-card:#FFFFFF; --surface-inset:#F1F5F9; --surface-modal:#FFFFFF;
+  --foreground:#0F172A; --muted:#475569; --faint:#94A3B8;
+  --border:#CBD5E1; --border-subtle:#E2E8F0;
+  --primary:#3B82F6; --primary-foreground:#FFFFFF;
+  --success:#16A34A; --warning:#D97706; --danger:#DC2626; --info:#0284C7;
+  --tint-primary:#EFF5FE; --tint-success:#E8F6ED; --tint-warning:#FBF1E6; --tint-danger:#FCE9E9; --tint-info:#E6F3F9;
+  --accent:#6366F1;
+  --shadow-modal:0 12px 32px rgba(15,23,42,.16);
+  --font-sans:system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+  --radius:6px; --radius-lg:6px;
+  --shell-nav:320px; --shell-top:56px;
+  font-family:var(--font-sans);
+}
+/* D-VA-6：正文主色 A/B（900 参考 vs 800 v2 现值） */
+html[data-text="t800"]{ --foreground:#1E293B }
+/* D-VA-7：圆角 A/B（单轨 6px vs 6/8 双轨） */
+html[data-radius="r68"]{ --radius-lg:8px }
+/* D-VA-4：壳层尺寸 A/B（DESIGN 320/56 vs 参考紧凑 240/48） */
+html[data-shell="w240"]{ --shell-nav:240px; --shell-top:48px }
+/* D-VA-3：辅色点缀 A/B（图标用辅色 vs 退化为主色） */
+html[data-accent="off"]{ --accent:var(--primary) }
+
+/* ===== 深色主题（吸收候选 1：参考仓库整套，非反色）===== */
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --surface-base:#0E1116; --surface-card:#171A20; --surface-inset:#20232A; --surface-modal:#20232A;
+  --foreground:#EDF0F6; --muted:#9DA5B1; --faint:#6C7582;
+  --border:#343840; --border-subtle:#282B33;
+  --primary:#5CA3FD; --primary-foreground:#070D1A;
+  --success:#46C473; --warning:#EBAE42; --danger:#F75D59; --info:#46AFEC;
+  --tint-primary:#262E3D; --tint-success:#193825; --tint-warning:#422F13; --tint-danger:#4A2322; --tint-info:#1B3442;
+  --shadow-modal:0 12px 32px rgba(0,0,0,.5);
+}
+/* D-VA-2：深色主色 A/B（≈#5CA3FD 参考 vs #93C5FD v2 现值） */
+html[data-theme="dark"][data-dp="b"]{ --primary:#93C5FD; --primary-foreground:#070D1A }
+/* D-VA-5：深色 tint 明度 A/B（参考系低明度带彩底 vs v2 现值更深更蓝） */
+html[data-theme="dark"][data-tint="v2"]{ --tint-primary:#233C61; --tint-success:#193528; --tint-warning:#3B2E1F; --tint-danger:#3B2427; --tint-info:#1C3540 }
+
+/* ===== 吸收候选 5：具名工具类 ===== */
+.focus-ring:focus-visible{ outline:2px solid color-mix(in oklab,var(--primary) 80%,transparent); outline-offset:1px }
+.row-hover{ transition:background 120ms ease }
+.row-hover:hover{ background:var(--tint-primary) }
+.num{ font-family:var(--font-mono); font-variant-numeric:tabular-nums }
+::selection{ background:color-mix(in oklab,var(--primary) 22%,transparent) }
+html{ scrollbar-width:thin; scrollbar-color:var(--border) transparent }
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--surface-base);color:var(--foreground);overflow:hidden;font-size:14px;line-height:1.5}
+button,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,textarea:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ===== App Shell（布局= #263 已确认规则，仅视觉参数换新）===== */
+.app{height:100vh;display:grid;grid-template-columns:var(--shell-nav) minmax(480px,1fr) 0}
+.app.open{grid-template-columns:var(--shell-nav) minmax(440px,1fr) minmax(380px,34vw)}
+.nav{background:var(--surface-card);border-right:1px solid var(--border-subtle);padding:16px 12px 12px;display:flex;flex-direction:column;min-width:0}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px 16px}
+.logo{width:28px;height:28px;border-radius:var(--radius);background:var(--foreground);color:var(--surface-card);display:grid;place-items:center;font-size:10px;font-weight:800}
+.brand b{font-size:13px}
+.brand small{display:block;color:var(--faint);font-size:10px;margin-top:1px}
+.new-session{height:36px;border:1px solid var(--border);background:var(--surface-card);border-radius:var(--radius);text-align:left;padding:0 11px;margin-bottom:12px}
+.new-session:hover{background:var(--tint-primary)}
+.nav-item{border:0;background:transparent;text-align:left;border-radius:var(--radius);color:var(--muted);height:36px;padding:0 10px;width:100%}
+.nav-item:hover{background:var(--tint-primary);color:var(--foreground)}
+.nav-item.active{background:var(--tint-primary);color:var(--foreground);font-weight:600}
+.nav-item i{font-style:normal;width:23px;display:inline-block;color:var(--faint)}
+.nav-item.active i{color:var(--primary)}
+.nav-label{font-size:11px;color:var(--faint);padding:20px 10px 8px}
+.session{border:0;background:transparent;text-align:left;border-radius:var(--radius);color:var(--muted);padding:9px 10px;margin-bottom:3px;width:100%}
+.session:hover{background:var(--tint-primary)}
+.session.active{background:var(--tint-primary);color:var(--foreground)}
+.session b{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.session .meta{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--faint);margin-top:4px}
+.profile{margin-top:auto;border-top:1px solid var(--border-subtle);padding:13px 7px 1px;display:flex;align-items:center;gap:9px}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--tint-primary);color:var(--primary);display:grid;place-items:center;font-size:11px}
+.profile b{font-size:11px}
+.profile span{display:block;font-size:10px;color:var(--muted)}
+
+/* ===== 状态原语（吸收候选 4：颜色+文字并存）===== */
+.dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.dot.running{background:var(--info)}
+.dot.done{background:var(--success)}
+.dot.waiting{background:var(--warning)}
+.dot.failed{background:var(--danger)}
+.stext{font-size:11px;color:var(--muted)}
+.stext.running{color:var(--info)}
+.stext.done{color:var(--success)}
+.stext.waiting{color:var(--warning)}
+.stext.failed{color:var(--danger)}
+.statusline{display:inline-flex;align-items:center;gap:6px}
+
+/* ===== 主区 ===== */
+.main{min-width:0;display:flex;flex-direction:column;background:var(--surface-base)}
+.top{height:var(--shell-top);border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;padding:0 20px;flex:none;gap:12px}
+.title{font-size:13px;font-weight:600}
+.title span{color:var(--muted);font-weight:400;margin-left:8px;font-size:12px}
+.top-actions{margin-left:auto;display:flex;gap:8px}
+.ghost{border:1px solid var(--border);background:var(--surface-card);border-radius:var(--radius);padding:7px 10px;font-size:12px}
+.ghost:hover{background:var(--tint-primary)}
+.conversation{flex:1;overflow:auto;padding:44px clamp(24px,7vw,96px) 170px}
+.thread{max-width:760px;margin:auto}
+.thread-context{font-size:11px;color:var(--faint);display:flex;align-items:center;gap:9px;margin-bottom:28px}
+.thread-context:after{content:"";height:1px;background:var(--border-subtle);flex:1}
+.user-message{margin-left:16%;background:var(--surface-inset);border-radius:var(--radius-lg);padding:12px 15px;font-size:13px;line-height:1.6;margin-bottom:26px}
+.agent-label{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-bottom:14px}
+.agent-label .name{color:var(--foreground);font-weight:600}
+.copy h1{font-size:18px;font-weight:650;letter-spacing:-.01em;margin:0 0 10px}
+.copy p{font-size:13px;line-height:1.75;color:var(--muted);margin:0 0 18px;max-width:66ch}
+.copy code{font-family:var(--font-mono);font-size:11px;color:var(--primary);background:var(--tint-primary);padding:2px 5px;border-radius:4px}
+.attention{border-left:3px solid var(--warning);background:var(--tint-warning);border-radius:0 var(--radius) var(--radius) 0;padding:10px 13px;margin:18px 0}
+.attention b{font-size:12px;display:block;margin-bottom:3px}
+.attention span{font-size:12px;color:var(--muted);line-height:1.6}
+.trace{width:100%;border:1px solid var(--border-subtle);background:var(--surface-card);border-radius:var(--radius-lg);min-height:52px;display:grid;grid-template-columns:22px 1fr auto 18px;gap:8px;align-items:center;text-align:left;margin:20px 0 14px;padding:8px 12px;color:var(--muted)}
+.trace:hover{background:var(--tint-primary);color:var(--foreground)}
+.trace strong{font-size:12px;font-weight:600;display:block}
+.trace small{display:block;color:var(--faint);font-size:10px;margin-top:2px}
+.trace .num{font-size:11px;color:var(--faint)}
+.artifact{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-subtle);border-radius:var(--radius-lg);background:var(--surface-card)}
+.file-icon{width:32px;height:38px;border-radius:var(--radius);background:var(--tint-primary);color:var(--accent);display:grid;place-items:center;font-size:10px;font-weight:700}
+.artifact b{font-size:12px;display:block}
+.artifact span{font-size:10px;color:var(--faint)}
+.linklike{margin-left:auto;border:0;background:transparent;color:var(--primary);font-size:11px;font-weight:600;padding:7px 8px;border-radius:var(--radius)}
+
+/* ===== Composer（吸收候选 9：focus-within + 附件 chips）===== */
+.composer-zone{position:absolute;bottom:0;left:0;right:0;padding:12px clamp(20px,6vw,80px) 18px;background:var(--surface-base)}
+/* 吸收候选 6：TaskHintBar 三态任务提示条 */
+.task-hint{max-width:760px;margin:0 auto 8px;border:0;border-radius:var(--radius);padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:12px;text-align:left;width:100%}
+.task-hint.running{background:var(--tint-info);color:var(--info)}
+.task-hint.waiting{background:var(--tint-warning);color:var(--warning)}
+.task-hint.failed{background:var(--tint-danger);color:var(--danger)}
+.task-hint b{color:var(--foreground);font-weight:600}
+.task-hint span{color:var(--muted)}
+.task-hint em{margin-left:auto;font-style:normal;color:var(--primary);font-weight:600;flex:none}
+.task-hint:hover{filter:brightness(.985)}
+html[data-theme="dark"] .task-hint:hover{filter:brightness(1.12)}
+.composer{max-width:760px;margin:auto;background:var(--surface-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 11px 8px;box-shadow:0 4px 16px rgba(15,23,42,.06)}
+.composer:focus-within{border-color:var(--primary);box-shadow:0 4px 16px rgba(15,23,42,.06),0 0 0 3px color-mix(in oklab,var(--primary) 14%,transparent)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-inset);border-radius:999px;padding:3px 5px 3px 10px;font-size:11px;color:var(--muted)}
+.chip i{font-style:normal;color:var(--accent)}
+.chip button{border:0;background:transparent;color:var(--faint);width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:10px}
+.chip button:hover{background:var(--tint-danger);color:var(--danger)}
+.composer textarea{width:100%;height:44px;resize:none;border:0;background:transparent;outline:0;padding:3px 5px;font-size:13px}
+.composer textarea::placeholder{color:var(--faint)}
+.compose-foot{display:flex;align-items:center;gap:4px}
+.compose-foot .tool-btn{border:0;background:transparent;color:var(--muted);height:28px;border-radius:var(--radius);font-size:11px;padding:0 9px}
+.compose-foot .tool-btn:hover{background:var(--surface-inset);color:var(--foreground)}
+.compose-foot .send{margin-left:auto;width:30px;height:30px;padding:0;border-radius:50%;background:var(--primary);color:var(--primary-foreground);font-size:14px}
+.hint-row{max-width:760px;margin:6px auto 0;font-size:10px;color:var(--faint);display:flex;justify-content:space-between}
+
+/* ===== 右侧抽屉（吸收候选 7：单实例 ContextPanel）===== */
+.drawer{min-width:0;background:var(--surface-card);border-left:1px solid var(--border-subtle);overflow:hidden;opacity:0;transform:translateX(16px);transition:opacity .2s,transform .25s}
+.app.open .drawer{opacity:1;transform:none}
+.drawer-head{height:var(--shell-top);border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:8px;padding:0 14px}
+.drawer-head strong{font-size:13px}
+.drawer-head .meta{margin-left:auto;display:flex;gap:12px;font-size:11px;color:var(--muted)}
+.close-x{border:0;background:transparent;color:var(--muted);width:28px;height:28px;border-radius:var(--radius)}
+.close-x:hover{background:var(--surface-inset);color:var(--foreground)}
+.tabs{height:42px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:end;padding:0 18px;gap:18px}
+.tab{border:0;background:transparent;color:var(--faint);font-size:12px;padding:0 0 10px}
+.tab.active{color:var(--foreground);font-weight:600;box-shadow:inset 0 -2px var(--primary)}
+.drawer-body{height:calc(100% - var(--shell-top) - 42px);overflow:auto;padding:22px 18px 40px}
+.summary{font-size:11px;color:var(--muted);margin-bottom:22px}
+.timeline{position:relative;padding-left:26px}
+.timeline:before{content:"";position:absolute;left:8px;top:8px;bottom:10px;width:1px;background:var(--border-subtle)}
+.step{position:relative;padding:0 0 22px}
+.step:before{content:"";position:absolute;left:-22px;top:5px;width:7px;height:7px;border-radius:50%;background:var(--faint);box-shadow:0 0 0 4px var(--surface-card)}
+.step.done:before{background:var(--success)}
+.step.current:before{background:var(--info)}
+.step.wait:before{background:var(--warning)}
+.step-head{display:flex;gap:10px;align-items:baseline}
+.step h3{font-size:12px;margin:0;font-weight:600}
+.step .num{margin-left:auto;font-size:10px;color:var(--faint)}
+.step p{font-size:11px;color:var(--muted);line-height:1.6;margin:5px 0 0}
+/* 吸收候选 8：ToolCallBlock 折叠工具调用块 */
+.toolcall{margin-top:9px;border:1px solid var(--border-subtle);border-radius:var(--radius);background:var(--surface-inset)}
+.toolcall>button{width:100%;border:0;background:transparent;display:grid;grid-template-columns:14px 12px 1fr auto;gap:7px;align-items:center;padding:8px 10px;font-size:11px;color:var(--muted);text-align:left}
+.toolcall>button:hover{color:var(--foreground)}
+.toolcall .tname{font-family:var(--font-mono);font-size:11px;color:var(--foreground)}
+.toolcall .tmeta{font-size:10px;color:var(--faint)}
+.toolcall .body{display:none;border-top:1px solid var(--border-subtle);padding:9px 10px}
+.toolcall.open .body{display:block}
+.toolcall .body pre{margin:0;font:11px/1.6 var(--font-mono);color:var(--muted);white-space:pre-wrap}
+.toolcall .body .lab{font-size:10px;color:var(--faint);margin-bottom:3px}
+.toolcall .chev{transition:transform .15s}
+.toolcall.open .chev{transform:rotate(90deg)}
+.io-block{display:none}
+.io-block.active{display:block}
+.io-row{padding:12px 2px;border-bottom:1px solid var(--border-subtle)}
+.io-row b{font-size:11px}
+.io-row pre{margin:4px 0 0;font:11px/1.6 var(--font-mono);color:var(--muted);white-space:pre-wrap}
+
+/* ===== 决策条（原型评估工具，不属于被评估设计）===== */
+.decide{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:99;display:flex;align-items:center;gap:10px;background:#111827;color:#f9fafb;border-radius:10px;padding:8px 12px;font-size:11px;box-shadow:0 10px 30px rgba(0,0,0,.35);max-width:96vw;flex-wrap:wrap;justify-content:center}
+.decide .cap{font-weight:700;color:#fbbf24}
+.decide .grp{display:flex;align-items:center;gap:4px}
+.decide .grp b{color:#9ca3af;font-weight:600;margin-right:2px}
+.decide button{border:1px solid #374151;background:#1f2937;color:#d1d5db;border-radius:6px;padding:4px 8px;font-size:11px}
+.decide button.on{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600}
+.decide .reset{color:#fbbf24;border-color:#92400e}
+@media(max-width:1180px){.app,.app.open{grid-template-columns:var(--shell-nav) minmax(420px,1fr)}.drawer{position:fixed;right:0;top:0;bottom:0;width:min(430px,50vw);z-index:8;box-shadow:var(--shadow-modal)}.app:not(.open) .drawer{transform:translateX(105%);pointer-events:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main class="app" id="app">
+  <aside class="nav">
+    <div class="brand"><div class="logo">TA</div><div><b>ToolWithAgent</b><small>规则工作台</small></div></div>
+    <button class="new-session focus-ring">＋　新会话</button>
+    <button class="nav-item active focus-ring"><i>◫</i>工作台</button>
+    <button class="nav-item focus-ring"><i>✓</i>任务</button>
+    <button class="nav-item focus-ring"><i>↻</i>运行记录</button>
+    <div class="nav-label">最近会话</div>
+    <button class="session active focus-ring"><b>防火墙日志字段映射</b><span class="meta"><span class="dot running"></span>处理中 · 现在</span></button>
+    <button class="session focus-ring"><b>Base64 解析规则补充</b><span class="meta"><span class="dot done"></span>已导出 · 2 小时前</span></button>
+    <button class="session focus-ring"><b>威胁类型枚举填充</b><span class="meta"><span class="dot waiting"></span>等待确认 · 昨天</span></button>
+    <div class="profile"><div class="avatar">吴</div><div><b>吴军</b><span>普通用户</span></div></div>
+  </aside>
+
+  <section class="main">
+    <header class="top">
+      <div class="title">防火墙日志字段映射<span>main_data_v2.xlsx</span></div>
+      <div class="top-actions">
+        <button class="ghost focus-ring" id="themeToggle">深色</button>
+      </div>
+    </header>
+    <div class="conversation">
+      <article class="thread">
+        <div class="thread-context">当前主数据 · 1,284 行</div>
+        <div class="user-message">检查字段映射结果。威胁类型不要直接映射为"其他"，如果没找到字段，请再校验一次。</div>
+        <div class="agent-label"><span class="dot done"></span><span class="name">Agent</span><span>已完成复核</span></div>
+        <div class="copy">
+          <h1>找到了更合适的候选字段</h1>
+          <p>第二轮校验在 <code>threat_category</code> 中找到了可用值。我没有覆盖原结果，而是生成了一份仅影响当前子规则的新版本。</p>
+          <div class="attention"><b>需要你确认</b><span>是否把"威胁类型"从"其他"改为 threat_category？置信度 92%。</span></div>
+          <button class="trace focus-ring" id="openDrawer"><span>⌘</span><span><strong>执行详情</strong><small>查看 Agent 做了什么、调用了哪些工具</small></span><span class="num">1 分 42 秒</span><span>›</span></button>
+          <div class="artifact">
+            <div class="file-icon">XLS</div>
+            <div><b>字段映射结果.xlsx</b><span>18 / 19 个字段已确认</span></div>
+            <button class="linklike focus-ring" id="openArtifact">查看结果</button>
+          </div>
+        </div>
+      </article>
+    </div>
+    <div class="composer-zone">
+      <button class="task-hint waiting focus-ring" id="hintBar"><span class="dot waiting"></span><b>等待你确认</b><span>· 将"威胁类型"改为 threat_category</span><em>查看 ›</em></button>
+      <div class="composer">
+        <div class="chips">
+          <span class="chip"><i>▦</i>当前子规则：防火墙主日志<button aria-label="移除">✕</button></span>
+          <span class="chip"><i>▤</i>威胁情报补充.xlsx<button aria-label="移除">✕</button></span>
+        </div>
+        <textarea aria-label="发送给 Agent 的消息" placeholder="继续说明需求，或让 Agent 调整当前结果…"></textarea>
+        <div class="compose-foot">
+          <button class="tool-btn focus-ring">＋ 上传文件</button>
+          <button class="tool-btn focus-ring">支持 xlsx / csv / json</button>
+          <button class="send focus-ring" aria-label="发送">↑</button>
+        </div>
+      </div>
+      <div class="hint-row"><span>Enter 发送 · Shift+Enter 换行</span><span>发送前会先处理未应用的草稿</span></div>
+    </div>
+  </section>
+
+  <aside class="drawer" aria-label="执行详情">
+    <header class="drawer-head">
+      <strong id="drawerTitle">执行详情</strong>
+      <div class="meta"><span class="num">◷ 1m42s</span><span class="num">8.4k Token</span></div>
+      <button class="close-x focus-ring" id="closeDrawer" aria-label="关闭抽屉">✕</button>
+    </header>
+    <nav class="tabs">
+      <button class="tab active" data-panel="timeline">执行时间线</button>
+      <button class="tab" data-panel="io">输入与输出</button>
+    </nav>
+    <div class="drawer-body">
+      <section class="tl-block" id="timeline">
+        <div class="summary">Agent 共执行 4 步，其中 1 步等待你的确认。</div>
+        <div class="timeline">
+          <article class="step done">
+            <div class="step-head"><h3>读取日志样例</h3><span class="num">0.4s</span></div>
+            <p>识别 1,284 行数据和 19 个原始字段。</p>
+            <div class="toolcall"><button class="focus-ring" aria-expanded="false"><span class="chev">›</span><span class="dot done"></span><span class="tname">parse_excel</span><span class="tmeta num">0.4s</span></button><div class="body"><div class="lab">输出</div><pre>rows: 1284
+fields: 19
+sheet: 防火墙主日志</pre></div></div>
+          </article>
+          <article class="step done">
+            <div class="step-head"><h3>生成初始字段映射</h3><span class="num">38s</span></div>
+            <p>"威胁类型"第一轮没有找到可靠候选，被临时标记为"其他"。</p>
+            <div class="toolcall"><button class="focus-ring" aria-expanded="false"><span class="chev">›</span><span class="dot done"></span><span class="tname">standard_mapper</span><span class="tmeta num">38s · 5.1k tok</span></button><div class="body"><div class="lab">输入</div><pre>fields: 19 → targets: 19</pre><div class="lab" style="margin-top:8px">输出</div><pre>matched: 18
+unmatched: 1 (threat_category)</pre></div></div>
+          </article>
+          <article class="step current">
+            <div class="step-head"><h3>重新校验威胁类型</h3><span class="num">63s</span></div>
+            <p>扩大检索范围后，从 24 个候选字段中选出 threat_category。</p>
+            <div class="toolcall open"><button class="focus-ring" aria-expanded="true"><span class="chev">›</span><span class="dot running"></span><span class="tname">semantic_lookup</span><span class="tmeta num">63s · 2.9k tok</span></button><div class="body"><div class="lab">输入</div><pre>field: threat_category
+scope: 全部子规则</pre><div class="lab" style="margin-top:8px">输出</div><pre>candidate: threat_category
+confidence: 0.92</pre></div></div>
+          </article>
+          <article class="step wait">
+            <div class="step-head"><h3>等待你的确认</h3><span class="num">现在</span></div>
+            <p>确认后才会继续枚举填充，不会自动覆盖现有结果。</p>
+          </article>
+        </div>
+      </section>
+      <section class="io-block" id="io">
+        <div class="summary">这里只展示可用于排查问题的输入、输出和错误，不展示模型内部原始推理。</div>
+        <div class="io-row"><b>本次输入</b><pre>main_data_v2.xlsx
+标准字段表 v3
+用户要求：威胁类型需要二次校验</pre></div>
+        <div class="io-row"><b>关键输出</b><pre>target: 威胁类型
+candidate: threat_category
+confidence: 0.92</pre></div>
+        <div class="io-row"><b>模型与运行</b><pre>model: Qwen3-235B-A22B
+run_id: run_9f3a2c
+retry: 0</pre></div>
+      </section>
+    </div>
+  </aside>
+</main>
+
+<div class="decide" role="toolbar" aria-label="原型决策条">
+  <span class="cap">PROTOTYPE 决策条</span>
+  <span class="grp"><b>D-VA-2 深色主色</b><button data-set="dp" data-val="a">#5CA3FD</button><button data-set="dp" data-val="b">#93C5FD</button></span>
+  <span class="grp"><b>D-VA-5 深色tint</b><button data-set="tint" data-val="ref">参考系</button><button data-set="tint" data-val="v2">v2现值</button></span>
+  <span class="grp"><b>D-VA-4 壳层</b><button data-set="shell" data-val="w320">320/56</button><button data-set="shell" data-val="w240">240/48</button></span>
+  <span class="grp"><b>D-VA-7 圆角</b><button data-set="radius" data-val="r6">6单轨</button><button data-set="radius" data-val="r68">6/8双轨</button></span>
+  <span class="grp"><b>D-VA-6 正文</b><button data-set="text" data-val="t900">900</button><button data-set="text" data-val="t800">800</button></span>
+  <span class="grp"><b>D-VA-3 辅色</b><button data-set="accent" data-val="on">有</button><button data-set="accent" data-val="off">无</button></span>
+  <button class="reset" id="resetDecide">重置建议值</button>
+</div>
+
+<script>
+const root=document.documentElement,app=document.querySelector('#app');
+/* 决策条：data-set/data-val 切换 <html> 属性，CSS 变量即时响应 */
+const defaults={dp:'a',tint:'ref',shell:'w320',radius:'r6',text:'t900',accent:'on'};
+function syncBar(){document.querySelectorAll('.decide [data-set]').forEach(b=>b.classList.toggle('on',root.dataset[b.dataset.set]===b.dataset.val))}
+document.querySelectorAll('.decide [data-set]').forEach(b=>b.onclick=()=>{root.dataset[b.dataset.set]=b.dataset.val;syncBar()});
+document.querySelector('#resetDecide').onclick=()=>{Object.assign(root.dataset,defaults);syncBar()};syncBar();
+/* 明暗 */
+const tt=document.querySelector('#themeToggle');const qs=new URLSearchParams(location.search);
+function setTheme(t){root.dataset.theme=t;tt.textContent=t==='light'?'深色':'浅色'}
+setTheme(qs.get('theme')||'light');tt.onclick=()=>setTheme(root.dataset.theme==='light'?'dark':'light');
+/* 抽屉与 Tabs（单实例 ContextPanel 语义） */
+const showPanel=n=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.panel===n));document.querySelector('#timeline').style.display=n==='timeline'?'block':'none';document.querySelector('#io').classList.toggle('active',n==='io');app.classList.add('open')};
+document.querySelector('#openDrawer').onclick=()=>showPanel('timeline');
+document.querySelector('#hintBar').onclick=()=>showPanel('timeline');
+document.querySelector('#closeDrawer').onclick=()=>app.classList.remove('open');
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>showPanel(b.dataset.panel));
+/* ToolCallBlock 折叠 */
+document.querySelectorAll('.toolcall>button').forEach(b=>b.onclick=()=>{const t=b.parentElement;t.classList.toggle('open');b.setAttribute('aria-expanded',t.classList.contains('open'))});
+/* 键盘：←/→ 切明暗（输入框聚焦时不拦截） */
+document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)&&!/input|textarea/i.test(document.activeElement.tagName))setTheme(e.key==='ArrowLeft'?'light':'dark')});
+</script>
+</body>
+</html>
