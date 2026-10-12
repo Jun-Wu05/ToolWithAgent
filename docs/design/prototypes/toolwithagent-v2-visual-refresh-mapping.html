@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-dp="a" data-tint="ref" data-shell="w320" data-radius="r6" data-text="t900" data-accent="on">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ToolWithAgent V2 · 视觉融入原型 · 字段映射编辑器</title>
+<!--
+  PROTOTYPE（一次性，回答设计问题，不是实现承诺）
+  问题：DESIGN.md 基线 + agent-console-suite 吸收候选融入后的字段映射编辑器视觉。
+  交互为演示级子集（选择/草稿计数/应用）；完整交互规格见 toolwithagent-v2-field-mapping-editor.html 与 PRD。
+  底部决策条实时 A/B 待决项 D-VA-2/3/4/5/6/7；状态列演示吸收候选 4（StatusDot+StatusText）。
+-->
+<style>
+:root{
+  color-scheme:light;
+  --surface-base:#F8FAFC; --surface-card:#FFFFFF; --surface-inset:#F1F5F9; --surface-modal:#FFFFFF;
+  --foreground:#0F172A; --muted:#475569; --faint:#94A3B8;
+  --border:#CBD5E1; --border-subtle:#E2E8F0;
+  --primary:#3B82F6; --primary-foreground:#FFFFFF;
+  --success:#16A34A; --warning:#D97706; --danger:#DC2626; --info:#0284C7;
+  --tint-primary:#EFF5FE; --tint-success:#E8F6ED; --tint-warning:#FBF1E6; --tint-danger:#FCE9E9; --tint-info:#E6F3F9;
+  --accent:#6366F1;
+  --shadow-modal:0 12px 32px rgba(15,23,42,.16);
+  --font-sans:system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+  --radius:6px; --radius-lg:6px;
+  --shell-nav:320px; --shell-top:56px;
+  font-family:var(--font-sans);
+}
+html[data-text="t800"]{ --foreground:#1E293B }
+html[data-radius="r68"]{ --radius-lg:8px }
+html[data-shell="w240"]{ --shell-nav:240px; --shell-top:48px }
+html[data-accent="off"]{ --accent:var(--primary) }
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --surface-base:#0E1116; --surface-card:#171A20; --surface-inset:#20232A; --surface-modal:#20232A;
+  --foreground:#EDF0F6; --muted:#9DA5B1; --faint:#6C7582;
+  --border:#343840; --border-subtle:#282B33;
+  --primary:#5CA3FD; --primary-foreground:#070D1A;
+  --success:#46C473; --warning:#EBAE42; --danger:#F75D59; --info:#46AFEC;
+  --tint-primary:#262E3D; --tint-success:#193825; --tint-warning:#422F13; --tint-danger:#4A2322; --tint-info:#1B3442;
+  --shadow-modal:0 12px 32px rgba(0,0,0,.5);
+}
+html[data-theme="dark"][data-dp="b"]{ --primary:#93C5FD; --primary-foreground:#070D1A }
+html[data-theme="dark"][data-tint="v2"]{ --tint-primary:#233C61; --tint-success:#193528; --tint-warning:#3B2E1F; --tint-danger:#3B2427; --tint-info:#1C3540 }
+
+.focus-ring:focus-visible{ outline:2px solid color-mix(in oklab,var(--primary) 80%,transparent); outline-offset:1px }
+.row-hover{ transition:background 120ms ease }
+.row-hover:hover{ background:var(--tint-primary) }
+.num{ font-family:var(--font-mono); font-variant-numeric:tabular-nums }
+::selection{ background:color-mix(in oklab,var(--primary) 22%,transparent) }
+html{ scrollbar-width:thin; scrollbar-color:var(--border) transparent }
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--surface-base);color:var(--foreground);overflow:hidden;font-size:14px;line-height:1.5}
+button,select,textarea,input{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+.app{height:100vh;display:grid;grid-template-columns:var(--shell-nav) minmax(700px,1fr)}
+.nav{background:var(--surface-card);border-right:1px solid var(--border-subtle);padding:16px 12px 12px;display:flex;flex-direction:column;min-width:0}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px 16px}
+.logo{width:28px;height:28px;border-radius:var(--radius);background:var(--foreground);color:var(--surface-card);display:grid;place-items:center;font-size:10px;font-weight:800}
+.brand b{font-size:13px}
+.brand small{display:block;color:var(--faint);font-size:10px;margin-top:1px}
+.new-session{height:36px;border:1px solid var(--border);background:var(--surface-card);border-radius:var(--radius);text-align:left;padding:0 11px;margin-bottom:12px}
+.new-session:hover{background:var(--tint-primary)}
+.nav-item{border:0;background:transparent;text-align:left;border-radius:var(--radius);color:var(--muted);height:36px;padding:0 10px;width:100%}
+.nav-item:hover{background:var(--tint-primary);color:var(--foreground)}
+.nav-item.active{background:var(--tint-primary);color:var(--foreground);font-weight:600}
+.nav-item i{font-style:normal;width:23px;display:inline-block;color:var(--faint)}
+.nav-item.active i{color:var(--primary)}
+.nav-label{font-size:11px;color:var(--faint);padding:20px 10px 8px}
+.session{border:0;background:transparent;text-align:left;border-radius:var(--radius);color:var(--muted);padding:9px 10px;margin-bottom:3px;width:100%}
+.session:hover{background:var(--tint-primary)}
+.session.active{background:var(--tint-primary);color:var(--foreground)}
+.session b{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.session .meta{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--faint);margin-top:4px}
+.profile{margin-top:auto;border-top:1px solid var(--border-subtle);padding:13px 7px 1px;display:flex;align-items:center;gap:9px}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--tint-primary);color:var(--primary);display:grid;place-items:center;font-size:11px}
+.profile b{font-size:11px}
+.profile span{display:block;font-size:10px;color:var(--muted)}
+
+.dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.dot.running{background:var(--info)}
+.dot.done{background:var(--success)}
+.dot.waiting{background:var(--warning)}
+.dot.failed{background:var(--danger)}
+.stext{font-size:11px;color:var(--muted)}
+.stext.done{color:var(--success)}
+.stext.waiting{color:var(--warning)}
+.stext.failed{color:var(--danger)}
+.statusline{display:inline-flex;align-items:center;gap:6px}
+
+.workspace{min-width:0;display:flex;flex-direction:column;background:var(--surface-card)}
+.topbar{height:var(--shell-top);flex:none;border-bottom:1px solid var(--border-subtle);padding:0 20px;display:flex;align-items:center;gap:12px}
+.back{border:0;background:transparent;color:var(--muted);padding:7px 4px}
+.top-title b{font-size:14px}
+.top-title span{color:var(--muted);font-size:11px;margin-left:8px}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+.save-state{font-size:11px;color:var(--success);display:flex;align-items:center;gap:6px}
+.save-state:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.ghost{border:1px solid var(--border);background:var(--surface-card);border-radius:var(--radius);padding:7px 10px;font-size:12px}
+.ghost:hover{background:var(--tint-primary)}
+
+.content{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.editor-head{padding:20px 22px 0;flex:none}
+.heading-row{display:flex;align-items:flex-start;gap:18px}
+.heading-row h1{font-size:22px;line-height:1.25;margin:0 0 6px}
+.heading-row p{margin:0;color:var(--muted);font-size:12px}
+.summary{margin-left:auto;display:flex;gap:18px}
+.summary div{min-width:64px;text-align:right}
+.summary strong{font-size:18px;display:block}
+.summary span{font-size:10px;color:var(--muted)}
+.notice{margin-top:16px;background:var(--tint-info);color:var(--info);padding:9px 12px;border-radius:var(--radius);display:flex;align-items:center;gap:9px;font-size:12px}
+.notice b{color:var(--foreground)}
+.notice button{margin-left:auto;border:0;background:transparent;color:var(--primary);font-weight:600}
+.sheet-row{margin-top:17px;display:flex;align-items:end;border-bottom:1px solid var(--border-subtle);gap:4px}
+.sheet-scroll{display:flex;overflow-x:auto;min-width:0;scrollbar-width:thin}
+.sheet{flex:none;border:0;background:transparent;color:var(--muted);padding:10px 15px 11px;position:relative;white-space:nowrap;font-size:12px}
+.sheet.active{color:var(--primary);font-weight:650}
+.sheet.active:after{content:"";height:2px;background:var(--primary);position:absolute;left:11px;right:11px;bottom:-1px}
+.sheet em{font-style:normal;margin-left:6px;padding:2px 6px;border-radius:999px;background:var(--surface-inset);font-size:10px}
+.toolbar{padding:12px 22px;display:flex;align-items:center;gap:8px;flex:none}
+.search{width:250px;border:1px solid var(--border);background:var(--surface-card);border-radius:var(--radius);padding:8px 10px}
+.filter{border:1px solid var(--border);background:var(--surface-card);border-radius:var(--radius);padding:8px 10px}
+.scope-note{font-size:11px;color:var(--muted)}
+.toolbar .count{margin-left:auto;font-size:11px;color:var(--muted)}
+
+.table-wrap{flex:1;min-height:0;overflow:auto;padding:0 22px 150px}
+.mapping-table{width:100%;min-width:900px;border-collapse:collapse;table-layout:fixed}
+.mapping-table col:nth-child(1){width:20%}
+.mapping-table col:nth-child(2){width:22%}
+.mapping-table col:nth-child(3){width:24%}
+.mapping-table col:nth-child(4){width:13%}
+.mapping-table col:nth-child(5){width:12%}
+.mapping-table col:nth-child(6){width:9%}
+.mapping-table thead{position:sticky;top:0;z-index:3;background:var(--surface-card)}
+.mapping-table th{text-align:left;font-size:11px;color:var(--muted);font-weight:600;padding:9px 10px;border-bottom:1px solid var(--border)}
+.group-row th{padding:18px 10px 8px;color:var(--foreground);font-size:12px;background:var(--surface-card)}
+.group-row th span{color:var(--muted);font-weight:400;margin-left:7px}
+.data-row{border-bottom:1px solid var(--border-subtle)}
+.data-row:hover{background:var(--tint-primary)}
+.data-row td{padding:12px 10px;vertical-align:middle;font-size:12px}
+.data-row.changed{background:var(--tint-primary)}
+.data-row.warning td:first-child{box-shadow:inset 3px 0 var(--warning)}
+.data-row.error{background:var(--tint-danger)}
+.field{font-family:var(--font-mono);font-size:11px}
+.path{display:block;color:var(--faint);font:10px var(--font-mono);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.samples{color:var(--muted);line-height:1.5}
+.target{width:100%;min-width:145px;border:1px solid var(--border);background:var(--surface-card);border-radius:var(--radius);padding:7px 8px}
+.target:disabled{color:var(--faint);background:var(--surface-inset)}
+.match{font-size:11px;color:var(--muted)}
+.match.user{color:var(--primary);font-weight:600}
+.match.warn{color:var(--warning)}
+.cancel-map{border:0;background:transparent;color:var(--primary);padding:6px 0;font-size:11px}
+.cancel-map:disabled{color:var(--faint);cursor:default}
+.row-error{display:block;color:var(--danger);font-size:10px;margin-top:5px}
+.reparse{border:0;background:transparent;color:var(--danger);font-weight:600;padding:5px 7px;border-radius:var(--radius);margin-top:7px;font-size:10px;border:1px solid var(--danger)}
+
+.bottom-zone{position:absolute;left:var(--shell-nav);right:0;bottom:0;background:var(--surface-card);border-top:1px solid var(--border-subtle);padding:10px 22px 14px;z-index:5}
+.action-bar{max-width:1180px;margin:0 auto 8px;background:var(--surface-inset);border-radius:var(--radius-lg);padding:10px 12px;display:flex;align-items:center;gap:10px}
+.draft-copy b{font-size:12px}
+.draft-copy span{display:block;color:var(--muted);font-size:10px;margin-top:2px}
+.discard{margin-left:auto;border:0;background:transparent;color:var(--muted);padding:8px}
+.apply{border:0;border-radius:var(--radius);background:var(--primary);color:var(--primary-foreground);padding:9px 14px;font-weight:650}
+.composer{max-width:760px;margin:auto;background:var(--surface-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:9px 11px}
+.composer:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 14%,transparent)}
+.composer textarea{width:100%;height:32px;resize:none;border:0;background:transparent;outline:0;font-size:12px}
+.compose-foot{display:flex;gap:5px;align-items:center}
+.compose-foot .tool-btn{border:0;background:transparent;color:var(--muted);border-radius:var(--radius);padding:6px 8px;font-size:10px}
+.compose-foot .tool-btn:hover{background:var(--surface-inset);color:var(--foreground)}
+.compose-foot .send{margin-left:auto;background:var(--primary);color:var(--primary-foreground);border-radius:50%;width:29px;height:29px;padding:0;font-size:14px}
+
+.decide{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:99;display:flex;align-items:center;gap:10px;background:#111827;color:#f9fafb;border-radius:10px;padding:8px 12px;font-size:11px;box-shadow:0 10px 30px rgba(0,0,0,.35);max-width:96vw;flex-wrap:wrap;justify-content:center}
+.decide .cap{font-weight:700;color:#fbbf24}
+.decide .grp{display:flex;align-items:center;gap:4px}
+.decide .grp b{color:#9ca3af;font-weight:600;margin-right:2px}
+.decide button{border:1px solid #374151;background:#1f2937;color:#d1d5db;border-radius:6px;padding:4px 8px;font-size:11px}
+.decide button.on{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600}
+.decide .reset{color:#fbbf24;border-color:#92400e}
+.toast{position:fixed;top:70px;left:50%;transform:translate(-50%,-10px);background:var(--foreground);color:var(--surface-card);padding:9px 13px;border-radius:var(--radius);font-size:11px;opacity:0;pointer-events:none;transition:.18s;z-index:30}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media(max-width:980px){.app{grid-template-columns:var(--shell-nav) minmax(660px,1fr)}.bottom-zone{left:var(--shell-nav)}.summary{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main class="app">
+  <aside class="nav">
+    <div class="brand"><div class="logo">TA</div><div><b>ToolWithAgent</b><small>规则工作台</small></div></div>
+    <button class="new-session focus-ring">＋　新会话</button>
+    <button class="nav-item focus-ring"><i>◫</i>工作台</button>
+    <button class="nav-item focus-ring"><i>✓</i>任务</button>
+    <button class="nav-item active focus-ring"><i>↻</i>运行记录</button>
+    <div class="nav-label">最近会话</div>
+    <button class="session focus-ring"><b>防火墙日志字段映射</b><span class="meta"><span class="dot running"></span>编辑草稿 · 刚刚</span></button>
+    <button class="session focus-ring"><b>Base64 解析规则补充</b><span class="meta"><span class="dot done"></span>已导出 · 2 小时前</span></button>
+    <div class="profile"><div class="avatar">吴</div><div><b>吴军</b><span>普通用户</span></div></div>
+  </aside>
+
+  <section class="workspace">
+    <header class="topbar">
+      <button class="back focus-ring">‹ 返回对话</button>
+      <div class="top-title"><b>字段映射结果</b><span>main_data_v2.xlsx · 标准字段表 v3</span></div>
+      <div class="top-actions"><span class="save-state" id="saveState">草稿已自动保存</span><button class="ghost focus-ring" id="themeToggle">深色</button></div>
+    </header>
+    <div class="content">
+      <section class="editor-head">
+        <div class="heading-row">
+          <div><h1>检查并调整字段映射</h1><p>原始字段不会被改名；未匹配字段不会阻止应用。</p></div>
+          <div class="summary">
+            <div><strong class="num" id="okCount">4</strong><span>样例映射成功</span></div>
+            <div><strong class="num" id="unCount">2</strong><span>样例未匹配</span></div>
+            <div><strong class="num" id="errCount">1</strong><span>样例解析异常</span></div>
+          </div>
+        </div>
+        <div class="notice"><span>↺</span><span><b>已恢复今天 14:41 的草稿</b>，共 3 处修改。草稿尚未影响正式规则。</span><button class="focus-ring" id="dismiss">知道了</button></div>
+        <div class="sheet-row">
+          <div class="sheet-scroll">
+            <button class="sheet active focus-ring">防火墙主日志 <em class="num">50</em></button>
+            <button class="sheet focus-ring">威胁情报 <em class="num">34</em></button>
+            <button class="sheet focus-ring">流量审计 <em class="num">76</em></button>
+            <button class="sheet focus-ring">终端告警 <em class="num">28</em></button>
+          </div>
+        </div>
+      </section>
+      <div class="toolbar">
+        <input class="search focus-ring" aria-label="搜索字段" placeholder="搜索原始字段或标准字段">
+        <select class="filter focus-ring" aria-label="按状态筛选">
+          <option value="all">全部状态</option><option value="success">映射成功</option><option value="unmatched">未匹配</option><option value="error">解析异常</option>
+        </select>
+        <span class="scope-note"><b>防火墙主日志</b> · 搜索作用于整个子规则 · <b style="color:var(--warning)">当前为代表性样例</b></span>
+        <span class="count num" id="rangeCount">样例 1–7 · 第 1/2 页</span>
+      </div>
+      <div class="table-wrap">
+        <table class="mapping-table">
+          <colgroup><col><col><col><col><col><col></colgroup>
+          <thead><tr><th>原始字段</th><th>数据样例</th><th>映射的标准字段</th><th>匹配度</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr class="group-row"><th colspan="6">映射成功 <span>4 个 · 本次修改优先显示</span></th></tr>
+            <tr class="data-row changed row-hover" data-status="success">
+              <td><span class="field">src_ip</span><span class="path">event.network.src_ip</span></td>
+              <td class="samples">10.24.8.15 · 172.16.3.4 · 10.1.0.9</td>
+              <td><select class="target focus-ring" data-original="源IP" aria-label="src_ip 映射的标准字段"><option value=""></option><option selected>源IP</option><option>目的IP</option><option>源端口</option><option>目的端口</option><option>攻击手法</option><option>设备名称</option><option>发生时间</option></select></td>
+              <td><span class="match user">用户选择</span></td>
+              <td><span class="statusline"><span class="dot done"></span><span class="stext done">映射成功</span></span></td>
+              <td><button class="cancel-map focus-ring">取消映射</button></td>
+            </tr>
+            <tr class="data-row row-hover" data-status="success">
+              <td><span class="field">dst_ip</span><span class="path">event.network.dst_ip</span></td>
+              <td class="samples">8.8.8.8 · 192.168.4.21 · 1.1.1.1</td>
+              <td><select class="target focus-ring" data-original="目的IP" aria-label="dst_ip 映射的标准字段"><option value=""></option><option>源IP</option><option selected>目的IP</option><option>源端口</option><option>目的端口</option><option>攻击手法</option><option>设备名称</option><option>发生时间</option></select></td>
+              <td><span class="match num">98%</span></td>
+              <td><span class="statusline"><span class="dot done"></span><span class="stext done">映射成功</span></span></td>
+              <td><button class="cancel-map focus-ring">取消映射</button></td>
+            </tr>
+            <tr class="data-row warning row-hover" data-status="success">
+              <td><span class="field">threat_category</span><span class="path">event.security.threat_category</span></td>
+              <td class="samples">木马 · 勒索软件 · 扫描行为</td>
+              <td><select class="target focus-ring" data-original="攻击手法" aria-label="threat_category 映射的标准字段"><option value=""></option><option>源IP</option><option>目的IP</option><option>源端口</option><option>目的端口</option><option selected>攻击手法</option><option>设备名称</option><option>发生时间</option></select></td>
+              <td><span class="match warn">证据存在歧义</span></td>
+              <td><span class="statusline"><span class="dot done"></span><span class="stext done">映射成功</span></span></td>
+              <td><button class="cancel-map focus-ring">取消映射</button></td>
+            </tr>
+            <tr class="data-row row-hover" data-status="success">
+              <td><span class="field">event_time</span><span class="path">event.time</span></td>
+              <td class="samples num">14:32:01 · 14:32:09 · 14:33:18</td>
+              <td><select class="target focus-ring" data-original="发生时间" aria-label="event_time 映射的标准字段"><option value=""></option><option>源IP</option><option>目的IP</option><option>源端口</option><option>目的端口</option><option>攻击手法</option><option>设备名称</option><option selected>发生时间</option></select></td>
+              <td><span class="match num">96%</span></td>
+              <td><span class="statusline"><span class="dot done"></span><span class="stext done">映射成功</span></span></td>
+              <td><button class="cancel-map focus-ring">取消映射</button></td>
+            </tr>
+            <tr class="group-row"><th colspan="6">未匹配 <span>2 个 · 可保留未映射</span></th></tr>
+            <tr class="data-row row-hover" data-status="unmatched">
+              <td><span class="field">session_hint</span><span class="path">event.meta.session_hint</span></td>
+              <td class="samples">edge-a · edge-b · core-1</td>
+              <td><select class="target focus-ring" data-original="" aria-label="session_hint 映射的标准字段"><option value="" selected></option><option>源IP</option><option>目的IP</option><option>源端口</option><option>目的端口</option><option>攻击手法</option><option>设备名称</option><option>发生时间</option></select></td>
+              <td><span class="match">暂无可靠候选</span></td>
+              <td><span class="statusline"><span class="dot waiting"></span><span class="stext waiting">未匹配</span></span></td>
+              <td><button class="cancel-map focus-ring" disabled>取消映射</button></td>
+            </tr>
+            <tr class="data-row row-hover" data-status="unmatched">
+              <td><span class="field">collector_node</span><span class="path">event.meta.collector_node</span></td>
+              <td class="samples">cn-north-03 · cn-north-04</td>
+              <td><select class="target focus-ring" data-original="" aria-label="collector_node 映射的标准字段"><option value="" selected></option><option>源IP</option><option>目的IP</option><option>源端口</option><option>目的端口</option><option>攻击手法</option><option>设备名称</option><option>发生时间</option></select></td>
+              <td><span class="match">候选差距过小</span></td>
+              <td><span class="statusline"><span class="dot waiting"></span><span class="stext waiting">未匹配</span></span></td>
+              <td><button class="cancel-map focus-ring" disabled>取消映射</button></td>
+            </tr>
+            <tr class="group-row"><th colspan="6">解析异常 <span>1 个 · 应用前必须处理</span></th></tr>
+            <tr class="data-row error" data-status="error">
+              <td><span class="field">raw_device</span><span class="path">event.device[</span></td>
+              <td class="samples">FW-BJ-01 · FW-SH-07</td>
+              <td>
+                <select class="target focus-ring" data-original="" disabled aria-label="raw_device 映射的标准字段（解析异常时不可编辑）"><option value="" selected></option><option>源IP</option><option>发生时间</option></select>
+                <span class="row-error">源字段路径解析失败；选择标准字段不能修复。请先修复源解析并重新解析。</span>
+                <button class="reparse focus-ring" type="button">重新解析源数据</button>
+              </td>
+              <td><span class="match warn">无法解析字段路径</span></td>
+              <td><span class="statusline"><span class="dot failed"></span><span class="stext failed">解析异常</span></span></td>
+              <td><button class="cancel-map" disabled>取消映射</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="bottom-zone" id="bottomZone">
+  <div class="action-bar">
+    <div class="draft-copy"><b id="draftCount">草稿包含 3 处修改</b><span>自动保存；应用前不会影响正式规则或 Agent 后续任务</span></div>
+    <button class="discard focus-ring" id="discard">丢弃草稿</button>
+    <button class="apply focus-ring" id="apply">应用修改并继续</button>
+  </div>
+  <div class="composer">
+    <textarea aria-label="发送给 Agent 的消息" placeholder="继续说明需求，或让 Agent 调整当前结果…"></textarea>
+    <div class="compose-foot"><button class="tool-btn focus-ring">＋ 上传文件</button><button class="tool-btn focus-ring">支持 xlsx / csv / json</button><button class="send focus-ring" aria-label="发送">↑</button></div>
+  </div>
+</div>
+
+<div class="decide" role="toolbar" aria-label="原型决策条">
+  <span class="cap">PROTOTYPE 决策条</span>
+  <span class="grp"><b>D-VA-2 深色主色</b><button data-set="dp" data-val="a">#5CA3FD</button><button data-set="dp" data-val="b">#93C5FD</button></span>
+  <span class="grp"><b>D-VA-5 深色tint</b><button data-set="tint" data-val="ref">参考系</button><button data-set="tint" data-val="v2">v2现值</button></span>
+  <span class="grp"><b>D-VA-4 壳层</b><button data-set="shell" data-val="w320">320/56</button><button data-set="shell" data-val="w240">240/48</button></span>
+  <span class="grp"><b>D-VA-7 圆角</b><button data-set="radius" data-val="r6">6单轨</button><button data-set="radius" data-val="r68">6/8双轨</button></span>
+  <span class="grp"><b>D-VA-6 正文</b><button data-set="text" data-val="t900">900</button><button data-set="text" data-val="t800">800</button></span>
+  <span class="grp"><b>D-VA-3 辅色</b><button data-set="accent" data-val="on">有</button><button data-set="accent" data-val="off">无</button></span>
+  <button class="reset" id="resetDecide">重置建议值</button>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite">已自动保存</div>
+
+<script>
+const root=document.documentElement,toast=document.querySelector('#toast');
+const flash=m=>{toast.textContent=m;toast.classList.add('show');clearTimeout(flash.t);flash.t=setTimeout(()=>toast.classList.remove('show'),1800)};
+/* 决策条 */
+const defaults={dp:'a',tint:'ref',shell:'w320',radius:'r6',text:'t900',accent:'on'};
+const syncBar=()=>document.querySelectorAll('.decide [data-set]').forEach(b=>b.classList.toggle('on',root.dataset[b.dataset.set]===b.dataset.val));
+document.querySelectorAll('.decide [data-set]').forEach(b=>b.onclick=()=>{root.dataset[b.dataset.set]=b.dataset.val;syncBar()});
+document.querySelector('#resetDecide').onclick=()=>{Object.assign(root.dataset,defaults);syncBar()};syncBar();
+/* 明暗 */
+const tt=document.querySelector('#themeToggle');const qs=new URLSearchParams(location.search);
+const setTheme=t=>{root.dataset.theme=t;tt.textContent=t==='light'?'深色':'浅色'};
+setTheme(qs.get('theme')||'light');tt.onclick=()=>setTheme(root.dataset.theme==='light'?'dark':'light');
+/* 演示级交互：选择→状态/草稿计数；应用→回到正式 */
+let draftBase=3;
+const recount=()=>{const c={success:0,unmatched:0,error:0};document.querySelectorAll('.data-row').forEach(r=>c[r.dataset.status]++);document.querySelector('#okCount').textContent=c.success;document.querySelector('#unCount').textContent=c.unmatched;document.querySelector('#errCount').textContent=c.error};
+document.querySelectorAll('.target').forEach(sel=>sel.addEventListener('change',e=>{const row=sel.closest('.data-row');if(row.dataset.status==='error'){sel.value='';flash('解析异常不能通过选择标准字段修复，请先修复源解析');return}const ok=Boolean(e.target.value);row.dataset.status=ok?'success':'unmatched';const dot=row.querySelector('.dot'),st=row.querySelector('.stext');dot.className='dot '+(ok?'done':'waiting');st.className='stext '+(ok?'done':'waiting');st.textContent=ok?'映射成功':'未匹配';row.querySelector('.match').textContent=ok?'用户选择':'用户取消映射';row.querySelector('.match').className='match user';row.querySelector('.cancel-map').disabled=!ok;row.classList.add('changed');draftBase=Math.max(draftBase,1);document.querySelector('#draftCount').textContent=`草稿包含 ${draftBase} 处修改`;recount();flash('草稿已自动保存')}));
+document.querySelector('#discard').onclick=()=>{flash('演示原型：完整丢弃逻辑见既有 field-mapping-editor 原型')};
+document.querySelector('#apply').onclick=()=>{const err=document.querySelector('.data-row.error');if(err){flash('全部未应用：请先修复源解析并重新解析');return}draftBase=0;document.querySelector('#draftCount').textContent='没有未应用的修改';document.querySelector('#saveState').textContent='已生成新产物版本';flash('已生成不可变产物版本 v4（演示）')};
+document.querySelector('#dismiss').onclick=()=>document.querySelector('.notice').remove();
+/* 底部操作区跟随壳层宽度 */
+new MutationObserver(()=>document.querySelector('#bottomZone').style.left=getComputedStyle(root).getPropertyValue('--shell-nav').trim()).observe(root,{attributes:true,attributeFilter:['data-shell']});
+</script>
+</body>
+</html>
