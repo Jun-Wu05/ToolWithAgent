@@ -112,6 +112,98 @@ def test威胁映射精确调用一次并按顺序提交双槽() -> None:
     assert session.writes == ["last_threat_data", "latest_threat_artifact"]
 
 
+def _broken_enum_session() -> dict:
+    """构造枚举产物槽损坏的会话（#320 不可用分支共用夹具）。"""
+    return {"latest_enum_artifact": {"not": "a-valid-slot"}}
+
+
+def test威胁映射枚举产物不可用时执行器预检拦截() -> None:
+    """槽损坏时 PlanExecutor 预检 needs_input artifact_source_unavailable（#320 补盲区）。"""
+    from application.adapters import create_default_adapters
+    from application.execution import ExecutionContext, PlanExecutor
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import PlanDecision, StepStatus, ThreatMappingStep
+
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="session.artifacts.enum_values",
+    )
+    session = _broken_enum_session()
+    report = asyncio.run(
+        PlanExecutor(create_default_adapters(None)).execute(
+            PlanDecision(decision="execute", plan_id="enum-unavailable", steps=(step,)),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        )
+    )
+
+    assert report.status == StepStatus.NEEDS_INPUT
+    assert report.results[0].error_code == "artifact_source_unavailable"
+
+
+def test威胁映射枚举产物不可用时适配器直连同码拦截() -> None:
+    """直连 ThreatMappingAdapter 时同一前置语义生效（#320 补盲区）。"""
+    from application.adapters import create_default_adapters
+    from application.execution import ExecutionContext
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import StepStatus, ThreatMappingStep
+
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="session.artifacts.enum_values",
+    )
+    session = _broken_enum_session()
+    result = asyncio.run(
+        create_default_adapters(None)["threat_mapping"].execute(
+            step,
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.NEEDS_INPUT
+    assert result.error_code == "artifact_source_unavailable"
+
+
+def test威胁映射枚举前置两路径同码同文() -> None:
+    """执行器预检与适配器直连对同一坏会话产出完全一致结果（#320 防漂移）。"""
+    from application.adapters import create_default_adapters
+    from application.execution import ExecutionContext, PlanExecutor
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import PlanDecision, ThreatMappingStep
+
+    def make_step() -> ThreatMappingStep:
+        return ThreatMappingStep(
+            step_id="threat", type="threat_mapping",
+            source_ref="session.artifacts.enum_values",
+        )
+
+    executor_session = _broken_enum_session()
+    executor_result = asyncio.run(
+        PlanExecutor(create_default_adapters(None)).execute(
+            PlanDecision(decision="execute", plan_id="drift-lock", steps=(make_step(),)),
+            ExecutionContext(
+                session=executor_session,
+                session_facts=build_session_facts(executor_session),
+            ),
+        )
+    ).results[0]
+    adapter_session = _broken_enum_session()
+    adapter_result = asyncio.run(
+        create_default_adapters(None)["threat_mapping"].execute(
+            make_step(),
+            ExecutionContext(
+                session=adapter_session,
+                session_facts=build_session_facts(adapter_session),
+            ),
+            {},
+        )
+    )
+
+    assert executor_result.error_code == adapter_result.error_code
+    assert executor_result.message == adapter_result.message
+    assert executor_result.message == "最近枚举值产物已不可用，请重新提取枚举值"
+
+
 class _CoverageMember:
     """返回固定三列威胁映射的同步 ThreatAgent 替身（#277 失败关闭测试）。"""
 

@@ -32,7 +32,7 @@ from contracts.progress import (
     ProgressStatus,
 )
 from contracts.session_facts import SessionFacts
-from contracts.session_artifacts import ThreatArtifactSlot
+from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 
 
 def threat_fill_source_precondition(
@@ -67,6 +67,35 @@ def threat_fill_source_precondition(
             step,
             "threat_fill_target_fixed",
             f"威胁映射只能填充到固定目标字段「{THREAT_TYPE_FIELD}」",
+        )
+    return slot, None
+
+
+def threat_mapping_source_precondition(
+    step: ExecutableStep, session: Any
+) -> tuple[Any | None, StepResult | None]:
+    """威胁类型映射「枚举值产物可用」的唯一前置校验（#320 单一来源）。
+
+    执行器预检与 ThreatMappingAdapter 共同消费：拦截结果非 None 时调用方
+    必须原样返回；通过时返回已验证的枚举产物槽（非枚举产物来源返回
+    (None, None)，由调用方走 user.values / step: 依赖分支）。判定基于
+    session 槽 latest_enum_artifact 的解析结果——与 referenceable_artifacts
+    投影恒等（投影即由该槽解析生成）。
+    """
+    if step.source_ref != "session.artifacts.enum_values":
+        return None, None
+    raw_slot = session.get("latest_enum_artifact")
+    try:
+        slot = (
+            raw_slot
+            if isinstance(raw_slot, EnumArtifactSlot)
+            else EnumArtifactSlot.model_validate(raw_slot)
+        )
+    except (TypeError, ValueError):
+        return None, PlanExecutor._needs_input_result(
+            step,
+            "artifact_source_unavailable",
+            "最近枚举值产物已不可用，请重新提取枚举值",
         )
     return slot, None
 
@@ -448,20 +477,12 @@ class PlanExecutor:
             isinstance(step, ThreatMappingStep)
             and step.source_ref == "session.artifacts.enum_values"
         ):
-            enum_fact = next(
-                (
-                    item
-                    for item in session_facts.referenceable_artifacts
-                    if item.source_ref == step.source_ref and item.artifact_type == "enum_values"
-                ),
-                None,
+            # 前置条件单一来源（#320）：与 ThreatMappingAdapter 消费同一实现。
+            _enum_slot, blocked = threat_mapping_source_precondition(
+                step, context.session
             )
-            if enum_fact is None:
-                return self._needs_input_result(
-                    step,
-                    "artifact_source_unavailable",
-                    "最近枚举值产物不可用，请重新提取枚举值",
-                )
+            if blocked is not None:
+                return blocked
         if isinstance(step, FillStep):
             if step.config_ref not in session_facts.available_config_refs:
                 return self._needs_input_result(

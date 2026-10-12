@@ -11,12 +11,14 @@ from agent.shared.logger import get_logger
 from application.adapters.shared import (
     _failed,
     _needs_input,
-    _session_get,
     _session_set,
     _success,
     run_member_stream,
 )
-from application.execution import ExecutionContext
+from application.execution import (
+    ExecutionContext,
+    threat_mapping_source_precondition,
+)
 from application.parsing import parse_json_threat_result
 from application.threat_chain_policy import (
     is_code_only_value,
@@ -31,7 +33,7 @@ from contracts.planner_models import (
     ThreatMappingRow,
     ThreatMappingStep,
 )
-from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+from contracts.session_artifacts import ThreatArtifactSlot
 
 logger = get_logger("execution_adapters")
 
@@ -64,19 +66,11 @@ class ThreatMappingAdapter:
         if step.source_ref == "user.values":
             values = list(step.values)
         elif step.source_ref == "session.artifacts.enum_values":
-            raw_slot = _session_get(context.session, "latest_enum_artifact")
-            try:
-                slot = (
-                    raw_slot
-                    if isinstance(raw_slot, EnumArtifactSlot)
-                    else EnumArtifactSlot.model_validate(raw_slot)
-                )
-            except (TypeError, ValueError):
-                return _needs_input(
-                    step,
-                    "artifact_source_unavailable",
-                    "最近枚举值产物已不可用，请重新提取枚举值",
-                )
+            # 前置条件单一来源（#320）：与执行器预检消费同一实现，
+            # 直连适配器的调用路径也保持同一拦截语义。
+            slot, blocked = threat_mapping_source_precondition(step, context.session)
+            if blocked is not None:
+                return blocked
             values = list(slot.artifact.values)
             source_field = slot.source_field
         else:
