@@ -20,6 +20,7 @@ from agent.shared.logger import get_logger
 from agent.shared.mapping_utils import iter_config_entities, iter_normalize_entries
 
 from application.execution import ExecutionContext
+from application.execution_policy import _failed, _needs_input
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
 from contracts.planner_models import (
     ConfigDownloadKind,
@@ -236,29 +237,9 @@ def _success(step: ExecutableStep, artifact: StepArtifact, message: str | None =
     )
 
 
-def _failed(step: ExecutableStep, error_code: str, message: str) -> StepResult:
-    """把领域失败转换为稳定错误码，不携带敏感原值。"""
-    return StepResult(
-        step_id=step.step_id,
-        operation_type=step.type,
-        status=StepStatus.FAILED,
-        error_code=error_code,
-        message=message,
-    )
-
-
-def _needs_input(step: ExecutableStep, error_code: str, message: str) -> StepResult:
-    """把缺失输入转换为待输入结果，阻止执行器继续后续步骤。"""
-    return StepResult(
-        step_id=step.step_id,
-        operation_type=step.type,
-        status=StepStatus.NEEDS_INPUT,
-        error_code=error_code,
-        message=message,
-    )
-
-
 # ===== 字段词汇解析（issue #146）：用户可用标准字段名指称字段，解析在执行层完成 =====
+# _failed / _needs_input 自 #314 起以 application.execution_policy 的实现
+# （含 choices 参数版本）为唯一事实源，此处经导入再导出供适配器消费。
 
 
 def field_vocabulary(config: Any, targets: list[str] | None = None) -> list[tuple[str, str]]:

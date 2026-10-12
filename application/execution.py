@@ -32,6 +32,43 @@ from contracts.progress import (
     ProgressStatus,
 )
 from contracts.session_facts import SessionFacts
+from contracts.session_artifacts import ThreatArtifactSlot
+
+
+def threat_fill_source_precondition(
+    step: ExecutableStep, session: Any
+) -> tuple[Any | None, StepResult | None]:
+    """威胁映射填充「产物可用 + 固定目标」的唯一前置校验（#314 单一来源）。
+
+    执行器预检与 ThreatFillAdapter 共同消费：拦截结果非 None 时调用方必须
+    原样返回；通过时返回已验证的产物槽（非威胁映射来源返回 (None, None)，
+    由调用方走依赖产物分支）。判定基于 session 槽 latest_threat_artifact 的
+    解析结果——与 referenceable_artifacts 投影恒等（投影即由该槽解析生成）。
+    填充目标恒为「威胁类型」（#173 修复 1）：不按 source_field 血缘推导，
+    字段映射改判不会使目标静默漂移；用户显式点名其他字段由 Planner 澄清拦截。
+    """
+    if step.source_ref != "session.artifacts.threat_mapping":
+        return None, None
+    raw_slot = session.get("latest_threat_artifact")
+    try:
+        slot = (
+            raw_slot
+            if isinstance(raw_slot, ThreatArtifactSlot)
+            else ThreatArtifactSlot.model_validate(raw_slot)
+        )
+    except (TypeError, ValueError):
+        return None, PlanExecutor._needs_input_result(
+            step,
+            "artifact_source_unavailable",
+            "最近威胁映射产物已不可用，请重新执行威胁映射",
+        )
+    if step.target_fields != (THREAT_TYPE_FIELD,):
+        return None, PlanExecutor._needs_input_result(
+            step,
+            "threat_fill_target_fixed",
+            f"威胁映射只能填充到固定目标字段「{THREAT_TYPE_FIELD}」",
+        )
+    return slot, None
 
 
 @dataclass(frozen=True)
@@ -189,7 +226,7 @@ class PlanExecutor:
                 + int(bool(getattr(step, "target_field", None))),
                 len(step.depends_on),
             )
-            preflight_error = self._validate_step(step, context.session_facts, ledger)
+            preflight_error = self._validate_step(step, context, ledger)
             if preflight_error is None:
                 preflight_error = self._policy.validate_step(step, context, ledger)
             if preflight_error is not None:
@@ -354,10 +391,11 @@ class PlanExecutor:
     def _validate_step(
         self,
         step: ExecutableStep,
-        session_facts: SessionFacts,
+        context: ExecutionContext,
         ledger: Mapping[str, StepResult],
     ) -> StepResult | None:
         """集中执行 session 语义和依赖校验，避免各适配器重复解释状态。"""
+        session_facts = context.session_facts
         for dependency_id in step.depends_on:
             dependency = ledger.get(dependency_id)
             if dependency is None:
@@ -440,29 +478,12 @@ class PlanExecutor:
                         f"枚举映射表不包含目标字段: {sorted(unavailable)}",
                     )
             if step.source_ref == "session.artifacts.threat_mapping":
-                threat_fact = next(
-                    (
-                        item
-                        for item in session_facts.referenceable_artifacts
-                        if item.source_ref == step.source_ref
-                        and item.artifact_type == "threat_mapping"
-                    ),
-                    None,
+                # 前置条件单一来源（#314）：与 ThreatFillAdapter 消费同一实现。
+                _threat_slot, blocked = threat_fill_source_precondition(
+                    step, context.session
                 )
-                if threat_fact is None:
-                    return self._needs_input_result(
-                        step,
-                        "artifact_source_unavailable",
-                        "最近威胁映射产物不可用，请重新执行威胁映射",
-                    )
-                # 威胁映射填充目标固定为「威胁类型」（#173 修复 1）：
-                # 不再按 source_field 血缘推导（字段映射改判会使目标静默漂移）。
-                if step.target_fields != (THREAT_TYPE_FIELD,):
-                    return self._needs_input_result(
-                        step,
-                        "threat_fill_target_fixed",
-                        f"威胁映射只能填充到固定目标字段「{THREAT_TYPE_FIELD}」",
-                    )
+                if blocked is not None:
+                    return blocked
         return None
 
     def _validate_result(self, step: ExecutableStep, result: StepResult) -> StepResult:
