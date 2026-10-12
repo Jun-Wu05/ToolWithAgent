@@ -19,6 +19,7 @@ from agent.core.standard_field_catalog import (
     EnumMappingPolicy,
 )
 from agent.shared.logger import get_logger
+from agent.shared.mapping_utils import iter_normalize_entries
 
 logger = get_logger("standard_enum_mapping")
 
@@ -61,28 +62,25 @@ class EnumProfileOutcome:
 def iter_normalize_owners(
     node: Any,
 ) -> Iterator[tuple[ProfileKey, str, dict[str, Any], dict[str, Any]]]:
-    """递归产出 ((路径…, index), 展示名, owner 节点, normalize 条目)；元字段跳过。"""
+    """递归产出 ((路径…, index), 展示名, owner 节点, normalize 条目)；元字段跳过。
 
-    def walk(current: Any, path: tuple[str, ...]):
-        if isinstance(current, Mapping):
-            normalize = current.get("normalize")
-            if isinstance(normalize, list):
-                yield dict(current), path
-            for key, value in current.items():
-                if key != "normalize":
-                    yield from walk(value, (*path, str(key)))
-        elif isinstance(current, list):
-            for index, item in enumerate(current):
-                yield from walk(item, (*path, str(index)))
-
-    for owner, path in walk(node, ()):
-        display = str(owner.get("name") or "/".join(path) or "config")
-        for entry in owner.get("normalize", []):
-            if not isinstance(entry, dict):
-                continue
-            index = str(entry.get("index") or "").strip()
-            if index and index not in _EXCLUDED_INDEXES:
-                yield (*path, index), display, owner, entry
+    遍历自 agent.shared.mapping_utils.iter_normalize_entries 收口（#313）：
+    画像键保持纯 str 约定（dict 键与 list 位置都 str 化），与
+    mapping_utils.apply_enum_outcomes 共用同一遍历实现，不再人工保持同步。
+    """
+    for owner_path, _position, owner, entry in iter_normalize_entries(
+        node, excluded_indexes=_EXCLUDED_INDEXES
+    ):
+        display = str(
+            owner.get("name")
+            or "/".join(str(segment) for segment in owner_path)
+            or "config"
+        )
+        index = str(entry.get("index") or "").strip()
+        yield (
+            *tuple(str(segment) for segment in owner_path),
+            index,
+        ), display, dict(owner), entry
 
 
 def _accept_value(profile: FieldValueProfile, raw: Any) -> None:

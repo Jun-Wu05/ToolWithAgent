@@ -9,6 +9,7 @@ from agent.shared.event_classify import (
     THREAT_TYPE_FIELD,
     read_entity_event_name,
 )
+from agent.shared.mapping_utils import collect_config_names, iter_normalize_entries
 from application.artifact_targets import resolve_standard_target
 from contracts.planner_models import ConfigRef, ExecutionReport
 from contracts.session_artifacts import (
@@ -77,31 +78,15 @@ def _collect_decoded_field_mapping_state(
     mapped_indices: set[str] = set()
     mapped_count = 0
     unmapped_count = 0
-
-    def walk(node: Any) -> None:
-        nonlocal mapped_count, unmapped_count
-        if isinstance(node, Mapping):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for entry in normalize:
-                    if not isinstance(entry, Mapping):
-                        continue
-                    index = str(entry.get("index") or "").strip()
-                    if not index or index in EXCLUDED_FIELD_INDICES:
-                        continue
-                    if str(entry.get("field") or "").strip():
-                        mapped_indices.add(index)
-                        mapped_count += 1
-                    else:
-                        unmapped_count += 1
-            for key, value in node.items():
-                if key != "normalize":
-                    walk(value)
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                walk(item)
-
-    walk(decoded_data)
+    for _path, _position, _owner, entry in iter_normalize_entries(
+        decoded_data, excluded_indexes=EXCLUDED_FIELD_INDICES
+    ):
+        index = str(entry.get("index") or "").strip()
+        if str(entry.get("field") or "").strip():
+            mapped_indices.add(index)
+            mapped_count += 1
+        else:
+            unmapped_count += 1
     return mapped_indices, mapped_count, unmapped_count
 
 
@@ -184,12 +169,8 @@ def _count_enum_values(enum_result: Any) -> int:
 
 
 def _count_normalize_entries(value: Any) -> int:
-    if isinstance(value, Mapping):
-        own = len(value["normalize"]) if isinstance(value.get("normalize"), list) else 0
-        return own + sum(_count_normalize_entries(item) for item in value.values())
-    if isinstance(value, (list, tuple)):
-        return sum(_count_normalize_entries(item) for item in value)
-    return 0
+    """统计配置树中 normalize 条目数（dict 条目口径，schema 下与列表长度一致）。"""
+    return sum(1 for _ in iter_normalize_entries(value, require_index=False))
 
 
 def _read_config(session: Any, config_ref: ConfigRef) -> Any:
@@ -214,26 +195,16 @@ def _target_bindings(
 def _has_threat_type_entry(config: Any) -> bool:
     """判断配置中是否存在威胁类型条目（index 或 field 命中，含未映射条目）。
 
-    递归遍历与 apply_fill_to_config 同构：兼容 dict（单配置对象）与
-    list（规则列表）两种形态。
+    消费 agent.shared.mapping_utils.iter_normalize_entries——与
+    apply_fill_to_config 的「同构」自 #313 起是字面事实而非注释约定。
     """
-    if isinstance(config, dict):
-        normalize = config.get("normalize")
-        if isinstance(normalize, list):
-            for entry in normalize:
-                if not isinstance(entry, dict):
-                    continue
-                if (
-                    entry.get("index") == THREAT_TYPE_FIELD
-                    or entry.get("field") == THREAT_TYPE_FIELD
-                ):
-                    return True
-        return any(
-            _has_threat_type_entry(value) for value in config.values()
+    return any(
+        entry.get("index") == THREAT_TYPE_FIELD
+        or entry.get("field") == THREAT_TYPE_FIELD
+        for _path, _position, _owner, entry in iter_normalize_entries(
+            config, require_index=False
         )
-    if isinstance(config, list):
-        return any(_has_threat_type_entry(item) for item in config)
-    return False
+    )
 
 
 def _threat_target_bindings(
@@ -286,21 +257,8 @@ def _referenceable_artifacts(
 
 
 def _collect_rule_names(config: Any) -> tuple[str, ...]:
-    names: list[str] = []
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            name = node.get("name")
-            if isinstance(name, str) and name and name not in names:
-                names.append(name)
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(config)
-    return tuple(names)
+    """递归收集规则名（已收口 mapping_utils.collect_config_names，#313）。"""
+    return tuple(collect_config_names(config))
 
 
 def _collect_event_annotations(config: Any) -> tuple[EventAnnotationFact, ...]:

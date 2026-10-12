@@ -9,6 +9,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from agent.shared.mapping_utils import iter_normalize_entries
+
 
 logger = logging.getLogger("execution_adapters")
 
@@ -45,26 +47,11 @@ def _is_successful_mapping(row: Mapping[str, Any]) -> bool:
 def _collect_existing_assignments(decoded_data: Any) -> dict[str, tuple[str, ...]]:
     """收集上传配置中应由 #163 原样保留的非空 field 占用。"""
     assignments: dict[str, list[str]] = defaultdict(list)
-
-    def walk(node: Any) -> None:
-        if isinstance(node, Mapping):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for entry in normalize:
-                    if not isinstance(entry, Mapping):
-                        continue
-                    original = str(entry.get("index") or "").strip()
-                    standard = str(entry.get("field") or "").strip()
-                    if original and standard and original not in assignments[standard]:
-                        assignments[standard].append(original)
-            for key, value in node.items():
-                if key != "normalize":
-                    walk(value)
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                walk(item)
-
-    walk(decoded_data)
+    for _path, _position, _owner, entry in iter_normalize_entries(decoded_data):
+        original = str(entry.get("index") or "").strip()
+        standard = str(entry.get("field") or "").strip()
+        if original and standard and original not in assignments[standard]:
+            assignments[standard].append(original)
     return {standard: tuple(originals) for standard, originals in assignments.items()}
 
 
