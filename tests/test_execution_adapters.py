@@ -12,12 +12,22 @@ from application.adapters import (
     EnumFillAdapter,
     ExportAdapter,
     FieldMappingExecutionPolicy,
-    ProfessionalAgentAdapter,
     create_default_adapters,
 )
+from application.adapters.field_mapping import FieldMappingAdapter
 from application.execution import ExecutionContext, PlanExecutor
 from contracts.planner_models import ExportStep, FieldMappingStep, FillStep, PlanDecision, StepStatus
 from application.session_projection import build_session_facts
+
+
+def _mapping_registry(team, *, candidate_retriever=None, mapping_policy=None):
+    """生产组合根基座，字段映射按需注入假件（#312：测试走生产分派真相）。"""
+    adapters = create_default_adapters(team)
+    if candidate_retriever is not None or mapping_policy is not None:
+        adapters["field_mapping"] = FieldMappingAdapter(
+            team, mapping_policy, candidate_retriever=candidate_retriever
+        )
+    return adapters
 
 
 def test枚举映射表上下文执行填充而非枚举提取():
@@ -387,7 +397,7 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     )
 
     result = asyncio.run(
-        ProfessionalAgentAdapter(_Team(member), candidate_retriever=lambda fields: {}).execute(
+        _mapping_registry(_Team(member), candidate_retriever=lambda fields: {})["field_mapping"].execute(
             step,
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
             {},
@@ -444,7 +454,7 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
     assert facts.available_config_refs == ()
 
     result = asyncio.run(
-        ProfessionalAgentAdapter(_Team(_MappingMember()), candidate_retriever=lambda fields: {}).execute(
+        _mapping_registry(_Team(_MappingMember()), candidate_retriever=lambda fields: {})["field_mapping"].execute(
             FieldMappingStep(
                 step_id="mapping-excel",
                 type="field_mapping",
@@ -477,7 +487,7 @@ def test字段映射无可回填目标时不产出下载(monkeypatch):
     assert facts.available_config_refs == ()
 
     result = asyncio.run(
-        ProfessionalAgentAdapter(_Team(_MappingMember()), candidate_retriever=lambda fields: {}).execute(
+        _mapping_registry(_Team(_MappingMember()), candidate_retriever=lambda fields: {})["field_mapping"].execute(
             FieldMappingStep(
                 step_id="mapping-only",
                 type="field_mapping",
@@ -540,7 +550,7 @@ def test字段映射通过异步事件流并发执行三个批次(monkeypatch):
         type="field_mapping",
         source_ref="session.fields",
     )
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -550,7 +560,7 @@ def test字段映射通过异步事件流并发执行三个批次(monkeypatch):
             max_retries=0,
             retry_delay_seconds=0,
         ),
-    )
+    )["field_mapping"]
 
     result = asyncio.run(
         adapter.execute(
@@ -596,7 +606,7 @@ def test字段映射漏字段时补查缺失项后成功(monkeypatch):
     fields = [f"field_{index:02d}" for index in range(26)]
     member = _BackfillMappingMember(drop_field="field_01")
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -607,7 +617,7 @@ def test字段映射漏字段时补查缺失项后成功(monkeypatch):
             retry_delay_seconds=0,
             backfill_max_attempts=2,
         ),
-    )
+    )["field_mapping"]
 
     result = asyncio.run(
         adapter.execute(
@@ -656,7 +666,7 @@ def test字段映射补查仍缺时兜底未匹配(monkeypatch):
 
     member = _AlwaysDroppingMappingMember(drop_field="lonely")
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -667,7 +677,7 @@ def test字段映射补查仍缺时兜底未匹配(monkeypatch):
             retry_delay_seconds=0,
             backfill_max_attempts=2,
         ),
-    )
+    )["field_mapping"]
 
     result = asyncio.run(
         adapter.execute(
@@ -718,7 +728,7 @@ def test字段映射乱序返回不再判为失败(monkeypatch):
     fields = ["alpha", "beta", "gamma"]
     member = _ReorderedMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -729,7 +739,7 @@ def test字段映射乱序返回不再判为失败(monkeypatch):
             retry_delay_seconds=0,
             backfill_max_attempts=0,
         ),
-    )
+    )["field_mapping"]
 
     result = asyncio.run(
         adapter.execute(
@@ -773,7 +783,7 @@ def test字段映射重复字段去重后不失败(monkeypatch):
     fields = ["alpha", "beta"]
     member = _DuplicateMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -784,7 +794,7 @@ def test字段映射重复字段去重后不失败(monkeypatch):
             retry_delay_seconds=0,
             backfill_max_attempts=0,
         ),
-    )
+    )["field_mapping"]
 
     result = asyncio.run(
         adapter.execute(
@@ -814,7 +824,7 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     }
     member = _AsyncMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -825,7 +835,7 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
             retry_delay_seconds=0,
             backfill_max_attempts=0,
         ),
-    )
+    )["field_mapping"]
 
     result = asyncio.run(
         adapter.execute(
@@ -873,10 +883,10 @@ def test上传规则字段映射仅处理未映射字段并报告差分(monkeypa
         ],
     }
     member = _MappingMember()
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
-    )
+    )["field_mapping"]
 
     result = asyncio.run(
         adapter.execute(
@@ -917,10 +927,10 @@ def test上传规则全部已映射时直接成功且不调模型():
         "log_classification": {"classification_details": [{"logtype": "旧分类"}]},
     }
     member = _MappingMember()
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
-    )
+    )["field_mapping"]
     decision = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -986,10 +996,10 @@ def test字段映射一对一冲突裁决后仅写回保留者(monkeypatch, capl
     }
     member = CollisionMember()
     result = asyncio.run(
-        ProfessionalAgentAdapter(
+        _mapping_registry(
             _Team(member),
             candidate_retriever=retrieve,
-        ).execute(
+        )["field_mapping"].execute(
             FieldMappingStep(
                 step_id="mapping-conflict", type="field_mapping", source_ref="session.fields"
             ),
@@ -1117,7 +1127,7 @@ def test威胁映射依赖产物不是枚举值时失败():
         status=StepStatus.SUCCESS,
         artifact=ConfigExportArtifact(content="e30=", item_count=1),
     )
-    adapter = ProfessionalAgentAdapter(_Team(None))
+    adapter = create_default_adapters(_Team(None))["threat_mapping"]
     session = {}
 
     result = asyncio.run(
@@ -1317,7 +1327,7 @@ def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypa
 
     session = {"decoded_fields": [f"field_{index:02d}" for index in range(51)]}
     member = _TimeoutMappingMember()
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -1328,7 +1338,7 @@ def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypa
             retry_delay_seconds=0,
             max_timeout_split_depth=0,
         ),
-    )
+    )["field_mapping"]
     step = FieldMappingStep(
         step_id="mapping-timeout",
         type="field_mapping",
@@ -1359,7 +1369,7 @@ def test字段映射291字段形成12批且最大并发为3(monkeypatch):
     fields = [f"field_{index:03d}" for index in range(291)]
     session = {"decoded_fields": fields}
     member = _AsyncMappingMember()
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -1369,7 +1379,7 @@ def test字段映射291字段形成12批且最大并发为3(monkeypatch):
             max_retries=0,
             retry_delay_seconds=0,
         ),
-    )
+    )["field_mapping"]
     step = FieldMappingStep(
         step_id="mapping-291",
         type="field_mapping",
@@ -1413,7 +1423,7 @@ def test字段映射不可重试错误只调用一次(monkeypatch):
 
     session = {"decoded_fields": ["field_a"]}
     member = _PermanentMappingErrorMember()
-    adapter = ProfessionalAgentAdapter(
+    adapter = _mapping_registry(
         _Team(member),
         candidate_retriever=lambda fields: {},
         mapping_policy=FieldMappingExecutionPolicy(
@@ -1421,7 +1431,7 @@ def test字段映射不可重试错误只调用一次(monkeypatch):
             max_retries=1,
             retry_delay_seconds=0,
         ),
-    )
+    )["field_mapping"]
     step = FieldMappingStep(
         step_id="mapping-invalid",
         type="field_mapping",
@@ -1469,7 +1479,7 @@ def test字段映射写回阶段异常时不留下部分状态(monkeypatch):
 
     try:
         asyncio.run(
-            ProfessionalAgentAdapter(_Team(member), candidate_retriever=lambda fields: {}).execute(
+            _mapping_registry(_Team(member), candidate_retriever=lambda fields: {})["field_mapping"].execute(
                 step,
                 ExecutionContext(session=session, session_facts=build_session_facts(session)),
                 {},
