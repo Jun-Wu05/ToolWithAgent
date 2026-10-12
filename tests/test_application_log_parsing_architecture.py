@@ -66,7 +66,7 @@ def test_log_parse_adapter_preserves_call_order_session_and_progress() -> None:
     def classify(*args, **kwargs) -> str:
         calls.append(("classify", args, kwargs))
         return json.dumps(
-            {"classification_details": [{"logtype": "attack", "sample": "占位"}]},
+            {"status": "SUCCESS", "classification_details": [{"logtype": "attack", "sample": "占位"}]},
             ensure_ascii=False,
         )
 
@@ -249,6 +249,7 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
         ),
     }
     classification = {
+        "status": "SUCCESS",
         "classification_details": [{"logtype": "new", "sample": "kind=new src=1"}]
     }
 
@@ -434,6 +435,53 @@ def test_nonempty_failed_classification_preserves_historical_success_result() ->
     assert session["log_classification"] is previous
     assert session["mapped_sub_rules"] == [{"name": "old-mapped"}]
 
+
+def test_partial_classification_preserves_historical_success_and_submission() -> None:
+    """非空 PARTIAL 分类不能发布正式产物或覆盖此前成功快照。"""
+    from application.adapters.log_parse import LogParseAdapter
+    from application.execution import ExecutionContext
+    from application.log_knowledge_submission import build_submission_snapshot
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import LogParseStep, StepStatus
+
+    lines = ["kind=a src=1", "kind=b src=2", "kind=c src=3"]
+    previous = {
+        "status": "SUCCESS",
+        "log_format": "kv",
+        "feature_field": "kind",
+        "classification_details": [{"logtype": "old"}],
+    }
+    submission = build_submission_snapshot(
+        previous, lines, selection_mode="automatic"
+    )
+    assert submission.eligible is True
+    session = {
+        "raw_log_lines": lines,
+        "log_classification": previous,
+        "log_knowledge_submission": submission,
+    }
+    partial = {
+        "status": "PARTIAL",
+        "error": "部分日志未能分类",
+        "classification_details": [{"logtype": "new", "count": 2}],
+    }
+    result = asyncio.run(
+        LogParseAdapter(
+            format_identifier=lambda _: '{"format":"kv"}',
+            classifier=lambda *args, **kwargs: json.dumps(partial, ensure_ascii=False),
+            sample_filler=lambda value, _: value,
+        ).execute(
+            LogParseStep(step_id="log-1", type="log_parse"),
+            ExecutionContext(session=session, session_facts=build_session_facts(session)),
+            {},
+        )
+    )
+
+    assert result.status == StepStatus.FAILED
+    assert result.error_code == "log_parse_failed"
+    assert result.artifact is None
+    assert session["log_classification"] is previous
+    assert session["log_knowledge_submission"] is submission
 
 def test_legacy_json_prompt_and_adapter_paths_reexport_identical_objects() -> None:
     """迁移期旧入口必须引用同一对象，不能保留第二份实现。"""

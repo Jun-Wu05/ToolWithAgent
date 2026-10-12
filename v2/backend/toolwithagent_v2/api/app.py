@@ -43,6 +43,19 @@ class SessionInput(BaseModel):
     user_id: str
 
 
+class LogParseInput(BaseModel):
+    file_id: str
+    feature_field: str | None = None
+
+
+class FieldMappingInput(BaseModel):
+    file_id: str | None = None
+    classification_artifact_id: str | None = None
+    product: str = Field(max_length=160)
+    log_vendor: str = Field(max_length=160)
+    data_source: str = Field(default="", max_length=160)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     store = Store(settings)
@@ -139,6 +152,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return store.upload(user_writer(request)["id"], conversation_id, file, idempotency_key)
         finally:
             file.file.close()
+
+    @app.post("/api/v2/conversations/{conversation_id}/log-parse", status_code=201)
+    def enqueue_log_parse(request: Request, conversation_id: str, payload: LogParseInput):
+        return store.enqueue_log_parse(user_writer(request)["id"], conversation_id, payload.file_id, payload.feature_field)
+
+    @app.post("/api/v2/conversations/{conversation_id}/field-mapping", status_code=201)
+    def enqueue_field_mapping(request: Request, conversation_id: str, payload: FieldMappingInput, idempotency_key: str | None = Header(None)):
+        return store.enqueue_field_mapping(user_writer(request)["id"], conversation_id,
+                                          **payload.model_dump(), idempotency_key=idempotency_key)
+
+    @app.get("/api/v2/artifacts/{artifact_id}/mapping-view")
+    def mapping_view(request: Request, artifact_id: str, sub_rule: str | None = None, page: int = 1, q: str = "", status: str | None = None):
+        return store.mapping_view(principal(request)["id"], artifact_id, sub_rule, page, q, status)
+
+    @app.get("/api/v2/artifacts/{artifact_id}/download")
+    def mapping_download(request: Request, artifact_id: str):
+        name, content = store.mapping_download(principal(request)["id"], artifact_id)
+        return Response(content=content, media_type="text/plain; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/api/v2/artifacts/{artifact_id}/submit-log-knowledge", status_code=201)
+    def submit_log_knowledge(request: Request, artifact_id: str):
+        return store.enqueue_log_knowledge(user_writer(request)["id"], artifact_id)
 
     if settings.development:
         @app.post("/api/v2/dev/conversations/{conversation_id}/fake-runs", status_code=201)

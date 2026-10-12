@@ -859,3 +859,20 @@ def test契约_全部结构失败时字段全局未匹配():
     assert rows[0]["系统属性名称"] == "未匹配"
     assert rows[0]["匹配状态"] == "未匹配"
     assert outcomes_sub[("0", "result")].reject_reason
+
+
+def test_public_rule_reader_preserves_missing_json_scan_counts():
+    from application.standard_enum_mapping import build_value_profiles_from_logs
+    rules=[{'name':'a','parser':{'name':'json'},'normalize':[{'index':'v','result':[]}]}]
+    classification={'feature_identifier':r'(.*"kind":"(a)".*)', 'classification_details':[{'logtype':'a'}]}
+    profiles=build_value_profiles_from_logs(rules,['{"kind":"a","v":"x"}','{"kind":"a"}','{"kind":"a","v":""}'],classification)
+    profile=profiles[('0','v')]
+    assert (profile.scanned_lines,profile.hit_lines,profile.empty_count)==(3,2,1)
+
+
+def test_public_rule_reader_preserves_duplicate_config_entry_and_none_details():
+    from application.standard_enum_mapping import build_value_profiles_from_logs
+    rules=[{'name':'a','parser':{'name':'json'},'normalize':[{'index':'v','result':['first']},{'index':'v','result':['last']}]}]
+    profile=build_value_profiles_from_logs(rules,[],{'classification_details':None})[('0','v')]
+    assert profile.source=='config-sample'
+    assert profile.values=={'last':1}

@@ -59,6 +59,7 @@ async def _execute_plan_with_threat_transaction(
     plan: PlanDecision | DeterministicPlan,
     progress_sink: ProgressSink,
     session_facts: SessionFacts | None = None,
+    adapters: Mapping[str, Any] | None = None,
 ) -> ExecutionReport:
     """显式威胁全链在配置副本上执行，整计划成功后才提交。"""
     transactional = is_threat_type_replacement_plan(plan.steps)
@@ -70,7 +71,7 @@ async def _execute_plan_with_threat_transaction(
         if transactional or session_facts is None
         else session_facts
     )
-    report = await create_plan_executor(create_default_adapters(team)).execute(
+    report = await create_plan_executor(adapters if adapters is not None else create_default_adapters(team)).execute(
         plan,
         ExecutionContext(
             session=execution_session,
@@ -504,6 +505,7 @@ async def run_deterministic_plan(
     plan: DeterministicPlan,
     progress_sink: ProgressSink,
     on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None = None,
+    adapters: Mapping[str, Any] | None = None,
 ) -> ExecutionReport:
     """执行入口已提供全部参数的类型化确定性计划（同样绑定会话配置快照）。"""
     with model_runtime_scope(resolve_session_config(session)):
@@ -513,6 +515,7 @@ async def run_deterministic_plan(
             plan=plan,
             progress_sink=progress_sink,
             on_primary_report=on_primary_report,
+            adapters=adapters,
         )
 
 
@@ -523,6 +526,7 @@ async def _run_deterministic_plan_scoped(
     plan: DeterministicPlan,
     progress_sink: ProgressSink,
     on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None,
+    adapters: Mapping[str, Any] | None,
 ) -> ExecutionReport:
     """会话作用域内的确定性计划执行链（入口见 run_deterministic_plan）。"""
     report = await _execute_plan_with_threat_transaction(
@@ -530,6 +534,7 @@ async def _run_deterministic_plan_scoped(
         team=team,
         plan=plan,
         progress_sink=progress_sink,
+        adapters=adapters,
     )
     if on_primary_report is not None:
         await on_primary_report(report)

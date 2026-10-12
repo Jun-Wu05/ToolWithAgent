@@ -92,14 +92,6 @@ class LogParseAdapter:
         classification = parse_json_safe(classification_text)
         if not isinstance(classification, dict) or not classification:
             return _failed(step, "log_parse_failed", "日志类型提取没有生成有效结果")
-        if classification.get("status") == "FAILED":
-            # 分类器已明确失败（如特征字段零匹配）：以稳定错误上报步骤失败，
-            # 不提交空分类产物，会话保留上一次成功结果（#259）。
-            return _failed(
-                step,
-                "log_parse_failed",
-                f"日志类型提取失败：{classification.get('error') or '分类器未提供失败原因'}",
-            )
         if classification.get("status") == "UNSUPPORTED":
             # 数据不属于 KV/JSON 范畴：明确告知判定结果而不是伪成功
             # （#298：此前 UNSUPPORTED 走 _success，界面显示"步骤执行成功"
@@ -114,6 +106,13 @@ class LogParseAdapter:
                 "不属于支持的 KV/JSON 范畴，无法进行日志类型提取",
             )
 
+        if classification.get("status") != "SUCCESS":
+            # 仅完整成功可发布；失败或部分结果保持上一次正式分类不变。
+            return _failed(
+                step,
+                "log_parse_failed",
+                f"日志类型提取失败：{classification.get('error') or '分类器未提供失败原因'}",
+            )
         classification = self._sample_filler(classification, logs_text)
         submission = build_submission_snapshot(
             classification,
