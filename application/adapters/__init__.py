@@ -20,7 +20,6 @@ __all__ = [
     "RemoveMappingAdapter",
     "ThreatFillAdapter",
     "ThreatMappingAdapter",
-    "ProfessionalAgentAdapter",
 ]
 
 
@@ -66,7 +65,4 @@ def __getattr__(name: str) -> Any:
     if name == "ThreatMappingAdapter":
         from application.adapters.threat_mapping import ThreatMappingAdapter
         return ThreatMappingAdapter
-    if name == "ProfessionalAgentAdapter":
-        from application.adapters.professional import ProfessionalAgentAdapter
-        return ProfessionalAgentAdapter
     raise AttributeError(name)

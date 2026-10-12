@@ -21,7 +21,7 @@ from contracts.planner_models import (
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 from application.session_projection import build_session_facts
-from application.adapters import ProfessionalAgentAdapter, create_default_adapters
+from application.adapters import create_default_adapters
 from application.enum_mapping_attachments import commit_enum_mapping_attachment
 from application.execution import ExecutionContext, PlanExecutor
 from application.session_state import SessionState
@@ -229,7 +229,7 @@ def test上轮枚举产物可直接用于本轮威胁映射():
             ensure_ascii=False,
         )
     )
-    adapter = ProfessionalAgentAdapter(_Team(member))
+    adapter = create_default_adapters(_Team(member))["threat_mapping"]
     session = {"latest_enum_artifact": _enum_slot()}
     step = ThreatMappingStep(
         step_id="threat",
@@ -257,7 +257,7 @@ def test威胁映射失败保留上次成功产物():
         "latest_enum_artifact": _enum_slot(),
         "latest_threat_artifact": previous,
     }
-    adapter = ProfessionalAgentAdapter(_Team(_ThreatMember("[]")))
+    adapter = create_default_adapters(_Team(_ThreatMember("[]")))["threat_mapping"]
     step = ThreatMappingStep(
         step_id="threat",
         type="threat_mapping",
@@ -292,7 +292,7 @@ def test威胁映射覆盖校验失败保留上次成功产物():
             ensure_ascii=False,
         )
     )
-    adapter = ProfessionalAgentAdapter(_Team(member))
+    adapter = create_default_adapters(_Team(member))["threat_mapping"]
     step = ThreatMappingStep(
         step_id="threat",
         type="threat_mapping",
@@ -321,7 +321,7 @@ def test全数字枚举产物触发needs_input不覆盖旧产物():
         "latest_threat_artifact": previous,
     }
     member = _ThreatMember("[]")
-    adapter = ProfessionalAgentAdapter(_Team(member))
+    adapter = create_default_adapters(_Team(member))["threat_mapping"]
     step = ThreatMappingStep(
         step_id="threat",
         type="threat_mapping",
@@ -442,7 +442,7 @@ def test多字段同轮选择B后血缘仍记录但填充目标固定():
             ensure_ascii=False,
         )
     )
-    adapter = ProfessionalAgentAdapter(_Team(member))
+    adapter = create_default_adapters(_Team(member))["threat_mapping"]
     session = {"latest_enum_artifact": _enum_slot("C", "c-value")}
     b_artifact = EnumValuesArtifact(values=("b-value",), item_count=1, field="B")
     dependency = StepResult(

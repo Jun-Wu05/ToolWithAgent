@@ -5,7 +5,8 @@ import json
 import re
 from types import SimpleNamespace
 
-from application.adapters import FieldMappingExecutionPolicy, ProfessionalAgentAdapter
+from application.adapters import FieldMappingExecutionPolicy, create_default_adapters
+from application.adapters.field_mapping import FieldMappingAdapter
 from application.execution import ExecutionContext
 from contracts.planner_models import FieldMappingStep, StepStatus
 from application.session_projection import build_session_facts
@@ -66,10 +67,15 @@ class _MappingMember:
 
 
 def _run_mapping(fields, member, policy, session=None):
-    """通过真实 Adapter 接缝执行一步字段映射。"""
+    """经生产组合根的分派真相执行一步字段映射（#312），策略与候选假件注入。"""
     session = session or {"decoded_fields": fields}
+    team = _Team(member)
+    adapters = create_default_adapters(team)
+    adapters["field_mapping"] = FieldMappingAdapter(
+        team, policy, candidate_retriever=lambda fields: {}
+    )
     return asyncio.run(
-        ProfessionalAgentAdapter(_Team(member), mapping_policy=policy, candidate_retriever=lambda fields: {}).execute(
+        adapters["field_mapping"].execute(
             FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields"),
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
             {},
