@@ -1,7 +1,6 @@
 """Small bridge from durable V2 runs to the existing Application executor."""
 from __future__ import annotations
 
-import asyncio
 import csv
 import json
 import re
@@ -15,23 +14,24 @@ from application.adapters.log_knowledge_submit import LogKnowledgeSubmitAdapter
 from application.log_knowledge_submission import build_submission_snapshot
 from application.progress import NullProgressSink
 from application.request_runtime import run_deterministic_plan
-from contracts.planner_models import DeterministicPlan, LogKnowledgeSubmitStep, LogParseStep, StepStatus
+from contracts.planner_models import DeterministicPlan, FieldMappingStep, LogKnowledgeSubmitStep, LogParseStep, StepStatus
 
 
 def raw_log_lines(path: Path, media_type: str) -> list[str]:
     if media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-        workbook = load_workbook(path, read_only=True, data_only=True)
-        try:
-            sheet = workbook.active
-            rows = sheet.iter_rows(values_only=True)
-            header = next(rows, ())
-            index = next((i for i, value in enumerate(header) if "原始日志" in str(value)), None)
-            if index is None:
-                raise ValueError("raw_log_column_missing")
-            values = [str(row[index]) for row in rows if index < len(row) and row[index] is not None]
-            lines = [re.sub(r"[\r\n]+", " ", value) for value in values if value.strip()]
-        finally:
-            workbook.close()
+        with path.open("rb") as source:
+            workbook = load_workbook(source, read_only=True, data_only=True)
+            try:
+                sheet = workbook.active
+                rows = sheet.iter_rows(values_only=True)
+                header = next(rows, ())
+                index = next((i for i, value in enumerate(header) if "原始日志" in str(value)), None)
+                if index is None:
+                    raise ValueError("raw_log_column_missing")
+                values = [str(row[index]) for row in rows if index < len(row) and row[index] is not None]
+                lines = [re.sub(r"[\r\n]+", " ", value) for value in values if value.strip()]
+            finally:
+                workbook.close()
     elif media_type == "text/csv":
         with path.open(encoding="utf-8-sig", newline="") as source:
             reader = csv.DictReader(source)
@@ -78,10 +78,12 @@ def raw_log_lines(path: Path, media_type: str) -> list[str]:
 class BusinessApplication:
     """Invoke one existing typed step per durable V2 run."""
 
-    def __init__(self, knowledge_db_path: Path):
+    def __init__(self, knowledge_db_path: Path, *, team_factory=None, adapters_factory=None):
         from agent.tools.log_pattern_store import LogKnowledgeRepository
 
         self.repository = LogKnowledgeRepository(knowledge_db_path)
+        self.team_factory = team_factory
+        self.adapters_factory = adapters_factory
 
     async def parse(self, path: Path, snapshot: dict) -> dict:
         lines = raw_log_lines(path, snapshot["media_type"])
@@ -122,3 +124,45 @@ class BusinessApplication:
         if artifact is None or artifact.artifact_type != "log_knowledge_submission":
             return {"submission_status": "error", "application_id": None}
         return {"submission_status": artifact.submission_status, "application_id": artifact.application_id}
+
+    async def field_mapping(self, path: Path, snapshot: dict, classification: dict | None = None) -> dict:
+        """Run the existing mapping pipeline against one frozen input in memory."""
+        from agent.core.team import create_data_mapping_team
+        from contracts.rule_source import RuleSourceFields
+        from toolwithagent_v2.runtime.mapping_projection import collect_samples
+        from agent.tools.rule_generator import rules_to_base64_text
+
+        lines = raw_log_lines(path, snapshot["media_type"])
+        session = {"raw_log_lines": lines, "original_log": lines}
+        team = (self.team_factory or create_data_mapping_team)()
+        adapters = self.adapters_factory(team) if self.adapters_factory else create_default_adapters(team)
+        if classification is not None:
+            session["log_classification"] = classification["classification"]
+        else:
+            parse_plan = DeterministicPlan(plan_id="v2-mapping-log-parse", steps=(
+                LogParseStep(step_id="log-parse", type="log_parse", feature_field=snapshot.get("feature_field")),))
+            parsed = await run_deterministic_plan(session=session, team=team, plan=parse_plan,
+                progress_sink=NullProgressSink(), adapters=adapters)
+            if parsed.status != StepStatus.SUCCESS or not session.get("log_classification"):
+                return {"error": "log_parse_failed"}
+        session["rule_source_fields"] = RuleSourceFields.from_value(snapshot["source_fields"])
+        plan = DeterministicPlan(plan_id="v2-field-mapping", steps=(
+            FieldMappingStep(step_id="field-mapping", type="field_mapping", source_ref="session.fields"),))
+        report = await run_deterministic_plan(session=session, team=team, plan=plan,
+            progress_sink=NullProgressSink(), adapters=adapters)
+        mapped = next((result.artifact for result in report.results
+            if result.operation_type == "field_mapping" and result.status == StepStatus.SUCCESS
+            and result.artifact is not None), None)
+        config = session.get("mapped_sub_rules")
+        if report.status != StepStatus.SUCCESS or mapped is None or not config:
+            result = next((item for item in report.results if item.status != StepStatus.SUCCESS), None)
+            return {"error": (result.error_code if result else None) or "field_mapping_failed"}
+        warnings = [{"code": "threat_chain_warning", "message": result.message}
+            for result in report.results
+            if result.operation_type == "threat_chain" and result.message and "⚠️" in result.message]
+        return {"config": config, "mapping_rows": [row.model_dump(by_alias=True) for row in mapped.mappings],
+            "event_annotations": [row.model_dump() for row in mapped.event_annotations],
+            "warnings": warnings,
+            "samples": collect_samples(config, lines, session["log_classification"]),
+            "download_kind": mapped.download_kind or "mapped_sub_rules",
+            "download_content": rules_to_base64_text(config)}

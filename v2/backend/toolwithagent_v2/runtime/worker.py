@@ -145,6 +145,34 @@ class Worker:
             return self.store.finish(self.worker_id, claim, "log_knowledge_submission_error",
                                      message="知识申请暂时失败，请重试")
 
+    def _run_field_mapping(self, claim):
+        from toolwithagent_v2.runtime.mapping_projection import mapping_summary
+        try:
+            if not self.store.mapping_is_current(claim):
+                return self.store.finish(self.worker_id, claim, "mapping_input_stale",
+                                         message="主数据或分类结果已变化，请重新执行字段映射")
+            error = self._validate(claim["input"])
+            if error:
+                return self.store.finish(self.worker_id, claim, error)
+            classification = self.store.read_classification(claim) if claim["input"].get("source_artifact_id") else None
+            outcome = asyncio.run(self.business_application.field_mapping(
+                self.store.root / claim["input"]["storage_key"], claim["input"], classification))
+            if outcome.get("error") or not outcome.get("config") or not outcome.get("download_content"):
+                return self.store.finish(self.worker_id, claim, outcome.get("error") or "field_mapping_failed",
+                                         message="字段映射失败，请检查输入后重试")
+            summary = mapping_summary(outcome)
+            message = (f"字段映射完成：{summary['rule_count']} 条子规则，{summary['field_count']} 个字段；"
+                       f"映射成功 {summary['matched_count']}，未匹配 {summary['unmatched_count']}，解析异常 {summary['parse_error_count']}")
+            if summary["uncertain_annotation_count"]:
+                message += f"；事件名称待确认 {summary['uncertain_annotation_count']} 条"
+            if summary["warning_codes"]:
+                message += "；自动威胁类型链路有提醒，请查看结果"
+            return self.store.publish(self.worker_id, claim, json.dumps(outcome, ensure_ascii=False).encode("utf-8"),
+                kind="field_mapping", metadata={"summary":summary}, message=message)
+        except Exception:
+            return self.store.finish(self.worker_id, claim, "field_mapping_failed",
+                                     message="字段映射失败，请检查输入后重试")
+
     def once(self) -> bool:
         claim = self.store.claim(self.worker_id, lease_seconds=self.lease_seconds)
         if claim is None:
@@ -159,6 +187,8 @@ class Worker:
         keeper = threading.Thread(target=heartbeat, daemon=True)
         keeper.start()
         try:
+            if claim["task_type"] == "field_mapping":
+                return self._run_field_mapping(claim)
             if claim["task_type"] == "log_parse":
                 return self._run_log_parse(claim)
             if claim["task_type"] == "log_knowledge_submit":

@@ -1,0 +1,151 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MappingWorkspace } from './MappingWorkspace'
+import { api, saveDownload, type MappingView } from './api'
+
+const view = (overrides: Partial<MappingView> = {}): MappingView => ({
+  artifact_id: 'map-1', sub_rules: [{ id: '0', name: '登录事件', field_count: 51 }, { id: '1', name: '网络事件', field_count: 2 }],
+  sub_rule_id: '0', items: [{ source_path: 'src_ip', samples: ['10.0.0.1', '10.0.0.2', '10.0.0.3'],
+    expanded_samples: [{ value: '10.0.0.1', line_number: 2 }, { value: '10.0.0.2', line_number: 5 }, { value: '10.0.0.3', line_number: 7 }, { value: '10.0.0.4', line_number: 12 }],
+    standard_field: '源地址', evidence: '名称与样例匹配', status: 'matched', warning: '', user_modified: false }],
+  total: 51, page: 1, page_size: 50, sample_line_reference: 'log_entry', ...overrides,
+})
+const props = { artifact: { id: 'map-1', run_id: 'r1', file_id: 'f1', kind: 'field_mapping' as const, status: 'published', current: true,
+  summary: { rule_count: 2, field_count: 53, matched_count: 51, unmatched_count: 2, parse_error_count: 0 } },
+  onBack: vi.fn(), onDownload: vi.fn(), downloading: false, downloadError: '' }
+const reply = (body: MappingView) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+beforeEach(() => { vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(reply(view())))) })
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
+
+describe('mapping result view', () => {
+  it('shows read-only grouped evidence and log entry references for expanded samples', async () => {
+    render(<MappingWorkspace {...props} />)
+    await screen.findByText('src_ip')
+    expect(screen.getByRole('table')).toHaveTextContent('源地址')
+    expect(screen.getByRole('table')).toHaveTextContent('映射成功')
+    fireEvent.click(screen.getByText('查看更多样例'))
+    expect(screen.getByText('日志条目 12')).toBeInTheDocument()
+    expect(screen.queryByText(/Excel 行/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '应用修改并继续' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消映射' })).not.toBeInTheDocument()
+  })
+  it('shows final protected annotations and threat warnings, retaining them when a query fails', async () => {
+    vi.mocked(fetch).mockImplementation(() => Promise.resolve(reply(view({
+      event_annotations: [
+        { rule_name: '已判定子规则', event_name: '网络攻击事件', event_level: '高', threat_source_field: 'nested.description', threat_types: ['拒绝服务', '漏洞利用'], status: 'judged' },
+        { rule_name: '需确认子规则', event_name: '', event_level: 'unknown', threat_source_field: '', threat_types: [], status: 'uncertain' },
+      ],
+      warnings: [{ code: 'threat_chain_warning', message: '⚠️ 本次威胁类型未生成，请检查来源。' }],
+    }))))
+    render(<MappingWorkspace {...props} />)
+    const annotations = await screen.findByRole('table', { name: '事件名称标注' })
+    expect(annotations).toHaveTextContent('网络攻击事件')
+    expect(annotations).toHaveTextContent('nested.description')
+    expect(annotations).toHaveTextContent('拒绝服务、漏洞利用')
+    expect(annotations).toHaveTextContent('已判定')
+    expect(annotations).toHaveTextContent('待人工确认')
+    expect(annotations).toHaveTextContent('未知')
+    expect(annotations).toHaveTextContent('未确定')
+    expect(annotations).toHaveTextContent('未生成')
+    expect(screen.getByText('⚠️ 本次威胁类型未生成，请检查来源。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /确认标注|应用修改|编辑标注/ })).not.toBeInTheDocument()
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('查询失败'))
+    fireEvent.click(screen.getByRole('tab', { name: /网络事件/ }))
+    await screen.findByText('查询失败')
+    expect(screen.getByRole('table', { name: '事件名称标注' })).toHaveTextContent('网络攻击事件')
+    expect(screen.getByText('⚠️ 本次威胁类型未生成，请检查来源。')).toBeInTheDocument()
+  })
+  it('requests whole-rule filters and page 2 rather than filtering the displayed page', async () => {
+    render(<MappingWorkspace {...props} />)
+    await screen.findByText('src_ip')
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('page=2'), expect.objectContaining({ credentials: 'include' })))
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索字段或样例' }), { target: { value: 'target' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringMatching(/page=1.*q=target/), expect.anything()))
+    fireEvent.change(screen.getByLabelText('状态筛选'), { target: { value: 'unmatched' } })
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('status=unmatched'), expect.anything()))
+    fireEvent.click(screen.getByRole('tab', { name: /网络事件/ }))
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('sub_rule=1'), expect.anything()))
+  })
+  it('ignores an old artifact response after changing the opened artifact', async () => {
+    let resolveOld: (response: Response) => void = () => {}
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve })).mockImplementation(() => Promise.resolve(reply(view({ artifact_id: 'map-2', items: [], total: 0 }))))
+    const rendered = render(<MappingWorkspace {...props} />)
+    rendered.rerender(<MappingWorkspace {...props} artifact={{ ...props.artifact, id: 'map-2' }} />)
+    await screen.findByText('没有符合条件的字段。')
+    await act(async () => resolveOld(reply(view())))
+    expect(screen.queryByText('src_ip')).not.toBeInTheDocument()
+  })
+  it('offers retry and marks a stale result without removing download access', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('连接中断'))
+    render(<MappingWorkspace {...props} artifact={{ ...props.artifact, status: 'stale', current: false }} />)
+    await screen.findByText('连接中断')
+    expect(screen.getByText(/结果已过期/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
+    await screen.findByText('src_ip')
+    fireEvent.click(screen.getByRole('button', { name: '下载配置' }))
+    expect(props.onDownload).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: '返回对话' }))
+    expect(props.onBack).toHaveBeenCalledOnce()
+  })
+  it.each(['search', 'filter', 'pagination'])('keeps %s scoped to the visible tab after a newer tab query fails', async action => {
+    render(<MappingWorkspace {...props} />)
+    await screen.findByText('src_ip')
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('搜索失败'))
+    fireEvent.click(screen.getByRole('tab', { name: /网络事件/ }))
+    await screen.findByText('搜索失败')
+    expect(screen.getByRole('table')).toHaveTextContent('src_ip')
+    expect(screen.getByRole('tab', { name: /登录事件/ })).toHaveAttribute('aria-selected', 'true')
+    if (action === 'search') {
+      fireEvent.change(screen.getByRole('searchbox', { name: '搜索字段或样例' }), { target: { value: 'src_ip' } })
+      fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    } else if (action === 'filter') {
+      fireEvent.change(screen.getByLabelText('状态筛选'), { target: { value: 'unmatched' } })
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    }
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3))
+    const request = new URL(String(vi.mocked(fetch).mock.calls.at(-1)![0]), 'http://localhost')
+    expect(request.searchParams.get('sub_rule') || '0').toBe('0')
+  })
+  it('ignores slower query results after a newer filter has loaded', async () => {
+    render(<MappingWorkspace {...props} />)
+    await screen.findByText('src_ip')
+    let resolveOld: (response: Response) => void = () => {}
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve })).mockImplementation(() => Promise.resolve(reply(view({ items: [], total: 0 }))))
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索字段或样例' }), { target: { value: 'missing' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    fireEvent.change(screen.getByLabelText('状态筛选'), { target: { value: 'parse_error' } })
+    await screen.findByText('没有符合条件的字段。')
+    await act(async () => resolveOld(reply(view())))
+    expect(screen.queryByText('src_ip')).not.toBeInTheDocument()
+  })
+})
+
+describe('protected artifact API', () => {
+  it.each([['mapping_input_stale', '主数据或分类结果已变化，请重新选择当前输入。'], ['data_source_fields_required', '请填写产品和厂商。']])('renders a human-readable %s error', async (code, message) => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ error: { code, message: code } }), { status: 400 }))
+    await expect(api.fieldMapping('conv-1', { file_id: 'f1', product: '产品', log_vendor: '厂商' }, 'retry-key')).rejects.toMatchObject({ message, code })
+    expect(fetch).toHaveBeenCalledWith('/api/v2/conversations/conv-1/field-mapping', expect.objectContaining({ credentials: 'include', headers: expect.objectContaining({ 'Idempotency-Key': 'retry-key' }) }))
+  })
+  it.each([['attachment; filename="mappedconfig_20261010_1000_Base64.txt"', 'mappedconfig_20261010_1000_Base64.txt'], ["attachment; filename*=UTF-8''%E6%98%A0%E5%B0%84_Base64.txt", '映射_Base64.txt']])('keeps the server filename and releases the Blob URL (%s)', async (header, name) => {
+    vi.mocked(fetch).mockResolvedValue(new Response('Base64 payload', { headers: { 'Content-Disposition': header } }))
+    const file = await api.mappingDownload('map-1')
+    expect(file.name).toBe(name)
+    expect(fetch).toHaveBeenCalledWith('/api/v2/artifacts/map-1/download', expect.objectContaining({ credentials: 'include' }))
+    const create = vi.fn(() => 'blob:download')
+    const revoke = vi.fn()
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = create; static revokeObjectURL = revoke })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    saveDownload(file)
+    expect(click).toHaveBeenCalledOnce()
+    expect(revoke).toHaveBeenCalledWith('blob:download')
+    expect(document.querySelector('a[download]')).not.toBeInTheDocument()
+    click.mockRestore()
+  })
+  it('rejects a failed download without creating a Blob URL', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ error: { code: 'artifact_not_found', message: 'artifact_not_found' } }), { status: 404 }))
+    await expect(api.mappingDownload('map-1')).rejects.toMatchObject({ status: 404, message: '结果不存在或当前身份无权查看，请返回会话。' })
+  })
+})

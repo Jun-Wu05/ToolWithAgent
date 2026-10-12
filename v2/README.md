@@ -1,6 +1,6 @@
 # ToolWithAgent V2 独立入口
 
-V2 API、Worker、前端与原 Chainlit 入口并行运行。默认端口为 API `8100`、React `5173`；SQLite、上传文件和 Python 环境只放在当前 worktree 的 `tmp/` 中。当前基础切片执行确定性的 `file_ingest` 校验；#265 增加持久化 Run 恢复、取消、重跑及用于故障测试的 Fake Application。真实模型与字段映射业务尚未接入。
+V2 API、Worker、前端与原 Chainlit 入口并行运行。默认端口为 API `8100`、React `5173`；SQLite、上传文件和 Python 环境只放在当前 worktree 的 `tmp/` 中。当前支持文件校验、日志类型提取、日志知识申请与字段映射。业务通过既有 Application 执行；Run 支持持久恢复、取消和重跑。字段映射结果默认显示对话摘要，可原位放大为只读表格，按子规则搜索、筛选、分页并下载完整结果；编辑 Draft、冲突处理和应用修改由 #267 承接。
 
 ## 本地启动（PowerShell）
 
@@ -34,6 +34,11 @@ tmp/venv/Scripts/python.exe -m toolwithagent_v2.runtime.worker
 - `GET /health/live`、`GET /api/v2/me`
 - `GET/POST /api/v2/conversations`、`GET /api/v2/conversations/{id}`
 - `POST /api/v2/conversations/{id}/messages`（文本投影，不执行自然语言业务）
+- `POST /api/v2/conversations/{id}/log-parse`（显式文件与可选分类字段）
+- `POST /api/v2/artifacts/{id}/submit-log-knowledge`（当前合格分类的显式申请）
+- `POST /api/v2/conversations/{id}/field-mapping`（`file_id` 或 `classification_artifact_id` 二选一；`product`、`log_vendor` 必填，`data_source` 可留空；接受 `Idempotency-Key`）
+- `GET /api/v2/artifacts/{id}/mapping-view?sub_rule=0&page=1&q=&status=`（仅本人结果；每页 50 行，搜索/筛选作用于整个选定子规则；返回事件名称标注明细和业务警告）
+- `GET /api/v2/artifacts/{id}/download`（本人映射配置；复用既有 Base64 内容与文件名）
 - `POST /api/v2/conversations/{id}/files`（multipart `file`，返回 file/task/run）
 - `GET /api/v2/runs/{id}`、`GET /api/v2/conversations/{id}/events?after=N`（SSE）
 - `POST /api/v2/runs/{id}/retry`（可带 `Idempotency-Key`，复制原 Run 的冻结快照）
@@ -59,3 +64,10 @@ $env:PYTHONPATH = 'v2/backend'
 tmp/venv/Scripts/python.exe -c "import os,tempfile; assert tempfile.gettempdir()==os.environ['TEMP']"
 tmp/venv/Scripts/python.exe -m pytest -q v2/backend/tests --basetemp=tmp/pytest-v2 -o cache_dir=tmp/pytest-cache
 ```
+
+
+映射命令冻结文件、可选分类及规则数据源元数据，成功发布前再次检查主数据、分类与 Run 发布资格。正常未匹配允许成功；失败、取消或输入过期不发布部分结果，旧成功产物仍可查看和下载。只有最新且上游有效的映射被标记为当前结果。摘要和执行事件仅含计数；字段与样例通过本人主动打开的受保护结果接口读取。样例行号是日志条目序号，配置样例没有日志条目序号，不等同于 Excel 工作表行号。
+
+事件名称待确认或自动威胁类型链路产生业务警告时，主字段映射仍按既有 Application 语义成功。普通摘要只增加待确认数量和预定义警告码，完整警告与最终标注明细只在本人打开的结果视图中展示，不进入普通事件或运行诊断。
+
+当前字段映射契约没有数值匹配度和歧义标记；表格展示既有匹配状态作为依据，在每个状态组内保持原字段顺序。按真实匹配度排序及歧义提醒需要业务先提供可信证据，本轮不虚构分数或设置前端阈值。
