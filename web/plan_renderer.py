@@ -14,6 +14,7 @@ from agent.shared.logger import get_logger
 from application.clarification import ClarificationRunner, compose_clarification
 from application.threat_report import refresh_report_event_annotations
 from web.parsers import create_dataframe_elements
+from contracts.download_naming import download_filename
 from contracts.planner_models import ExecutionReport, PlanDecision, StepStatus
 from contracts.session_facts import SessionFacts
 from web.utils import render_log_parser_result
@@ -95,28 +96,6 @@ def _append_markdown_block(lines: list[str], block: str) -> None:
         lines.append("")
     lines.append(block)
     lines.append("")
-
-
-def _download_filename(kind: str, timestamp: str) -> str:
-    """按产物语义生成用户可见下载名。"""
-    names = {
-        "log_classification": f"logclassification_{timestamp}.json",
-        "enum_values": f"enumvalues_{timestamp}.json",
-        "threat_mapping": f"threatmapping_{timestamp}.xlsx",
-        "mapped_config": f"fieldmapped_config_{timestamp}.txt",
-        "mapped_sub_rules": f"fieldmapped_subrules_{timestamp}.txt",
-        "enummapping_config": f"enummapping_config_{timestamp}.txt",
-        "threatmapping_config": f"threatmapping_config_{timestamp}.txt",
-        "cancelmapping_config": f"cancelmapping_config_{timestamp}.txt",
-        "current_config": f"current_config_{timestamp}.txt",
-        "mappedconfig_subrules": f"mappedconfig_subrules_{timestamp}.txt",
-        "mappedconfig_mainrules": f"mappedconfig_mainrules_{timestamp}.txt",
-        "unmappedconfig_subrules": f"unmappedconfig_subrules_{timestamp}.txt",
-        "field_adjusted_config": f"fieldadjusted_config_{timestamp}.txt",
-    }
-    if kind in names:
-        return names[kind]
-    raise ValueError(f"不支持的下载产物类型: {kind}")
 
 
 def _threat_chain_download_step_ids(
@@ -353,7 +332,7 @@ async def render_execution_report(
             content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
             download_elements.append(
                 cl.File(
-                    name=_download_filename(artifact.download_kind, timestamp),
+                    name=download_filename(artifact.download_kind, timestamp),
                     content=content,
                     mime="text/plain",
                 )
@@ -366,7 +345,7 @@ async def render_execution_report(
                 field_mapping_downloads.append(
                     (
                         artifact.download_kind,
-                        _download_filename(artifact.download_kind, timestamp),
+                        download_filename(artifact.download_kind, timestamp),
                         artifact.download_content.encode("utf-8"),
                     )
                 )
@@ -380,7 +359,7 @@ async def render_execution_report(
                     dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
                 download_elements.append(
                     cl.File(
-                        name=_download_filename("threat_mapping", timestamp),
+                        name=download_filename("threat_mapping", timestamp),
                         content=output.getvalue(),
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
@@ -392,7 +371,7 @@ async def render_execution_report(
             if download_allowed:
                 download_elements.append(
                     cl.File(
-                        name=_download_filename("enum_values", timestamp),
+                        name=download_filename("enum_values", timestamp),
                         content=json.dumps(
                             {
                                 "field": artifact.field,
@@ -409,7 +388,7 @@ async def render_execution_report(
         elif artifact.artifact_type == "log_classification":
             download_elements.append(
                 cl.File(
-                    name=_download_filename("log_classification", timestamp),
+                    name=download_filename("log_classification", timestamp),
                     content=json.dumps(
                         artifact.classification,
                         ensure_ascii=False,
