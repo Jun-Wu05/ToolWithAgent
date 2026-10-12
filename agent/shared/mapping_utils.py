@@ -2,6 +2,9 @@
 映射填充共享工具 — 消除威胁填充/枚举填充/sub_rules填充中重复的 mappings 追加逻辑。
 
 提供:
+- iter_normalize_entries(config, ...) → Iterator  配置树单一遍历器（#313 收口）
+- iter_config_entities(config, targets) → Iterator  entity 迭代（自 adapters/shared 迁入）
+- collect_config_names(config) → list[str]  名字收集（收口两份同构实现）
 - append_mappings_to_normalize(normalize_item, mappings) → int   核心：去重追加
 - apply_fill_to_sub_rules(sub_rules, mapping_table, target_field) → list  统一 sub_rules 填充
 - remove_field_mappings(sub_rules, target_field) → list  取消字段映射
@@ -12,6 +15,7 @@ from __future__ import annotations
 import copy
 import json
 from collections import Counter
+from collections.abc import Collection, Mapping
 from typing import Any, Iterator
 
 _ENUM_EXCLUDED_INDEXES = frozenset({"original_log", "日志类型", "事件名称", "事件级别"})
@@ -24,6 +28,108 @@ def _is_reference_value(value: Any) -> bool:
         and value.startswith("%{")
         and value.endswith("}")
     )
+
+
+def iter_normalize_entries(
+    config: Any,
+    *,
+    require_index: bool = True,
+    excluded_indexes: Collection[str] = (),
+) -> Iterator[tuple[tuple[str | int, ...], int, dict, dict]]:
+    """递归遍历配置树，产出 (owner 路径, 条目下标, owner, normalize 条目)。
+
+    配置树 normalize 条目遍历的单一事实源（#313）：收口此前散落在
+    application/adapters、session_projection、standard_enum_mapping 与本模块
+    内部的十余份同构递归实现。dict（单配置对象）与 list/tuple（规则列表）
+    两种根形态等价；持有 list 型 normalize 的 dict 即 owner。
+
+    路径约定：dict 键用 str、list 位置用 int，可直接拼
+    ``(*owner_path, "normalize", position)`` 供贡献账本按段导航回条目；
+    需要纯 str 画像键（standard_enum_mapping.ProfileKey）的调用方在边界
+    自行 str() 化，两侧约定自本函数统一派生，不再人工保持同步。
+
+    过滤参数：``require_index=True`` 跳过空白 index 条目（画像/字段池语义），
+    ``require_index=False`` 产出全部 dict 条目（计数/固定目标判定语义）；
+    ``excluded_indexes`` 按剥空白后的 index 排除元字段。非 dict 条目一律跳过。
+    """
+    excluded = frozenset(excluded_indexes)
+
+    def walk(node: Any, path: tuple[str | int, ...]):
+        """按 owner 路径产出 (路径, 下标, owner, 条目)，不深入 normalize 键。"""
+        if isinstance(node, Mapping):
+            normalize = node.get("normalize")
+            if isinstance(normalize, list):
+                for position, entry in enumerate(normalize):
+                    if not isinstance(entry, dict):
+                        continue
+                    index = str(entry.get("index") or "").strip()
+                    if require_index and not index:
+                        continue
+                    if index in excluded:
+                        continue
+                    yield path, position, node, entry
+            for key, value in node.items():
+                if key != "normalize":
+                    yield from walk(value, (*path, key))
+        elif isinstance(node, (list, tuple)):
+            for position, item in enumerate(node):
+                yield from walk(item, (*path, position))
+
+    yield from walk(config, ())
+
+
+def iter_config_entities(config: Any, targets: list[str] | None = None):
+    """递归产出 entity dict（含 parser 或 normalize 的 dict，#146）。
+
+    targets 为 None 时产出全部 entity；否则只产出 name 命中名单的 entity。
+    自 application/adapters/shared.py 迁入（#313），作为配置树 entity 迭代
+    的唯一实现。
+    """
+    target_set = set(targets) if targets else None
+
+    def walk(node: Any):
+        """递归产出命中特征与名单的 entity dict。"""
+        if isinstance(node, dict):
+            name = node.get("name")
+            looks_like_entity = isinstance(node.get("parser"), dict) or isinstance(
+                node.get("normalize"), list
+            )
+            if looks_like_entity:
+                if target_set is None:
+                    yield node
+                elif isinstance(name, str) and name in target_set:
+                    yield node
+            for value in node.values():
+                yield from walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from walk(item)
+
+    yield from walk(config)
+
+
+def collect_config_names(config: Any) -> list[str]:
+    """递归收集配置树中全部 str 型 name（去重保序）。
+
+    收口 session_projection._collect_rule_names 与
+    application/adapters/field_skill._collect_entity_names 的同构实现（#313）。
+    """
+    names: list[str] = []
+
+    def walk(node: Any) -> None:
+        """递归收集 str 型 name，去重保序。"""
+        if isinstance(node, dict):
+            name = node.get("name")
+            if isinstance(name, str) and name and name not in names:
+                names.append(name)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(config)
+    return names
 
 
 def unbind_fixed_fields(
@@ -45,48 +151,40 @@ def unbind_fixed_fields(
     updated = copy.deepcopy(config)
     unbound: list[str] = []
 
-    def _walk(node: Any) -> None:
-        """递归遍历配置，移除各 entity 绑定过滤器中命中目标字段的固定值键。"""
-        if isinstance(node, dict):
-            parser = node.get("parser")
-            if isinstance(parser, dict) and isinstance(parser.get("filter"), list):
-                touched = False
-                for filter_item in parser["filter"]:
-                    if (
-                        isinstance(filter_item, dict)
-                        and filter_item.get("name") == "addFields"
-                        and filter_item.get("id") == ""
-                        and isinstance(filter_item.get("fields"), dict)
-                    ):
-                        hit = {
-                            key
-                            for key in targets & set(filter_item["fields"])
-                            if not _is_reference_value(filter_item["fields"][key])
-                        }
-                        if hit:
-                            for key in hit:
-                                filter_item["fields"].pop(key)
-                            touched = True
-                if touched:
-                    name = node.get("name")
-                    unbound.append(name if isinstance(name, str) else "<未命名>")
-                    # fields 清空的绑定过滤器整体移除，避免留下空 addFields
-                    parser["filter"] = [
-                        f for f in parser["filter"]
-                        if not (
-                            isinstance(f, dict)
-                            and f.get("name") == "addFields"
-                            and f.get("id") == ""
-                            and f.get("fields") == {}
-                        )
-                    ]
-            for value in node.values():
-                _walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                _walk(item)
-
-    _walk(updated)
+    for entity in iter_config_entities(updated):
+        parser = entity.get("parser")
+        if not (isinstance(parser, dict) and isinstance(parser.get("filter"), list)):
+            continue
+        touched = False
+        for filter_item in parser["filter"]:
+            if (
+                isinstance(filter_item, dict)
+                and filter_item.get("name") == "addFields"
+                and filter_item.get("id") == ""
+                and isinstance(filter_item.get("fields"), dict)
+            ):
+                hit = {
+                    key
+                    for key in targets & set(filter_item["fields"])
+                    if not _is_reference_value(filter_item["fields"][key])
+                }
+                if hit:
+                    for key in hit:
+                        filter_item["fields"].pop(key)
+                    touched = True
+        if touched:
+            name = entity.get("name")
+            unbound.append(name if isinstance(name, str) else "<未命名>")
+            # fields 清空的绑定过滤器整体移除，避免留下空 addFields
+            parser["filter"] = [
+                f for f in parser["filter"]
+                if not (
+                    isinstance(f, dict)
+                    and f.get("name") == "addFields"
+                    and f.get("id") == ""
+                    and f.get("fields") == {}
+                )
+            ]
     return updated, unbound
 
 
@@ -120,31 +218,16 @@ def append_mappings_to_normalize(normalize_item: dict, mappings: list[dict]) -> 
 def apply_enum_outcomes(structure: Any, outcomes: dict) -> int:
     """把 #189 枚举画像结果写入对应 normalize 条目，返回写入数。
 
-    键为 ``application.standard_enum_mapping.iter_normalize_owners`` 的结构
-    路径键；只处理本轮新映射（field 已是目标字段）且既有 mappings 为空的
-    条目，已有不明 mappings 拒绝写入。本模块不反向依赖 application，
-    遍历语义与该函数保持一致。
+    键为纯 str 画像键（结构路径 + index），与
+    ``application.standard_enum_mapping.iter_normalize_owners`` 共用
+    ``iter_normalize_entries`` 同一遍历实现派生（#313），两侧不再人工同步。
     """
-
-    def _walk(node: Any, path: tuple) -> Iterator[tuple[tuple, dict]]:
-        """递归收集 (结构路径+index, 条目)，元字段不参与枚举写回。"""
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for entry in normalize:
-                    if isinstance(entry, dict):
-                        index = str(entry.get("index") or "").strip()
-                        if index and index not in _ENUM_EXCLUDED_INDEXES:
-                            yield (*path, index), entry
-            for key, value in node.items():
-                if key != "normalize":
-                    yield from _walk(value, (*path, str(key)))
-        elif isinstance(node, list):
-            for position, item in enumerate(node):
-                yield from _walk(item, (*path, str(position)))
-
     written = 0
-    for key, entry in _walk(structure, ()):
+    for owner_path, _position, _owner, entry in iter_normalize_entries(
+        structure, excluded_indexes=_ENUM_EXCLUDED_INDEXES
+    ):
+        index = str(entry.get("index") or "").strip()
+        key = (*tuple(str(segment) for segment in owner_path), index)
         outcome = outcomes.get(key)
         if outcome is None or not outcome.mappings:
             continue
@@ -190,27 +273,14 @@ def apply_fill_to_config(
     if not field_mappings:
         return updated_config
 
-    def apply_to_node(node: Any) -> None:
-        """递归访问容器，并只在明确的 normalize 列表内追加映射。"""
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for normalize_item in normalize:
-                    if not isinstance(normalize_item, dict):
-                        continue
-                    index_value = str(normalize_item.get("index", "")).strip()
-                    field_value = str(normalize_item.get("field", "")).strip()
-                    for field_name, mappings in field_mappings.items():
-                        if mappings and (index_value == field_name or field_value == field_name):
-                            append_mappings_to_normalize(normalize_item, mappings)
-            for child in node.values():
-                apply_to_node(child)
-            return
-        if isinstance(node, list):
-            for child in node:
-                apply_to_node(child)
-
-    apply_to_node(updated_config)
+    for _path, _position, _owner, normalize_item in iter_normalize_entries(
+        updated_config, require_index=False
+    ):
+        index_value = str(normalize_item.get("index", "")).strip()
+        field_value = str(normalize_item.get("field", "")).strip()
+        for field_name, mappings in field_mappings.items():
+            if mappings and (index_value == field_name or field_value == field_name):
+                append_mappings_to_normalize(normalize_item, mappings)
     return updated_config
 
 
@@ -224,49 +294,36 @@ def apply_enum_fill_with_contributions(
         field_name: [] for field_name in mapping_table
     }
 
-    def apply_to_node(node: Any, path: list[str | int]) -> None:
-        """递归查找 normalize 条目，并以根配置路径记录实际新增项。"""
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for item_index, normalize_item in enumerate(normalize):
-                    if not isinstance(normalize_item, dict):
-                        continue
-                    index_value = str(normalize_item.get("index", "")).strip()
-                    field_value = str(normalize_item.get("field", "")).strip()
-                    for field_name, mappings in mapping_table.items():
-                        if index_value != field_name and field_value != field_name:
-                            continue
-                        existing_org = {
-                            str(mapping.get("orgValue", ""))
-                            for mapping in normalize_item.get("mappings", [])
-                            if isinstance(mapping, dict)
-                        }
-                        for mapping in mappings:
-                            org_value = str(mapping.get("orgValue", ""))
-                            if org_value in existing_org:
-                                continue
-                            added_mapping = {
-                                "mappingType": mapping.get("mappingType", "EQUAL"),
-                                "orgValue": org_value,
-                                "mappingValue": mapping.get("mappingValue", org_value),
-                            }
-                            normalize_item.setdefault("mappings", []).append(added_mapping)
-                            existing_org.add(org_value)
-                            contributions[field_name].append(
-                                {
-                                    "normalize_path": [*path, "normalize", item_index],
-                                    "mapping": copy.deepcopy(added_mapping),
-                                }
-                            )
-            for key, child in node.items():
-                apply_to_node(child, [*path, key])
-            return
-        if isinstance(node, list):
-            for item_index, child in enumerate(node):
-                apply_to_node(child, [*path, item_index])
-
-    apply_to_node(updated_config, [])
+    for owner_path, item_index, _owner, normalize_item in iter_normalize_entries(
+        updated_config, require_index=False
+    ):
+        index_value = str(normalize_item.get("index", "")).strip()
+        field_value = str(normalize_item.get("field", "")).strip()
+        for field_name, mappings in mapping_table.items():
+            if index_value != field_name and field_value != field_name:
+                continue
+            existing_org = {
+                str(mapping.get("orgValue", ""))
+                for mapping in normalize_item.get("mappings", [])
+                if isinstance(mapping, dict)
+            }
+            for mapping in mappings:
+                org_value = str(mapping.get("orgValue", ""))
+                if org_value in existing_org:
+                    continue
+                added_mapping = {
+                    "mappingType": mapping.get("mappingType", "EQUAL"),
+                    "orgValue": org_value,
+                    "mappingValue": mapping.get("mappingValue", org_value),
+                }
+                normalize_item.setdefault("mappings", []).append(added_mapping)
+                existing_org.add(org_value)
+                contributions[field_name].append(
+                    {
+                        "normalize_path": [*owner_path, "normalize", item_index],
+                        "mapping": copy.deepcopy(added_mapping),
+                    }
+                )
     return updated_config, contributions
 
 
@@ -302,28 +359,13 @@ def count_field_mappings(config: Any, target_fields: tuple[str, ...]) -> int:
     """递归统计目标字段 mappings 数量，供执行前后变更验证使用。"""
     targets = set(target_fields)
     count = 0
-
-    def count_node(node: Any) -> None:
-        """访问配置树并累计明确命中目标字段的 mappings。"""
-        nonlocal count
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for normalize_item in normalize:
-                    if not isinstance(normalize_item, dict):
-                        continue
-                    index_value = str(normalize_item.get("index", "")).strip()
-                    field_value = str(normalize_item.get("field", "")).strip()
-                    if index_value in targets or field_value in targets:
-                        count += len(normalize_item.get("mappings", []) or [])
-            for child in node.values():
-                count_node(child)
-            return
-        if isinstance(node, list):
-            for child in node:
-                count_node(child)
-
-    count_node(config)
+    for _path, _position, _owner, normalize_item in iter_normalize_entries(
+        config, require_index=False
+    ):
+        index_value = str(normalize_item.get("index", "")).strip()
+        field_value = str(normalize_item.get("field", "")).strip()
+        if index_value in targets or field_value in targets:
+            count += len(normalize_item.get("mappings", []) or [])
     return count
 
 
@@ -342,41 +384,27 @@ def count_field_mapping_changes(
     def collect(config: Any) -> dict[tuple[str | int, ...], dict[str, Counter[str]]]:
         """按 normalize 路径与 orgValue 收集可忽略顺序的映射内容。"""
         collected: dict[tuple[str | int, ...], dict[str, Counter[str]]] = {}
-
-        def visit(node: Any, path: tuple[str | int, ...]) -> None:
-            """递归访问配置树，只收集明确命中目标字段的 normalize 项。"""
-            if isinstance(node, dict):
-                normalize = node.get("normalize")
-                if isinstance(normalize, list):
-                    for item_index, normalize_item in enumerate(normalize):
-                        if not isinstance(normalize_item, dict):
-                            continue
-                        index_value = str(normalize_item.get("index", "")).strip()
-                        field_value = str(normalize_item.get("field", "")).strip()
-                        if index_value not in targets and field_value not in targets:
-                            continue
-                        by_org_value: dict[str, Counter[str]] = {}
-                        for mapping in normalize_item.get("mappings", []) or []:
-                            if not isinstance(mapping, dict):
-                                continue
-                            org_value = str(mapping.get("orgValue", ""))
-                            canonical = json.dumps(
-                                mapping,
-                                ensure_ascii=False,
-                                sort_keys=True,
-                                separators=(",", ":"),
-                                default=str,
-                            )
-                            by_org_value.setdefault(org_value, Counter())[canonical] += 1
-                        collected[(*path, "normalize", item_index)] = by_org_value
-                for key, child in node.items():
-                    visit(child, (*path, key))
-                return
-            if isinstance(node, list):
-                for item_index, child in enumerate(node):
-                    visit(child, (*path, item_index))
-
-        visit(config, ())
+        for owner_path, item_index, _owner, normalize_item in iter_normalize_entries(
+            config, require_index=False
+        ):
+            index_value = str(normalize_item.get("index", "")).strip()
+            field_value = str(normalize_item.get("field", "")).strip()
+            if index_value not in targets and field_value not in targets:
+                continue
+            by_org_value: dict[str, Counter[str]] = {}
+            for mapping in normalize_item.get("mappings", []) or []:
+                if not isinstance(mapping, dict):
+                    continue
+                org_value = str(mapping.get("orgValue", ""))
+                canonical = json.dumps(
+                    mapping,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+                by_org_value.setdefault(org_value, Counter())[canonical] += 1
+            collected[(*owner_path, "normalize", item_index)] = by_org_value
         return collected
 
     before = collect(before_config)
@@ -399,27 +427,13 @@ def count_field_mapping_changes(
 def remove_field_mappings_from_config(config: Any, target_field: str) -> Any:
     """在保持完整根结构的前提下递归清空目标字段 mappings。"""
     updated_config = copy.deepcopy(config)
-
-    def remove_from_node(node: Any) -> None:
-        """访问配置树并清空明确命中的 normalize 映射。"""
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for normalize_item in normalize:
-                    if not isinstance(normalize_item, dict):
-                        continue
-                    index_value = str(normalize_item.get("index", "")).strip()
-                    field_value = str(normalize_item.get("field", "")).strip()
-                    if index_value == target_field or field_value == target_field:
-                        normalize_item["mappings"] = []
-            for child in node.values():
-                remove_from_node(child)
-            return
-        if isinstance(node, list):
-            for child in node:
-                remove_from_node(child)
-
-    remove_from_node(updated_config)
+    for _path, _position, _owner, normalize_item in iter_normalize_entries(
+        updated_config, require_index=False
+    ):
+        index_value = str(normalize_item.get("index", "")).strip()
+        field_value = str(normalize_item.get("field", "")).strip()
+        if index_value == target_field or field_value == target_field:
+            normalize_item["mappings"] = []
     return updated_config
 
 def apply_fill_to_sub_rules(

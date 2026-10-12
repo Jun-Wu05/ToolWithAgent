@@ -17,6 +17,7 @@ from typing import Any
 
 from agent.core.embedding_client import retry_delay_seconds
 from agent.shared.logger import get_logger
+from agent.shared.mapping_utils import iter_config_entities, iter_normalize_entries
 
 from application.execution import ExecutionContext
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
@@ -157,25 +158,13 @@ def _count_tagged_normalize(config: Any) -> int:
     用于字段映射前后差分，得出本次「实际更新的 normalize 项数」，
     与「唯一字段映射数」区分（#23）：同一字段在 N 条子规则会被更新 N 次。
     """
-    count = 0
-
-    def _walk(node: Any) -> None:
-        """递归遍历 dict/list，累计 field 非空的 normalize 条目。"""
-        nonlocal count
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for entry in normalize:
-                    if isinstance(entry, dict) and entry.get("field"):
-                        count += 1
-            for value in node.values():
-                _walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                _walk(item)
-
-    _walk(config)
-    return count
+    return sum(
+        1
+        for _path, _position, _owner, entry in iter_normalize_entries(
+            config, require_index=False
+        )
+        if entry.get("field")
+    )
 
 
 async def run_member_stream(
@@ -270,34 +259,6 @@ def _needs_input(step: ExecutableStep, error_code: str, message: str) -> StepRes
 
 
 # ===== 字段词汇解析（issue #146）：用户可用标准字段名指称字段，解析在执行层完成 =====
-
-
-def iter_config_entities(config: Any, targets: list[str] | None = None):
-    """递归产出 entity dict（含 parser 或 normalize 的 dict）。
-
-    targets 为 None 时产出全部 entity；否则只产出 name 命中名单的 entity。
-    """
-    target_set = set(targets) if targets else None
-
-    def _walk(node: Any):
-        """递归遍历配置，按 entity 特征与目标名单产出。"""
-        if isinstance(node, dict):
-            name = node.get("name")
-            looks_like_entity = isinstance(node.get("parser"), dict) or isinstance(
-                node.get("normalize"), list
-            )
-            if looks_like_entity:
-                if target_set is None:
-                    yield node
-                elif isinstance(name, str) and name in target_set:
-                    yield node
-            for value in node.values():
-                yield from _walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                yield from _walk(item)
-
-    yield from _walk(config)
 
 
 def field_vocabulary(config: Any, targets: list[str] | None = None) -> list[tuple[str, str]]:

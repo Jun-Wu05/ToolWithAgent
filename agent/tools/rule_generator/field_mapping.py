@@ -12,6 +12,7 @@ from agent.shared.event_classify import (
     EVENT_NAME_FIELD,
     THREAT_TYPE_FIELD,
 )
+from agent.shared.mapping_utils import iter_normalize_entries
 
 # normalize entries 的 index 排除集合：系统自动生成的元字段，不参与用户字段映射
 # web/action_callbacks.py 也引用此常量（原散落 4 处 literal）
@@ -57,29 +58,17 @@ def find_non_catalog_field_entities(config: Any) -> list[tuple[str, str, str]]:
     不一致即非目录组合。用于上传配置的「原样保留 + 只报告来源与数量」语义。
     """
     illegal: list[tuple[str, str, str]] = []
-
-    def _walk(node: Any) -> None:
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for entry in normalize:
-                    if not isinstance(entry, dict):
-                        continue
-                    index = str(entry.get("index") or "")
-                    field_name = str(entry.get("field") or "").strip()
-                    entity = str(entry.get("entity") or "").strip()
-                    if not field_name:
-                        continue
-                    record = resolve_standard_field(field_name)
-                    if record is None or canonical_field_entity(record) != entity:
-                        illegal.append((index, field_name, entity))
-            for value in node.values():
-                _walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                _walk(item)
-
-    _walk(config)
+    for _path, _position, _owner, entry in iter_normalize_entries(
+        config, require_index=False
+    ):
+        index = str(entry.get("index") or "")
+        field_name = str(entry.get("field") or "").strip()
+        entity = str(entry.get("entity") or "").strip()
+        if not field_name:
+            continue
+        record = resolve_standard_field(field_name)
+        if record is None or canonical_field_entity(record) != entity:
+            illegal.append((index, field_name, entity))
     return illegal
 
 

@@ -42,8 +42,12 @@ from application.adapters.shared import (
     _write_config,
     field_vocabulary,
     format_field_vocabulary,
-    iter_config_entities,
     resolve_field_names,
+)
+from agent.shared.mapping_utils import (
+    collect_config_names,
+    iter_config_entities,
+    iter_normalize_entries,
 )
 from application.adapters.field_skill_policy import find_dangling_references
 
@@ -119,32 +123,15 @@ def _map_skill_error(message: str) -> str:
 
 def _first_field_sample(config: Any, field_name: str) -> str | None:
     """递归查找字段的第一条样本值（normalize result[0]），供正则生成。"""
-
-    def _walk(node: Any) -> str | None:
-        if isinstance(node, dict):
-            normalize = node.get("normalize")
-            if isinstance(normalize, list):
-                for entry in normalize:
-                    if (
-                        isinstance(entry, dict)
-                        and entry.get("index") == field_name
-                        and isinstance(entry.get("result"), list)
-                        and entry["result"]
-                        and str(entry["result"][0]).strip()
-                    ):
-                        return str(entry["result"][0])
-            for value in node.values():
-                found = _walk(value)
-                if found is not None:
-                    return found
-        elif isinstance(node, list):
-            for item in node:
-                found = _walk(item)
-                if found is not None:
-                    return found
-        return None
-
-    return _walk(config)
+    for _path, _position, _owner, entry in iter_normalize_entries(config):
+        if (
+            entry.get("index") == field_name
+            and isinstance(entry.get("result"), list)
+            and entry["result"]
+            and str(entry["result"][0]).strip()
+        ):
+            return str(entry["result"][0])
+    return None
 
 
 def _description_keyword(description: str) -> str:
@@ -164,22 +151,8 @@ def _description_keyword(description: str) -> str:
 
 
 def _collect_entity_names(config: Any) -> list[str]:
-    """递归收集配置中全部 entity 名单（去重保序）。"""
-    names: list[str] = []
-
-    def _walk(node: Any) -> None:
-        if isinstance(node, dict):
-            name = node.get("name")
-            if isinstance(name, str) and name and name not in names:
-                names.append(name)
-            for value in node.values():
-                _walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                _walk(item)
-
-    _walk(config)
-    return names
+    """递归收集配置中全部 entity 名单（已收口 mapping_utils.collect_config_names，#313）。"""
+    return collect_config_names(config)
 
 
 def _iter_target_entities(config: Any, targets: list[str] | None):
