@@ -146,88 +146,79 @@ def _parser_delimit(owner: dict[str, Any]) -> str:
     return delimit
 
 
-def build_value_profiles_from_logs(
-    sub_rules: Any,
-    raw_log_lines: list[str],
-    classification: Mapping[str, Any] | None = None,
-) -> dict[ProfileKey, FieldValueProfile]:
-    """全量日志模式：逐行扫描本子规则的日志，代码提取全部唯一非空值。
+def iter_rule_field_values(
+    owner: dict[str, Any], target: str, raw_log_lines: list[str],
+    classification: Mapping[str, Any] | None = None, rule_position: int | None = None,
+    config_samples: list[Any] | None = None,
+) -> tuple[str, Iterator[tuple[int | None, bool, Any]]]:
+    """Return sample source and (original line number, field present, value) rows.
 
-    行归属沿用规则生成器语义：JSON 用 feature_identifier 双捕获组严格匹配
-    logtype（纯 JSON 子规则不含日志类型元数据，按 sub_rules[i] ↔
-    classification_details[i] 序号回查恢复）；KV 用 logtype 子串过滤（零命中
-    回退全部行）。logtype 不可得或严格匹配零命中时降级 config-sample，
-    报告明确无法证明全量覆盖，绝不产出静默空画像。
+    Missing/invalid rows remain in the iterator so profile scan counts retain
+    their original meaning. Config samples have no original log line number.
     """
-    lines = [str(line) for line in (raw_log_lines or []) if str(line).strip()]
+    lines = [(number, str(line)) for number, line in enumerate(raw_log_lines or [], 1)
+             if str(line).strip()]
     classification = dict(classification or {})
-    fi_pattern = None
-    feature_identifier = str(classification.get("feature_identifier") or "")
-    if feature_identifier:
-        try:
-            fi_pattern = re.compile(feature_identifier)
-        except re.error:
-            fi_pattern = None
+    logtype = _parser_logtype(owner)
+    details = [str(detail.get("logtype") or "")
+               for detail in (classification.get("classification_details") or []) if isinstance(detail, dict)]
+    if not logtype and rule_position is not None and rule_position < len(details):
+        logtype = details[rule_position]
+    parser = owner.get("parser") or {}
+    parser_name = str(parser.get("name") or "")
+    pattern = None
+    try:
+        if classification.get("feature_identifier"):
+            pattern = re.compile(str(classification["feature_identifier"]))
+    except re.error:
+        pass
     body_group = int(classification.get("feature_body_group", 1) or 1)
     value_group = int(classification.get("feature_value_group", 2) or 2)
-    details_logtypes = [
-        str(detail.get("logtype") or "")
-        for detail in (classification.get("classification_details") or [])
-        if isinstance(detail, dict)
-    ]
+    if parser_name == "json" and pattern is not None and logtype:
+        matches = [(number, line, match) for number, line in lines if (match := pattern.search(line))
+                   and len(match.groups()) >= max(body_group, value_group)
+                   and match.group(value_group) == logtype]
+        if matches:
+            def json_values():
+                for number, line, match in matches:
+                    try:
+                        body = json.loads(match.group(body_group) or line)
+                        value = _lookup_member_value(body, target)
+                        yield number, value is not _MISSING, value
+                    except (json.JSONDecodeError, ValueError):
+                        yield number, False, None
+            return "full-logs", json_values()
+    elif parser_name in ("delimitWithKeyMap", "delimit"):
+        from agent.tools.rule_generator.utils import extract_kv_pairs
+        member_lines = [(number, line) for number, line in lines if logtype and logtype in line] or lines
+        def kv_values():
+            for number, line in member_lines:
+                pairs = dict(extract_kv_pairs(line, _parser_delimit(owner), str(parser.get("tab") or "=")))
+                yield number, target in pairs, pairs.get(target)
+        return "full-logs", kv_values()
+    if config_samples is None:
+        config_samples = next((entry.get("result") or [] for entry in owner.get("normalize", [])
+                               if isinstance(entry, dict) and entry.get("index") == target), [])
+    return "config-sample", ((None, True, value) for value in config_samples)
 
+
+def build_value_profiles_from_logs(
+    sub_rules: Any, raw_log_lines: list[str], classification: Mapping[str, Any] | None = None,
+) -> dict[ProfileKey, FieldValueProfile]:
+    """Scan each rule using the shared value reader; retain the 10-value policy."""
     profiles: dict[ProfileKey, FieldValueProfile] = {}
     for key, display, owner, entry in iter_normalize_owners(sub_rules):
         profile = FieldValueProfile(owner=display, field=key[-1])
-        parser_name = str((owner.get("parser") or {}).get("name") or "")
-        target = key[-1]
-        logtype = _parser_logtype(owner)
-        if not logtype:
-            owner_path = key[:-1]
-            position = owner_path[-1] if owner_path else ""
-            if position.isdigit() and int(position) < len(details_logtypes):
-                logtype = details_logtypes[int(position)]
-
-        handled = False
-        if parser_name == "json" and fi_pattern is not None and logtype:
-            matched = 0
-            for line in lines:
-                match = fi_pattern.search(line)
-                if not match or len(match.groups()) < max(body_group, value_group):
-                    continue
-                if match.group(value_group) != logtype:
-                    continue
-                matched += 1
-                try:
-                    body = json.loads(match.group(body_group) or line)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                value = _lookup_member_value(body, target)
-                if value is not _MISSING:
-                    profile.hit_lines += 1
-                    _accept_value(profile, value)
-            profile.scanned_lines = matched
-            handled = matched > 0
-        elif parser_name in ("delimitWithKeyMap", "delimit"):
-            from agent.tools.rule_generator.utils import extract_kv_pairs
-
-            tab = str((owner.get("parser") or {}).get("tab") or "=")
-            member_lines = (
-                [line for line in lines if logtype and logtype in line] or lines
-            )
-            profile.scanned_lines = len(member_lines)
-            for line in member_lines:
-                pairs = dict(extract_kv_pairs(line, _parser_delimit(owner), tab))
-                if target in pairs:
-                    profile.hit_lines += 1
-                    _accept_value(profile, pairs[target])
-            handled = True
-        if not handled:
-            profile.source = "config-sample"
-            samples = entry.get("result") or []
-            profile.scanned_lines = len(samples)
-            for raw in samples:
-                _accept_value(profile, raw)
+        position = key[-2] if len(key) > 1 else ""
+        source, rows = iter_rule_field_values(owner, key[-1], raw_log_lines, classification,
+                                            int(position) if position.isdigit() else None, entry.get("result") or [])
+        profile.source = source
+        for _number, present, value in rows:
+            profile.scanned_lines += 1
+            if present:
+                profile.hit_lines += 1
+                _accept_value(profile, value)
+        if source == "config-sample":
             profile.hit_lines = profile.scanned_lines - profile.empty_count
         profiles[key] = profile
     return profiles
@@ -432,6 +423,7 @@ __all__ = [
     "build_review_prompt",
     "build_value_profiles_from_config",
     "build_value_profiles_from_logs",
+    "iter_rule_field_values",
     "iter_normalize_owners",
     "review_enum_profile",
     "run_enum_review_stage",

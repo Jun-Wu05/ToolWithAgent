@@ -75,6 +75,9 @@ class Store:
             for m in messages:
                 m["content"] = json.loads(m.pop("content_json"))["text"]
             files = [self._file(r) for r in db.execute("SELECT * FROM files WHERE conversation_id=? ORDER BY created_at,id", (conversation_id,))]
+            current_file, _ = self._current_mapping_input(db, conversation_id)
+            for file in files:
+                file["mapping_eligible"] = bool(current_file and file["id"] == current_file["id"] and file["parse_status"] == "succeeded")
             runs = [self._run(r) for r in db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? ORDER BY r.queued_at,r.id", (conversation_id,))]
             return {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs, "artifacts": self._artifacts(db, conversation_id)}
 
@@ -191,6 +194,107 @@ class Store:
             db.commit()
             return result
 
+    def _current_mapping_input(self, db, conversation_id):
+        file = db.execute("SELECT * FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
+        classification = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind='log_classification' AND a.status='published' ORDER BY a.created_at DESC,a.id DESC LIMIT 1", (conversation_id,)).fetchone()
+        return file, classification
+
+    def enqueue_field_mapping(self, owner_id, conversation_id, *, file_id=None, classification_artifact_id=None,
+                              product, log_vendor, data_source="", idempotency_key=None):
+        from contracts.rule_source import RuleSourceFields
+        if bool(file_id) == bool(classification_artifact_id):
+            raise ValueError("mapping_input_required")
+        if any(len(str(value)) > 160 for value in (product, log_vendor, data_source)):
+            raise ValueError("invalid_source_fields")
+        try:
+            fields = RuleSourceFields.create(product=product, log_vendor=log_vendor, data_source=data_source)
+        except ValueError:
+            raise ValueError("data_source_fields_required") from None
+        source_fields = {"product": fields.product, "log_vendor": fields.log_vendor, "data_source": fields.data_source}
+        request_hash = hashlib.sha256(json.dumps([file_id, classification_artifact_id, source_fields], sort_keys=True).encode()).hexdigest()
+        scope = "field-mapping:" + conversation_id
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.owns(db, conversation_id, owner_id)
+            if idempotency_key:
+                receipt = db.execute("SELECT request_sha256,result_json FROM idempotency_receipts WHERE principal_id=? AND operation_scope=? AND key=?", (owner_id, scope, idempotency_key)).fetchone()
+                if receipt:
+                    if receipt["request_sha256"] != request_hash:
+                        raise ValueError("idempotency_key_reused")
+                    return json.loads(receipt["result_json"])
+            current, classification = self._current_mapping_input(db, conversation_id)
+            if classification_artifact_id:
+                source = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN tasks t ON t.id=a.task_id JOIN runs r ON r.id=a.run_id WHERE a.id=? AND a.conversation_id=? AND t.owner_id=? AND a.kind='log_classification' AND a.status='published'", (classification_artifact_id, conversation_id, owner_id)).fetchone()
+                if source is None:
+                    raise LookupError("artifact_not_found")
+                snapshot = json.loads(source["input_snapshot_json"])
+                file_id = snapshot["file_id"]
+                if classification is None or classification["id"] != classification_artifact_id:
+                    raise ValueError("mapping_input_stale")
+            else:
+                source = None
+            file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=?", (file_id, conversation_id, owner_id)).fetchone()
+            if file is None:
+                raise LookupError("file_not_found")
+            if file["parse_status"] != "succeeded":
+                raise ValueError("file_not_validated")
+            if current is None or current["id"] != file_id:
+                raise ValueError("mapping_input_stale")
+            snapshot = {key: file[key] for key in ("sha256", "storage_key", "media_type")}
+            snapshot.update({"file_id": file_id, "source_fields": source_fields,
+                             "classification_anchor": classification["id"] if classification else None})
+            if source is not None:
+                snapshot.update({"source_artifact_id":source["id"], "source_sha256":source["sha256"], "source_storage_key":source["storage_key"],
+                                 "feature_field":json.loads(source["input_snapshot_json"]).get("feature_field")})
+            result = self._enqueue_task(db, owner_id, conversation_id, "field_mapping", snapshot)
+            if idempotency_key:
+                db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(), owner_id, scope, idempotency_key, request_hash, "completed", json.dumps(result), now()))
+            db.commit()
+            return result
+
+    def _mapping_is_current_db(self, db, claim):
+        file, classification = self._current_mapping_input(db, claim["conversation_id"])
+        snapshot = claim["input"]
+        return bool(file and file["id"] == snapshot["file_id"] and
+                    (classification["id"] if classification else None) == snapshot.get("classification_anchor"))
+
+    def mapping_is_current(self, claim):
+        with connect(self.path) as db:
+            return self._mapping_is_current_db(db, claim)
+
+    def _owned_mapping(self, owner_id, artifact_id):
+        with connect(self.path) as db:
+            row = db.execute("SELECT a.* FROM artifacts a JOIN tasks t ON t.id=a.task_id WHERE a.id=? AND a.kind='field_mapping' AND a.status='published' AND t.owner_id=?", (artifact_id,owner_id)).fetchone()
+            if row is None:
+                raise LookupError("artifact_not_found")
+        key = row["storage_key"]
+        if not key.startswith("artifacts/") or ".." in key.split("/"):
+            raise ValueError("artifact_corrupt")
+        path = (self.root / key).resolve()
+        if not path.is_relative_to((self.root / "artifacts").resolve()):
+            raise ValueError("artifact_corrupt")
+        try:
+            content = path.read_bytes()
+        except OSError:
+            raise ValueError("artifact_corrupt") from None
+        if hashlib.sha256(content).hexdigest() != row["sha256"]:
+            raise ValueError("artifact_corrupt")
+        return dict(row), json.loads(content)
+
+    def mapping_view(self, owner_id, artifact_id, sub_rule=None, page=1, q="", status=None):
+        from toolwithagent_v2.runtime.mapping_projection import mapping_view
+        _row, payload = self._owned_mapping(owner_id, artifact_id)
+        return {"artifact_id": artifact_id, **mapping_view(payload, sub_rule, page, q, status)}
+
+    def mapping_download(self, owner_id, artifact_id):
+        from application.download_names import download_filename
+        row, payload = self._owned_mapping(owner_id, artifact_id)
+        timestamp = datetime.fromisoformat(row["created_at"]).astimezone().strftime("%Y%m%d_%H%M")
+        name = download_filename(payload["download_kind"], timestamp)
+        with connect(self.path) as db:
+            db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason) VALUES(?,?,?,?,?,?,?)", (uid(),owner_id,"artifact_download","artifact",artifact_id,now(),""))
+        return name, payload["download_content"].encode("utf-8")
+
     def enqueue_log_knowledge(self, owner_id, artifact_id):
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -286,8 +390,18 @@ class Store:
                 "file_id": json.loads(row["input_snapshot_json"])["file_id"],
                 "kind": row["kind"], "status": row["status"], "summary": metadata.get("summary", {}),
                 "submission_eligible": bool(metadata.get("submission_eligible")) and bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
+                "mapping_eligible": bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
                 "submission_status": status, "application_id": application_id,
                 "created_at": row["created_at"]})
+        mapping_rows = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind='field_mapping' AND a.status='published' ORDER BY a.created_at,a.id", (conversation_id,)).fetchall()
+        latest_mapping_id = mapping_rows[-1]["id"] if mapping_rows else None
+        for row in mapping_rows:
+            snapshot = json.loads(row["input_snapshot_json"])
+            current = row["id"] == latest_mapping_id and self._mapping_is_current_db(db, {"conversation_id":conversation_id, "input":snapshot})
+            result.append({"id":row["id"], "run_id":row["run_id"], "file_id":snapshot["file_id"],
+                "kind":row["kind"], "status":"published" if current else "stale", "current":current,
+                "source_artifact_id":snapshot.get("source_artifact_id"), "summary":json.loads(row["metadata_json"]).get("summary",{}),
+                "created_at":row["created_at"]})
         return result
 
     def _file(self, row):
@@ -598,6 +712,11 @@ class Store:
                 if row is None:
                     db.rollback()
                     return False
+                if kind == "field_mapping" and not self._mapping_is_current_db(db, claim):
+                    self._assistant_message(db, row["conversation_id"], "主数据或分类结果已变化，请重新执行字段映射")
+                    self._record_state(db, row, "failed", "mapping_input_stale")
+                    db.commit()
+                    return True
                 final.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(stage, final)
                 # The rename is short, but fail closed if the lease expired while
@@ -609,6 +728,8 @@ class Store:
                 artifact_id = uid()
                 db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                            (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata or {}, ensure_ascii=False), now(), len(content)))
+                if kind == "field_mapping" and claim["input"].get("source_artifact_id"):
+                    db.execute("INSERT INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) VALUES(?,?,?)", (claim["input"]["source_artifact_id"],artifact_id,"field_mapping"))
                 self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id,
                             {"artifact_id": artifact_id, "run_id": row["id"], "kind": kind, "version": version})
                 if message:
