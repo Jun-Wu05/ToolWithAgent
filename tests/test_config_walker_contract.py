@@ -123,3 +123,36 @@ def test_collect_config_names去重保序():
         "rules": [{"name": "rule_a"}, {"name": "rule_a"}, {"name": "rule_b"}],
     }
     assert collect_config_names(tree) == ["outer", "rule_a", "rule_b"]
+
+
+def test_resolve_standard_target与填充链同源解析():
+    """目标解析与填充消费同一遍历（#330）：解析出的目标恰是填充命中的条目。"""
+    from agent.shared.mapping_utils import apply_fill_to_config
+    from application.artifact_targets import resolve_standard_target
+
+    config = {
+        "normalize": [
+            {"index": "alarm_name", "field": "event_name", "mappings": []},
+            {"index": "other", "field": "别的字段", "mappings": []},
+        ]
+    }
+
+    assert resolve_standard_target(config, "alarm_name") == "event_name"
+    assert resolve_standard_target(config, "不存在") is None
+    # 同一来源命中多个不同目标 → 不唯一，拒绝解析（调用方按无绑定处理）
+    ambiguous = {
+        "normalize": [
+            {"index": "shared", "field": "f1"},
+            {"index": "shared", "field": "f2"},
+        ]
+    }
+    assert resolve_standard_target(ambiguous, "shared") is None
+
+    filled = apply_fill_to_config(
+        config,
+        {"event_name": [{"mappingType": "EQUAL", "orgValue": "x", "mappingValue": "y"}]},
+    )
+    assert filled["normalize"][0]["mappings"] == [
+        {"mappingType": "EQUAL", "orgValue": "x", "mappingValue": "y"}
+    ]
+    assert filled["normalize"][1]["mappings"] == []
