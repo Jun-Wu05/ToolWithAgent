@@ -340,7 +340,7 @@ def test_existing_v2_database_upgrades_without_losing_data(tmp_path):
     store = Store(Settings(data_dir=db_path.parent))
     assert store.get_conversation("existing", "saved")["title"] == "Saved"
     with connect(db_path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0002_durable_runs"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0003_mapping_drafts"
 
 
 def test_blob_reconciliation_serializes_with_publication(tmp_path, monkeypatch):

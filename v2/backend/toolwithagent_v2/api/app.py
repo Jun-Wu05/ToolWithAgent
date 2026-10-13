@@ -56,12 +56,25 @@ class FieldMappingInput(BaseModel):
     data_source: str = Field(default="", max_length=160)
 
 
+class MappingOperationInput(BaseModel):
+    sub_rule_id: str = Field(max_length=20)
+    source_path: str = Field(min_length=1,max_length=4096)
+    standard_field: str | None = Field(default=None,max_length=160)
+    linked_sub_rule_ids: list[str] = Field(default_factory=list,max_length=1000)
+
+
+class MappingReplacementInput(BaseModel):
+    operation_key: str = Field(min_length=1,max_length=80)
+    proposal: MappingOperationInput
+    confirm: bool
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     store = Store(settings)
     app = FastAPI(title="ToolWithAgent V2", version="0.1.0")
     app.state.store = store
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Idempotency-Key"])
+    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Content-Type", "Idempotency-Key", "If-Match"])
 
     def principal(request: Request):
         user_id = request.cookies.get("v2_dev_user") or ("dev-user" if settings.development else None)
@@ -100,8 +113,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "idempotency_key_reused", "run_not_retryable", "task_has_active_run",
             "run_not_cancellable", "run_not_stoppable", "run_not_waiting",
             "invalid_confirmation_token", "confirmation_expired",
+            "mapping_base_stale", "mapping_catalog_changed", "draft_revision_conflict", "draft_apply_in_progress", "draft_not_editable",
+            "draft_resolution_required", "mapping_target_conflict", "mapping_link_conflict", "mapping_draft_apply_stale",
         } else 400)
-        return JSONResponse(status_code=status, content={"error": {"code": code, "message": code, "details": {}, "request_id": request.state.request_id}})
+        if code == "draft_revision_required":
+            status = 428
+        return JSONResponse(status_code=status, content={"error": {"code": code, "message": code, "details": getattr(exc,"details",{}), "request_id": request.state.request_id}})
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):
@@ -163,8 +180,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                           **payload.model_dump(), idempotency_key=idempotency_key)
 
     @app.get("/api/v2/artifacts/{artifact_id}/mapping-view")
-    def mapping_view(request: Request, artifact_id: str, sub_rule: str | None = None, page: int = 1, q: str = "", status: str | None = None):
-        return store.mapping_view(principal(request)["id"], artifact_id, sub_rule, page, q, status)
+    def mapping_view(request: Request, artifact_id: str, sub_rule: str | None = None, page: int = 1, q: str = "", status: str | None = None, draft_id: str | None = None):
+        return store.mapping_view(principal(request)["id"], artifact_id, sub_rule, page, q, status,draft_id)
+
+    def draft_revision(value):
+        if value is None:
+            raise ValueError("draft_revision_required")
+        value = value.strip('"')
+        if not value.isdecimal() or int(value) < 1:
+            raise ValueError("invalid_draft_revision")
+        return int(value)
+
+    @app.get("/api/v2/standard-fields")
+    def standard_fields(request: Request, draft_id: str | None = None, sub_rule: str | None = None, q: str = ""):
+        return store.standard_fields(principal(request)["id"],draft_id,sub_rule,q)
+
+    @app.post("/api/v2/artifacts/{artifact_id}/mapping-drafts")
+    def create_mapping_draft(request: Request, artifact_id: str):
+        return store.create_mapping_draft(user_writer(request)["id"],artifact_id)
+
+    @app.get("/api/v2/mapping-drafts/{draft_id}")
+    def get_mapping_draft(request: Request, draft_id: str):
+        return store.get_mapping_draft(principal(request)["id"],draft_id)
+
+    @app.patch("/api/v2/mapping-drafts/{draft_id}/operations/{operation_key}")
+    def save_mapping_operation(request: Request, draft_id: str, operation_key: str, payload: MappingOperationInput, if_match: str | None = Header(None)):
+        return store.save_mapping_operation(user_writer(request)["id"],draft_id,operation_key,payload.model_dump(),draft_revision(if_match))
+
+    @app.get("/api/v2/mapping-drafts/{draft_id}/same-source-candidates/{operation_key}")
+    def mapping_candidates(request: Request, draft_id: str, operation_key: str):
+        return store.mapping_candidates(principal(request)["id"],draft_id,operation_key)
+
+    @app.post("/api/v2/mapping-drafts/{draft_id}/replacement-confirmations")
+    def confirm_mapping_replacement(request: Request, draft_id: str, payload: MappingReplacementInput, if_match: str | None = Header(None), idempotency_key: str | None = Header(None)):
+        return store.confirm_mapping_replacement(user_writer(request)["id"],draft_id,payload.operation_key,payload.proposal.model_dump(),payload.confirm,draft_revision(if_match),idempotency_key)
+
+    @app.post("/api/v2/mapping-drafts/{draft_id}/apply",status_code=201)
+    def apply_mapping_draft(request: Request, draft_id: str, if_match: str | None = Header(None), idempotency_key: str | None = Header(None)):
+        return store.apply_mapping_draft(user_writer(request)["id"],draft_id,draft_revision(if_match),idempotency_key)
+
+    @app.delete("/api/v2/mapping-drafts/{draft_id}")
+    def discard_mapping_draft(request: Request, draft_id: str, if_match: str | None = Header(None)):
+        return store.discard_mapping_draft(user_writer(request)["id"],draft_id,draft_revision(if_match))
 
     @app.get("/api/v2/artifacts/{artifact_id}/download")
     def mapping_download(request: Request, artifact_id: str):

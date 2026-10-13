@@ -27,6 +27,7 @@ from .core import (
 )
 from .field_mapping import (
     apply_field_mapping_to_sub_rules,
+    apply_manual_field_mappings,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "rules_to_base64_text",
     # 标准字段映射
     "apply_field_mapping_to_sub_rules",
+    "apply_manual_field_mappings",
 ]

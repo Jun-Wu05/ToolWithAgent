@@ -149,3 +149,18 @@ describe('protected artifact API', () => {
     await expect(api.mappingDownload('map-1')).rejects.toMatchObject({ status: 404, message: '结果不存在或当前身份无权查看，请返回会话。' })
   })
 })
+
+describe('Draft API wire contract', () => {
+  it('preserves structured conflict details and expected revision for replacement', async () => {
+    const details = { operation_key: 'row-key', proposal: { sub_rule_id: '0', source_path: 'src.ip', standard_field: '源地址', linked_sub_rule_ids: [] }, occupied_by: 'other.ip', candidates: { items: [] } }
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ error: { code: 'mapping_target_conflict', details } }), { status: 409 }))
+    await expect(api.saveMapping('draft-1', 7, 'row-key', details.proposal)).rejects.toMatchObject({ code: 'mapping_target_conflict', status: 409, details })
+    expect(fetch).toHaveBeenCalledWith('/api/v2/mapping-drafts/draft-1/operations/row-key', expect.objectContaining({ method: 'PATCH', headers: expect.objectContaining({ 'If-Match': '7' }), body: JSON.stringify(details.proposal) }))
+  })
+  it('sends apply idempotency and discard revision headers', async () => {
+    await api.applyMappingDraft('draft-1', 4, 'durable-key')
+    expect(fetch).toHaveBeenLastCalledWith('/api/v2/mapping-drafts/draft-1/apply', expect.objectContaining({ method: 'POST', headers: { 'If-Match': '4', 'Idempotency-Key': 'durable-key' } }))
+    await api.discardMappingDraft('draft-1', 4)
+    expect(fetch).toHaveBeenLastCalledWith('/api/v2/mapping-drafts/draft-1', expect.objectContaining({ method: 'DELETE', headers: { 'If-Match': '4' } }))
+  })
+})

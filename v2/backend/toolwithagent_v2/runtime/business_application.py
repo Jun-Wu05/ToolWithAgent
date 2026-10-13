@@ -166,3 +166,9 @@ class BusinessApplication:
             "samples": collect_samples(config, lines, session["log_classification"]),
             "download_kind": mapped.download_kind or "mapped_sub_rules",
             "download_content": rules_to_base64_text(config)}
+
+
+    def apply_mapping_draft(self, base: dict, snapshot: dict) -> dict:
+        """Apply a frozen Draft deterministically; no team, adapters or model calls."""
+        from toolwithagent_v2.runtime.mapping_drafts import project_payload
+        return project_payload(base, snapshot["draft_operations"])

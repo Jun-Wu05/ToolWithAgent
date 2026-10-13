@@ -1,8 +1,16 @@
 """Owner-only mapping table projection; no business decisions or editing."""
+import hashlib
+import json
 from application.standard_enum_mapping import iter_rule_field_values
 from agent.tools.rule_generator.utils import value_to_str
+from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES, MAPPING_EXCLUDED_STANDARD_FIELDS
 
 STATUSES = ('matched', 'unmatched', 'parse_error')
+
+
+def operation_key(rule_id, source_path):
+    identity = json.dumps([str(rule_id), source_path], ensure_ascii=False).encode('utf-8')
+    return 'row-' + hashlib.sha256(identity).hexdigest()[:24]
 
 
 def collect_samples(config, lines, classification):
@@ -32,6 +40,8 @@ def collect_samples(config, lines, classification):
 def mapping_rows(payload):
     original = {item['原始字段名']: item for item in payload['mapping_rows']}
     result = []
+    manual = {(str(item["sub_rule_id"]), item["source_path"]) for item in payload.get("manual_fields", [])}
+    draft_fields = {(str(item["sub_rule_id"]), item["source_path"]) for item in payload.get("draft_fields", [])}
     for position, rule in enumerate(payload['config']):
         rows = []
         for entry in rule.get('normalize', []):
@@ -40,16 +50,28 @@ def mapping_rows(payload):
                 continue  # Generated platform fields are not editable source fields.
             mapped = original[source]
             standard = str(entry.get('field') or '')
+            editable = source not in EXCLUDED_FIELD_INDICES and standard not in MAPPING_EXCLUDED_STANDARD_FIELDS
             status = 'matched' if standard else 'unmatched'
             if '解析异常' in mapped.get('匹配状态', ''):
                 status = 'parse_error'
-            evidence = mapped.get('匹配状态', '')
+            user_modified = (str(position), source) in manual
+            evidence = "用户选择" if user_modified else mapped.get('匹配状态', '')
             values = payload.get('samples', {}).get(str(position), {}).get(source, [])[:20]
             rows.append({'source_path': source, 'samples': [item['value'] for item in values[:3]],
                 'expanded_samples': values, 'standard_field': standard, 'evidence': evidence,
                 'status': status, 'warning': '未匹配' if status == 'unmatched' else ('解析异常' if status == 'parse_error' else ''),
-                'user_modified': False})
-        rows.sort(key=lambda row: STATUSES.index(row['status']))
+                'user_modified': user_modified, 'sub_rule_id': str(position),
+                'editable': editable, 'disabled_reason': None if editable else 'mapping_source_not_editable',
+                'draft_modified': (str(position), source) in draft_fields,
+                'group_status': payload.get('group_statuses', {}).get(str(position), {}).get(source, status)})
+        order = payload.get('row_order', {}).get(str(position))
+        if order is not None:
+            positions = {source: index for index, source in enumerate(order)}
+            rows.sort(key=lambda row: positions.get(row['source_path'], len(positions)))
+        else:
+            rows.sort(key=lambda row: (STATUSES.index(row['status']), not row['user_modified']))
+        for row in rows:
+            row['operation_key'] = operation_key(str(position), row['source_path'])
         result.append({'id': str(position), 'name': str(rule.get('name') or f'子规则 {position+1}'), 'rows': rows})
     return result
 

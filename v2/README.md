@@ -1,6 +1,6 @@
 # ToolWithAgent V2 独立入口
 
-V2 API、Worker、前端与原 Chainlit 入口并行运行。默认端口为 API `8100`、React `5173`；SQLite、上传文件和 Python 环境只放在当前 worktree 的 `tmp/` 中。当前支持文件校验、日志类型提取、日志知识申请与字段映射。业务通过既有 Application 执行；Run 支持持久恢复、取消和重跑。字段映射结果默认显示对话摘要，可原位放大为只读表格，按子规则搜索、筛选、分页并下载完整结果；编辑 Draft、冲突处理和应用修改由 #267 承接。
+V2 API、Worker、前端与原 Chainlit 入口并行运行。默认端口为 API `8100`、React `5173`；SQLite、上传文件和 Python 环境只放在当前 worktree 的 `tmp/` 中。当前支持文件校验、日志类型提取、日志知识申请与字段映射。业务通过既有 Application 执行；Run 支持持久恢复、取消和重跑。字段映射结果默认显示对话摘要，可原位放大为编辑器，按子规则搜索、筛选、分页、自动保存 Draft，确认占用替换和精确路径联动，并原子应用为新版本或下载正式结果。
 
 ## 本地启动（PowerShell）
 
@@ -70,4 +70,65 @@ tmp/venv/Scripts/python.exe -m pytest -q v2/backend/tests --basetemp=tmp/pytest-
 
 事件名称待确认或自动威胁类型链路产生业务警告时，主字段映射仍按既有 Application 语义成功。普通摘要只增加待确认数量和预定义警告码，完整警告与最终标注明细只在本人打开的结果视图中展示，不进入普通事件或运行诊断。
 
-当前字段映射契约没有数值匹配度和歧义标记；表格展示既有匹配状态作为依据，在每个状态组内保持原字段顺序。按真实匹配度排序及歧义提醒需要业务先提供可信证据，本轮不虚构分数或设置前端阈值。
+当前字段映射契约没有数值匹配度和歧义标记；表格展示既有匹配状态作为依据，自动匹配行在每个状态组内保持原字段顺序，人工选择行优先。按真实匹配度排序及歧义提醒需要业务先提供可信证据，本轮不虚构分数或设置前端阈值。
+
+## 字段映射 Draft（#267 冻结契约）
+
+正式映射 Blob 不可变。编辑只保存本人 Draft；未应用的实际修改不会成为后续任务输入，并在服务重启后恢复。`GET /conversations/{id}` 的 `drafts` 仅含安全摘要，不含字段、样例或操作内容。多个旧来源 Draft 可逐个恢复、丢弃；`base_current=false` 时不能编辑或应用，但可读取和明确丢弃。
+
+所有以下路径带 `/api/v2` 前缀。写操作仅允许 User 操作自己的资源；其他用户资源返回 404，Developer/Admin 写操作返回 403。
+
+- `POST /artifacts/{id}/mapping-drafts`：获取或创建当前映射的 Draft，返回 `Draft`。
+- `GET /mapping-drafts/{id}`：恢复完整本人 Draft。
+- `GET /artifacts/{id}/mapping-view?draft_id={id}&sub_rule=0&page=1&q=&status=`：叠加草稿，整条子规则搜索/筛选后按 50 行分页。未传 `draft_id` 仍是正式产物。
+- `GET /standard-fields?draft_id={id}&sub_rule=0&q=`：返回 `items[{name,category,occupied_by,disabled_reason}]`，只使用标准表规范中文名并排除事件名称、事件级别、日志类型、威胁类型。占用目标仍可见，`occupied_by` 是完整原始字段路径；占用不代表下拉禁用，选择后需要确认替换。
+- `PATCH /mapping-drafts/{id}/operations/{operation_key}`：自动保存当前字段及明确选择的联动范围。
+- `GET /mapping-drafts/{id}/same-source-candidates/{operation_key}`：读取已保存操作的精确同路径候选。
+- `POST /mapping-drafts/{id}/replacement-confirmations`：确认或取消占用替换。
+- `POST /mapping-drafts/{id}/apply`：冻结完整修改并排队新的确定性 Task/Run，返回 `{task,run,draft}`，HTTP 201。排队不是应用成功；等待 Run `succeeded` 且 Draft `applied`/`applied_artifact_id`，再继续发送原指令。
+- `DELETE /mapping-drafts/{id}`：明确丢弃，返回 Draft `discarded`。正在应用时先等待或取消 Run。
+
+`Draft` 字段如下：
+
+```json
+{
+  "id": "...", "conversation_id": "...", "base_artifact_id": "...",
+  "revision": 2, "status": "active", "changed_count": 1,
+  "operation_count": 1, "apply_run_id": null, "applied_artifact_id": null,
+  "base_current": true,
+  "operations": [{"operation_key": "row-...", "proposal": {"sub_rule_id": "0", "source_path": "src.ip", "standard_field": "源地址", "linked_sub_rule_ids": []}, "changes": [{"sub_rule_id": "0", "source_path": "src.ip", "standard_field": "源地址"}]}]
+}
+```
+
+普通 conversation 的 Draft 摘要省略 `operations` 和 `operation_count`；`changed_count` 是相对基准正式产物的实际最终字段变更数，回退至原状态可归零，归零不阻止发送新消息。Draft 状态为 `active` / `applying` / `applied` / `discarded`。编辑投影行额外返回：`sub_rule_id`、稳定 `operation_key`、`draft_modified`、`group_status`、`editable`、`disabled_reason`。`editable=false` 的平台固定来源或已占用平台固定目标行只读（后端同样拒绝调整）。正常威胁链的独立“威胁类型”条目与 `%{source}` 提取绑定不被字段关系编辑改变，原始字段/result始终保留。`user_modified`/“用户选择”表示人工证据（也可能来自基准正式产物）；`draft_modified` 才表示本 Draft 的未应用修改。UI 按 `group_status` 保持原组和原行位置，`status` 显示实际当前状态，应用后新正式产物重新排序。
+
+PATCH、替换确认、apply、DELETE 必须传 `If-Match: <revision>`。apply 和替换确认同时必须传 `Idempotency-Key`，相同请求重试复用持久 receipt。PATCH 使用后端行返回的 `operation_key`，该 key 固定绑定子规则位置和完整路径，不由 UI 随意生成；同操作最新 revision 下的相同请求不重复增加 revision。子规则 `id` 是位置字符串，重复显示名不会混淆。
+
+PATCH body：
+
+```json
+{"sub_rule_id":"0","source_path":"src.ip","standard_field":"源地址","linked_sub_rule_ids":[]}
+```
+
+`standard_field=null` 表示取消映射，保留原字段。默认只修改当前子规则；`linked_sub_rule_ids` 仅包含用户明确选择且无占用冲突的其他精确同路径子规则，不接受模糊名或末段名。成功返回 `{draft,candidates}`；`candidates` 为 `{source_path,standard_field,items[{sub_rule_id,name,current_standard_field,samples,selectable,conflict_source_path,selected,disabled_reason}]}`。`disabled_reason` 是兼容新增字段：平台固定来源或固定目标保护为 `mapping_source_not_editable`，目标占用为 `mapping_target_conflict`，可选候选为 `null`；同时存在只读和占用时优先显示只读保护原因，`conflict_source_path` 仍保留占用信息。只有可编辑且无占用的候选 `selectable=true`；伪造不可选的 linked ID 仍返回 `mapping_link_conflict`，不保存修改。后续可 GET 候选或用相同 operation key PATCH 新范围；整组选中修改保存在同一操作内。
+
+选择已占用目标返回 HTTP 409 `mapping_target_conflict`，不保存任何变化。错误 `details` 返回 `{operation_key,proposal,occupied_by,candidates}`，即使该操作尚未保存也足够打开一次替换与联动范围对话框。UI 可在 `proposal.linked_sub_rule_ids` 中放入明确选中的 eligible IDs，再提交：
+
+```json
+{"operation_key":"row-...","proposal":{"sub_rule_id":"0","source_path":"src.ip","standard_field":"源地址","linked_sub_rule_ids":["2"]},"confirm":true}
+```
+
+确认在相同 revision 下重新验证，以一个原子操作清空当前子规则原占用者、赋值当前字段并保存显式联动。`confirm=false` 不改变 Draft/ revision。其他子规则占用冲突项始终 `selectable=false`，不能借替换确认绕过。改目标、取消、回退或改变联动范围时，先前操作的旧占用清理和已取消的联动不会残留。
+
+稳定错误码：缺少 `If-Match` 为 428 `draft_revision_required`；非法 header 为 400 `invalid_draft_revision`；过期 revision 为 409 `draft_revision_conflict`（details 当前 revision），必须停止写入并明确重新加载。409 还包括 `mapping_target_conflict`、`mapping_link_conflict`、`mapping_base_stale`、`mapping_catalog_changed`、`draft_apply_in_progress`、`draft_not_editable`、`draft_resolution_required`、`mapping_draft_apply_stale`、`idempotency_key_reused`。非法目标/来源/key/scope、空 Draft 或缺少幂等 key 返回 400。Owner 编辑接口可返回错误位置；普通消息、SSE 与 Run 不暴露字段或业务值。
+
+apply 冻结 base 内容、Draft revision/operations、当前目录版本及原 Run 的 Provider/Prompt/标准字段审计版本，不调用模型。Worker 在同一发布事务重查 revision、当前来源、目录版本、lease/leader/fence，生成会话内递增版本、新 Task/Run 与 `mapping_edit` 血缘，完成 Draft 并把旧产物及已有下游标为 stale。改变映射目标时清理旧目标的值映射/默认值，保留字段提取样例。失败、取消、失联或上游变化均保留可恢复 Draft 和原正式产物；旧失败 Run 不能覆盖后来编辑。旧自动映射运行在成功人工应用后失去发布资格，正常自动映射排队不受影响。
+
+存在实际未应用修改时，新的 `POST /conversations/{id}/messages` 返回 409 `draft_resolution_required`；用户必须选择应用后发送、丢弃后发送或返回编辑。已成功消息的相同 receipt 重放仍返回原结果。发送入口不能把 Draft operations 作为业务输入。
+## Draft 编辑范围与验收边界
+
+草稿编辑和恢复沿基础正式版本保持固定行序与分组。正式应用的新版本按实际状态与人工修改优先重新排序；重新打开未应用草稿时的重排仍是已记录的 Spec Minor。
+
+原生下拉选择即时自动保存，保存期间禁用关联控件。技术规格中的 300–500ms 防抖尚待后续交互完善，快速键盘切换可能需要等待当前保存完成；保存失败的选择可保留并重试。
+
+浏览器视觉、真实 Provider、双入口真实样本与平台导入仍待人工验收；本轮自动验证不能替代这些合入及发布门槛。

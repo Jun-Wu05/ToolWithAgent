@@ -27,21 +27,47 @@ export type FieldMappingArtifact = {
 }
 export type MappingInput = { file_id?: string; classification_artifact_id?: string; product: string; log_vendor: string; data_source?: string }
 export type MappingStatus = 'matched' | 'unmatched' | 'parse_error'
+export type MappingProposal = { sub_rule_id: string; source_path: string; standard_field: string | null; linked_sub_rule_ids: string[] }
+export type MappingCandidates = { source_path: string; standard_field: string | null; items: { sub_rule_id: string; name: string; current_standard_field: string; samples: string[]; selectable: boolean; conflict_source_path: string | null; selected: boolean; disabled_reason?: string | null }[] }
+export type MappingDraftSummary = { id: string; conversation_id: string; base_artifact_id: string; revision: number; status: 'active' | 'applying' | 'applied' | 'discarded'; changed_count: number; apply_run_id: string | null; applied_artifact_id: string | null; base_current: boolean }
+export type MappingDraft = MappingDraftSummary & { operation_count: number; operations: { operation_key: string; proposal: MappingProposal; changes: Omit<MappingProposal, 'linked_sub_rule_ids'>[] }[] }
+export type StandardField = { name: string; category: string; occupied_by: string | null; disabled_reason: string | null }
+export type MappingConflict = { operation_key: string; proposal: MappingProposal; occupied_by: string; candidates: MappingCandidates }
+export type DraftSave = { draft: MappingDraft; candidates: MappingCandidates }
 export type MappingView = {
   artifact_id: string; sub_rules: { id: string; name: string; field_count: number }[]; sub_rule_id: string
   items: { source_path: string; samples: string[]; expanded_samples: { value: string; line_number: number | null; source?: string }[];
-    standard_field: string; evidence: string; status: MappingStatus; warning: string; user_modified: boolean }[]
+    standard_field: string; evidence: string; status: MappingStatus; warning: string; user_modified: boolean; sub_rule_id?: string; operation_key?: string; draft_modified?: boolean; group_status?: MappingStatus; editable?: boolean; disabled_reason?: string | null }[]
   total: number; page: number; page_size: number; sample_line_reference: 'log_entry'
   event_annotations?: EventAnnotation[]; warnings?: MappingWarning[]
 }
-export type MappingQuery = { sub_rule?: string; page: number; q: string; status: string }
+export type MappingQuery = { sub_rule?: string; page: number; q: string; status: string; draft_id?: string }
 export type ArtifactDownload = { name: string; blob: Blob }
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string }
-export type Conversation = ConversationSummary & { messages: Message[]; files: FileRecord[]; runs: Run[]; artifacts?: (ClassificationArtifact | FieldMappingArtifact)[] }
+export type Conversation = ConversationSummary & { messages: Message[]; files: FileRecord[]; runs: Run[]; artifacts?: (ClassificationArtifact | FieldMappingArtifact)[]; drafts?: MappingDraftSummary[] }
 export type EventRecord = { sequence: number; event_type: string; resource_type: string; resource_id: string; payload: Record<string, unknown> }
-export type ApiError = Error & { code?: string; status?: number }
+export type ApiError = Error & { code?: string; status?: number; details?: unknown }
 const base = '/api/v2'
 const messages: Record<string, string> = {
+  mapping_draft_not_found: '草稿不存在或当前身份无权查看，请返回会话。',
+  mapping_draft_empty: '草稿没有实际修改，无需应用。',
+  mapping_source_not_editable: '该字段由平台维护，不能在此修改。',
+  mapping_occupant_not_editable: '目标由平台维护的字段占用，不能替换。',
+  mapping_target_invalid: '请选择标准字段目录中的合法中文名称。',
+  mapping_scope_invalid: '联动范围无效，请重新选择子规则。',
+  mapping_operation_key_invalid: '字段来源已变化，请重新加载草稿。',
+  draft_revision_required: '保存需要当前草稿版本，请重新加载草稿。',
+  invalid_draft_revision: '草稿版本无效，请重新加载草稿。',
+  invalid_request: '提交内容无效，请检查后重试。',
+  draft_revision_conflict: '草稿已在其他页面更新，已停止保存。请重新加载草稿。',
+  mapping_target_conflict: '这个标准字段已被占用，请确认是否替换。',
+  mapping_link_conflict: '所选联动子规则存在占用冲突，请重新选择范围。',
+  mapping_base_stale: '草稿来源已过期，可查看或丢弃，请编辑当前正式结果。',
+  mapping_catalog_changed: '标准字段目录已变化，请重新加载后检查修改。',
+  draft_apply_in_progress: '修改正在应用，请等待执行完成。',
+  draft_not_editable: '这份草稿不能继续编辑，请重新打开当前结果。',
+  draft_resolution_required: '还有未应用的修改，请先选择如何处理草稿。',
+  mapping_draft_apply_stale: '应用时草稿或来源已变化，修改未发布，请重新检查草稿。',
   mapping_input_stale: '主数据或分类结果已变化，请重新选择当前输入。',
   mapping_input_required: '请选择一份当前输入后开始映射。',
   data_source_fields_required: '请填写产品和厂商。',
@@ -62,6 +88,7 @@ async function responseFor(path: string, init?: RequestInit): Promise<Response> 
     const error = new Error(messages[body?.error?.code || body?.detail] || body?.error?.message || body?.detail || '请求失败，请稍后重试。') as ApiError
     error.code = body?.error?.code
     error.status = response.status
+    error.details = body?.error?.details
     throw error
   }
   return response
@@ -104,13 +131,22 @@ export const api = {
   mappingView: (id: string, query: MappingQuery, signal?: AbortSignal) => {
     const params = new URLSearchParams({ page: String(query.page), q: query.q, status: query.status })
     if (query.sub_rule !== undefined) params.set('sub_rule', query.sub_rule)
+    if (query.draft_id) params.set('draft_id', query.draft_id)
     return request<MappingView>('/artifacts/' + encodeURIComponent(id) + '/mapping-view?' + params, { signal })
   },
   mappingDownload,
+  createMappingDraft: (id: string) => request<MappingDraft>('/artifacts/' + encodeURIComponent(id) + '/mapping-drafts', { method: 'POST' }),
+  mappingDraft: (id: string) => request<MappingDraft>('/mapping-drafts/' + encodeURIComponent(id)),
+  standardFields: (draftId: string, subRule: string, signal?: AbortSignal) => request<{ items: StandardField[] }>('/standard-fields?' + new URLSearchParams({ draft_id: draftId, sub_rule: subRule }), { signal }),
+  saveMapping: (id: string, revision: number, operationKey: string, proposal: MappingProposal) => request<DraftSave>('/mapping-drafts/' + encodeURIComponent(id) + '/operations/' + encodeURIComponent(operationKey), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': String(revision) }, body: JSON.stringify(proposal) }),
+  mappingCandidates: (id: string, operationKey: string) => request<MappingCandidates>('/mapping-drafts/' + encodeURIComponent(id) + '/same-source-candidates/' + encodeURIComponent(operationKey)),
+  confirmMapping: (id: string, revision: number, conflict: MappingConflict, proposal: MappingProposal, confirm: boolean, key: string) => request<DraftSave>('/mapping-drafts/' + encodeURIComponent(id) + '/replacement-confirmations', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': String(revision), 'Idempotency-Key': key }, body: JSON.stringify({ operation_key: conflict.operation_key, proposal, confirm }) }),
+  applyMappingDraft: (id: string, revision: number, key: string) => request<{ task: { id: string; status: string }; run: Run; draft: MappingDraft }>('/mapping-drafts/' + encodeURIComponent(id) + '/apply', { method: 'POST', headers: { 'If-Match': String(revision), 'Idempotency-Key': key } }),
+  discardMappingDraft: (id: string, revision: number) => request<MappingDraft>('/mapping-drafts/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'If-Match': String(revision) } }),
   submitLogKnowledge: (artifactId: string) => request<{ task: { id: string; status: string }; run: Run }>('/artifacts/' + encodeURIComponent(artifactId) + '/submit-log-knowledge', { method: 'POST' }),
   retryRun: (id: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/retry', { method: 'POST' }),
   cancelToken: (id: string) => request<{ token: string }>('/runs/' + encodeURIComponent(id) + '/cancel-token', { method: 'POST' }),
   cancelRun: (id: string, token: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }),
-  run: (id: string) => request<Run>('/runs/' + encodeURIComponent(id)),
+  run: async (id: string): Promise<Run> => { const run = await request<Run>('/runs/' + encodeURIComponent(id)); return { ...run, error_message: messages[run.error_code || run.error_message || ''] || run.error_message } },
   eventsUrl: (id: string, after: number) => base + '/conversations/' + encodeURIComponent(id) + '/events?after=' + after,
 }

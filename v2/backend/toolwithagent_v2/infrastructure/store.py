@@ -79,7 +79,7 @@ class Store:
             for file in files:
                 file["mapping_eligible"] = bool(current_file and file["id"] == current_file["id"] and file["parse_status"] == "succeeded")
             runs = [self._run(r) for r in db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? ORDER BY r.queued_at,r.id", (conversation_id,))]
-            return {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs, "artifacts": self._artifacts(db, conversation_id)}
+            return {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs, "artifacts": self._artifacts(db, conversation_id), "drafts": [self._draft_response(db,draft,summary=True) for draft in db.execute("SELECT * FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') ORDER BY created_at,id", (conversation_id,owner_id))]}
 
     def create_message(self, owner_id, conversation_id, content, idempotency_key=None):
         content = content.strip()
@@ -96,6 +96,8 @@ class Store:
                     if receipt["request_sha256"] != request_hash:
                         raise ValueError("idempotency_key_reused")
                     return json.loads(receipt["result_json"])
+            if db.execute("SELECT 1 FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') AND changed_count>0 LIMIT 1", (conversation_id,owner_id)).fetchone():
+                raise ValueError("draft_resolution_required")
             db.execute("INSERT INTO messages(id,conversation_id,actor,kind,content_json,created_at) VALUES(?,?,?,?,?,?)", (message_id, conversation_id, "user", "text", json.dumps({"text": content}, ensure_ascii=False), timestamp))
             db.execute("UPDATE conversations SET updated_at=?,revision=revision+1 WHERE id=?", (timestamp, conversation_id))
             self._event(db, conversation_id, "message_created", "message", message_id, {"actor": "user"})
@@ -242,7 +244,8 @@ class Store:
                 raise ValueError("mapping_input_stale")
             snapshot = {key: file[key] for key in ("sha256", "storage_key", "media_type")}
             snapshot.update({"file_id": file_id, "source_fields": source_fields,
-                             "classification_anchor": classification["id"] if classification else None})
+                             "classification_anchor": classification["id"] if classification else None,
+                             "mapping_edit_anchor": self._mapping_edit_anchor(db,conversation_id)})
             if source is not None:
                 snapshot.update({"source_artifact_id":source["id"], "source_sha256":source["sha256"], "source_storage_key":source["storage_key"],
                                  "feature_field":json.loads(source["input_snapshot_json"]).get("feature_field")})
@@ -264,7 +267,7 @@ class Store:
 
     def _owned_mapping(self, owner_id, artifact_id):
         with connect(self.path) as db:
-            row = db.execute("SELECT a.* FROM artifacts a JOIN tasks t ON t.id=a.task_id WHERE a.id=? AND a.kind='field_mapping' AND a.status='published' AND t.owner_id=?", (artifact_id,owner_id)).fetchone()
+            row = db.execute("SELECT a.* FROM artifacts a JOIN tasks t ON t.id=a.task_id WHERE a.id=? AND a.kind='field_mapping' AND a.status IN ('published','stale') AND t.owner_id=?", (artifact_id,owner_id)).fetchone()
             if row is None:
                 raise LookupError("artifact_not_found")
         key = row["storage_key"]
@@ -281,10 +284,238 @@ class Store:
             raise ValueError("artifact_corrupt")
         return dict(row), json.loads(content)
 
-    def mapping_view(self, owner_id, artifact_id, sub_rule=None, page=1, q="", status=None):
+    def mapping_view(self, owner_id, artifact_id, sub_rule=None, page=1, q="", status=None, draft_id=None):
         from toolwithagent_v2.runtime.mapping_projection import mapping_view
         _row, payload = self._owned_mapping(owner_id, artifact_id)
-        return {"artifact_id": artifact_id, **mapping_view(payload, sub_rule, page, q, status)}
+        draft = None
+        if draft_id:
+            from toolwithagent_v2.runtime.mapping_drafts import project_payload
+            with connect(self.path) as db:
+                row = self._owned_draft(db,owner_id,draft_id)
+                if row["base_artifact_id"] != artifact_id:
+                    raise LookupError("mapping_draft_not_found")
+                payload = project_payload(payload,self._draft_operations(db,draft_id),editing=True)
+                draft = self._draft_response(db,row)
+        return {"artifact_id": artifact_id, "draft": draft, **mapping_view(payload, sub_rule, page, q, status)}
+
+    def _mapping_base_current_db(self, db, artifact_id, conversation_id):
+        row = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.id=? AND a.conversation_id=? AND a.kind='field_mapping' AND a.status='published'", (artifact_id, conversation_id)).fetchone()
+        latest = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='field_mapping' AND status='published' ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
+        return bool(row and latest and latest["id"] == artifact_id and self._mapping_is_current_db(db, {"conversation_id": conversation_id, "input": json.loads(row["input_snapshot_json"])}))
+
+    def _mapping_edit_anchor(self, db, conversation_id):
+        row = db.execute("SELECT a.id FROM artifacts a JOIN tasks t ON t.id=a.task_id WHERE a.conversation_id=? AND a.kind='field_mapping' AND a.status IN ('published','stale') AND t.type='mapping_draft_apply' ORDER BY a.created_at DESC,a.id DESC LIMIT 1", (conversation_id,)).fetchone()
+        return row["id"] if row else None
+
+    def _owned_draft(self, db, owner_id, draft_id):
+        row = db.execute("SELECT * FROM drafts WHERE id=? AND owner_id=? AND kind='field_mapping'", (draft_id, owner_id)).fetchone()
+        if row is None:
+            raise LookupError("mapping_draft_not_found")
+        self.owns(db, row["conversation_id"], owner_id)
+        return row
+
+    def _draft_operations(self, db, draft_id):
+        return [json.loads(row["after_json"]) for row in db.execute("SELECT after_json FROM draft_operations WHERE draft_id=? ORDER BY created_at,id", (draft_id,))]
+
+    def _draft_response(self, db, row, *, summary=False):
+        artifact = db.execute("SELECT id FROM artifacts WHERE run_id=? AND kind='field_mapping' AND status IN ('published','stale')", (row["apply_run_id"],)).fetchone()
+        result = {"id": row["id"], "conversation_id": row["conversation_id"], "base_artifact_id": row["base_artifact_id"],
+                  "revision": row["revision"], "status": row["status"], "changed_count": row["changed_count"],
+                  "apply_run_id": row["apply_run_id"], "applied_artifact_id": artifact["id"] if artifact else None,
+                  "base_current": self._mapping_base_current_db(db, row["base_artifact_id"], row["conversation_id"])}
+        if not summary:
+            result["operations"] = self._draft_operations(db, row["id"])
+            result["operation_count"] = len(result["operations"])
+        return result
+
+    def _draft_revision(self, row, revision, *, writable=True):
+        from toolwithagent_v2.runtime.mapping_drafts import DraftError
+        if row["revision"] != revision:
+            raise DraftError("draft_revision_conflict", {"revision": row["revision"]})
+        if writable and row["status"] != "active":
+            raise DraftError("draft_apply_in_progress" if row["status"] == "applying" else "draft_not_editable")
+
+    def create_mapping_draft(self, owner_id, artifact_id):
+        self._owned_mapping(owner_id, artifact_id)
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            artifact = db.execute("SELECT conversation_id FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
+            self.owns(db, artifact["conversation_id"], owner_id)
+            if not self._mapping_base_current_db(db, artifact_id, artifact["conversation_id"]):
+                raise ValueError("mapping_base_stale")
+            row = db.execute("SELECT * FROM drafts WHERE owner_id=? AND base_artifact_id=? AND status IN ('active','applying')", (owner_id, artifact_id)).fetchone()
+            if row is None:
+                draft_id, timestamp = uid(), now()
+                db.execute("INSERT INTO drafts(id,owner_id,conversation_id,kind,status,revision,created_at,updated_at,base_artifact_id) VALUES(?,?,?,'field_mapping','active',1,?,?,?)", (draft_id,owner_id,artifact["conversation_id"],timestamp,timestamp,artifact_id))
+                row = self._owned_draft(db, owner_id, draft_id)
+            result = self._draft_response(db, row)
+            db.commit()
+            return result
+
+    def get_mapping_draft(self, owner_id, draft_id):
+        with connect(self.path) as db:
+            return self._draft_response(db, self._owned_draft(db, owner_id, draft_id))
+
+    def standard_fields(self, owner_id, draft_id=None, sub_rule=None, q=""):
+        from agent.core.standard_field_catalog import get_standard_field_catalog
+        from agent.tools.rule_generator.field_mapping import MAPPING_EXCLUDED_STANDARD_FIELDS
+        from toolwithagent_v2.runtime.mapping_drafts import project_payload
+        if len(q) > 200:
+            raise ValueError("invalid_mapping_query")
+        occupied = {}
+        if draft_id:
+            with connect(self.path) as db:
+                draft = self._owned_draft(db, owner_id, draft_id)
+                _artifact, base = self._owned_mapping(owner_id, draft["base_artifact_id"])
+                payload = project_payload(base, self._draft_operations(db, draft_id))
+            rules = payload["config"]
+            selected = str(sub_rule) if sub_rule is not None else "0"
+            if not selected.isdecimal() or str(int(selected)) != selected or int(selected) >= len(rules):
+                raise ValueError("mapping_sub_rule_not_found")
+            occupied = {str(entry["field"]): entry["index"] for entry in rules[int(selected)].get("normalize", []) if entry.get("field")}
+        query = q.strip().casefold()
+        return {"items": [{"name": field.system_property_name, "category": field.category,
+                           "occupied_by": occupied.get(field.system_property_name), "disabled_reason": None}
+                          for field in get_standard_field_catalog().fields
+                          if field.system_property_name not in MAPPING_EXCLUDED_STANDARD_FIELDS
+                          and (not query or query in field.system_property_name.casefold())]}
+
+    def save_mapping_operation(self, owner_id, draft_id, key, proposal, revision, *, replace=False):
+        from toolwithagent_v2.runtime.mapping_drafts import effective_changes, prepare_operation
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_draft(db, owner_id, draft_id)
+            self._draft_revision(row, revision)
+            if not self._mapping_base_current_db(db, row["base_artifact_id"], row["conversation_id"]):
+                raise ValueError("mapping_base_stale")
+            _artifact, base = self._owned_mapping(owner_id, row["base_artifact_id"])
+            operations = self._draft_operations(db, draft_id)
+            operation, choices, modified = prepare_operation(base, operations, key, proposal, replace=replace)
+            previous = next((item for item in operations if item["operation_key"] == key), None)
+            if modified and (previous is not None or operation["changes"]):
+                db.execute("DELETE FROM draft_operations WHERE draft_id=? AND operation_key=?", (draft_id,key))
+                if operation["changes"]:
+                    db.execute("INSERT INTO draft_operations(id,draft_id,operation_key,scope_json,before_json,after_json,validation_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(),draft_id,key,json.dumps(proposal,ensure_ascii=False),"{}",json.dumps(operation,ensure_ascii=False),"{}",now()))
+                operations = self._draft_operations(db, draft_id)
+                count = len(effective_changes(base, operations))
+                db.execute("UPDATE drafts SET revision=revision+1,changed_count=?,updated_at=? WHERE id=?", (count,now(),draft_id))
+            row = self._owned_draft(db, owner_id, draft_id)
+            result = {"draft": self._draft_response(db,row), "candidates": choices}
+            db.commit()
+            return result
+
+    def mapping_candidates(self, owner_id, draft_id, key):
+        from toolwithagent_v2.runtime.mapping_drafts import candidates, project_payload
+        with connect(self.path) as db:
+            row = self._owned_draft(db, owner_id, draft_id)
+            operations = self._draft_operations(db, draft_id)
+            operation = next((item for item in operations if item["operation_key"] == key), None)
+            if operation is None:
+                raise LookupError("mapping_operation_not_found")
+            _artifact, base = self._owned_mapping(owner_id, row["base_artifact_id"])
+            return candidates(project_payload(base, operations), operation["proposal"])
+
+    def _draft_receipt(self, db, owner_id, scope, key, request):
+        if not key or len(key) > 200:
+            raise ValueError("idempotency_key_required")
+        digest = hashlib.sha256(json.dumps(request, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        receipt = db.execute("SELECT * FROM idempotency_receipts WHERE principal_id=? AND operation_scope=? AND key=?", (owner_id,scope,key)).fetchone()
+        if receipt and receipt["request_sha256"] != digest:
+            raise ValueError("idempotency_key_reused")
+        return digest, json.loads(receipt["result_json"]) if receipt else None
+
+    def _save_draft_receipt(self, db, owner_id, scope, key, digest, result):
+        db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,'completed',?,?)", (uid(),owner_id,scope,key,digest,json.dumps(result,ensure_ascii=False),now()))
+
+    def confirm_mapping_replacement(self, owner_id, draft_id, key, proposal, confirm, revision, idempotency_key):
+        # Confirm and its receipt share the save transaction via the same connection.
+        from toolwithagent_v2.runtime.mapping_drafts import effective_changes, prepare_operation
+        scope = "mapping-replacement:" + draft_id
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_draft(db, owner_id, draft_id)
+            digest, existing = self._draft_receipt(db,owner_id,scope,idempotency_key,[key,proposal,confirm,revision])
+            if existing is not None:
+                return existing
+            self._draft_revision(row,revision)
+            if not self._mapping_base_current_db(db,row["base_artifact_id"],row["conversation_id"]):
+                raise ValueError("mapping_base_stale")
+            if confirm:
+                _artifact,base = self._owned_mapping(owner_id,row["base_artifact_id"])
+                operations = self._draft_operations(db,draft_id)
+                operation, choices, modified = prepare_operation(base,operations,key,proposal,replace=True)
+                previous = next((item for item in operations if item["operation_key"] == key), None)
+                if modified and (previous is not None or operation["changes"]):
+                    db.execute("DELETE FROM draft_operations WHERE draft_id=? AND operation_key=?", (draft_id,key))
+                    if operation["changes"]:
+                        db.execute("INSERT INTO draft_operations(id,draft_id,operation_key,scope_json,before_json,after_json,validation_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(),draft_id,key,json.dumps(proposal,ensure_ascii=False),"{}",json.dumps(operation,ensure_ascii=False),"{}",now()))
+                    db.execute("UPDATE drafts SET revision=revision+1,changed_count=?,updated_at=? WHERE id=?", (len(effective_changes(base,self._draft_operations(db,draft_id))),now(),draft_id))
+                result = {"draft":self._draft_response(db,self._owned_draft(db,owner_id,draft_id)),"candidates":choices}
+            else:
+                result = {"draft":self._draft_response(db,row),"candidates":None}
+            self._save_draft_receipt(db,owner_id,scope,idempotency_key,digest,result)
+            db.commit()
+            return result
+
+    def discard_mapping_draft(self, owner_id, draft_id, revision):
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_draft(db,owner_id,draft_id)
+            self._draft_revision(row,revision)
+            db.execute("UPDATE drafts SET status='discarded',revision=revision+1,updated_at=? WHERE id=?", (now(),draft_id))
+            result = self._draft_response(db,self._owned_draft(db,owner_id,draft_id))
+            db.commit()
+            return result
+
+    def apply_mapping_draft(self, owner_id, draft_id, revision, idempotency_key):
+        from toolwithagent_v2.runtime.mapping_drafts import catalog_version, project_payload
+        scope = "mapping-apply:" + draft_id
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_draft(db,owner_id,draft_id)
+            digest,existing = self._draft_receipt(db,owner_id,scope,idempotency_key,[row["base_artifact_id"],revision])
+            if existing is not None:
+                return existing
+            self._draft_revision(row,revision)
+            if not row["changed_count"]:
+                raise ValueError("mapping_draft_empty")
+            if not self._mapping_base_current_db(db,row["base_artifact_id"],row["conversation_id"]):
+                raise ValueError("mapping_base_stale")
+            artifact,base = self._owned_mapping(owner_id,row["base_artifact_id"])
+            operations = self._draft_operations(db,draft_id)
+            project_payload(base,operations)  # Fail before creating a Task for invalid configuration.
+            original = db.execute("SELECT * FROM runs WHERE id=?", (artifact["run_id"],)).fetchone()
+            snapshot = json.loads(original["input_snapshot_json"])
+            snapshot.update({"base_artifact_id":artifact["id"], "base_sha256":artifact["sha256"], "base_storage_key":artifact["storage_key"],
+                             "draft_id":draft_id,"draft_revision":revision,"draft_operations":operations,"catalog_version":catalog_version()})
+            result = self._enqueue_task(db,owner_id,row["conversation_id"],"mapping_draft_apply",snapshot)
+            db.execute("UPDATE runs SET provider_config_revision=?,prompt_version=?,standard_field_version=? WHERE id=?", (original["provider_config_revision"],original["prompt_version"],original["standard_field_version"],result["run"]["id"]))
+            db.execute("UPDATE drafts SET status='applying',apply_run_id=?,updated_at=? WHERE id=?", (result["run"]["id"],now(),draft_id))
+            result["draft"] = self._draft_response(db,self._owned_draft(db,owner_id,draft_id))
+            self._save_draft_receipt(db,owner_id,scope,idempotency_key,digest,result)
+            db.commit()
+            return result
+
+    def _draft_apply_current_db(self, db, claim):
+        from toolwithagent_v2.runtime.mapping_drafts import catalog_version
+        snapshot = claim["input"]
+        row = db.execute("SELECT * FROM drafts WHERE id=? AND owner_id=?", (snapshot["draft_id"],claim["owner_id"])).fetchone()
+        artifact = db.execute("SELECT sha256,storage_key FROM artifacts WHERE id=?", (snapshot["base_artifact_id"],)).fetchone()
+        return bool(row and row["status"] == "applying" and row["apply_run_id"] == claim["id"]
+                    and row["revision"] == snapshot["draft_revision"] and row["base_artifact_id"] == snapshot["base_artifact_id"]
+                    and artifact and artifact["sha256"] == snapshot["base_sha256"] and artifact["storage_key"] == snapshot["base_storage_key"]
+                    and snapshot["catalog_version"] == catalog_version()
+                    and self._mapping_base_current_db(db,row["base_artifact_id"],row["conversation_id"]))
+
+    def read_mapping_draft_apply(self, claim):
+        with connect(self.path) as db:
+            if not self._draft_apply_current_db(db,claim):
+                raise ValueError("mapping_draft_apply_stale")
+        _artifact,base = self._owned_mapping(claim["owner_id"],claim["input"]["base_artifact_id"])
+        return base
+
+    def _release_mapping_draft(self, db, run_id):
+        db.execute("UPDATE drafts SET status='active',updated_at=? WHERE status='applying' AND apply_run_id=?", (now(),run_id))
 
     def mapping_download(self, owner_id, artifact_id):
         from application.download_names import download_filename
@@ -393,8 +624,9 @@ class Store:
                 "mapping_eligible": bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
                 "submission_status": status, "application_id": application_id,
                 "created_at": row["created_at"]})
-        mapping_rows = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind='field_mapping' AND a.status='published' ORDER BY a.created_at,a.id", (conversation_id,)).fetchall()
-        latest_mapping_id = mapping_rows[-1]["id"] if mapping_rows else None
+        mapping_rows = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind='field_mapping' AND a.status IN ('published','stale') ORDER BY a.created_at,a.id", (conversation_id,)).fetchall()
+        published_mappings = [row for row in mapping_rows if row["status"] == "published"]
+        latest_mapping_id = published_mappings[-1]["id"] if published_mappings else None
         for row in mapping_rows:
             snapshot = json.loads(row["input_snapshot_json"])
             current = row["id"] == latest_mapping_id and self._mapping_is_current_db(db, {"conversation_id":conversation_id, "input":snapshot})
@@ -449,6 +681,7 @@ class Store:
                 snapshot = json.loads(abandoned["input_snapshot_json"])
                 if abandoned["task_type"] == "file_ingest":
                     db.execute("UPDATE files SET parse_status='failed',updated_at=? WHERE id=?", (timestamp, snapshot.get("file_id", "")))
+                self._release_mapping_draft(db,abandoned["id"])
                 self._run_event(db, abandoned["id"], "run_failed", "failed")
                 self._event(db, abandoned["conversation_id"], "run_failed", "run", abandoned["id"], {"run_id": abandoned["id"], "status": "failed", "error_code": "worker_lost"})
             if db.execute("SELECT 1 FROM runs WHERE status='running' LIMIT 1").fetchone():
@@ -517,6 +750,8 @@ class Store:
             snapshot = json.loads(row["input_snapshot_json"])
             if row["task_type"] == "file_ingest" and snapshot.get("file_id"):
                 db.execute("UPDATE files SET parse_status=?,updated_at=? WHERE id=?", (status, timestamp, snapshot["file_id"]))
+        if terminal and status != "succeeded":
+            self._release_mapping_draft(db,row["id"])
         self._run_event(db, row["id"], "run_" + status, status)
         self._event(db, row["conversation_id"], "run_" + status, "run", row["id"],
                     {"run_id": row["id"], "status": status, "error_code": error_code})
@@ -537,6 +772,12 @@ class Store:
             current = db.execute("SELECT status FROM runs WHERE id=?", (source["current_run_id"],)).fetchone()
             if current and current["status"] not in ("succeeded", "failed", "cancelled"):
                 raise ValueError("task_has_active_run")
+            if source["task_type"] == "mapping_draft_apply":
+                frozen = json.loads(source["input_snapshot_json"])
+                draft = self._owned_draft(db,owner_id,frozen["draft_id"])
+                if (draft["status"] != "active" or draft["revision"] != frozen["draft_revision"]
+                    or not self._mapping_base_current_db(db,frozen["base_artifact_id"],source["conversation_id"])):
+                    raise ValueError("mapping_draft_apply_stale")
             attempt = db.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM runs WHERE task_id=?", (source["task_id"],)).fetchone()[0]
             new_id = uid()
             db.execute("""INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,provider_config_revision,prompt_version,standard_field_version,queued_at,created_at,updated_at)
@@ -547,6 +788,8 @@ class Store:
             db.execute("UPDATE tasks SET status='queued',current_run_id=?,updated_at=?,revision=revision+1 WHERE id=?",
                        (new_id, timestamp, source["task_id"]))
             snapshot = json.loads(source["input_snapshot_json"])
+            if source["task_type"] == "mapping_draft_apply":
+                db.execute("UPDATE drafts SET status='applying',apply_run_id=?,updated_at=? WHERE id=?", (new_id,timestamp,snapshot["draft_id"]))
             if source["task_type"] == "file_ingest" and snapshot.get("file_id"):
                 db.execute("UPDATE files SET parse_status='queued',updated_at=? WHERE id=?", (timestamp, snapshot["file_id"]))
             self._run_event(db, new_id, "run_queued", "queued")
@@ -712,11 +955,17 @@ class Store:
                 if row is None:
                     db.rollback()
                     return False
-                if kind == "field_mapping" and not self._mapping_is_current_db(db, claim):
-                    self._assistant_message(db, row["conversation_id"], "主数据或分类结果已变化，请重新执行字段映射")
-                    self._record_state(db, row, "failed", "mapping_input_stale")
-                    db.commit()
-                    return True
+                if kind == "field_mapping":
+                    applying = claim["task_type"] == "mapping_draft_apply"
+                    valid = (self._draft_apply_current_db(db,claim) if applying else
+                             self._mapping_is_current_db(db,claim) and claim["input"].get("mapping_edit_anchor") == self._mapping_edit_anchor(db,row["conversation_id"]))
+                    if not valid:
+                        self._assistant_message(db,row["conversation_id"],"映射来源或草稿版本已变化，请重新查看结果")
+                        self._record_state(db,row,"failed","mapping_draft_apply_stale" if applying else "mapping_input_stale")
+                        db.commit()
+                        return True
+                    if applying:
+                        self._owned_mapping(claim["owner_id"],claim["input"]["base_artifact_id"])
                 final.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(stage, final)
                 # The rename is short, but fail closed if the lease expired while
@@ -724,12 +973,22 @@ class Store:
                 if self._valid_claim(db, worker_id, claim) is None:
                     db.rollback()
                     return False
-                version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE task_id=? AND kind=?", (row["task_id"], kind)).fetchone()[0]
+                if kind == "field_mapping":
+                    version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE conversation_id=? AND kind=?", (row["conversation_id"],kind)).fetchone()[0]
+                    previous = [item["id"] for item in db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='field_mapping' AND status='published'", (row["conversation_id"],))]
+                    for previous_id in previous:
+                        db.execute("WITH RECURSIVE descendants(id) AS (SELECT ? UNION SELECT edge.derived_artifact_id FROM artifact_edges edge JOIN descendants d ON edge.source_artifact_id=d.id) UPDATE artifacts SET status='stale' WHERE id IN (SELECT id FROM descendants)", (previous_id,))
+                else:
+                    version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE task_id=? AND kind=?", (row["task_id"],kind)).fetchone()[0]
                 artifact_id = uid()
                 db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                            (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata or {}, ensure_ascii=False), now(), len(content)))
                 if kind == "field_mapping" and claim["input"].get("source_artifact_id"):
                     db.execute("INSERT INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) VALUES(?,?,?)", (claim["input"]["source_artifact_id"],artifact_id,"field_mapping"))
+                if kind == "field_mapping" and claim["task_type"] == "mapping_draft_apply":
+                    db.execute("INSERT INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) VALUES(?,?,'mapping_edit')", (claim["input"]["base_artifact_id"],artifact_id))
+                    db.execute("INSERT OR IGNORE INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) SELECT source_artifact_id,?,relation FROM artifact_edges WHERE derived_artifact_id=?", (artifact_id,claim["input"]["base_artifact_id"]))
+                    db.execute("UPDATE drafts SET status='applied',updated_at=? WHERE id=? AND apply_run_id=?", (now(),claim["input"]["draft_id"],row["id"]))
                 self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id,
                             {"artifact_id": artifact_id, "run_id": row["id"], "kind": kind, "version": version})
                 if message:
