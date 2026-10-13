@@ -335,6 +335,21 @@ def _normalize_threat_source_clarification(
         )
     if decision.reason_code == "threat_source_not_found":
         requested = decision.parameters.get("requested_field", "").replace("`", "").strip()
+        if requested in session_facts.threat_source_fields:
+            # 模型声明与共同来源事实矛盾时只纠正提示，不替模型生成执行计划。
+            logger.info(
+                "planner_source_fact_conflict requested_field_present=true"
+            )
+            return decision.model_copy(
+                update={
+                    "reason_code": "planner_source_fact_conflict",
+                    "question": (
+                        "指定字段已存在于全部威胁子规则，规划结果与当前字段事实不一致，"
+                        "本次未执行，请重新发起换源请求。"
+                    ),
+                    "choices": (),
+                }
+            )
         question = (
             f"字段 `{requested}` 不存在于当前威胁子规则，未执行。"
             if requested
