@@ -4,7 +4,6 @@
 禁止跨包引用下划线私有实现（Issue #88 工具门面）。
 """
 
-from agent.tools.standard_mapper import field_mapping_tool
 from agent.tools.enum_field_tool import (
     enum_field_tool,
     flatten_enum_mappings,
@@ -66,15 +65,7 @@ def call_llm_direct(*args, **kwargs):
     return _call_llm_direct(*args, **kwargs)
 
 
-def load_object_mapping(excel_path: str) -> dict:
-    """系统属性对象映射加载门面（延迟绑定实现，保持测试替身可替换）。"""
-    from agent.tools.standard_mapper import _load_object_mapping
-
-    return _load_object_mapping(excel_path)
-
-
 __all__ = [
-    'field_mapping_tool',
     'enum_field_tool',
     'flatten_enum_mappings',
     'read_enum_mappings_from_excel',
@@ -86,5 +77,4 @@ __all__ = [
     'classify_log_features_headless',
     'fill_log_samples',
     'call_llm_direct',
-    'load_object_mapping',
 ]
