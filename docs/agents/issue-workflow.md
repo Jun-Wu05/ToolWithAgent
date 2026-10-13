@@ -31,6 +31,15 @@ git branch -D <分支> && git push github --delete <分支>
 - 主 worktree 默认驻留 master：更新用 `git pull --ff-only github master`；若主 worktree 临时切到特性分支（master 不被任何 worktree 占用），才可用 `git fetch github master:master` 直接更新引用。
 - Python 用全局环境（无仓库内 venv）；测试全离线，但依赖两个 gitignore 的本地文件组（见第 2 步）。
 
+## Tracker 发布前确认
+
+Agent 往 tracker 发布任何产物（新建 issue、PR、spec）前，先在会话中给用户过目：
+
+1. 未与用户讨论过的话题，先问清（grill / 澄清提问），不得擅自定稿发布；已讨论过的话题，只综合既有讨论，不新增未讨论的设计决策。
+2. 成文（issue 正文、PR 正文、spec）先展示全文，用户确认后再发布。
+
+已确认 issue 的机械执行（贴标签、按用户指示评论或关闭）不受此限。目的：防止 agent 替用户做设计决策或替双方立约。
+
 ## 流程
 
 ### 1. 领取与开分支

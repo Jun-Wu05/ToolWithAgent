@@ -8,7 +8,7 @@ GitHub Issues（`Jun-Wu05/ToolWithAgent`，用 `gh` CLI）。见 `docs/agents/is
 
 ### Issue 实施 SOP（worktree 隔离 + 小改动直通）
 
-每个 issue 从 master 开短命分支、PR 合并后即删分支：开分支 → 领取协议复核 → 实施（全量 pytest 绿）→ PR（`Closes #NNN`）→ 清理。**较大改动（≥3 文件/跨模块/需分组提交/主 worktree 有相交 WIP）建独立 git worktree 隔离；小改动按判据直通**，判据表见 `docs/agents/issue-workflow.md`。
+每个 issue 从 master 开短命分支、PR 合并后即删分支：开分支 → 领取协议复核 → 实施（全量 pytest 绿）→ PR（`Closes #NNN`）→ 清理。**较大改动（≥3 文件/跨模块/需分组提交/主 worktree 有相交 WIP）建独立 git worktree 隔离；小改动按判据直通**，判据表见 `docs/agents/issue-workflow.md`。凡往 tracker 发布产物（issue/PR/spec），成文先给用户过目再发布，细则见 `docs/agents/issue-workflow.md` 的「Tracker 发布前确认」。
 
 ### 自动验证授权
 
