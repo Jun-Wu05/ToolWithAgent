@@ -35,8 +35,9 @@ _MESSAGES = {
 class LogKnowledgeSubmitAdapter:
     """执行按钮专用提交步骤，不读取用户原文。"""
 
-    def __init__(self, repository: Any | None = None) -> None:
+    def __init__(self, repository: Any | None = None, connection: Any | None = None) -> None:
         self._repository = repository
+        self._connection = connection
 
     def _repository_instance(self) -> Any:
         if self._repository is not None:
@@ -105,11 +106,12 @@ class LogKnowledgeSubmitAdapter:
             feature_field=snapshot.feature_field,
             extractor_type=snapshot.extractor_type,
             extractor_spec=snapshot.extractor_spec,
-            submitter="session-user",
+            submitter=str(_session_get(context.session, "submitter_id") or "session-user"),
         )
         try:
+            kwargs = {"connection": self._connection} if self._connection is not None else {}
             stored = self._repository_instance().submit_application(
-                application, snapshot.samples
+                application, snapshot.samples, **kwargs
             )
         except Exception as error:
             logger.error(

@@ -15,6 +15,7 @@ import re as _re
 import sqlite3
 import time as _time
 from dataclasses import dataclass
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -233,6 +234,8 @@ class LogKnowledgeRepository:
         self,
         application: LogKnowledgeApplicationInput,
         samples: list[str] | tuple[str, ...] = (),
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> LogKnowledgeSubmissionResult:
         """Atomically create or reuse an active application by recipe identity."""
         if application.selection_mode not in {"automatic", "explicit"}:
@@ -248,9 +251,10 @@ class LogKnowledgeRepository:
         )
         now = _utc_now()
         try:
-            with self.connect() as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                active = connection.execute(
+            with (nullcontext(connection) if connection is not None else self.connect()) as active_connection:
+                if connection is None:
+                    active_connection.execute("BEGIN IMMEDIATE")
+                active = active_connection.execute(
                     """
                     SELECT id, status FROM log_knowledge_applications
                     WHERE identity_hash = ? AND status IN ('pending', 'approved')
@@ -260,17 +264,19 @@ class LogKnowledgeRepository:
                 if active is not None:
                     application_id, status = int(active[0]), str(active[1])
                     if status == "pending":
-                        self._add_samples_bounded(connection, application_id, samples)
-                        connection.commit()
+                        self._add_samples_bounded(active_connection, application_id, samples)
+                        if connection is None:
+                            active_connection.commit()
                         return LogKnowledgeSubmissionResult(
                             "pending_duplicate", application_id
                         )
-                    connection.commit()
+                    if connection is None:
+                        active_connection.commit()
                     return LogKnowledgeSubmissionResult(
                         "already_approved", application_id
                     )
 
-                cursor = connection.execute(
+                cursor = active_connection.execute(
                     """
                     INSERT INTO log_knowledge_applications (
                         identity_hash, recipe_version, structure_hash,
@@ -297,8 +303,9 @@ class LogKnowledgeRepository:
                     ),
                 )
                 application_id = int(cursor.lastrowid)
-                self._add_samples_bounded(connection, application_id, samples)
-                connection.commit()
+                self._add_samples_bounded(active_connection, application_id, samples)
+                if connection is None:
+                    active_connection.commit()
                 return LogKnowledgeSubmissionResult("created", application_id)
         except sqlite3.Error as exc:
             raise LogKnowledgeError("log knowledge submission failed") from exc

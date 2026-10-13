@@ -69,7 +69,7 @@ def test日志类型提取单步可运行(monkeypatch):
     monkeypatch.setattr(
         log_classifier,
         "_do_classify_log_features",
-        lambda *args, **kwargs: json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False),
+        lambda *args, **kwargs: json.dumps({"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}, ensure_ascii=False),
     )
     monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
     session = {"raw_log_lines": ["event_type3=attack src=10.0.0.1"]}
@@ -80,7 +80,7 @@ def test日志类型提取单步可运行(monkeypatch):
     )
 
     assert report.status == StepStatus.SUCCESS
-    assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
+    assert session["log_classification"] == {"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}
 
 
 def test日志类型提取显式分类特征字段优先于自动探测(monkeypatch):
@@ -106,7 +106,7 @@ def test日志类型提取显式分类特征字段优先于自动探测(monkeypa
 
     def _fake_classify(*args, **kwargs):
         classify_args.append(args)
-        return json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False)
+        return json.dumps({"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}, ensure_ascii=False)
 
     monkeypatch.setattr(log_format_identifier, "_do_identify_log_format", _fake_identify)
     monkeypatch.setattr(log_classifier, "_do_classify_log_features", _fake_classify)
@@ -119,7 +119,7 @@ def test日志类型提取显式分类特征字段优先于自动探测(monkeypa
     )
 
     assert report.status == StepStatus.SUCCESS
-    assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
+    assert session["log_classification"] == {"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}
     # 格式识别仍然自动执行，消费原始日志行。
     assert identify_inputs and "category=attack" in identify_inputs[0]
     # 显式分类特征字段传给分类阶段，优先于 Step1 自动探测到的 log_type。
@@ -149,7 +149,7 @@ def test日志类型提取不带显式字段时沿用自动探测值(monkeypatch
     monkeypatch.setattr(
         log_classifier,
         "_do_classify_log_features",
-        lambda *args, **kwargs: (classify_args.append(args), json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False))[1],
+        lambda *args, **kwargs: (classify_args.append(args), json.dumps({"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}, ensure_ascii=False))[1],
     )
     monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
     session = {"raw_log_lines": ["event_type3=attack src=10.0.0.1"]}
@@ -161,7 +161,7 @@ def test日志类型提取不带显式字段时沿用自动探测值(monkeypatch
 
     assert report.status == StepStatus.SUCCESS
     assert classify_args[0][3] == "event_type3"
-    assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
+    assert session["log_classification"] == {"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}
 
 
 def test枚举提取与显式字段日志类型提取复合计划两步各留产物(monkeypatch):
@@ -192,7 +192,7 @@ def test枚举提取与显式字段日志类型提取复合计划两步各留产
     monkeypatch.setattr(
         log_classifier,
         "_do_classify_log_features",
-        lambda *args, **kwargs: json.dumps({"攻击日志": {"feature": "attack"}}, ensure_ascii=False),
+        lambda *args, **kwargs: json.dumps({"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}, ensure_ascii=False),
     )
     monkeypatch.setattr(log_sample_filler, "fill_sample_logs", lambda classification, logs_text: classification)
     session = {
@@ -221,7 +221,7 @@ def test枚举提取与显式字段日志类型提取复合计划两步各留产
     # 第一步产物：枚举值列表，保留可引用产物身份供后续值映射链路使用。
     assert set(report.results[0].artifact.values) == {"attack", "scan"}
     # 第二步产物：按显式分类特征字段生成的日志分类照常写入会话。
-    assert session["log_classification"] == {"攻击日志": {"feature": "attack"}}
+    assert session["log_classification"] == {"status": "SUCCESS", "classification_details": [{"logtype": "攻击日志", "feature": "attack"}]}
 
 
 def test字段映射单步可运行(monkeypatch):
