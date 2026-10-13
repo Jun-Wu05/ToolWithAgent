@@ -5,7 +5,6 @@
 """
 
 from agent.tools.enum_field_tool import (
-    enum_field_tool,
     flatten_enum_mappings,
     read_enum_mappings_from_excel,
 )
@@ -66,7 +65,6 @@ def call_llm_direct(*args, **kwargs):
 
 
 __all__ = [
-    'enum_field_tool',
     'flatten_enum_mappings',
     'read_enum_mappings_from_excel',
     'extract_enum_from_logs',

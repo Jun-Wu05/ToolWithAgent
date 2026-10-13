@@ -2,12 +2,16 @@
 SessionState 契约测试 — 防止「写入未定义的 session 字段」类 bug。
 
 背景：SessionState.__setitem__ 严格要求字段必须预先定义，否则抛
-'SessionState 没有字段: xxx'。但全代码库有 20+ 处 session[key]=value
-写入散落在多个文件。每次新增功能写 session 时，容易忘记在 SessionState
-里加字段，导致运行期崩溃。
+'SessionState 没有字段: xxx'。会话写入散落在 web/ 与 application/ 多个文件，
+风格有两类：旧式 ``session["key"] = value`` 直写，与 application 层的
+``_session_set(session, "key", value)`` 垫片调用。每次新增功能写 session 时，
+容易忘记在 SessionState 里加字段，导致运行期崩溃。
 
-本测试扫描 web/ 下所有 session[...]= 写入，断言每个 key 都已定义，
+本测试扫描 web/ 与 application/ 下两类字面量键写入，断言每个 key 都已定义，
 把「运行期 KeyError」提前到「测试期 AssertionError」。
+
+已知边界：变量键写入（如 ``_session_set(session, session_key, ...)`` 或
+``session[key] = value``）无法静态判定，不在守卫视野内。
 """
 import os
 import re
@@ -18,12 +22,16 @@ import application.session_state as ss_module
 
 
 def _collect_written_session_keys(root_dir: str) -> set:
-    """扫描目录下所有 .py 文件，收集 session[key]= 写入的 key 名。
+    """扫描目录下所有 .py 文件，收集两类字面量键写入的 key 名。
 
-    匹配 user_session["key"] = 和 session["key"] = 两种风格。
+    匹配 ``user_session["key"] =`` / ``session["key"] =`` 直写，与
+    ``_session_set(session, "key", ...)``（允许参数间空白/换行前的同行形态）。
     """
     written = set()
     session_write_re = re.compile(r'(?:user_)?session\[[\'"](\w+)[\'"]\]\s*=')
+    session_set_re = re.compile(
+        r'_session_set\(\s*(?:user_)?session\s*,\s*[\'"](\w+)[\'"]'
+    )
     for dirpath, dirnames, filenames in os.walk(root_dir):
         # 跳过缓存目录
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
@@ -39,6 +47,8 @@ def _collect_written_session_keys(root_dir: str) -> set:
                         continue
                     for m in session_write_re.finditer(line):
                         written.add(m.group(1))
+                    for m in session_set_re.finditer(line):
+                        written.add(m.group(1))
     return written
 
 
@@ -52,11 +62,13 @@ class TestSessionStateContract:
     """所有被写入的 session key 必须在 SessionState 中定义。"""
 
     def test_all_written_keys_are_defined(self):
-        """扫描 web/ 下所有 session[key]= 写入，断言 key 已定义。
+        """扫描 web/ 与 application/ 下两类字面量键写入，断言 key 已定义。
 
         失败时列出未定义的 key 及修复指引（在 SessionState 加字段）。
         """
-        written = _collect_written_session_keys("web")
+        written = _collect_written_session_keys("web") | _collect_written_session_keys(
+            "application"
+        )
         defined = _collect_defined_session_fields()
 
         missing = written - defined
@@ -69,8 +81,35 @@ class TestSessionStateContract:
             pytest.fail(
                 f"以下 session key 被写入但 SessionState 未定义，"
                 f"会导致运行期 'SessionState 没有字段' 崩溃：\n{detail}\n\n"
-                f"修复：在 web/session_state.py 的 SessionState dataclass 中添加这些字段。"
+                f"修复：在 application/session_state.py 的 SessionState dataclass 中添加这些字段。"
             )
+
+    def test_guard_scan_covers_application_writes(self):
+        """自证守卫未空转：application/ 扫描必须实际命中 _session_set 字面量键。
+
+        写入风格整体迁移后旧守卫曾扫描空集而永远绿（issue #329）；
+        本用例钉住「扫描集合非空」，再次漂移时立即变红。
+        """
+        written = _collect_written_session_keys("application")
+        assert written, (
+            "application/ 扫描结果为空——守卫再次空转，"
+            "检查写入风格与正则是否漂移"
+        )
+        assert "pending_plan" in written
+
+    def test_guard_detects_session_set_style_writes(self, tmp_path):
+        """自证识别能力：对临时样本同时识别直写与 _session_set 两类形态。"""
+        sample = tmp_path / "sample_writer.py"
+        sample.write_text(
+            "_session_set(session, \"not_a_real_field_xyz\", 1)\n"
+            "session[\"also_not_real_abc\"] = 2\n",
+            encoding="utf-8",
+        )
+        written = _collect_written_session_keys(str(tmp_path))
+
+        assert "not_a_real_field_xyz" in written
+        assert "also_not_real_abc" in written
+        assert "not_a_real_field_xyz" not in _collect_defined_session_fields()
 
     def test_session_state_setitem_rejects_unknown_key(self):
         """SessionState.__setitem__ 对未定义字段抛 KeyError（这是防护的根基）。
