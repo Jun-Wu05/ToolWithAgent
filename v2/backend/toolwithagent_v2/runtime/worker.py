@@ -173,6 +173,20 @@ class Worker:
             return self.store.finish(self.worker_id, claim, "field_mapping_failed",
                                      message="字段映射失败，请检查输入后重试")
 
+    def _run_mapping_draft_apply(self, claim):
+        from toolwithagent_v2.runtime.mapping_projection import mapping_summary
+        try:
+            base = self.store.read_mapping_draft_apply(claim)
+            outcome = self.business_application.apply_mapping_draft(base,claim["input"])
+            summary = mapping_summary(outcome)
+            return self.store.publish(self.worker_id,claim,json.dumps(outcome,ensure_ascii=False).encode("utf-8"),
+                kind="field_mapping",metadata={"summary":summary},
+                message=f"字段映射修改已应用：{summary['matched_count']} 个字段已映射，{summary['unmatched_count']} 个未匹配")
+        except (ValueError,LookupError):
+            return self.store.finish(self.worker_id,claim,"mapping_draft_apply_stale",message="映射修改未应用，请检查草稿和来源后重试")
+        except Exception:
+            return self.store.finish(self.worker_id,claim,"mapping_draft_apply_failed",message="映射修改未应用，草稿已保留，请重试")
+
     def once(self) -> bool:
         claim = self.store.claim(self.worker_id, lease_seconds=self.lease_seconds)
         if claim is None:
@@ -187,6 +201,8 @@ class Worker:
         keeper = threading.Thread(target=heartbeat, daemon=True)
         keeper.start()
         try:
+            if claim["task_type"] == "mapping_draft_apply":
+                return self._run_mapping_draft_apply(claim)
             if claim["task_type"] == "field_mapping":
                 return self._run_field_mapping(claim)
             if claim["task_type"] == "log_parse":

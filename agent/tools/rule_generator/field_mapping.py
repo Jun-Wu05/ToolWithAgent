@@ -204,3 +204,51 @@ def apply_field_mapping_to_config(
 
     _apply(updated)
     return updated
+
+
+def apply_manual_field_mappings(config: list[dict], changes: list[dict], *, validate_occupancy: bool = True) -> list[dict]:
+    """Atomically apply explicit positional field choices without modifying sources.
+
+    The complete sparse change set is checked before it is returned. Changing a
+    target invalidates its previous value mappings/default, but preserves the
+    extraction result and all unrelated rule/filter metadata.
+    """
+    result = copy.deepcopy(config)
+    seen = set()
+    for change in changes:
+        rule_id, source = str(change.get("sub_rule_id", "")), change.get("source_path")
+        if not rule_id.isdecimal() or str(int(rule_id)) != rule_id or int(rule_id) >= len(result):
+            raise ValueError("mapping_sub_rule_not_found")
+        if not isinstance(source, str) or not source or source in EXCLUDED_FIELD_INDICES:
+            raise ValueError("mapping_source_not_editable")
+        identity = (rule_id, source)
+        if identity in seen:
+            raise ValueError("mapping_duplicate_source")
+        seen.add(identity)
+        entries = [entry for entry in result[int(rule_id)].get("normalize", [])
+                   if entry.get("index") == source]
+        if len(entries) != 1:
+            raise ValueError("mapping_source_not_editable")
+        if entries[0].get("field") in MAPPING_EXCLUDED_STANDARD_FIELDS:
+            raise ValueError("mapping_source_not_editable")
+        target = change.get("standard_field") or ""
+        record = resolve_standard_field(target) if target else None
+        if target and (record is None or record.system_property_name != target
+                       or target in MAPPING_EXCLUDED_STANDARD_FIELDS):
+            raise ValueError("mapping_target_invalid")
+        entry = entries[0]
+        if str(entry.get("field") or "") == target:
+            continue
+        entry.pop("mappings", None)
+        entry.pop("value", None)
+        entry.update(field=target or None, entity=canonical_field_entity(record) if record else None,
+                     sim=True if record else None, core=False if record else None)
+    for rule in result if validate_occupancy else []:
+        occupied = set()
+        for entry in rule.get("normalize", []):
+            target = str(entry.get("field") or "")
+            if target:
+                if target in occupied:
+                    raise ValueError("mapping_target_conflict")
+                occupied.add(target)
+    return result

@@ -7,7 +7,7 @@ vi.mock('./api', () => ({
   saveDownload: vi.fn(),
   api: {
     me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(),
-    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn()
+    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn()
   }
 }))
 class FakeEventSource {
@@ -33,6 +33,9 @@ beforeEach(() => {
   vi.mocked(api.submitLogKnowledge).mockResolvedValue({ task: { id: 't3', status: 'queued' }, run: { id: 'r3', status: 'queued' } })
   vi.mocked(api.fieldMapping).mockResolvedValue({ task: { id: 'tm1', status: 'queued' }, run: { id: 'rm1', status: 'queued' } })
   vi.mocked(api.mappingView).mockResolvedValue({ artifact_id: 'map-1', sub_rules: [{ id: '0', name: '登录', field_count: 1 }], sub_rule_id: '0', items: [{ source_path: 'src_ip', samples: ['敏感样例'], expanded_samples: [{ value: '敏感样例', line_number: 1 }], standard_field: '源地址', evidence: '名称匹配', status: 'matched', warning: '', user_modified: false }], total: 1, page: 1, page_size: 50, sample_line_reference: 'log_entry' })
+  vi.mocked(api.createMappingDraft).mockResolvedValue({ id: 'draft-1', conversation_id: 'conv-1', base_artifact_id: 'map-1', revision: 0, status: 'active', changed_count: 0, operation_count: 0, operations: [], base_current: true, apply_run_id: null, applied_artifact_id: null })
+  vi.mocked(api.mappingDraft).mockImplementation(async () => ({ id: 'draft-1', conversation_id: 'conv-1', base_artifact_id: 'map-1', revision: 0, status: 'active', changed_count: 0, operation_count: 0, operations: [], base_current: true, apply_run_id: null, applied_artifact_id: null }))
+  vi.mocked(api.standardFields).mockResolvedValue({ items: [] })
   vi.mocked(api.mappingDownload).mockResolvedValue({ name: 'mappedconfig_Base64.txt', blob: new Blob(['payload']) })
   vi.mocked(api.cancelToken).mockResolvedValue({ token: 'cancel-token' })
   vi.mocked(api.cancelRun).mockResolvedValue({ id: 'r2', status: 'cancelled' })
