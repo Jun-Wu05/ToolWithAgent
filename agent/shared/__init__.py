@@ -6,10 +6,7 @@ Agent 共享工具类模块
 """
 
 from agent.shared.logger import get_logger
-from agent.shared.field_mapping import FieldMappingHandler, get_field_mapping_handler
 
 __all__ = [
     "get_logger",
-    "FieldMappingHandler",
-    "get_field_mapping_handler",
 ]
