@@ -113,11 +113,10 @@ def test_field_retriever_delegates_catalog_facts_and_index(monkeypatch) -> None:
 
 
 def test_remaining_consumers_delegate_to_catalog_and_keep_prompt_policy(monkeypatch) -> None:
-    """standard_mapper 与 Prompt 公共入口共享 Catalog，且保留旧返回策略。"""
+    """Prompt 公共入口消费 Catalog，且保留旧返回策略。"""
     from types import SimpleNamespace
 
     import agent.prompts as prompts
-    from agent.tools import standard_mapper
 
     class FakeCatalog:
         fields = (SimpleNamespace(system_property_name="源地址"),)
@@ -128,13 +127,8 @@ def test_remaining_consumers_delegate_to_catalog_and_keep_prompt_policy(monkeypa
             return [{"系统属性名称": "源地址", "字段名称": "src_address"}]
 
     fake = FakeCatalog()
-    monkeypatch.setattr(standard_mapper, "get_standard_field_catalog", lambda: fake)
     monkeypatch.setattr(prompts, "get_standard_field_catalog", lambda: fake)
-    monkeypatch.setattr(standard_mapper, "_synonyms_cache", None)
 
-    # #177：白名单集合已由目录解析（resolve_standard_field）取代
-    assert standard_mapper._load_standard_fields_list() == fake.records()
-    assert standard_mapper._load_synonyms() is fake.synonyms
     assert prompts.load_standard_fields() == fake.standard_fields_text
 
     monkeypatch.setattr(

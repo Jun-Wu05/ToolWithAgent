@@ -41,7 +41,7 @@ def _load_kv_extractor_isolated():
             sys.modules["agent"] = m
 
     existing_tools = sys.modules.get("agent.tools")
-    if existing_tools is not None and hasattr(existing_tools, "field_mapping_tool"):
+    if existing_tools is not None and hasattr(existing_tools, "read_enum_mappings_from_excel"):
         from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
         return KvExtractor
 

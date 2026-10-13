@@ -358,7 +358,6 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     import application.field_mapping_input as input_builder
 
     import agent.tools.rule_generator as rule_generator
-    import agent.tools.standard_mapper as standard_mapper
     import application.field_source as field_source
 
     _permissive_standard_catalog(monkeypatch)
@@ -414,7 +413,6 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
 def testExcel日志字段映射导出映射后子规则而不是Excel记录配置(monkeypatch):
     """Excel 行数据不是解析配置，自动下载必须来自本次生成的 mapped_sub_rules。"""
     import agent.tools.rule_generator as rule_generator
-    import agent.tools.standard_mapper as standard_mapper
     import application.field_source as field_source
 
     _permissive_standard_catalog(monkeypatch)
@@ -435,7 +433,6 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
             }
         ],
     )
-    monkeypatch.setattr(standard_mapper, "_load_object_mapping", lambda path: {})
     excel_rows = [{"原始日志": 'alarm_name="attack"', "设备": "ips"}]
     session = {
         "decoded_data": copy.deepcopy(excel_rows),
