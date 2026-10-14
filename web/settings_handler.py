@@ -5,7 +5,8 @@
 """
 
 import time
-from typing import Dict, List
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
 
 import chainlit as cl
 import httpx
@@ -23,6 +24,34 @@ logger = get_logger("settings_handler")
 
 RESET_OPTION = "--- 重置设置 ---"
 MODEL_PLACEHOLDER = "请先配置 API Key 后获取模型列表"
+
+
+@dataclass(frozen=True)
+class ConnectionTestResult:
+    """连接测试结果的唯一形态（`test_connection` 返回值对象化）。
+
+    四键即原 dict 契约的 `success / message / models_count / models`；
+    消费方 `on_settings_update` 逐键读取，对象化对行为零变化。
+    """
+
+    success: bool
+    message: str
+    models_count: int = 0
+    models: List[str] = field(default_factory=list)
+
+    @classmethod
+    def failure(cls, message: str) -> "ConnectionTestResult":
+        """失败结果统一构造（模型计数恒为 0、模型列表恒为空）。"""
+        return cls(success=False, message=message)
+
+    @classmethod
+    def success_with(
+        cls, models: List[str], message: str
+    ) -> "ConnectionTestResult":
+        """成功结果统一构造（计数随模型列表长度）。"""
+        return cls(
+            success=True, message=message, models_count=len(models), models=models
+        )
 
 # ============= 模型列表缓存 =============
 
@@ -178,18 +207,29 @@ class ModelManager:
         return models
 
     @staticmethod
+    async def _get_models_response(
+        client: httpx.AsyncClient, spec, api_key: str
+    ) -> httpx.Response:
+        """按规格端点请求模型列表（Bearer 头、10s 超时）——列表 GET 的唯一实现。"""
+        return await client.get(
+            spec.models_list_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10.0,
+        )
+
+    @staticmethod
+    def _parse_model_ids(data: Any) -> List[str]:
+        """解析 OpenAI 风格模型列表响应的 id 字段（过滤缺 id 项）。"""
+        return [m["id"] for m in data.get("data", []) if m.get("id")]
+
+    @staticmethod
     async def _fetch_models(spec, api_key: str) -> List[str]:
         """按规格端点拉取模型列表；失败回退静态默认表，不向调用方抛错。"""
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    spec.models_list_url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=10.0,
-                )
+                response = await ModelManager._get_models_response(client, spec, api_key)
                 response.raise_for_status()
-                data = response.json()
-                models = [m["id"] for m in data.get("data", []) if m.get("id")]
+                models = ModelManager._parse_model_ids(response.json())
                 logger.info(f"[API] {spec.display_name} 返回 {len(models)} 个模型")
                 return models
         except Exception as e:
@@ -204,7 +244,9 @@ class ModelManager:
         _models_cache.clear()
 
     @staticmethod
-    async def test_connection(provider: str, api_key: str = None, model: str = None) -> Dict:
+    async def test_connection(
+        provider: str, api_key: str = None, model: str = None
+    ) -> ConnectionTestResult:
         """测试指定供应商 API 连通性；无密钥按静态默认表返回成功。
 
         有密钥时两段验证（#123）：模型列表 GET + 1-token 最小对话 POST。
@@ -214,47 +256,25 @@ class ModelManager:
         """
         provider = (provider or "").lower().strip()
         if provider not in model_config.list_provider_names():
-            return {
-                "success": False,
-                "message": f"❌ 未知供应商: {provider}",
-                "models_count": 0,
-                "models": [],
-            }
+            return ConnectionTestResult.failure(f"❌ 未知供应商: {provider}")
         spec = model_config.get_provider_spec(provider)
         if not (api_key or "").strip():
             models = list(spec.default_models)
-            return {
-                "success": True,
-                "message": (
-                    "✅ 使用静态模型列表（密钥来自环境变量）："
-                    f"可用 {len(models)} 个，下拉精选 {len(_curate_models(models))} 个"
-                ),
-                "models_count": len(models),
-                "models": models,
-            }
+            return ConnectionTestResult.success_with(
+                models,
+                "✅ 使用静态模型列表（密钥来自环境变量）："
+                f"可用 {len(models)} 个，下拉精选 {len(_curate_models(models))} 个",
+            )
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    spec.models_list_url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=10.0,
-                )
+                response = await ModelManager._get_models_response(client, spec, api_key)
                 if response.status_code == 401:
-                    return {
-                        "success": False,
-                        "message": "❌ API Key 无效",
-                        "models_count": 0,
-                        "models": [],
-                    }
+                    return ConnectionTestResult.failure("❌ API Key 无效")
                 if response.status_code != 200:
-                    return {
-                        "success": False,
-                        "message": f"❌ 请求失败 (HTTP {response.status_code})",
-                        "models_count": 0,
-                        "models": [],
-                    }
-                data = response.json()
-                models = [m["id"] for m in data.get("data", []) if m.get("id")]
+                    return ConnectionTestResult.failure(
+                        f"❌ 请求失败 (HTTP {response.status_code})"
+                    )
+                models = ModelManager._parse_model_ids(response.json())
 
                 # 第二段：1-token 最小对话请求，验证聊天链路与余额/配额（#123）
                 probe_model = (model or "").strip()
@@ -263,12 +283,9 @@ class ModelManager:
                 if not probe_model and models:
                     probe_model = models[0]
                 if not probe_model:
-                    return {
-                        "success": True,
-                        "message": "✅ 连接成功（无可用模型名，未验证对话链路）",
-                        "models_count": len(models),
-                        "models": models,
-                    }
+                    return ConnectionTestResult.success_with(
+                        models, "✅ 连接成功（无可用模型名，未验证对话链路）"
+                    )
                 chat_url = model_config.get_chat_completions_url(spec.name)
                 chat_response = await client.post(
                     chat_url,
@@ -281,63 +298,31 @@ class ModelManager:
                     timeout=20.0,
                 )
                 if chat_response.status_code == 402:
-                    return {
-                        "success": False,
-                        "message": (
-                            "❌ 余额/配额不足（HTTP 402）：模型列表可访问，"
-                            "但对话请求被拒，请充值后重试"
-                        ),
-                        "models_count": 0,
-                        "models": [],
-                    }
+                    return ConnectionTestResult.failure(
+                        "❌ 余额/配额不足（HTTP 402）：模型列表可访问，"
+                        "但对话请求被拒，请充值后重试"
+                    )
                 if chat_response.status_code == 404:
-                    return {
-                        "success": False,
-                        "message": f"❌ 模型不可用（HTTP 404）: {probe_model}",
-                        "models_count": 0,
-                        "models": [],
-                    }
+                    return ConnectionTestResult.failure(
+                        f"❌ 模型不可用（HTTP 404）: {probe_model}"
+                    )
                 if chat_response.status_code != 200:
-                    return {
-                        "success": False,
-                        "message": (
-                            f"❌ 对话请求失败 (HTTP {chat_response.status_code})，"
-                            "模型列表可访问但聊天链路异常"
-                        ),
-                        "models_count": 0,
-                        "models": [],
-                    }
-                return {
-                    "success": True,
-                    "message": (
-                        f"✅ 连接成功（对话链路已验证，模型 {probe_model}）："
-                        f"可用模型 {len(models)} 个，"
-                        f"下拉精选 {len(_curate_models(models))} 个"
-                    ),
-                    "models_count": len(models),
-                    "models": models,
-                }
+                    return ConnectionTestResult.failure(
+                        f"❌ 对话请求失败 (HTTP {chat_response.status_code})，"
+                        "模型列表可访问但聊天链路异常"
+                    )
+                return ConnectionTestResult.success_with(
+                    models,
+                    f"✅ 连接成功（对话链路已验证，模型 {probe_model}）："
+                    f"可用模型 {len(models)} 个，"
+                    f"下拉精选 {len(_curate_models(models))} 个",
+                )
         except httpx.TimeoutException:
-            return {
-                "success": False,
-                "message": "❌ 请求超时，请检查网络连接",
-                "models_count": 0,
-                "models": [],
-            }
+            return ConnectionTestResult.failure("❌ 请求超时，请检查网络连接")
         except httpx.ConnectError:
-            return {
-                "success": False,
-                "message": "❌ 网络连接失败，请检查代理设置",
-                "models_count": 0,
-                "models": [],
-            }
+            return ConnectionTestResult.failure("❌ 网络连接失败，请检查代理设置")
         except Exception as e:
-            return {
-                "success": False,
-                "message": f"❌ 未知错误: {str(e)}",
-                "models_count": 0,
-                "models": [],
-            }
+            return ConnectionTestResult.failure(f"❌ 未知错误: {str(e)}")
 
 
 async def on_settings_update(settings: dict):
@@ -429,14 +414,14 @@ async def on_settings_update(settings: dict):
     # 移除加载消息
     await loading_msg.remove()
 
-    if result["success"]:
+    if result.success:
         # 测试成功，应用配置
         apply_model_settings(user_session, provider, model, api_key)
 
         logger.info("[SETTINGS] Team 已重新初始化")
 
         # 获取最新的模型列表并重发设置界面（按厂家分组渲染）
-        models = result.get("models", [])
+        models = result.models
         await cl.ChatSettings(
             build_settings_widgets(
                 provider=provider, models=models, api_key=api_key, selected_model=model
@@ -447,8 +432,8 @@ async def on_settings_update(settings: dict):
             content=f"""✅ **配置更新成功！**
 
 📊 **测试结果：**
-- {result['message']}
-- 可用模型：{result['models_count']} 个
+- {result.message}
+- 可用模型：{result.models_count} 个
 
 🤖 **当前配置：**
 - 供应商：{provider or '使用默认'}
@@ -464,7 +449,7 @@ async def on_settings_update(settings: dict):
             content=f"""❌ **配置测试失败**
 
 📊 **测试结果：**
-- {result['message']}
+- {result.message}
 
 💡 请检查：
 1. API Key 是否正确
