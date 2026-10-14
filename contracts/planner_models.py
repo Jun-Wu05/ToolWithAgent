@@ -7,6 +7,11 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from contracts.download_naming import (
+    ConfigDownloadKind,
+    FieldMappingDownloadKind,
+)
+
 
 class StrictContract(BaseModel):
     """为跨模块契约提供禁止额外字段的共同约束。"""
@@ -24,16 +29,9 @@ agent.shared.event_classify 反向 re-export 保持既有导入路径不变。
 SessionEnumArtifactRef = Literal["session.artifacts.enum_values"]
 SessionThreatArtifactRef = Literal["session.artifacts.threat_mapping"]
 SessionArtifactRef = Union[SessionEnumArtifactRef, SessionThreatArtifactRef]
-ConfigDownloadKind = Literal[
-    "enummapping_config",
-    "threatmapping_config",
-    "cancelmapping_config",
-    "current_config",
-    "mappedconfig_subrules",
-    "mappedconfig_mainrules",
-    "unmappedconfig_subrules",
-    "field_adjusted_config",
-]
+# ConfigDownloadKind / FieldMappingDownloadKind 已迁至 contracts.download_naming（#337），
+# 上方导入即再导出——既有 `from contracts.planner_models import ConfigDownloadKind`
+# 导入路径保持不变。
 
 
 class ConversationTurn(StrictContract):
@@ -485,7 +483,7 @@ class FieldMappingArtifact(ArtifactContract):
     artifact_type: Literal["field_mapping"] = "field_mapping"
     mappings: tuple[FieldMappingRow, ...]
     event_annotations: tuple[EventAnnotationRow, ...] = ()
-    download_kind: Literal["mapped_config", "mapped_sub_rules"] | None = None
+    download_kind: FieldMappingDownloadKind | None = None
     download_content: str | None = None
 
     @model_validator(mode="after")
