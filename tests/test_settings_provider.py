@@ -99,8 +99,8 @@ def test连接测试无密钥返回静态表成功():
     result = asyncio.run(
         settings_handler.ModelManager.test_connection("siliconflow", None)
     )
-    assert result["success"] is True
-    assert result["models"]
+    assert result.success is True
+    assert result.models
 
 
 # ---------- 模型列表按厂家分组展示 ----------
@@ -198,10 +198,10 @@ def test连接测试发对话探测并注明精选数(monkeypatch):
         )
     )
 
-    assert result["success"] is True
-    assert "对话链路已验证" in result["message"]
-    assert "可用模型 2 个" in result["message"]
-    assert "下拉精选" in result["message"]
+    assert result.success is True
+    assert "对话链路已验证" in result.message
+    assert "可用模型 2 个" in result.message
+    assert "下拉精选" in result.message
     # 探测请求：规格聊天端点 + 鉴权头 + 所选模型 + max_tokens=1
     spec = model_config.get_provider_spec("siliconflow")
     assert len(_ProbeAsyncClient.post_calls) == 1
@@ -222,7 +222,7 @@ def test连接测试未选模型时用规格默认表首个探测(monkeypatch):
         settings_handler.ModelManager.test_connection("siliconflow", "sf-key", model="")
     )
 
-    assert result["success"] is True
+    assert result.success is True
     spec = model_config.get_provider_spec("siliconflow")
     assert _ProbeAsyncClient.post_calls[0]["json"]["model"] == spec.default_models[0]
 
@@ -237,9 +237,9 @@ def test连接测试余额不足返回四十二(monkeypatch):
         settings_handler.ModelManager.test_connection("openrouter", "or-key")
     )
 
-    assert result["success"] is False
-    assert "余额/配额不足" in result["message"]
-    assert "402" in result["message"]
+    assert result.success is False
+    assert "余额/配额不足" in result.message
+    assert "402" in result.message
 
 
 def test连接测试模型不可用返回四零四(monkeypatch):
@@ -251,9 +251,9 @@ def test连接测试模型不可用返回四零四(monkeypatch):
         settings_handler.ModelManager.test_connection("siliconflow", "sf-key", model="m-alpha")
     )
 
-    assert result["success"] is False
-    assert "模型不可用" in result["message"]
-    assert "m-alpha" in result["message"]
+    assert result.success is False
+    assert "模型不可用" in result.message
+    assert "m-alpha" in result.message
 
 
 def test连接测试无密钥静态分支文案含精选数():
@@ -261,8 +261,8 @@ def test连接测试无密钥静态分支文案含精选数():
     result = asyncio.run(
         settings_handler.ModelManager.test_connection("siliconflow", None)
     )
-    assert result["success"] is True
-    assert "下拉精选" in result["message"]
+    assert result.success is True
+    assert "下拉精选" in result.message
 
 
 def test未超上限的列表不做精选():
@@ -315,12 +315,9 @@ def test设置保存按最终解析结果校验并放行环境变量密钥(monke
 
     async def _fake_test(provider, key, model=None):
         tested.append(key)
-        return {
-            "success": True,
-            "message": "ok",
-            "models_count": 2,
-            "models": ["deepseek-chat", "deepseek-reasoner"],
-        }
+        return settings_handler.ConnectionTestResult.success_with(
+            ["deepseek-chat", "deepseek-reasoner"], "ok"
+        )
 
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
@@ -352,12 +349,9 @@ def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
 
     async def _fake_test(provider, key, model=None):
         tested_models.append(model)
-        return {
-            "success": True,
-            "message": "ok",
-            "models_count": 2,
-            "models": ["deepseek-chat", "deepseek-reasoner"],
-        }
+        return settings_handler.ConnectionTestResult.success_with(
+            ["deepseek-chat", "deepseek-reasoner"], "ok"
+        )
 
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
@@ -397,7 +391,7 @@ def test设置保存密钥解析为空时拦截并提示变量名(monkeypatch):
 
     async def _fake_test(provider, key, model=None):
         called.append(provider)
-        return {"success": True, "message": "ok", "models_count": 0, "models": []}
+        return settings_handler.ConnectionTestResult.success_with([], "ok")
 
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
