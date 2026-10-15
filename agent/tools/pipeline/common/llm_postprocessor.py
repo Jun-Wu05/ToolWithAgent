@@ -14,44 +14,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from agent.shared.llm_response import parse_json_object
 from agent.shared.logger import get_logger
 
 logger = get_logger("log_parser_pipeline")
-
-
-def _try_parse_json(text: str) -> dict | None:
-    """鲁棒的 JSON 解析 —— 去除 markdown 围栏和尾随逗号。
-
-    Args:
-        text: LLM 原始响应字符串。
-
-    Returns:
-        解析后的字典，解析失败返回 None。
-    """
-    if not text or not text.strip():
-        return None
-    text = text.strip()
-    # 去除 markdown 代码围栏
-    if text.startswith("```"):
-        # 去除开头围栏
-        idx = text.find("\n")
-        if idx != -1:
-            text = text[idx + 1 :]
-        # 去除结尾围栏
-        if text.endswith("```"):
-            text = text[:-3]
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        # 尝试去除最后一个 `]` 或 `}` 前的尾随逗号
-        import re
-
-        cleaned = re.sub(r",(\s*[}\]])", r"\1", text)
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            return None
 
 
 def build_fallback_details(aggregation: dict) -> list[dict]:
@@ -330,7 +296,7 @@ def postprocess_llm_classification(
     Returns:
         包含 status、classification_details、feature_count 等键的字典。
     """
-    parsed = _try_parse_json(llm_response)
+    parsed = parse_json_object(llm_response, repair_trailing_comma=True)
 
     if parsed is None:
         logger.warning("[llm_postprocessor] LLM returned invalid JSON, using fallback")
