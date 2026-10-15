@@ -14,6 +14,7 @@ from typing import Any
 from agent.prompts import load_log_feature_locate_prompt
 from agent.shared.logger import get_logger
 from agent.tools.enum_extract_tool import sample_logs
+from agent.tools.pipeline.common.format_context import FormatContext
 from agent.tools.pipeline.llm_client import _call_llm_direct, _try_parse_json
 
 logger = get_logger("log_parser_pipeline")
@@ -34,27 +35,26 @@ def _escape_format_braces(text: str) -> str:
     return text.replace('{', '{{').replace('}', '}}')
 
 
-def _prepare_header_analysis(logs_str: str, format_type: str = "json", delimit: str = "=") -> dict:
+def _prepare_header_analysis(logs_str: str, format_type: str, kv_delimit: str) -> dict:
     """用 HeaderExtractor 聚合日志头模式。
 
     Args:
         logs_str: 原始日志字符串。
         format_type: 日志格式（"json" 或 "kv"）。
-        delimit: KV 格式的 key-value 连接符。
+        kv_delimit: KV 格式的键值分隔符。
     """
     from agent.tools.pipeline.extractors.header_extractor import (
         HeaderExtractor,
         aggregate_headers,
     )
-    return aggregate_headers(logs_str, format_type, delimit)
+    return aggregate_headers(logs_str, format_type, kv_delimit)
 
 
 def _prepare_body_analysis(
     logs_str: str,
     feature_field: str,
-    format_type: str = "json",
-    delimit: str = "=",
-    tab: str = " ",
+    format_type: str,
+    fmt: FormatContext,
 ) -> dict:
     """用 JsonExtractor 或 KvExtractor 分析 body 字段候选。
 
@@ -62,19 +62,19 @@ def _prepare_body_analysis(
         logs_str: 原始日志字符串。
         feature_field: Step 1 建议的特征字段。
         format_type: 日志格式（"json" 或 "kv"）。
-        delimit: KV 格式的 key-value 连接符。
-        tab: KV 格式的 key-value 分隔符。
+        fmt: KV 分隔符上下文（字段分隔符 + 键值分隔符），JSON 格式不使用。
     """
     if format_type and format_type.lower() == "kv":  # 大小写无关（#190）
         from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
-        extractor = KvExtractor(delimit, tab)
+        extractor = KvExtractor(
+            field_delimit=fmt.field_delimit, kv_delimit=fmt.kv_delimit
+        )
     else:
         from agent.tools.pipeline.extractors.json_extractor import JsonExtractor
         extractor = JsonExtractor()
 
     lines = [l for l in logs_str.strip().split("\n") if l.strip()][:200]
 
-    # CHANGED: 添加日志，输出日志体示例（2026-06-08 调试）
     sample_lines = lines[:3]
     logger.info(f"[_prepare_body_analysis] 日志体示例（前3行）：")
     for i, line in enumerate(sample_lines, 1):
@@ -107,10 +107,18 @@ def locate_feature(
     feature_field: str = "",
     format_type: str = "json",
     format_detail: str = "",
-    delimit: str = "=",
-    tab: str = " ",
+    fmt: FormatContext | None = None,
 ) -> dict:
     """判断分类特征位置（header / body）。
+
+    Args:
+        logs_str: 原始日志字符串。
+        feature_field: Step 1 建议的特征字段。
+        format_type: 日志格式（"json" 或 "kv"）。
+        format_detail: 格式细节描述。
+        fmt: KV 分隔符上下文（字段分隔符 field_delimit + 键值分隔符
+            kv_delimit，#344）；KV 格式必须提供，缺省时回落默认分隔符，
+            JSON 格式不使用。
 
     返回:
         {"feature_location": "body"|"header"|"unknown",
@@ -119,10 +127,12 @@ def locate_feature(
     if not logs_str or not logs_str.strip():
         return {"feature_location": "unknown", "feature_field": "", "reason": "日志为空", "body_candidates": 0}
 
+    ctx = fmt or FormatContext()
+
     try:
         # 1. 准备分析数据
-        header_analysis = _prepare_header_analysis(logs_str, format_type, delimit)
-        body_analysis = _prepare_body_analysis(logs_str, feature_field, format_type, delimit, tab)
+        header_analysis = _prepare_header_analysis(logs_str, format_type, ctx.kv_delimit)
+        body_analysis = _prepare_body_analysis(logs_str, feature_field, format_type, ctx)
 
         header_clusters = header_analysis.get("clusters", [])
         header_distinct = len(header_clusters)

@@ -32,6 +32,7 @@ from agent.tools.pipeline.classification_policy import (
     BODY_KEY_COVERAGE_THRESHOLD,
     decide_body_key_route,
 )
+from agent.tools.pipeline.common.format_context import FormatContext
 
 logger = get_logger("log_parser_pipeline")
 
@@ -299,65 +300,61 @@ def _classify_kv_features(
     if not feature_field or not feature_field.strip():
         return _build_failed_result(format_type, format_detail, feature_field, "feature_field 为空，Step1 未识别出分类字段")
 
-    # 1. 从 format_info 解析 delimit/tab（语义：delimit=字段分隔符，tab=键值分隔符）
+    # 1. 解析分隔符上下文（delimit=字段分隔符，tab=键值分隔符，#344 单一解析）；
     # format_info 为 None 时无条件回退默认分隔符，body_logs 先按原文初始化（#179）
-    field_delimit = " "
-    kv_delimit = "="
+    field_delimit, kv_delimit = FormatContext.from_format_info(format_info)
     body_logs = logs_str
-    if format_info:
-        field_delimit = format_info.get("delimit", " ") or " "  # 字段分隔符
-        kv_delimit = format_info.get("tab", "=") or "="          # 键值分隔符
-        if header_end_marker:
-            # CHANGED (2026-08-07 修复 issue #14): 改用 strip_header_to_body 从左 split(marker, 1)，
-            # 与全仓其它 8 处剥头一致。原 rpartition 从右切，当 header_end_marker 与 KV 字段
-            # 分隔符相同（如 skyeye_ioc 日志 marker='\t' 且字段也用 \t 分隔）时，只保留每行
-            # 最后一个字段，type= 等字段被切进 header 丢失，导致 matched=0。
-            from agent.tools.pipeline.common.json_utils import strip_header_to_body
-            lines = logs_str.strip().split('\n')
-            body_lines = []
-            extracted_count = 0
-            for line in lines:
-                body = strip_header_to_body(line, header_end_marker, is_json=False)
-                stripped_body = body.strip()
-                if stripped_body and stripped_body != line.strip():
-                    # 成功剥离头部，body 非空且与原行不同
-                    body_lines.append(stripped_body)
-                    extracted_count += 1
-                elif stripped_body:
-                    # marker 未匹配到（strip_header_to_body 返回原行），保留原始行（兼容性）
-                    body_lines.append(line)
-                else:
-                    # 日志体为空，保留原始行（兼容性）
-                    body_lines.append(line)
-                    logger.warning(
-                        "[_classify_kv_features] 日志体为空，保留原始行; "
-                        f"line_length={len(line)}"
-                    )
-            body_logs = '\n'.join(body_lines)
-
-            # 确定性回退（PR #121 修复）：剥离使特征键行存在率大幅下降 → marker 无效。
-            # 典型：幻觉 marker 等于字段分隔符，把行首第一个字段（常为特征字段）剥掉。
-            probe = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
-            before_hits = sum(
-                1 for line in lines if probe.extract_value(line, feature_field) is not None
-            )
-            after_hits = sum(
-                1 for line in body_lines if probe.extract_value(line, feature_field) is not None
-            )
-            if before_hits > 0 and after_hits < before_hits * 0.5:
+    if format_info and header_end_marker:
+        # 改用 strip_header_to_body 从左 split(marker, 1)（修复 issue #14），
+        # 与全仓其它 8 处剥头一致。原 rpartition 从右切，当 header_end_marker 与 KV 字段
+        # 分隔符相同（如 skyeye_ioc 日志 marker='\t' 且字段也用 \t 分隔）时，只保留每行
+        # 最后一个字段，type= 等字段被切进 header 丢失，导致 matched=0。
+        from agent.tools.pipeline.common.json_utils import strip_header_to_body
+        lines = logs_str.strip().split('\n')
+        body_lines = []
+        extracted_count = 0
+        for line in lines:
+            body = strip_header_to_body(line, header_end_marker, is_json=False)
+            stripped_body = body.strip()
+            if stripped_body and stripped_body != line.strip():
+                # 成功剥离头部，body 非空且与原行不同
+                body_lines.append(stripped_body)
+                extracted_count += 1
+            elif stripped_body:
+                # marker 未匹配到（strip_header_to_body 返回原行），保留原始行（兼容性）
+                body_lines.append(line)
+            else:
+                # 日志体为空，保留原始行（兼容性）
+                body_lines.append(line)
                 logger.warning(
-                    f"[_classify_kv_features] header_end_marker='{header_end_marker}' 剥离使特征键 "
-                    f"'{feature_field}' 行存在率 {before_hits}->{after_hits}，判定 marker 无效，回退不剥离"
+                    "[_classify_kv_features] 日志体为空，保留原始行; "
+                    f"line_length={len(line)}"
                 )
-                body_lines = lines
-                body_logs = logs_str
-                header_end_marker = ""
+        body_logs = '\n'.join(body_lines)
 
-            logger.info(
-                "[_classify_kv_features] header_end_marker 提取日志体完成: "
-                f"marker_length={len(header_end_marker)}, "
-                f"成功={extracted_count}/{len(lines)}, body_length={len(body_logs)}"
+        # 确定性回退（PR #121 修复）：剥离使特征键行存在率大幅下降 → marker 无效。
+        # 典型：幻觉 marker 等于字段分隔符，把行首第一个字段（常为特征字段）剥掉。
+        probe = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
+        before_hits = sum(
+            1 for line in lines if probe.extract_value(line, feature_field) is not None
+        )
+        after_hits = sum(
+            1 for line in body_lines if probe.extract_value(line, feature_field) is not None
+        )
+        if before_hits > 0 and after_hits < before_hits * 0.5:
+            logger.warning(
+                f"[_classify_kv_features] header_end_marker='{header_end_marker}' 剥离使特征键 "
+                f"'{feature_field}' 行存在率 {before_hits}->{after_hits}，判定 marker 无效，回退不剥离"
             )
+            body_lines = lines
+            body_logs = logs_str
+            header_end_marker = ""
+
+        logger.info(
+            "[_classify_kv_features] header_end_marker 提取日志体完成: "
+            f"marker_length={len(header_end_marker)}, "
+            f"成功={extracted_count}/{len(lines)}, body_length={len(body_logs)}"
+        )
 
     # 2. 使用 KvExtractor 提取 + 聚合（使用新参数名）
     extractor = KvExtractor(field_delimit=field_delimit, kv_delimit=kv_delimit)
@@ -414,7 +411,7 @@ def _classify_kv_features(
         best_coverage = 0.0
         for candidate in candidates:
             coverage = _kv_key_line_coverage(
-                body_logs, feature_field, candidate, kv_delimit
+                body_logs, feature_field, FormatContext(candidate, kv_delimit)
             )
             if coverage > best_coverage:
                 best_delimit, best_coverage = candidate, coverage
@@ -572,12 +569,12 @@ _LABEL_PREFIX_RE = _re_mod.compile(r"^(\S{1,32}):\s+")
 
 
 def _kv_key_line_coverage(
-    logs_str: str, feature_field: str, delimit: str, tab: str, max_lines: int = 50
+    logs_str: str, feature_field: str, fmt: FormatContext, max_lines: int = 50
 ) -> float:
     """全行扫描特征键的行覆盖率（0~1），供确定性路由判定。"""
     from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
 
-    probe = KvExtractor(field_delimit=delimit, kv_delimit=tab)
+    probe = KvExtractor(field_delimit=fmt.field_delimit, kv_delimit=fmt.kv_delimit)
     lines = [l for l in logs_str.strip().split("\n") if l.strip()][:max_lines]
     if not lines:
         return 0.0
@@ -623,7 +620,7 @@ def _json_key_line_coverage(logs_str: str, feature_field: str, max_lines: int = 
 
 
 def _normalize_body_key_lines(
-    logs_str: str, feature_field: str, delimit: str, tab: str
+    logs_str: str, feature_field: str, fmt: FormatContext
 ) -> str:
     """行级规范化：仅当该行提取不到特征键、且去掉行首『标签: 』前缀后能提取时才去前缀。
 
@@ -632,7 +629,7 @@ def _normalize_body_key_lines(
     """
     from agent.tools.pipeline.extractors.kv_extractor import KvExtractor
 
-    probe = KvExtractor(field_delimit=delimit, kv_delimit=tab)
+    probe = KvExtractor(field_delimit=fmt.field_delimit, kv_delimit=fmt.kv_delimit)
     normalized = []
     for line in logs_str.split("\n"):
         if line.strip() and probe.extract_value(line, feature_field) is None:
@@ -701,12 +698,10 @@ def _do_classify_log_features(
         )
         explicit_info = _parse_format_info_dict(format_info)
         if is_kv:
-            info = explicit_info or {}
             normalized = _normalize_body_key_lines(
                 logs_str,
                 feature_field,
-                info.get("delimit", ";") or ";",
-                info.get("tab", "=") or "=",
+                FormatContext.from_format_info(explicit_info),
             )
             return _classify_kv_features(
                 logs_str=normalized,
@@ -730,13 +725,12 @@ def _do_classify_log_features(
     if feature_field and feature_field.strip() and feature_field != "__header__":
         routing_info = _parse_format_info_dict(format_info) or {}
         if is_kv:
-            routing_delimit = routing_info.get("delimit", ";") or ";"
-            routing_tab = routing_info.get("tab", "=") or "="
+            routing_ctx = FormatContext.from_format_info(routing_info)
             normalized = _normalize_body_key_lines(
-                logs_str, feature_field, routing_delimit, routing_tab
+                logs_str, feature_field, routing_ctx
             )
             coverage = _kv_key_line_coverage(
-                normalized, feature_field, routing_delimit, routing_tab
+                normalized, feature_field, routing_ctx
             )
             route = decide_body_key_route(feature_field, coverage)
             if route.use_body_path:
@@ -772,10 +766,12 @@ def _do_classify_log_features(
     if is_kv and has_header:
         from agent.tools.pipeline.log_feature_locator import locate_feature
 
-        # CHANGED: 修复 delimit/tab 默认值写反的问题（delimit=字段分隔符, tab=键值分隔符）
-        info_dict = _parse_format_info_dict(format_info) or {}
-        delimit = info_dict.get("delimit", ";") or ";"   # 字段分隔符默认值
-        tab = info_dict.get("tab", "=") or "="           # 键值分隔符默认值
+        # 分隔符经 FormatContext 单一解析后按名传递，杜绝历史上
+        # log_classifier（delimit=字段分隔符）与 locate_feature（delimit=键值
+        # 分隔符）两套同名反义约定在调用点交叉的活 bug（#344）。
+        step2a_ctx = FormatContext.from_format_info(
+            _parse_format_info_dict(format_info) or {}
+        )
 
         logger.info("[_do_classify_log_features] 日志头+KV → Step 2a 特征定位")
         locate_result = locate_feature(
@@ -783,8 +779,7 @@ def _do_classify_log_features(
             feature_field=feature_field,
             format_type=format_type,
             format_detail=format_detail,
-            delimit=delimit,
-            tab=tab,
+            fmt=step2a_ctx,
         )
         located = locate_result.get("feature_location", "body")
         located_field = locate_result.get("feature_field", "")
@@ -827,7 +822,6 @@ def _do_classify_log_features(
 
         if located == "header":
             # Path A: 特征在日志头中
-            # CHANGED: 传递 format_info（delimit/tab），确保 analysis 使用 Step1 确定性值
             logger.info("[_do_classify_log_features] → Path A (header)")
             from agent.tools.pipeline.log_header_processor import classify_header_features
 
@@ -836,19 +830,18 @@ def _do_classify_log_features(
                 format_type=format_type,
                 format_detail=format_detail,
                 header_end_marker=header_end_marker,
-                format_info={"delimit": delimit, "tab": tab},  # CHANGED: 传递 Step1 确定的分隔符
+                format_info=step2a_ctx.as_format_info(),  # 传递 Step1 确定的分隔符
             )
 
         if located == "body":
             # Path KV: 特征在 body 中，可能修正了 feature_field
-            # CHANGED: 传递 format_info 保留 delimit/tab（修复 KV 分隔符丢失问题）
             logger.info("[_do_classify_log_features] → Path KV (body, via Step 2a)")
             return _classify_kv_features(
                 logs_str=logs_str,
                 format_type=format_type,
                 format_detail=format_detail,
                 feature_field=located_field or feature_field,
-                format_info={"delimit": delimit, "tab": tab},
+                format_info=step2a_ctx.as_format_info(),  # 保留分隔符，修复 KV 分隔符丢失问题
                 header_end_marker=header_end_marker,
             )
 

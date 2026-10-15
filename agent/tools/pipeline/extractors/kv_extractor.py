@@ -49,57 +49,29 @@ class KvExtractor(ValueExtractor):
 
     def __init__(
         self,
-        delimit: str = None,      # CHANGED: 旧参数名（向后兼容），实际语义是 kv_delimit
-        tab: str = None,          # CHANGED: 旧参数名（向后兼容），实际语义是 field_delimit
-        field_delimit: str = None,  # CHANGED: 新参数名，字段分隔符，删除硬编码默认值（2026-06-08 修复）
-        kv_delimit: str = None,     # CHANGED: 新参数名，键值分隔符，删除硬编码默认值（2026-06-08 修复）
-        clean_special_chars: bool = True,  # CHANGED: 是否清理异常字符（2026-06-16 新增）
+        field_delimit: str,
+        kv_delimit: str,
+        clean_special_chars: bool = True,
     ):
         """初始化 KV 提取器。
 
         Args:
-            delimit: （已废弃）键值分隔符，请使用 kv_delimit
-            tab: （已废弃）字段分隔符，请使用 field_delimit
             field_delimit: 字段分隔符（如 " " 或 "||"），必须由上游提供
-            kv_delimit: 键值分隔符（如 "=" 或 ":"），必须由上游提供
+                （经 ``FormatContext.from_format_info`` 从 format_info 解析）。
+            kv_delimit: 键值分隔符（如 "=" 或 ":"），必须由上游提供。
             clean_special_chars: 是否清理异常字符（默认 True）
-        
-        Raises:
-            ValueError: 如果 field_delimit 或 kv_delimit 为 None
         """
-        # CHANGED: 向后兼容：如果使用旧参数名，映射到新参数名
-        if delimit is not None:
-            kv_delimit = delimit
-        if tab is not None:
-            field_delimit = tab
-
-        # CHANGED: 添加参数校验，强制上游提供完整信息（2026-06-08 修复）
-        if field_delimit is None:
-            raise ValueError(
-                "field_delimit 不能为 None。"
-                "请从 format_info 中获取，或使用已废弃的 tab 参数。"
-            )
-        if kv_delimit is None:
-            raise ValueError(
-                "kv_delimit 不能为 None。"
-                "请从 format_info 中获取，或使用已废弃的 delimit 参数。"
-            )
-
         self.field_delimit = field_delimit
         self.kv_delimit = kv_delimit
         self.clean_special_chars = clean_special_chars
 
-        # CHANGED: 修改参数名，但保留 self.delimit 和 self.tab 以兼容旧代码
-        self.delimit = kv_delimit    # 键值分隔符（向后兼容）
-        self.tab = field_delimit     # 字段分隔符（向后兼容）
-
-        # CHANGED (2026-08-03): 归一化 field_delimit，兼容 " " 和 "space" 两种写法
+        # 归一化 field_delimit，兼容 " " 和 "space" 两种写法
         if field_delimit in (" ", "space", "\t"):
             field_delimit = "space"
             field_pattern = r'\s+'
         else:
             field_pattern = _re.escape(field_delimit)
-        # CHANGED: 构建 kv_delimit 分隔符模式（键值分隔符）
+        # 键值分隔符模式
         kv_pattern = _re.escape(kv_delimit)
 
         # CHANGED (2026-07-28 修复竖线分隔 KV 错位 bug):
