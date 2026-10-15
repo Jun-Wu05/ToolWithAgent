@@ -32,7 +32,7 @@ FieldMappingDownloadKind = Literal["mapped_config", "mapped_sub_rules"]
 """字段映射产物的下载类型（FieldMappingArtifact.download_kind 的 2 值子词汇表）。"""
 
 RendererArtifactKind = Literal["threat_mapping", "enum_values", "log_classification"]
-"""渲染层以 artifact_type 字符串直接调用的三类产物（plan_renderer 收紧前的声明位）。"""
+"""渲染层以 artifact_type 字符串直接调用的三类产物（plan_renderer 已收紧消费）。"""
 
 DownloadKind = Union[ConfigDownloadKind, FieldMappingDownloadKind, RendererArtifactKind]
 """全部下载产物类型的 13 值全集——文件名映射表键集的契约来源（#337）。"""

@@ -15,24 +15,20 @@ from contracts.download_naming import (
     DOWNLOAD_NAME_TEMPLATES,
     ConfigDownloadKind,
     FieldMappingDownloadKind,
+    RendererArtifactKind,
     download_filename,
 )
 from contracts.planner_models import (
     ConfigDownloadKind as ConfigDownloadKindViaPlannerModels,
 )
 
-# plan_renderer 侧 3 个内联字符串的前置镜像：该文件在 PR #317 在途清单，
-# 本仓不改；若其新增第 4 个内联字符串不会自动进本清单——该缺口由
-# 「plan_renderer 收紧 + 镜像清单替换为真词汇表」的后续 issue 消除。
-RENDERER_KINDS = {"threat_mapping", "enum_values", "log_classification"}
-
 
 def _vocabulary_union() -> set[str]:
-    """三源生产词汇表并集：ConfigDownloadKind ∪ FieldMapping 子表 ∪ 渲染层镜像。"""
+    """三源生产词汇表并集：ConfigDownloadKind ∪ FieldMapping 子表 ∪ 渲染层词汇表。"""
     return (
         set(get_args(ConfigDownloadKind))
         | set(get_args(FieldMappingDownloadKind))
-        | RENDERER_KINDS
+        | set(get_args(RendererArtifactKind))
     )
 
 
