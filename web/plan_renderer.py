@@ -359,7 +359,7 @@ async def render_execution_report(
                     dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
                 download_elements.append(
                     cl.File(
-                        name=download_filename("threat_mapping", timestamp),
+                        name=download_filename(artifact.artifact_type, timestamp),
                         content=output.getvalue(),
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
@@ -371,7 +371,7 @@ async def render_execution_report(
             if download_allowed:
                 download_elements.append(
                     cl.File(
-                        name=download_filename("enum_values", timestamp),
+                        name=download_filename(artifact.artifact_type, timestamp),
                         content=json.dumps(
                             {
                                 "field": artifact.field,
@@ -388,7 +388,7 @@ async def render_execution_report(
         elif artifact.artifact_type == "log_classification":
             download_elements.append(
                 cl.File(
-                    name=download_filename("log_classification", timestamp),
+                    name=download_filename(artifact.artifact_type, timestamp),
                     content=json.dumps(
                         artifact.classification,
                         ensure_ascii=False,
