@@ -7,7 +7,6 @@ LLM API 调用封装 + JSON 解析 + log_format 枚举归一化。
 from __future__ import annotations
 
 import json
-import re as _re
 import time
 from typing import Any
 
@@ -107,38 +106,6 @@ def _call_llm_direct(
         f"output_tokens={usage.get('completion_tokens', '?')}"
     )
     return content
-
-
-def _try_parse_json(text: str) -> dict | None:
-    """尝试从 LLM 响应中提取 JSON"""
-    text = text.strip()
-    
-    # 🔧 新增：记录原始文本
-    logger.debug(f"[_try_parse_json] 原始文本长度: {len(text)}, 前200字符: {text[:200]}")
-    
-    # 去掉可能的 markdown 代码块包装
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        text = "\n".join(lines).strip()
-        logger.debug(f"[_try_parse_json] 去除 markdown 后: {text[:200]}")
-    
-    try:
-        result = json.loads(text)
-        logger.debug(f"[_try_parse_json] JSON 解析成功: {result}")
-        return result
-    except json.JSONDecodeError as e:
-        logger.warning(f"[_try_parse_json] JSON 解析失败: {e}, 文本: {text[:500]}")
-        # 尝试提取第一个 { ... } 块
-        m = _re.search(r"\{.*\}", text, _re.DOTALL)
-        if m:
-            try:
-                result = json.loads(m.group())
-                logger.debug(f"[_try_parse_json] 提取 JSON 块成功: {result}")
-                return result
-            except json.JSONDecodeError as e2:
-                logger.warning(f"[_try_parse_json] 提取 JSON 块失败: {e2}")
-        return None
 
 
 def normalize_log_format(format_type: str) -> str:

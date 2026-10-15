@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any, Callable
 
+from agent.shared.llm_response import parse_json_object
 from agent.shared.logger import get_logger
 
 
@@ -285,23 +286,7 @@ def _is_mapping_refusal_response(content: str) -> bool:
 
 def parse_json_safe(text: str) -> dict[str, Any] | None:
     """解析 JSON 对象，兼容 Markdown 代码块与正文中的对象片段。"""
-    if not text:
-        return None
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        text = "\n".join(lines).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
-    return None
+    return parse_json_object(text, extract_block=True)
 
 
 def parse_json_threat_result(content: Any) -> list[dict[str, Any]]:

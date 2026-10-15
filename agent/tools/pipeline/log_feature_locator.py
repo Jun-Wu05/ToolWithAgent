@@ -12,10 +12,11 @@ import json
 from typing import Any
 
 from agent.prompts import load_log_feature_locate_prompt
+from agent.shared.llm_response import parse_json_object
 from agent.shared.logger import get_logger
 from agent.tools.enum_extract_tool import sample_logs
 from agent.tools.pipeline.common.format_context import FormatContext
-from agent.tools.pipeline.llm_client import _call_llm_direct, _try_parse_json
+from agent.tools.pipeline.llm_client import _call_llm_direct
 
 logger = get_logger("log_parser_pipeline")
 
@@ -165,7 +166,7 @@ def locate_feature(
         
         # 🔧 新增：记录 LLM 响应和解析结果
         logger.info(f"[locate_feature] LLM 原始响应（完整）: {response}")
-        parsed = _try_parse_json(response)
+        parsed = parse_json_object(response, extract_block=True)
 
         if parsed:
             logger.info(f"[locate_feature] JSON 解析成功: {parsed}")
