@@ -156,7 +156,7 @@ async def _handle_base64_upload(file_content, element, user_session) -> None:
         logger.info(f"[FILE_UPLOAD] 记录上传文件元信息: name={file_name_val}, time={file_time}")
 
         # 检查是否有待处理的枚举 Excel 路径（同时上传场景的反向处理）
-        enum_excel_path = user_session.get("enum_excel_path")
+        enum_excel_path = user_session.enum_excel_path
 
         logger.info(f"[FILE_UPLOAD] Base64解码成功，raw_base64已缓存，enum_excel_path={enum_excel_path is not None}")
 

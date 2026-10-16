@@ -56,11 +56,7 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
         )
         session_facts = build_session_facts(user_session)
         if isinstance(result, ExecutionReport):
-            final_config = (
-                user_session.mapped_sub_rules
-                if hasattr(user_session, "mapped_sub_rules")
-                else user_session.get("mapped_sub_rules")
-            )
+            final_config = user_session.mapped_sub_rules
             await refresh_primary_report_anchor(result, final_config)
             await render_execution_report(result, session_facts=session_facts)
         else:
