@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, get_args
 
 from contracts.planner_models import (
+    ConfigRef,
     EnumExtractStep,
     DeterministicPlan,
     ExecutionReport,
@@ -23,7 +24,6 @@ from contracts.planner_models import (
     THREAT_TYPE_FIELD,
     ThreatMappingStep,
 )
-from application.adapters.shared import _CONFIG_SESSION_KEYS
 from application.progress import NullProgressSink
 from application.recovery import RecoveryBudget, RETRYABLE_STEP_TYPES, is_transient
 from contracts.progress import (
@@ -34,6 +34,11 @@ from contracts.progress import (
 )
 from contracts.session_facts import SessionFacts
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+
+# ConfigRef 词汇表成员判定；与 adapters.shared._CONFIG_SESSION_KEYS 的键集由
+# test_application_config_architecture 双向钉死（#350）。此处不导入
+# adapters.shared——shared 反向依赖本模块的 ExecutionContext，会成环。
+_CONFIG_REFS = frozenset(get_args(ConfigRef))
 
 
 def threat_fill_source_precondition(
@@ -447,7 +452,7 @@ class PlanExecutor:
                 )
         if (
             isinstance(step, ExportStep)
-            and step.source_ref in _CONFIG_SESSION_KEYS
+            and step.source_ref in _CONFIG_REFS
             and step.source_ref not in session_facts.available_config_refs
         ):
             return self._needs_input_result(
