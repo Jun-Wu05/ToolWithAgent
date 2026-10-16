@@ -10,6 +10,7 @@ from agent.core.model_config import model_runtime_scope
 from agent.core.planner import PlannerService
 from agent.shared.logger import get_logger
 from application.adapters.composition import create_default_adapters
+from application.adapters.shared import _session_get, _session_set
 from application.execution import ExecutionContext
 from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
@@ -216,21 +217,6 @@ def _assistant_history_content(result: PlanDecision | ExecutionReport) -> str:
         status = _STEP_STATUS_LABELS[item.status]
         outcomes.append(f"{operation}（{status}）")
     return f"已执行：{'；'.join(outcomes)}。"
-
-
-def _session_get(session: Any, key: str, default: Any = None) -> Any:
-    """兼容类型化会话与测试字典。"""
-    if isinstance(session, Mapping):
-        return session.get(key, default)
-    return getattr(session, key, default)
-
-
-def _session_set(session: Any, key: str, value: Any) -> None:
-    """兼容类型化会话与测试字典。"""
-    if isinstance(session, dict):
-        session[key] = value
-        return
-    setattr(session, key, value)
 
 
 def _record_execution_summary(session: Any, report: ExecutionReport) -> None:

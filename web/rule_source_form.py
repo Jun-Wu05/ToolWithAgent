@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import chainlit as cl
 
 from agent.shared.logger import get_logger
+from application.adapters.shared import _session_get, _session_set
 from contracts.planner_models import ExportStep, FieldMappingStep, StepSpec
 from contracts.rule_source import RuleSourceFields
 
@@ -17,19 +17,6 @@ RULE_SOURCE_VENDOR_ID = "rule_source_log_vendor"
 RULE_SOURCE_DATA_SOURCE_ID = "rule_source_data_source"
 RULE_SOURCE_DIALOG_TIMEOUT_SECONDS = 300
 logger = get_logger("rule_source_form")
-
-
-def _session_get(session: Any, key: str, default: Any = None) -> Any:
-    if isinstance(session, Mapping):
-        return session.get(key, default)
-    return getattr(session, key, default)
-
-
-def _session_set(session: Any, key: str, value: Any) -> None:
-    if isinstance(session, dict):
-        session[key] = value
-    else:
-        setattr(session, key, value)
 
 
 def get_rule_source_fields(session: Any) -> RuleSourceFields | None:
