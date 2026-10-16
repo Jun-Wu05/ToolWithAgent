@@ -5,7 +5,8 @@
 通过单一 key "user_session" 存储整个对象，所有字段通过 property 访问。
 """
 
-from collections.abc import Mapping
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Optional, List, Dict, Set
 
@@ -17,32 +18,10 @@ from application.log_knowledge_submission import LogKnowledgeSubmissionSnapshot
 
 
 _MAPPED_SUB_RULE_CONFIG_REF = "session.mapped_sub_rules"
-_MAPPING_DERIVED_STATE_KEYS = (
-    "mapped_sub_rules",
-    "sub_rule_mapping_results",
-    "last_mapping_data",
-    "excel_data",
-    "excel_filename",
-)
-
-
-def _read_state_value(session: Any, key: str, default: Any = None) -> Any:
-    """读取 SessionState 或测试字典，不把兼容细节泄漏给生命周期操作。"""
-    if isinstance(session, Mapping):
-        return session.get(key, default)
-    return getattr(session, key, default)
-
-
-def _write_state_value(session: Any, key: str, value: Any) -> None:
-    """写入 SessionState 或测试字典。"""
-    if isinstance(session, dict):
-        session[key] = value
-        return
-    setattr(session, key, value)
 
 
 def commit_log_classification(
-    session: Any,
+    session: SessionState,
     classification: Dict[str, Any],
     submission: LogKnowledgeSubmissionSnapshot | None = None,
 ) -> bool:
@@ -52,41 +31,45 @@ def commit_log_classification(
     与上传配置绑定的枚举贡献必须保留；这里只移除已失效的映射后子规则引用。
     """
     had_mapping_derivatives = any(
-        bool(_read_state_value(session, key)) for key in _MAPPING_DERIVED_STATE_KEYS
+        bool(value)
+        for value in (
+            session.mapped_sub_rules,
+            session.sub_rule_mapping_results,
+            session.last_mapping_data,
+            session.excel_data,
+            session.excel_filename,
+        )
     )
-    for key in _MAPPING_DERIVED_STATE_KEYS:
-        _write_state_value(session, key, None)
-    _write_state_value(session, "current_execution", None)
-    _write_state_value(session, "previous_execution", None)
+    session.mapped_sub_rules = None
+    session.sub_rule_mapping_results = None
+    session.last_mapping_data = None
+    session.excel_data = None
+    session.excel_filename = None
+    session.current_execution = None
+    session.previous_execution = None
 
-    contributions = dict(
-        _read_state_value(session, "enum_fill_contributions", {}) or {}
-    )
+    contributions = dict(session.enum_fill_contributions or {})
     if contributions.pop(_MAPPED_SUB_RULE_CONFIG_REF, None) is not None:
         had_mapping_derivatives = True
-    _write_state_value(session, "enum_fill_contributions", contributions)
+    session.enum_fill_contributions = contributions
 
-    stale_refs = set(
-        _read_state_value(session, "stale_enum_config_refs", set()) or set()
-    )
+    stale_refs = set(session.stale_enum_config_refs or set())
     if _MAPPED_SUB_RULE_CONFIG_REF in stale_refs:
         had_mapping_derivatives = True
         stale_refs.discard(_MAPPED_SUB_RULE_CONFIG_REF)
-    _write_state_value(session, "stale_enum_config_refs", stale_refs)
+    session.stale_enum_config_refs = stale_refs
 
-    pending_refills = dict(
-        _read_state_value(session, "enum_pending_refills", {}) or {}
-    )
+    pending_refills = dict(session.enum_pending_refills or {})
     if pending_refills.pop(_MAPPED_SUB_RULE_CONFIG_REF, None) is not None:
         had_mapping_derivatives = True
-    _write_state_value(session, "enum_pending_refills", pending_refills)
+    session.enum_pending_refills = pending_refills
 
-    _write_state_value(session, "rule_source_fields", None)
-    _write_state_value(session, "pending_rule_source_step", None)
-    _write_state_value(session, "pending_plan", None)
-    _write_state_value(session, "threat_source_field_override", None)
-    _write_state_value(session, "log_classification", classification)
-    _write_state_value(session, "log_knowledge_submission", submission)
+    session.rule_source_fields = None
+    session.pending_rule_source_step = None
+    session.pending_plan = None
+    session.threat_source_field_override = None
+    session.log_classification = classification
+    session.log_knowledge_submission = submission
     return had_mapping_derivatives
 
 
