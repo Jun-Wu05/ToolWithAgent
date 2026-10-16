@@ -203,6 +203,11 @@ def _failing_sample_block(
         pattern = _re.compile(regex_str)
     except _re.error:
         pattern = None
+    if pattern is None or pattern.groups < 1:
+        # 反馈块的价值是展示「上次捕获」；编译失败或没有捕获组时
+        # 不可能产出捕获内容，返回空块而非把不可用 pattern 传给判定函数
+        # （空 regex 是合法正则但零宽无组，曾在此崩溃，#352）。
+        return ""
     shown: list[str] = []
     for text in texts:
         if len(shown) >= limit:
@@ -357,10 +362,11 @@ def _generate_kv_feature_identifier(
     for attempt in range(1, max_attempts + 1):
         logger.debug(f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} 开始")
 
-        # CHANGED: 重试时附加错误反馈
+        # 重试时附加错误反馈；llm_call_failed（last_regex 为空）没有可修正的
+        # 正则，直接复用基础 prompt 重试（#352：空 regex 曾在反馈构造中崩溃）
         prompt = base_prompt.replace("{sample_logs}", sample_block)
         prompt = prompt.replace("{observed_facts}", observed_facts)
-        if attempt > 1 and last_error:
+        if attempt > 1 and last_regex:
             feedback = (
                 f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
                 f"- 上次错误：{last_error}\n"
@@ -548,7 +554,9 @@ def _generate_header_logtype_regex(
         prompt = base_prompt.replace(
             "{sample_logs}", "\n".join(header_texts[:_LOGTYPE_SAMPLE_LIMIT])
         )
-        if attempt > 1 and last_error:
+        # llm_call_failed（last_regex 为空）没有可修正的正则，直接复用基础
+        # prompt 重试（#352：空 regex 曾在反馈构造中崩溃）
+        if attempt > 1 and last_regex:
             feedback = (
                 f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
                 f"- 上次错误：{last_error}\n"
