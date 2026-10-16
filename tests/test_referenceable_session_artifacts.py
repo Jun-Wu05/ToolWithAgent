@@ -24,7 +24,7 @@ from application.session_projection import build_session_facts
 from application.adapters import create_default_adapters
 from application.enum_mapping_attachments import commit_enum_mapping_attachment
 from application.execution import ExecutionContext, PlanExecutor
-from application.session_state import SessionState
+from factories import make_session_state
 
 
 def _threat_artifact(source_field: str | None = "alarm_name") -> ThreatMappingArtifact:
@@ -184,7 +184,7 @@ def test旧last结果不会自动升级为可引用产物():
 
 def test主数据清空同时清除两个可引用产物():
     """可引用会话产物与当前主数据共享生命周期。"""
-    session = SessionState(
+    session = make_session_state(
         decoded_data={"normalize": []},
         latest_enum_artifact=_enum_slot(),
         latest_threat_artifact=_threat_slot(),

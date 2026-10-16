@@ -8,7 +8,7 @@ import asyncio
 def test_natural_language_request_plans_once_and_executes_typed_plan() -> None:
     """One public call owns facts, Planner, execution and session history."""
     from application.request_runtime import run_user_request
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import PlanDecision, StepStatus
 
     class Planner:
@@ -42,7 +42,7 @@ def test_natural_language_request_plans_once_and_executes_typed_plan() -> None:
 
     planner = Planner()
     sink = Sink()
-    session = SessionState(
+    session = make_session_state(
         decoded_data={"normalize": [{"index": "src", "field": "源IP"}]}
     )
     result = asyncio.run(
@@ -75,7 +75,7 @@ def test_natural_language_request_plans_once_and_executes_typed_plan() -> None:
 def test上一轮助手方案进入下一次planner历史() -> None:
     """唯一方案的确认续接必须能看到上一轮助手追问，而不只有用户消息。"""
     from application.request_runtime import run_user_request
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import PlanDecision
 
     class Planner:
@@ -99,7 +99,7 @@ def test上一轮助手方案进入下一次planner历史() -> None:
             pass
 
     planner = Planner()
-    session = SessionState()
+    session = make_session_state()
     for user_text in ("把event_str映射为威胁类型", "确认"):
         asyncio.run(
             run_user_request(
@@ -128,7 +128,7 @@ def test上一轮助手方案进入下一次planner历史() -> None:
 def test显式威胁来源计划按当前配置编译为原子替换链(monkeypatch) -> None:
     """Planner 只给语义四步时，运行时按已有威胁类型确定性补删除步骤。"""
     from application import request_runtime
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import ExecutionReport, PlanDecision
 
     class Planner:
@@ -192,7 +192,7 @@ def test显式威胁来源计划按当前配置编译为原子替换链(monkeypa
     monkeypatch.setattr(
         request_runtime, "run_threat_chain_after_mapping", no_follow_up
     )
-    session = SessionState(
+    session = make_session_state(
         raw_log_lines=["alarm_name=scan"],
         mapped_sub_rules=[
             {
@@ -244,7 +244,7 @@ def test显式威胁来源计划按当前配置编译为原子替换链(monkeypa
 def test自动选择跳过无有效映射并只提交成功候选(monkeypatch) -> None:
     """候选试跑隔离：全兜底结果不提交，下一有效来源才写回。"""
     from application import request_runtime
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import (
         ExecutionReport,
         PlanDecision,
@@ -316,7 +316,7 @@ def test自动选择跳过无有效映射并只提交成功候选(monkeypatch) -
     monkeypatch.setattr(
         request_runtime, "_execute_plan_with_threat_transaction", execute_candidate
     )
-    session = SessionState(
+    session = make_session_state(
         raw_log_lines=["alarm_name=scan threat_type=1002"],
         mapped_sub_rules=[
             {
@@ -379,7 +379,7 @@ def _export_proposal():
 
 def test提案保存后确认同一计划且只能执行一次(monkeypatch) -> None:
     from application import request_runtime
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import ExecutionReport, PlanDecision
 
     class Planner:
@@ -416,7 +416,7 @@ def test提案保存后确认同一计划且只能执行一次(monkeypatch) -> N
     )
     monkeypatch.setattr(request_runtime, "run_threat_chain_after_mapping", no_follow_up)
     planner = Planner()
-    session = SessionState(decoded_data={"normalize": []})
+    session = make_session_state(decoded_data={"normalize": []})
 
     proposal = asyncio.run(
         request_runtime.run_user_request(
@@ -461,7 +461,7 @@ def test提案保存后确认同一计划且只能执行一次(monkeypatch) -> N
 
 def test取消和事实变化均不执行待确认计划(monkeypatch) -> None:
     from application import request_runtime
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import PlanDecision
 
     class Sink:
@@ -490,7 +490,7 @@ def test取消和事实变化均不执行待确认计划(monkeypatch) -> None:
                     pending_plan_id=kwargs["pending_plan"].plan_id,
                 )
 
-        session = SessionState(decoded_data={"normalize": []})
+        session = make_session_state(decoded_data={"normalize": []})
         planner = Planner()
         await request_runtime.run_user_request(
             session=session,
