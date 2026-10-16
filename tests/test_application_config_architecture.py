@@ -194,3 +194,25 @@ def test取消映射产物保持根类型键顺序默认空格中文与base64文
     assert '"field": "威胁类型", "mappings": []' in decoded
     assert result.artifact.download_kind == "cancelmapping_config"
     assert result.artifact.item_count == 0
+
+
+def test配置引用映射是词汇表唯一事实源() -> None:
+    """_CONFIG_SESSION_KEYS 键集 == ConfigRef 全集，映射值必须是 SessionState 字段。
+
+    #337 双向钉风格：ConfigRef 加值漏更映射即红；session_projection 与
+    execution 都消费此映射，不再有第二份来源（#350 静默错映射收口）。
+    """
+    from dataclasses import fields
+    from typing import get_args
+
+    from application.adapters.shared import _CONFIG_SESSION_KEYS
+    from application.adapters.shared import _read_config as shared_read_config
+    from application.session_projection import _read_config as projection_read_config
+    from application.session_state import SessionState
+    from contracts.planner_models import ConfigRef
+
+    assert set(_CONFIG_SESSION_KEYS) == set(get_args(ConfigRef))
+    defined_fields = {f.name for f in fields(SessionState)}
+    assert set(_CONFIG_SESSION_KEYS.values()) <= defined_fields
+    # session_projection 消费同一实现（本地静默错映射副本已删除）
+    assert projection_read_config is shared_read_config

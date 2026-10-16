@@ -23,6 +23,7 @@ from contracts.planner_models import (
     THREAT_TYPE_FIELD,
     ThreatMappingStep,
 )
+from application.adapters.shared import _CONFIG_SESSION_KEYS
 from application.progress import NullProgressSink
 from application.recovery import RecoveryBudget, RETRYABLE_STEP_TYPES, is_transient
 from contracts.progress import (
@@ -446,7 +447,7 @@ class PlanExecutor:
                 )
         if (
             isinstance(step, ExportStep)
-            and step.source_ref in {"session.decoded_config", "session.mapped_sub_rules"}
+            and step.source_ref in _CONFIG_SESSION_KEYS
             and step.source_ref not in session_facts.available_config_refs
         ):
             return self._needs_input_result(

@@ -10,6 +10,7 @@ from agent.shared.event_classify import (
     read_entity_event_name,
 )
 from agent.shared.mapping_utils import collect_config_names, iter_normalize_entries
+from application.adapters.shared import _read_config
 from application.artifact_targets import resolve_standard_target
 from contracts.planner_models import ConfigRef, ExecutionReport
 from contracts.session_artifacts import (
@@ -171,11 +172,6 @@ def _count_enum_values(enum_result: Any) -> int:
 def _count_normalize_entries(value: Any) -> int:
     """统计配置树中 normalize 条目数（dict 条目口径，schema 下与列表长度一致）。"""
     return sum(1 for _ in iter_normalize_entries(value, require_index=False))
-
-
-def _read_config(session: Any, config_ref: ConfigRef) -> Any:
-    key = "decoded_data" if config_ref == "session.decoded_config" else "mapped_sub_rules"
-    return _read_session_value(session, key)
 
 
 def _target_bindings(
