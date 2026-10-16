@@ -18,7 +18,7 @@ from application.threat_chain import (
     SESSION_OVERRIDE_KEY,
     run_threat_chain_after_mapping,
 )
-from application.session_state import SessionState
+from factories import make_session_state
 from application.progress import NullProgressSink
 from application.request_runtime import run_deterministic_plan
 from application.threat_chain_policy import (
@@ -535,7 +535,7 @@ def test结构化会话换源失败同样保持原配置(monkeypatch):
     _mock_retrieval(monkeypatch)
     _mock_enum_llm(monkeypatch)
     team = _Team(_ThreatMember(_FULL_MAPPING))
-    session = SessionState(
+    session = make_session_state(
         raw_log_lines=[
             "attack_type=暴力破解 event_desc=暴力破解告警",
             "attack_type=端口扫描 event_desc=端口扫描告警",

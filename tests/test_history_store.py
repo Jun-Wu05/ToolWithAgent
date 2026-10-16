@@ -14,7 +14,7 @@ from application.history import (
     append_history,
     format_history_for_prompt,
 )
-from application.session_state import SessionState
+from factories import make_session_state
 
 
 class TestHistoryEntryTruncation:
@@ -26,20 +26,20 @@ class TestHistoryEntryTruncation:
 
     def test_content_under_limit_not_truncated(self):
         """短于阈值的 content 原样保留。"""
-        s = SessionState()
+        s = make_session_state()
         append_history(s, "user", "短消息")
         assert s.conversation_history[-1]["content"] == "短消息"
 
     def test_content_at_limit_not_truncated(self):
         """恰好等于阈值的 content 不被截断。"""
-        s = SessionState()
+        s = make_session_state()
         content = "x" * MAX_ENTRY_CHARS
         append_history(s, "assistant", content)
         assert s.conversation_history[-1]["content"] == content
 
     def test_content_over_limit_truncated(self):
         """超阈值的 content 被截断到阈值长度 + 截断标记。"""
-        s = SessionState()
+        s = make_session_state()
         content = "x" * (MAX_ENTRY_CHARS + 500)
         append_history(s, "assistant", content)
         stored = s.conversation_history[-1]["content"]
@@ -61,7 +61,7 @@ class TestHistoryWindowBudget:
         回归：原总窗口 2000 时，1 条 1500 记录占 75%，滑动窗口贪心累加
         后实际只剩 1-2 条可见，多轮语义链断裂。
         """
-        s = SessionState()
+        s = make_session_state()
         # 写入 1 条满长 assistant 记录 + 配对 user 记录 + 第二轮
         full_content = "y" * MAX_ENTRY_CHARS
         append_history(s, "user", "提取枚举值")
