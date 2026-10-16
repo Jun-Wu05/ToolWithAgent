@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from factories import make_session_state
+
 
 def _fake_chainlit(sent: list, session: object):
     class Message:
@@ -204,7 +206,7 @@ def test_three_rule_buttons_open_modal_before_execution_when_fields_missing(
     import web.deterministic_plan as deterministic_plan
     import web.rule_source_form as source_form
 
-    session = {"log_classification": {"classification_details": []}}
+    session = make_session_state(log_classification={"classification_details": []})
     prompted = []
     monkeypatch.setattr(action_callbacks, "cl", _fake_chainlit([], session))
     monkeypatch.setattr(
@@ -241,12 +243,12 @@ def test_three_rule_buttons_execute_directly_when_session_fields_exist(
     import web.rule_source_form as source_form
     from contracts.rule_source import RuleSourceFields
 
-    session = {
-        "log_classification": {"classification_details": []},
-        "rule_source_fields": RuleSourceFields.create(
+    session = make_session_state(
+        log_classification={"classification_details": []},
+        rule_source_fields=RuleSourceFields.create(
             product="产品A", log_vendor="厂商B"
         ),
-    }
+    )
     calls = []
     monkeypatch.setattr(action_callbacks, "cl", _fake_chainlit([], session))
     monkeypatch.setattr(

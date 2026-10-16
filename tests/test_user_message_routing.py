@@ -5,6 +5,8 @@ import logging
 
 from contracts.planner_models import ExecutionReport, PlanDecision, StepResult
 
+from factories import make_session_state
+
 
 class FakePlanner:
     """返回预设决策并记录规划时业务执行器是否已被调用。"""
@@ -106,7 +108,7 @@ def _run(monkeypatch, decision, user_text="处理请求", session=None):
     monkeypatch.setattr(handlers, "_clear_session_data", clear_session)
     monkeypatch.setattr(handlers, "reset_session_progress_sink", reset_progress)
 
-    asyncio.run(handlers.handle_user_message(session or {}, object(), user_text))
+    asyncio.run(handlers.handle_user_message(session or make_session_state(), object(), user_text))
     planner.rendered_facts = rendered_facts
     return planner, events, rendered
 
@@ -161,7 +163,7 @@ def test澄清渲染接收当前安全会话事实(monkeypatch):
     planner, _, _ = _run(
         monkeypatch,
         decision,
-        session={"raw_log_lines": ["secret_business_value"]},
+        session=make_session_state(raw_log_lines=["secret_business_value"]),
     )
 
     assert planner.rendered_facts[0].has_logs is True
@@ -191,7 +193,7 @@ def testplanner不可用时不走关键词或router兜底(monkeypatch):
         monkeypatch,
         decision,
         user_text="提取 src_ip 的枚举值",
-        session={"raw_log_lines": ["src_ip=1.1.1.1"]},
+        session=make_session_state(raw_log_lines=["src_ip=1.1.1.1"]),
     )
 
     assert planner.calls == 1
@@ -379,7 +381,7 @@ def test后续威胁链报告先刷新原主报告再渲染链路结果(monkeypa
     async def render_report(result, **_kwargs):
         events.append(("render", result))
 
-    session = {"mapped_sub_rules": [{"name": "threat-rule"}]}
+    session = make_session_state(mapped_sub_rules=[{"name": "threat-rule"}])
     monkeypatch.setattr(handlers, "get_session_progress_sink", lambda: Ledger())
     monkeypatch.setattr(handlers, "run_user_request", run_request)
     monkeypatch.setattr(
@@ -393,7 +395,7 @@ def test后续威胁链报告先刷新原主报告再渲染链路结果(monkeypa
     asyncio.run(handlers.handle_user_message(session, object(), "把 alarm_name 映射为威胁类型"))
 
     assert events == [
-        ("refresh", report, session["mapped_sub_rules"]),
+        ("refresh", report, session.mapped_sub_rules),
         ("render", report),
         "finish",
     ]

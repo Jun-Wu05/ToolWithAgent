@@ -55,7 +55,10 @@ def threat_fill_source_precondition(
     """
     if step.source_ref != "session.artifacts.threat_mapping":
         return None, None
-    raw_slot = session.get("latest_threat_artifact")
+    # 延迟导入：adapters.shared 反向依赖本模块的 ExecutionContext，顶层导入会成环
+    from application.adapters.shared import _session_get
+
+    raw_slot = _session_get(session, "latest_threat_artifact")
     try:
         slot = (
             raw_slot
@@ -90,7 +93,10 @@ def threat_mapping_source_precondition(
     """
     if step.source_ref != "session.artifacts.enum_values":
         return None, None
-    raw_slot = session.get("latest_enum_artifact")
+    # 延迟导入：adapters.shared 反向依赖本模块的 ExecutionContext，顶层导入会成环
+    from application.adapters.shared import _session_get
+
+    raw_slot = _session_get(session, "latest_enum_artifact")
     try:
         slot = (
             raw_slot

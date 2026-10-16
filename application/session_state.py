@@ -350,34 +350,3 @@ class SessionState:
         self.last_threat_data = None
         self.excel_data = None
         self.excel_filename = None
-
-    # ---- Dict 兼容层（过渡期，后续可移除）----
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """dict.get() 兼容方法，迁移完成后可移除"""
-        return getattr(self, key, default)
-
-    def __getitem__(self, key: str) -> Any:
-        """dict[key] 兼容方法"""
-        if hasattr(self, key):
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        """dict[key] = value 兼容方法"""
-        if hasattr(self, key):
-            setattr(self, key, value)
-        else:
-            raise KeyError(f"SessionState 没有字段: {key}")
-
-    def __contains__(self, key: str) -> bool:
-        """key in dict 兼容方法"""
-        return hasattr(self, key)
-
-    def pop(self, key: str, default: Any = None) -> Any:
-        """dict.pop() 兼容方法 — 取值后重置为默认值"""
-        if hasattr(self, key):
-            value = getattr(self, key)
-            setattr(self, key, default)
-            return value
-        return default

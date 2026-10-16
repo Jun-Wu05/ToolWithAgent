@@ -1,14 +1,14 @@
 """
 SessionState 契约测试 — 防止「写入未定义的 session 字段」类 bug。
 
-背景：SessionState.__setitem__ 严格要求字段必须预先定义，否则抛
-'SessionState 没有字段: xxx'。会话写入散落在 web/ 与 application/ 多个文件，
-风格有两类：旧式 ``session["key"] = value`` 直写，与 application 层的
+背景：会话写入散落在 web/ 与 application/ 多个文件，风格有两类：旧式
+``session["key"] = value`` 直写，与 application 层的
 ``_session_set(session, "key", value)`` 垫片调用。每次新增功能写 session 时，
 容易忘记在 SessionState 里加字段，导致运行期崩溃。
 
 本测试扫描 web/ 与 application/ 下两类字面量键写入，断言每个 key 都已定义，
-把「运行期 KeyError」提前到「测试期 AssertionError」。
+把运行期错误提前到测试期。#367 退役 dict 兼容层后，SessionState 只余属性
+形态；直写形态在类型上已不可能，扫描保留作为防御。
 
 已知边界：变量键写入（如 ``_session_set(session, session_key, ...)`` 或
 ``session[key] = value``）无法静态判定，不在守卫视野内。
@@ -138,25 +138,31 @@ class TestSessionStateContract:
         assert "also_not_real_abc" in written
         assert "not_a_real_field_xyz" not in _collect_defined_session_fields()
 
-    def test_session_state_setitem_rejects_unknown_key(self):
-        """SessionState.__setitem__ 对未定义字段抛 KeyError（这是防护的根基）。
-
-        确保这个严格行为不会被意外放宽（若放宽，上面的扫描测试就失效了）。
-        """
-        from application.session_state import SessionState
-        s = SessionState()
-        with pytest.raises(KeyError, match="没有字段"):
-            s["nonexistent_field_xyz"] = "value"
-
     def test_defined_fields_are_writable(self):
         """SessionState 每个已定义字段都能正常读写（回归基本契约）。"""
         from application.session_state import SessionState
         s = SessionState()
         # 抽查几个关键字段
-        s["mapped_sub_rules"] = [{"normalize": []}]
+        s.mapped_sub_rules = [{"normalize": []}]
         assert s.mapped_sub_rules == [{"normalize": []}]
-        s["last_threat_data"] = [{"a": 1}]
+        s.last_threat_data = [{"a": 1}]
         assert s.last_threat_data == [{"a": 1}]
+
+    def test_session_state_dict_compat_layer_is_removed(self):
+        """SessionState 不再提供 dict 形态方法（#367 退役契约）。
+
+        get/__getitem__/__setitem__/__contains__/pop 曾是 dict 迁移期的兼容层；
+        重新引入任何一种都会让「session 是不是 dict」的歧义回到类型上。
+        """
+        defined = vars(ss_module.SessionState)
+        for name in (
+            "get",
+            "__getitem__",
+            "__setitem__",
+            "__contains__",
+            "pop",
+        ):
+            assert name not in defined
 
     def test_log_classification_commit_clears_only_mapped_rule_derivatives(self):
         """生产 SessionState 与字典测试接缝共享同一派生状态失效语义。"""
