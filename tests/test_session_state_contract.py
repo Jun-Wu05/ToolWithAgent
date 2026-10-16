@@ -20,6 +20,33 @@ import pytest
 
 import application.session_state as ss_module
 
+# 会话垫片的允许唯一实现位置（#351 收口：其余拷贝全部改为导入）
+_SHIM_SINGLE_HOME = "application/adapters/shared.py"
+
+
+def _collect_shim_definitions(root_dir: str) -> dict[str, set[str]]:
+    """扫描目录下 .py 文件中的会话垫片 def 定义（posix 路径 → 函数名集合）。
+
+    覆盖三个历史拷贝名：``_session_get``/``_session_set``（3 文件 6 份 def）
+    与 ``_read_session_value``（session_projection 的同体只读变体）。
+    """
+    shim_def_re = re.compile(r"def (_session_get|_session_set|_read_session_value)\(")
+    found: dict[str, set[str]] = {}
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for fname in filenames:
+            if not fname.endswith(".py"):
+                continue
+            fpath = os.path.join(dirpath, fname)
+            with open(fpath, encoding="utf-8") as f:
+                for line in f:
+                    m = shim_def_re.search(line)
+                    if m:
+                        found.setdefault(fpath.replace(os.sep, "/"), set()).add(
+                            m.group(1)
+                        )
+    return found
+
 
 def _collect_written_session_keys(root_dir: str) -> set:
     """扫描目录下所有 .py 文件，收集两类字面量键写入的 key 名。
@@ -186,7 +213,25 @@ class TestSessionStateContract:
             decoded_ref: {"severity": [{"orgValue": "high"}]}
         }
         assert session.stale_enum_config_refs == {decoded_ref}
-        assert session.enum_pending_refills == {decoded_ref: {"severity"}}
+        assert session.enum_pending_refills == {
+            decoded_ref: {"severity"},
+        }
         assert session.rule_source_fields is None
         assert session.pending_rule_source_step is None
         assert session.pending_plan is None
+
+    def test_会话垫片单一实现(self):
+        """垫片 def 全仓唯一：application/web 扫描只允许 adapters/shared 一处。
+
+        #351 收口前的形态是 3 文件 6 份 def + session_projection 的
+        ``_read_session_value`` 同体只读变体；任何新拷贝（包括改名前的
+        旧名）在此立即变红。
+        """
+        definitions: dict[str, set[str]] = {}
+        for root in ("application", "web"):
+            for path, names in _collect_shim_definitions(root).items():
+                definitions.setdefault(path, set()).update(names)
+
+        assert definitions == {
+            _SHIM_SINGLE_HOME: {"_session_get", "_session_set"},
+        }
