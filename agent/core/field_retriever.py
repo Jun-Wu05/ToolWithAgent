@@ -692,13 +692,15 @@ def _collect_stripped_variants(
 
 def _collect_exact_candidates(
     field_name: str,
+    field_index: int,
     records: list,
     exact_index: dict[str, int],
     variant_space: _StrippedVariantSpace,
 ) -> tuple[list[tuple[str, str, float, CandidateRow]], set[str]]:
     """Layer 1 + 1.5：原始字段名与去前缀变体的精确匹配兜底（置顶）。
 
-    返回 (候选暂存, 已见字段名集合)；暂存为 (formatted_str, 字段名, 相似度, 结构化行)。
+    变体轮按原始字段下标（field_index）查 fields_map；返回 (候选暂存, 已见字段名集合)，
+    暂存为 (formatted_str, 字段名, 相似度, 结构化行)。
     """
     candidates_tmp: list[tuple[str, str, float, CandidateRow]] = []
     seen_field_keys: set[str] = set()  # 防止精确匹配和语义检索重复
@@ -722,9 +724,9 @@ def _collect_exact_candidates(
         )
         seen_field_keys.add(rfn)
 
-    # Layer 1.5: 去前缀变体的精确名称匹配兜底
-    if field_name in variant_space.fields_map:
-        for variant in variant_space.fields_map[field_name]:
+    # Layer 1.5: 去前缀变体的精确名称匹配兜底（fields_map 以原始字段下标为键）
+    if field_index in variant_space.fields_map:
+        for variant in variant_space.fields_map[field_index]:
             v_key = _normalize_field_name(variant)
             v_exact_idx = exact_index.get(v_key)
             if v_exact_idx is not None:
@@ -875,7 +877,7 @@ def batch_retrieve_candidates_table(
     for i, field_name in enumerate(raw_field_names):
         field_started_at = time.monotonic()
         exact_rows, seen_field_keys = _collect_exact_candidates(
-            field_name, records, exact_index, variant_space
+            field_name, i, records, exact_index, variant_space
         )
         candidates_tmp = exact_rows + _collect_semantic_candidates(
             i, records, similarity_matrix, variant_space, top_k, seen_field_keys

@@ -94,6 +94,32 @@ def test_public_runtime_entry_preserves_lookup_exclusions_and_format(monkeypatch
     )
 
 
+def test_nested_field_variant_exact_match_pins_stripped_hit(monkeypatch) -> None:
+    """Layer 1.5：嵌套字段的去前缀变体精确命中目录时置顶 1.00 候选（#363）。"""
+    import application.field_runtime as runtime
+    from agent.core import field_retriever
+
+    records = [
+        {"系统属性名称": "事件名称", "字段名称": "event_name"},
+        {"系统属性名称": "严重程度", "字段名称": "severity"},
+    ]
+    embeddings = np.array([[1.0, 0.0], [0.0, 1.0]])
+    monkeypatch.setattr(field_retriever, "_load_cache", lambda: (embeddings, records))
+    monkeypatch.setattr(
+        field_retriever,
+        "_call_embedding_api",
+        lambda texts: np.array([[0.0, 1.0] for _ in texts]),
+    )
+
+    table = field_retriever.batch_retrieve_candidates_table(["data.severity"])
+    assert table["data.severity"][0] == ("严重程度", 1.0, "severity", "severity")
+
+    assert runtime.batch_retrieve_candidates(["data.severity"], top_k=2) == (
+        "## 标准字段候选（语义检索 top-2，按相似度降序）：\n"
+        "data.severity → 严重程度(1.00, severity, by_stripped=severity)"
+    )
+
+
 def test_stale_cache_without_api_key_fails_closed_without_rebuild(monkeypatch) -> None:
     """缓存元数据缺失且无法重建时，公共初始化入口稳定返回 False。"""
     from agent.core import field_retriever
