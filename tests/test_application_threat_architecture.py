@@ -8,6 +8,9 @@ import base64
 import json
 from pathlib import Path
 
+from application.session_state import SessionState
+from factories import make_session_state
+
 
 def _import_roots(path: Path) -> set[str]:
     """提取静态导入根，验证 Application 威胁模块不反向依赖 Web。"""
@@ -81,18 +84,9 @@ def test威胁映射精确调用一次并按顺序提交双槽() -> None:
                 "mappingValue": "恶意程序", "ignored": "drop",
             }]}, ensure_ascii=False)
 
-    class Session(dict):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.writes: list[str] = []
-
-        def __setitem__(self, key, value):
-            self.writes.append(key)
-            super().__setitem__(key, value)
-
     member = Member()
     enum_artifact = EnumValuesArtifact(values=("攻击",), item_count=1, field="event_type")
-    session = Session(latest_enum_artifact=EnumArtifactSlot(
+    session = _recording_session(latest_enum_artifact=EnumArtifactSlot(
         artifact=enum_artifact, source_field="event_type"
     ))
     step = ThreatMappingStep(
@@ -112,9 +106,9 @@ def test威胁映射精确调用一次并按顺序提交双槽() -> None:
     assert session.writes == ["last_threat_data", "latest_threat_artifact"]
 
 
-def _broken_enum_session() -> dict:
+def _broken_enum_session():
     """构造枚举产物槽损坏的会话（#320 不可用分支共用夹具）。"""
-    return {"latest_enum_artifact": {"not": "a-valid-slot"}}
+    return make_session_state(latest_enum_artifact={"not": "a-valid-slot"})
 
 
 def test威胁映射枚举产物不可用时执行器预检拦截() -> None:
@@ -218,16 +212,20 @@ class _CoverageMember:
         return self.response
 
 
-class _RecordingSession(dict):
-    """记录写入顺序的 Session 替身。"""
+class _RecordingSession(SessionState):
+    """记录属性写入顺序的 Session 替身（垫片对 SessionState 走 setattr）。"""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.writes: list[str] = []
+    def __setattr__(self, name: str, value) -> None:
+        if name != "writes" and hasattr(self, "writes"):
+            self.writes.append(name)
+        super().__setattr__(name, value)
 
-    def __setitem__(self, key, value):
-        self.writes.append(key)
-        super().__setitem__(key, value)
+
+def _recording_session(**overrides) -> _RecordingSession:
+    """构造开始记录属性写入的会话替身（构造期字段初始化不入账）。"""
+    session = _RecordingSession(**overrides)
+    session.writes = []
+    return session
 
 
 def _run_threat_mapping(member, session, step) -> object:
@@ -264,7 +262,7 @@ def test威胁映射来源外结果失败关闭不提交会话() -> None:
         ),
         source_field="old_field",
     )
-    session = _RecordingSession(latest_threat_artifact=previous)
+    session = _recording_session(latest_threat_artifact=previous)
     step = ThreatMappingStep(
         step_id="threat", type="threat_mapping",
         source_ref="user.values", values=("攻击",),
@@ -276,7 +274,7 @@ def test威胁映射来源外结果失败关闭不提交会话() -> None:
     assert result.error_code == "threat_mapping_coverage_rejected"
     assert len(member.calls) == 1
     assert session.writes == []
-    assert session["latest_threat_artifact"] is previous
+    assert session.latest_threat_artifact is previous
 
 
 def test威胁映射缺项结果失败关闭不提交会话() -> None:
@@ -286,7 +284,7 @@ def test威胁映射缺项结果失败关闭不提交会话() -> None:
     member = _CoverageMember(json.dumps({"items": [
         {"mappingType": "EQUAL", "orgValue": "攻击", "mappingValue": "暴力破解"},
     ]}, ensure_ascii=False))
-    session = _RecordingSession()
+    session = _recording_session()
     step = ThreatMappingStep(
         step_id="threat", type="threat_mapping",
         source_ref="user.values", values=("攻击", "扫描"),
@@ -304,7 +302,7 @@ def test威胁映射全数字代码输入needs_input且不调用模型() -> None
     from contracts.planner_models import StepStatus, ThreatMappingStep
 
     member = _CoverageMember("[]")
-    session = _RecordingSession()
+    session = _recording_session()
     step = ThreatMappingStep(
         step_id="threat", type="threat_mapping",
         source_ref="user.values", values=("30", "10"),
@@ -326,7 +324,7 @@ def test威胁映射混合输入仍调用模型并按覆盖校验裁决() -> Non
     member = _CoverageMember(json.dumps({"items": [
         {"mappingType": "REGULAR", "orgValue": "(?:30|攻击)", "mappingValue": "暴力破解"},
     ]}, ensure_ascii=False))
-    session = _RecordingSession()
+    session = _recording_session()
     step = ThreatMappingStep(
         step_id="threat", type="threat_mapping",
         source_ref="user.values", values=("30", "攻击"),
@@ -349,7 +347,7 @@ def test威胁映射依赖来源同样执行统一校验语义() -> None:
     )
 
     member = _CoverageMember("[]")
-    session = _RecordingSession()
+    session = _recording_session()
     step = ThreatMappingStep(
         step_id="threat", type="threat_mapping",
         source_ref="step:enum-a", depends_on=("enum-a",),
@@ -385,7 +383,7 @@ def test威胁填充base64解码文本保持中文根结构键顺序与默认空
     config = [{"name": "规则一", "normalize": [{
         "index": "event_type", "field": "事件类型", "mappings": [],
     }]}]
-    session = {"decoded_data": config, "decoded_fields": ["event_type"]}
+    session = make_session_state(decoded_data=config, decoded_fields=["event_type"])
     artifact = ThreatMappingArtifact(
         mappings=(ThreatMappingRow.model_validate({
             "mappingType": "REGULAR", "orgValue": "攻击", "mappingValue": "恶意活动",
@@ -410,7 +408,7 @@ def test威胁填充base64解码文本保持中文根结构键顺序与默认空
 
     assert result.status == StepStatus.SUCCESS
     decoded = base64.b64decode(result.artifact.content).decode("utf-8")
-    assert decoded == json.dumps(session["decoded_data"], ensure_ascii=False)
+    assert decoded == json.dumps(session.decoded_data, ensure_ascii=False)
     assert decoded.startswith('[{"name": "规则一", "normalize":')
     assert '"mappingType": "REGULAR"' in decoded
     assert '"mappingValue": "恶意活动"' in decoded
