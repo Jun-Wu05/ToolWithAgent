@@ -175,7 +175,9 @@ def test非KV_JSON格式以稳定错误明确告知且不产生伪成功() -> No
     from application.session_projection import build_session_facts
     from contracts.planner_models import LogParseStep
 
-    session = {"raw_log_lines": ["<190>Aug 10 12:44:51 2026 AC %%10STAMGR/6/X: Client MAC: 1"]}
+    session = make_session_state(
+        raw_log_lines=["<190>Aug 10 12:44:51 2026 AC %%10STAMGR/6/X: Client MAC: 1"]
+    )
     unsupported = json.dumps(
         {"status": "UNSUPPORTED", "error": "不支持的日志格式: unknown"}
     )
@@ -363,11 +365,11 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
         )
 
     previous = {"classification_details": [{"logtype": "old"}]}
-    invalid_session = {
-        "raw_log_lines": ["kind=attack"],
-        "log_classification": previous,
-        "mapped_sub_rules": [{"name": "old-mapped"}],
-    }
+    invalid_session = make_session_state(
+        raw_log_lines=["kind=attack"],
+        log_classification=previous,
+        mapped_sub_rules=[{"name": "old-mapped"}],
+    )
     invalid = asyncio.run(
         execute(
             LogParseAdapter(
@@ -380,13 +382,13 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
     )
     assert invalid.status == StepStatus.FAILED
     assert invalid.error_code == "log_format_invalid"
-    assert invalid_session["log_classification"] is previous
-    assert invalid_session["mapped_sub_rules"] == [{"name": "old-mapped"}]
+    assert invalid_session.log_classification is previous
+    assert invalid_session.mapped_sub_rules == [{"name": "old-mapped"}]
 
-    empty_session = {
-        "raw_log_lines": ["kind=attack"],
-        "log_classification": previous,
-    }
+    empty_session = make_session_state(
+        raw_log_lines=["kind=attack"],
+        log_classification=previous,
+    )
     empty = asyncio.run(
         execute(
             LogParseAdapter(
@@ -399,7 +401,7 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
     )
     assert empty.status == StepStatus.FAILED
     assert empty.error_code == "log_parse_failed"
-    assert empty_session["log_classification"] is previous
+    assert empty_session.log_classification is previous
 
 
 def test_nonempty_failed_classification_preserves_historical_success_result() -> None:
@@ -410,11 +412,11 @@ def test_nonempty_failed_classification_preserves_historical_success_result() ->
     from contracts.planner_models import LogParseStep, StepStatus
 
     previous = {"classification_details": [{"logtype": "old"}]}
-    session = {
-        "raw_log_lines": ["kind=attack"],
-        "log_classification": previous,
-        "mapped_sub_rules": [{"name": "old-mapped"}],
-    }
+    session = make_session_state(
+        raw_log_lines=["kind=attack"],
+        log_classification=previous,
+        mapped_sub_rules=[{"name": "old-mapped"}],
+    )
     result = asyncio.run(
         LogParseAdapter(
             format_identifier=lambda _: '{"format":"kv"}',
@@ -430,8 +432,8 @@ def test_nonempty_failed_classification_preserves_historical_success_result() ->
     assert result.status == StepStatus.FAILED
     assert result.error_code == "log_parse_failed"
     assert "历史失败结构" in (result.message or "")
-    assert session["log_classification"] is previous
-    assert session["mapped_sub_rules"] == [{"name": "old-mapped"}]
+    assert session.log_classification is previous
+    assert session.mapped_sub_rules == [{"name": "old-mapped"}]
 
 
 def test_legacy_json_prompt_and_adapter_paths_reexport_identical_objects() -> None:

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from agent.shared.mapping_utils import unbind_fixed_fields
+from factories import make_session_state
 from contracts.planner_models import (
     AddFieldsStep,
     DecodeFieldsStep,
@@ -130,10 +131,10 @@ def test契约缺省值向后兼容():
 
 def test会话事实暴露子规则名单():
     """mapped_sub_rule_names / decoded_config_rule_names 去重保序投影。"""
-    session = {
-        "mapped_sub_rules": [{"name": "rule-a"}, {"name": "rule-b"}, {"name": "rule-a"}],
-        "decoded_data": [{"name": "entry-1"}, {"name": "entry-1"}, {"name": "sub-9"}],
-    }
+    session = make_session_state(
+        mapped_sub_rules=[{"name": "rule-a"}, {"name": "rule-b"}, {"name": "rule-a"}],
+        decoded_data=[{"name": "entry-1"}, {"name": "entry-1"}, {"name": "sub-9"}],
+    )
     facts = build_session_facts(session)
     assert facts.mapped_sub_rule_names == ("rule-a", "rule-b")
     assert facts.decoded_config_rule_names == ("entry-1", "sub-9")
@@ -193,7 +194,7 @@ def test适配器未知子规则名返回rule_name_not_found():
         target_rule_names=("不存在的规则",),
         config_ref="session.mapped_sub_rules",
     )
-    result = _run(FieldSkillAdapter(), step, {"mapped_sub_rules": _annotated_config()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(mapped_sub_rules=_annotated_config()))
     assert result.status.value == "failed"
     assert result.error_code == "rule_name_not_found"
     assert "暴力破解_kv_子规则" in result.message
@@ -205,10 +206,10 @@ def test适配器威胁组解析只命中威胁子规则():
         step_id="a1", type="add_fields", field_name="备注", field_value="重点",
         rule_group="threat", config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _annotated_config()}
+    session = make_session_state(mapped_sub_rules=_annotated_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success"
-    by_name = {e["name"]: e for e in session["mapped_sub_rules"]}
+    by_name = {e["name"]: e for e in session.mapped_sub_rules}
     assert "备注" in [i["index"] for i in by_name["暴力破解_kv_子规则"]["normalize"]]
     assert "备注" not in [i["index"] for i in by_name["用户登录_json_子规则"]["normalize"]]
     assert "备注" not in [i["index"] for i in by_name["未标注_子规则"]["normalize"]]
@@ -220,7 +221,9 @@ def test适配器无标注时组批返回event_annotation_required():
         step_id="d1", type="delete_fields", fields=("a",),
         rule_group="non_threat", config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": [{"name": "r", "normalize": [{"index": "a"}], "parser": {"filter": []}}]}
+    session = make_session_state(
+        mapped_sub_rules=[{"name": "r", "normalize": [{"index": "a"}], "parser": {"filter": []}}]
+    )
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "failed"
     assert result.error_code == "event_annotation_required"
@@ -246,7 +249,7 @@ def test适配器删除悬空引用被拒():
         step_id="d1", type="delete_fields", fields=("a",),
         config_ref="session.decoded_config",
     )
-    result = _run(FieldSkillAdapter(), step, {"decoded_data": config})
+    result = _run(FieldSkillAdapter(), step, make_session_state(decoded_data=config))
     assert result.status.value == "failed"
     assert result.error_code == "field_reference_conflict"
     assert "merger" in result.message
@@ -255,7 +258,7 @@ def test适配器删除悬空引用被拒():
         step_id="d2", type="delete_fields", fields=("reqheader",),
         config_ref="session.decoded_config",
     )
-    result2 = _run(FieldSkillAdapter(), step_placeholder, {"decoded_data": config})
+    result2 = _run(FieldSkillAdapter(), step_placeholder, make_session_state(decoded_data=config))
     assert result2.status.value == "failed"
     assert "%{reqheader}" in result2.message
 
@@ -273,7 +276,7 @@ def test事件名守卫只检查目标范围():
         step_id="a2", type="add_fields", field_name="事件名称", field_value="终端告警",
         target_rule_names=("暴力破解_kv_子规则",), config_ref="session.mapped_sub_rules",
     )
-    result2 = _run(FieldSkillAdapter(), step_conflict, {"mapped_sub_rules": _annotated_config()})
+    result2 = _run(FieldSkillAdapter(), step_conflict, make_session_state(mapped_sub_rules=_annotated_config()))
     assert result2.status.value == "failed"
     assert result2.error_code == "event_level_conflict"
 
@@ -285,11 +288,11 @@ def testskip_existing步骤级联生效():
         target_rule_names=("暴力破解_kv_子规则", "未标注_子规则"),
         skip_existing=True, config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _annotated_config()}
+    session = make_session_state(mapped_sub_rules=_annotated_config())
     result = _run(FieldSkillAdapter(), step, session)
     # 暴力破解已有事件名称（跳过），未标注子规则正常新增
     assert result.status.value == "success"
-    by_name = {e["name"]: e for e in session["mapped_sub_rules"]}
+    by_name = {e["name"]: e for e in session.mapped_sub_rules}
     assert "已存在该字段，跳过" in result.message
     assert "事件名称" in [i["index"] for i in by_name["未标注_子规则"]["normalize"]]
 
@@ -377,12 +380,12 @@ def test枚举填充事件级别即解绑():
             ]},
         }
     ]
-    session = {
-        "decoded_data": config,
-        "enum_preview": [
+    session = make_session_state(
+        decoded_data=config,
+        enum_preview=[
             {"目标字段": "事件级别", "orgValue": "1", "mappingValue": "高危"},
         ],
-    }
+    )
     step = FillStep(
         step_id="f1", type="fill", fill_kind="enum",
         target_fields=("事件级别",),
@@ -392,7 +395,7 @@ def test枚举填充事件级别即解绑():
     result = _run(EnumFillAdapter(), step, session)
     assert result.status.value == "success"
     assert "已解除 1 条规则的固定值绑定" in result.message
-    rule = session["decoded_data"][0]
+    rule = session.decoded_data[0]
     bound_keys = rule["parser"]["filter"][0]["fields"]
     assert "事件级别" not in bound_keys
     mappings = rule["normalize"][0]["mappings"]

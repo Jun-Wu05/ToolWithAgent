@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from factories import make_recording_session, make_session_state
+
 
 def _import_roots(path: Path) -> set[str]:
     """读取静态导入根，用于阻止 Application 反向依赖界面层。"""
@@ -46,15 +48,6 @@ def test取消映射通过标准字段名原子写回原配置来源() -> None:
     from application.session_projection import build_session_facts
     from contracts.planner_models import RemoveMappingStep, StepStatus
 
-    class RecordingSession(dict):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.writes: list[str] = []
-
-        def __setitem__(self, key, value):
-            self.writes.append(key)
-            super().__setitem__(key, value)
-
     original = [{
         "name": "规则一",
         "normalize": [{
@@ -66,7 +59,7 @@ def test取消映射通过标准字段名原子写回原配置来源() -> None:
             ],
         }],
     }]
-    session = RecordingSession(mapped_sub_rules=copy.deepcopy(original))
+    session = make_recording_session(mapped_sub_rules=copy.deepcopy(original))
     step = RemoveMappingStep(
         step_id="remove",
         type="remove_mapping",
@@ -84,7 +77,7 @@ def test取消映射通过标准字段名原子写回原配置来源() -> None:
     assert result.changed_count == 2
     assert result.message == "目标字段映射已取消；字段解析：威胁类型→alarm_type"
     assert session.writes == ["mapped_sub_rules"]
-    assert session["mapped_sub_rules"][0]["normalize"][0]["mappings"] == []
+    assert session.mapped_sub_rules[0]["normalize"][0]["mappings"] == []
     assert original[0]["normalize"][0]["mappings"] != []
 
 
@@ -121,17 +114,8 @@ def test取消映射失败关闭且不留下部分状态(
     from application.session_projection import build_session_facts
     from contracts.planner_models import RemoveMappingStep
 
-    class RecordingSession(dict):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.writes: list[str] = []
-
-        def __setitem__(self, key, value):
-            self.writes.append(key)
-            super().__setitem__(key, value)
-
     original = copy.deepcopy(config)
-    session = RecordingSession(
+    session = make_recording_session(
         decoded_data=config,
         stale_enum_config_refs={"session.decoded_config"} if stale else set(),
     )
@@ -151,7 +135,7 @@ def test取消映射失败关闭且不留下部分状态(
     assert result.status.name == status_name
     assert result.error_code == error_code
     assert session.writes == []
-    assert session["decoded_data"] == original
+    assert session.decoded_data == original
 
 
 @pytest.mark.parametrize(
@@ -174,7 +158,7 @@ def test取消映射产物保持根类型键顺序默认空格中文与base64文
     from application.session_projection import build_session_facts
     from contracts.planner_models import RemoveMappingStep, StepStatus
 
-    session = {"decoded_data": copy.deepcopy(config)}
+    session = make_session_state(decoded_data=copy.deepcopy(config))
     step = RemoveMappingStep(
         step_id="remove",
         type="remove_mapping",
@@ -189,7 +173,7 @@ def test取消映射产物保持根类型键顺序默认空格中文与base64文
 
     assert result.status == StepStatus.SUCCESS
     decoded = base64.b64decode(result.artifact.content).decode("utf-8")
-    assert decoded == json.dumps(session["decoded_data"], ensure_ascii=False)
+    assert decoded == json.dumps(session.decoded_data, ensure_ascii=False)
     assert decoded.startswith('{"name": "规则一"' if isinstance(config, dict) else '[{"name": "规则一"')
     assert '"field": "威胁类型", "mappings": []' in decoded
     assert result.artifact.download_kind == "cancelmapping_config"

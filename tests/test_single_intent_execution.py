@@ -245,7 +245,7 @@ def test字段映射单步可运行(monkeypatch):
             ensure_ascii=False,
         ),
     )
-    session = {"decoded_fields": ["event_type3"]}
+    session = make_session_state(decoded_fields=["event_type3"])
 
     report = _execute_single_step(
         session,
@@ -254,7 +254,7 @@ def test字段映射单步可运行(monkeypatch):
     )
 
     assert report.status == StepStatus.SUCCESS
-    assert session["last_mapping_data"][0]["原始字段名"] == "event_type3"
+    assert session.last_mapping_data[0]["原始字段名"] == "event_type3"
 
 
 def test枚举提取单步可运行(monkeypatch):
@@ -268,10 +268,10 @@ def test枚举提取单步可运行(monkeypatch):
             {"field": "event_type3", "regex": r"event_type3=(\w+)"}
         ),
     )
-    session = {
-        "raw_log_lines": ["event_type3=attack src=10.0.0.1", "event_type3=scan src=10.0.0.2"],
-        "decoded_fields": ["event_type3"],
-    }
+    session = make_session_state(
+        raw_log_lines=["event_type3=attack src=10.0.0.1", "event_type3=scan src=10.0.0.2"],
+        decoded_fields=["event_type3"],
+    )
 
     report = _execute_single_step(
         session,
@@ -299,13 +299,13 @@ def test枚举提取从原始日志读取未进入字段映射列表的event_nam
             ensure_ascii=False,
         ),
     )
-    session = {
-        "raw_log_lines": [
+    session = make_session_state(
+        raw_log_lines=[
             '{"data":{"event_name":"login"}}',
             '{"data":{"event_name":"logout"}}',
         ],
-        "decoded_fields": ["src"],
-    }
+        decoded_fields=["src"],
+    )
 
     report = _execute_single_step(
         session,
@@ -326,10 +326,10 @@ def test枚举提取模型返回非JSON时失败关闭(monkeypatch):
     import agent.tools.pipeline.llm_client as llm_client
 
     monkeypatch.setattr(llm_client, "_call_llm_direct", lambda *a, **kw: "这不是JSON")
-    session = {
-        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
-        "decoded_fields": ["event_type3"],
-    }
+    session = make_session_state(
+        raw_log_lines=["event_type3=attack src=10.0.0.1"],
+        decoded_fields=["event_type3"],
+    )
 
     report = _execute_single_step(
         session,
@@ -355,10 +355,10 @@ def test枚举提取字段不一致时失败关闭(monkeypatch):
         "_call_llm_direct",
         lambda *a, **kw: json.dumps({"field": "别的字段", "regex": r"(\w+)"}, ensure_ascii=False),
     )
-    session = {
-        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
-        "decoded_fields": ["event_type3"],
-    }
+    session = make_session_state(
+        raw_log_lines=["event_type3=attack src=10.0.0.1"],
+        decoded_fields=["event_type3"],
+    )
 
     report = _execute_single_step(
         session,
@@ -386,10 +386,10 @@ def test枚举提取正则无法匹配时失败关闭(monkeypatch):
     )
     monkeypatch.setattr(enum_tool, "validate_regex_with_stats", lambda *a, **kw: {"valid": False})
     monkeypatch.setattr(enum_tool, "validate_and_fix_regex", lambda *a, **kw: {"valid": False})
-    session = {
-        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
-        "decoded_fields": ["event_type3"],
-    }
+    session = make_session_state(
+        raw_log_lines=["event_type3=attack src=10.0.0.1"],
+        decoded_fields=["event_type3"],
+    )
 
     report = _execute_single_step(
         session,
@@ -417,10 +417,10 @@ def test枚举提取空结果时失败关闭(monkeypatch):
     )
     monkeypatch.setattr(enum_tool, "validate_regex_with_stats", lambda *a, **kw: {"valid": True})
     monkeypatch.setattr(enum_tool, "extract_enum_with_field", lambda *a, **kw: {"value": []})
-    session = {
-        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
-        "decoded_fields": ["event_type3"],
-    }
+    session = make_session_state(
+        raw_log_lines=["event_type3=attack src=10.0.0.1"],
+        decoded_fields=["event_type3"],
+    )
 
     report = _execute_single_step(
         session,
@@ -438,7 +438,7 @@ def test枚举提取空结果时失败关闭(monkeypatch):
 
 def test枚举提取无日志时在适配器调用前拦截():
     """无日志时执行器以 logs_required 拦截，不进入适配器（回归 #37）。"""
-    session = {}
+    session = make_session_state()
 
     report = _execute_single_step(
         session,
@@ -459,11 +459,11 @@ def test枚举提取失败不被旧枚举结果掩盖(monkeypatch):
     import agent.tools.pipeline.llm_client as llm_client
 
     monkeypatch.setattr(llm_client, "_call_llm_direct", lambda *a, **kw: "bad-json")
-    session = {
-        "raw_log_lines": ["event_type3=attack src=10.0.0.1"],
-        "decoded_fields": ["event_type3"],
-        "last_enum_extract_result": {"value": ["旧值不得掩盖失败"]},
-    }
+    session = make_session_state(
+        raw_log_lines=["event_type3=attack src=10.0.0.1"],
+        decoded_fields=["event_type3"],
+        last_enum_extract_result={"value": ["旧值不得掩盖失败"]},
+    )
 
     report = _execute_single_step(
         session,
@@ -478,7 +478,7 @@ def test枚举提取失败不被旧枚举结果掩盖(monkeypatch):
     assert report.status == StepStatus.FAILED
     assert report.results[0].artifact is None
     # 旧值既未被当作本次成功产物上报，也未被清空。
-    assert session["last_enum_extract_result"]["value"] == ["旧值不得掩盖失败"]
+    assert session.last_enum_extract_result["value"] == ["旧值不得掩盖失败"]
 
 
 def test威胁类型映射单步可运行():
@@ -496,7 +496,7 @@ def test威胁类型映射单步可运行():
             ensure_ascii=False,
         ),
     )
-    session = {"last_enum_extract_result": {"value": ["不得读取"]}}
+    session = make_session_state(last_enum_extract_result={"value": ["不得读取"]})
 
     report = _execute_single_step(
         session,
@@ -510,17 +510,17 @@ def test威胁类型映射单步可运行():
     )
 
     assert report.status == StepStatus.SUCCESS
-    assert session["last_threat_data"][0]["orgValue"] == "attack"
+    assert session.last_threat_data[0]["orgValue"] == "attack"
 
 
 def test枚举填充单步可运行():
     """Base64 解码配置可直接填充，无需先生成 mapped_sub_rules。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "name": "uploaded-rule",
             "normalize": [{"index": "event_type3", "mappings": []}],
         },
-        "enum_preview": [
+        enum_preview=[
             {
                 "目标字段": "event_type3",
                 "mappingType": "EQUAL",
@@ -528,7 +528,7 @@ def test枚举填充单步可运行():
                 "mappingValue": "攻击",
             }
         ],
-    }
+    )
 
     execution_started_at = time.monotonic()
     report = _execute_single_step(
@@ -546,14 +546,14 @@ def test枚举填充单步可运行():
 
     assert report.status == StepStatus.SUCCESS
     assert execution_elapsed < 1.0
-    assert session["decoded_data"]["normalize"][0]["mappings"][0]["orgValue"] == "attack"
+    assert session.decoded_data["normalize"][0]["mappings"][0]["orgValue"] == "attack"
     assert report.results[0].artifact.download_kind == "enummapping_config"
 
 
 def test取消映射单步可运行():
     """取消映射修改显式配置来源并返回完整可下载配置。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "normalize": [
                 {
                     "index": "event_type3",
@@ -563,7 +563,7 @@ def test取消映射单步可运行():
                 }
             ]
         }
-    }
+    )
 
     report = _execute_single_step(
         session,
@@ -576,19 +576,19 @@ def test取消映射单步可运行():
     )
 
     assert report.status == StepStatus.SUCCESS
-    assert session["decoded_data"]["normalize"][0]["mappings"] == []
+    assert session.decoded_data["normalize"][0]["mappings"] == []
     assert report.results[0].artifact.content
     assert report.results[0].artifact.download_kind == "cancelmapping_config"
 
 
 def test导出单步可运行():
     """完整解码配置可以显式来源直接导出，不误入日志规则导出分支。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "name": "uploaded-rule",
             "normalize": [{"index": "event_type3", "mappings": []}],
         }
-    }
+    )
 
     report = _execute_single_step(
         session,
@@ -608,12 +608,12 @@ def test导出单步可运行():
 def test执行前拦截日志包含稳定追踪字段(caplog):
     """日志必须说明请求了什么配置来源以及当前实际有哪些来源。"""
     caplog.set_level(logging.INFO, logger="plan_executor")
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "normalize": [{"index": "event_type3", "mappings": []}],
         },
-        "enum_preview": [{"目标字段": "event_type3"}],
-    }
+        enum_preview=[{"目标字段": "event_type3"}],
+    )
 
     report = _execute_single_step(
         session,

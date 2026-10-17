@@ -8,6 +8,8 @@ import json
 import re
 from types import SimpleNamespace
 
+from factories import make_session_state
+
 
 class _MappingMember:
     """记录字段批次并按逆序返回，验证 Runner 恢复输入顺序。"""
@@ -84,7 +86,7 @@ def test_adapter只调用一次fake_runner并在成功后提交session() -> None
             ]
 
     runner = RecordingRunner()
-    session = {"decoded_fields": ["src", "dst"]}
+    session = make_session_state(decoded_fields=["src", "dst"])
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     result = asyncio.run(
         FieldMappingAdapter(team=None, batch_runner=runner).execute(
@@ -98,7 +100,7 @@ def test_adapter只调用一次fake_runner并在成功后提交session() -> None
     assert len(runner.calls) == 1
     assert runner.calls[0][0] == ("src", "dst")
     assert "session" not in runner.calls[0][1]
-    assert [row["原始字段名"] for row in session["last_mapping_data"]] == ["src", "dst"]
+    assert [row["原始字段名"] for row in session.last_mapping_data] == ["src", "dst"]
 
 
 def test_runner失败由adapter映射稳定错误且不提交session() -> None:
@@ -113,7 +115,7 @@ def test_runner失败由adapter映射稳定错误且不提交session() -> None:
         async def run(self, fields, **kwargs):
             raise FieldMappingBatchError(1, "field_mapping_timeout", "第 1 批字段映射失败")
 
-    session = {"decoded_fields": ["src"]}
+    session = make_session_state(decoded_fields=["src"])
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     result = asyncio.run(
         FieldMappingAdapter(team=None, batch_runner=FailedRunner()).execute(
@@ -125,5 +127,5 @@ def test_runner失败由adapter映射稳定错误且不提交session() -> None:
 
     assert result.status == StepStatus.FAILED
     assert result.error_code == "field_mapping_timeout"
-    assert "last_mapping_data" not in session
-    assert "mapped_sub_rules" not in session
+    assert session.last_mapping_data is None
+    assert session.mapped_sub_rules is None
