@@ -8,6 +8,8 @@ from pathlib import Path
 from contracts.planner_models import EnumValuesArtifact
 from contracts.session_artifacts import EnumArtifactSlot
 
+from factories import make_session_state
+
 
 def test_contracts_do_not_import_runtime_or_domain_packages() -> None:
     """Contracts must remain pure types with no implementation reverse dependency."""
@@ -33,16 +35,16 @@ def test_application_projects_stable_safe_session_facts() -> None:
     """Application owns reads, target binding, annotations and artifact redaction."""
     from application.session_projection import build_session_facts
 
-    session = {
-        "api_key": "secret-key",
-        "enum_excel_path": r"C:\private\mapping.xlsx",
-        "decoded_data": {
+    session = make_session_state(
+        api_key="secret-key",
+        enum_excel_path=r"C:\private\mapping.xlsx",
+        decoded_data={
             "name": "decoded-rule",
             "normalize": [{"index": "alarm_name", "field": "event_name"}],
         },
-        "decoded_fields": ["original_log", "alarm_name"],
-        "enum_preview": [{"目标字段": "event_name", "原始值": "raw-secret"}],
-        "mapped_sub_rules": [
+        decoded_fields=["original_log", "alarm_name"],
+        enum_preview=[{"目标字段": "event_name", "原始值": "raw-secret"}],
+        mapped_sub_rules=[
             {
                 "name": "AUDIT_kv_子规则",
                 "normalize": [
@@ -56,13 +58,13 @@ def test_application_projects_stable_safe_session_facts() -> None:
                 },
             }
         ],
-        "latest_enum_artifact": EnumArtifactSlot(
+        latest_enum_artifact=EnumArtifactSlot(
             artifact=EnumValuesArtifact(
                 values=("artifact-secret",), item_count=1, field="alarm_name"
             ),
             source_field="alarm_name",
         ),
-    }
+    )
 
     facts = build_session_facts(session)
 
@@ -94,9 +96,9 @@ def test上传规则投影仅把未映射字段放入映射池() -> None:
     """field 是已映射的唯一判定，mappings 非空不阻止字段映射。"""
     from application.session_projection import build_session_facts
 
-    session = {
-        "decoded_fields": ["src_ip", "event_type", "threat_code"],
-        "decoded_data": {
+    session = make_session_state(
+        decoded_fields=["src_ip", "event_type", "threat_code"],
+        decoded_data={
             "normalize": [
                 {
                     "index": "src_ip",
@@ -119,7 +121,7 @@ def test上传规则投影仅把未映射字段放入映射池() -> None:
                 },
             ]
         },
-    }
+    )
 
     facts = build_session_facts(session)
 

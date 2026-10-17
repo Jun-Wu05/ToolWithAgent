@@ -28,6 +28,7 @@ from contracts.planner_models import FieldMappingStep
 from application.session_projection import build_session_facts
 from application.execution import ExecutionContext
 from application.adapters.field_mapping import FieldMappingAdapter
+from factories import make_session_state
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -286,7 +287,8 @@ def _annotate(adapter, rules):
     step = FieldMappingStep(
         step_id="mapping", type="field_mapping", source_ref="session.fields"
     )
-    context = ExecutionContext(session={}, session_facts=build_session_facts({}), progress_sink=None)
+    session = make_session_state()
+    context = ExecutionContext(session=session, session_facts=build_session_facts(session), progress_sink=None)
     outcome = asyncio.run(adapter._annotate_event_names(step, context, rules))
     return step, outcome
 

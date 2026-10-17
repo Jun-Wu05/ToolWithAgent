@@ -26,6 +26,25 @@ def make_session_state(**overrides) -> SessionState:
     return SessionState(**overrides)
 
 
+class _RecordingSession(SessionState):
+    """记录属性写入顺序的 Session 替身（垫片对 SessionState 走 setattr）。"""
+
+    def __setattr__(self, name: str, value) -> None:
+        if name != "writes" and hasattr(self, "writes"):
+            self.writes.append(name)
+        super().__setattr__(name, value)
+
+
+def make_recording_session(**overrides) -> _RecordingSession:
+    """构造开始记录属性写入的会话替身（构造期字段初始化不入账）。
+
+    消费方：钉死「会话写入顺序 / 零写入」契约的架构测试（threat/config/enum）。
+    """
+    session = _RecordingSession(**overrides)
+    session.writes = []
+    return session
+
+
 def make_session_state_with_stale_derived_state(**overrides) -> SessionState:
     """「旧派生状态待清理」场景：enum 附件与贡献记录字段族。
 

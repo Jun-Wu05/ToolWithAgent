@@ -11,6 +11,8 @@ from application.execution import ExecutionContext
 from contracts.planner_models import FieldMappingStep, StepStatus
 from application.session_projection import build_session_facts
 
+from factories import make_session_state
+
 
 class _Team:
     """提供单个字段映射成员。"""
@@ -68,7 +70,7 @@ class _MappingMember:
 
 def _run_mapping(fields, member, policy, session=None):
     """经生产组合根的分派真相执行一步字段映射（#312），策略与候选假件注入。"""
-    session = session or {"decoded_fields": fields}
+    session = session or make_session_state(decoded_fields=fields)
     team = _Team(member)
     adapters = create_default_adapters(team)
     adapters["field_mapping"] = FieldMappingAdapter(
@@ -154,13 +156,13 @@ def test字段映射子批失败时session保持原子不变(monkeypatch):
     import application.field_mapping_input as input_builder
 
     fields = [f"child_{index:02d}" for index in range(25)]
-    session = {
-        "decoded_fields": fields,
-        "mapped_sub_rules": [
+    session = make_session_state(
+        decoded_fields=fields,
+        mapped_sub_rules=[
             {"name": "rule", "normalize": [{"index": field, "field": ""} for field in fields]}
         ],
-    }
-    original_sub_rules = json.loads(json.dumps(session["mapped_sub_rules"]))
+    )
+    original_sub_rules = json.loads(json.dumps(session.mapped_sub_rules))
     member = _MappingMember("child_failure")
     result = _run_mapping(
         fields,
@@ -177,9 +179,9 @@ def test字段映射子批失败时session保持原子不变(monkeypatch):
     assert result.status == StepStatus.FAILED
     assert result.error_code == "field_mapping_model_failed"
     assert member.calls.count(tuple(fields)) == 1
-    assert "last_mapping_data" not in session
-    assert "sub_rule_mapping_results" not in session
-    assert session["mapped_sub_rules"] == original_sub_rules
+    assert session.last_mapping_data is None
+    assert session.sub_rule_mapping_results is None
+    assert session.mapped_sub_rules == original_sub_rules
 
 
 def test字段映射429仍按RetryAfter有限原样重试(monkeypatch):

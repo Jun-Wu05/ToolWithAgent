@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from factories import make_session_state
+
 from contracts.planner_models import (
     DecodeFieldsStep,
     PlanDecision,
@@ -120,14 +122,14 @@ def test解码写入ognl并保持幂等合并(decode_module):
 
 def test解码适配器写回并产出下载产物():
     """decode_fields 步骤成功写回 session。"""
-    session = {"decoded_data": _config()}
+    session = make_session_state(decoded_data=_config())
     step = DecodeFieldsStep(
         step_id="d1", type="decode_fields", fields=("req_header",), config_ref="session.decoded_config"
     )
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status == StepStatus.SUCCESS
     decode_filters = [
-        f for f in session["decoded_data"][0]["parser"]["filter"]
+        f for f in session.decoded_data[0]["parser"]["filter"]
         if f.get("name") == "addFields" and "Base64Decode" in str(f.get("fields"))
     ]
     assert decode_filters
@@ -138,7 +140,7 @@ def test解码字段缺失映射field_not_found():
     step = DecodeFieldsStep(
         step_id="d1", type="decode_fields", fields=("ghost",), config_ref="session.decoded_config"
     )
-    result = _run(FieldSkillAdapter(), step, {"decoded_data": _config()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(decoded_data=_config()))
     assert result.status == StepStatus.FAILED
     assert result.error_code == "field_not_found"
 
@@ -274,7 +276,7 @@ def test正则生成无法全匹配重试修正():
 
 def test正则提取适配器用户直接提供正则():
     """pattern 显式携带时不调 LLM，直接执行脚本。"""
-    session = {"decoded_data": _config()}
+    session = make_session_state(decoded_data=_config())
     step = RegexExtractStep(
         step_id="r1",
         type="regex_extract",
@@ -287,13 +289,13 @@ def test正则提取适配器用户直接提供正则():
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status == StepStatus.SUCCESS
     assert "newclient" in result.message
-    indexes = [e["index"] for e in session["decoded_data"][0]["normalize"]]
+    indexes = [e["index"] for e in session.decoded_data[0]["normalize"]]
     assert "newclient" in indexes
 
 
 def test正则提取适配器注入假LLM生成():
     """pattern 缺省时经注入假 LLM 生成并执行。"""
-    session = {"decoded_data": _config()}
+    session = make_session_state(decoded_data=_config())
     step = RegexExtractStep(
         step_id="r1",
         type="regex_extract",
@@ -306,7 +308,7 @@ def test正则提取适配器注入假LLM生成():
     )
     result = _run(adapter, step, session)
     assert result.status == StepStatus.SUCCESS
-    indexes = [e["index"] for e in session["decoded_data"][0]["normalize"]]
+    indexes = [e["index"] for e in session.decoded_data[0]["normalize"]]
     assert "Referer" in indexes  # Referer 不存在 → 原名
 
 
@@ -326,7 +328,7 @@ def test正则提取无样本且无正则时失败():
         description="client",
         config_ref="session.decoded_config",
     )
-    result = _run(FieldSkillAdapter(), step, {"decoded_data": empty_sample})
+    result = _run(FieldSkillAdapter(), step, make_session_state(decoded_data=empty_sample))
     assert result.status == StepStatus.FAILED
     assert result.error_code == "sample_required"
 

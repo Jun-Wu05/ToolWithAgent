@@ -22,6 +22,8 @@ from agent.shared.mapping_utils import apply_enum_outcomes
 from contracts.planner_models import FieldMappingStep, StepStatus
 from contracts.session_facts import SessionFacts
 
+from factories import make_session_state
+
 POLICY_RESULT_WHITELIST = ("失败", "成功", "未知")
 
 
@@ -249,12 +251,12 @@ class _Team:
         self.members = [member]
 
 
-def _enum_adapter_session(log_lines: list[str]) -> dict:
+def _enum_adapter_session(log_lines: list[str]):
     rule = _kv_rule("AUDIT_kv_子规则", "AUDIT", ["result", "zzz"])
-    return {
-        "mapped_sub_rules": [rule],
-        "raw_log_lines": log_lines,
-    }
+    return make_session_state(
+        mapped_sub_rules=[rule],
+        raw_log_lines=log_lines,
+    )
 
 
 def _run_enum_adapter(session, runner, team, event_classifier):
@@ -285,7 +287,7 @@ def test场景14_精确英文字段名绕过LLM字段猜测():
     )
     assert result.status == StepStatus.SUCCESS
     assert runner.fields == ["zzz"]  # result 被确定性摘出，不进 LLM 批次
-    rows = {row["原始字段名"]: row for row in session["last_mapping_data"]}
+    rows = {row["原始字段名"]: row for row in session.last_mapping_data}
     assert rows["result"]["系统属性名称"] == "事件结果"
     assert rows["result"]["匹配状态"] == "匹配成功"
 
@@ -638,7 +640,7 @@ def test集成_全部画像结构失败时字段全局未匹配():
     assert result.status == StepStatus.SUCCESS
     assert len(runner.fields) == 1  # 只 zzz 进 LLM 批次，result 被 exact 摘出
     entry = {
-        item["index"]: item for item in session["mapped_sub_rules"][0]["normalize"]
+        item["index"]: item for item in session.mapped_sub_rules[0]["normalize"]
     }
     assert entry["result"]["field"] is None  # 唯一画像结构失败 → 全局未匹配
     assert entry["result"].get("mappings") == []
@@ -653,7 +655,7 @@ def test集成_二阶段成功时通过FieldMappingAgent写入mappings与默认�
     assert result.status == StepStatus.SUCCESS
     assert member.calls, "第二阶段应通过 FieldMappingAgent 成员调用"
     entry = {
-        item["index"]: item for item in session["mapped_sub_rules"][0]["normalize"]
+        item["index"]: item for item in session.mapped_sub_rules[0]["normalize"]
     }
     assert entry["result"]["field"] == "事件结果"
     assert entry["result"]["mappings"] == [

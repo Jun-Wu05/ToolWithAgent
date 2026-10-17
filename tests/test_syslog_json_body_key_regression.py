@@ -6,6 +6,8 @@ import asyncio
 import base64
 import json
 
+from factories import make_session_state
+
 
 SYSLOG_JSON_LINE = (
     "<1068>Sep 01 13:50:00 audit-host Audit REDIS: "
@@ -71,15 +73,15 @@ def test_body_key分类可由真实导出adapter生成子规则(monkeypatch) -> 
     from contracts.planner_models import ExportStep, StepStatus
 
     classification = _classify_body_key(monkeypatch)
-    session = {
-        "log_classification": classification,
-        "raw_log_lines": [SYSLOG_JSON_LINE],
-        "rule_source_fields": {
+    session = make_session_state(
+        log_classification=classification,
+        raw_log_lines=[SYSLOG_JSON_LINE],
+        rule_source_fields={
             "product": "测试产品",
             "log_vendor": "测试厂商",
             "data_source": "测试产品(测试厂商)",
         },
-    }
+    )
     result = asyncio.run(
         ExportAdapter().execute(
             ExportStep(
@@ -116,15 +118,15 @@ def test_body_key分类可由真实字段映射adapter原子写回(monkeypatch) 
             ]
 
     classification = _classify_body_key(monkeypatch)
-    session = {
-        "log_classification": classification,
-        "raw_log_lines": [SYSLOG_JSON_LINE],
-        "rule_source_fields": {
+    session = make_session_state(
+        log_classification=classification,
+        raw_log_lines=[SYSLOG_JSON_LINE],
+        rule_source_fields={
             "product": "测试产品",
             "log_vendor": "测试厂商",
             "data_source": "测试产品(测试厂商)",
         },
-    }
+    )
     context = ExecutionContext(
         session=session,
         session_facts=build_session_facts(session),
@@ -146,7 +148,7 @@ def test_body_key分类可由真实字段映射adapter原子写回(monkeypatch) 
     )
 
     assert result.status == StepStatus.SUCCESS
-    assert session["mapped_sub_rules"]
-    assert session["sub_rule_mapping_results"]
+    assert session.mapped_sub_rules
+    assert session.sub_rule_mapping_results
     assert result.artifact.download_kind == "mapped_sub_rules"
     assert result.artifact.download_content

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from factories import make_session_state
+
 from contracts.planner_models import (
     DeleteFieldsStep,
     MergeFieldsStep,
@@ -199,11 +201,11 @@ def test删除事件级别联动删除绑定对():
         step_id="d1", type="delete_fields", fields=("事件级别",),
         config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _diverse_config()}
+    session = make_session_state(mapped_sub_rules=_diverse_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success", result.message
     assert "已联动删除绑定对（事件名称+事件级别）" in result.message
-    for rule in session["mapped_sub_rules"]:
+    for rule in session.mapped_sub_rules:
         indexes = [i["index"] for i in rule["normalize"]]
         assert "事件名称" not in indexes
         assert "事件级别" not in indexes
@@ -214,7 +216,7 @@ def test删除事件名称同样联动绑定对():
         step_id="d1", type="delete_fields", fields=("事件名称",),
         config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _diverse_config()}
+    session = make_session_state(mapped_sub_rules=_diverse_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success", result.message
     assert "已联动删除绑定对" in result.message
@@ -227,7 +229,7 @@ def test适配器合并线上指令端到端():
         source_fields=("req_url", "req_query"), target_field="合并字段", sep="",
         config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _diverse_config()}
+    session = make_session_state(mapped_sub_rules=_diverse_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success", result.message
     assert "成功合并 2 个 entity" in result.message
@@ -240,7 +242,7 @@ def test适配器删除线上指令端到端():
         step_id="d1", type="delete_fields", fields=("HTTP请求头",),
         config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _diverse_config()}
+    session = make_session_state(mapped_sub_rules=_diverse_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success", result.message
     assert "成功从 1 个 entity 删除 1 个字段" in result.message
@@ -256,7 +258,7 @@ def test近邻提示字段名笔误():
         source_fields=("reqquery", "req_url"), target_field="合并字段", sep="",
         config_ref="session.mapped_sub_rules",
     )
-    result = _run(FieldSkillAdapter(), step, {"mapped_sub_rules": _diverse_config()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(mapped_sub_rules=_diverse_config()))
     assert result.status.value == "failed"
     assert result.error_code == "field_not_found"
     assert "req_query" in result.message
