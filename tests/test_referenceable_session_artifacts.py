@@ -391,7 +391,7 @@ def test上轮威胁产物只能填回固定目标威胁类型():
     assert success.changed_count == 1
 
 
-def test直接值威胁产物同样受固定目标约束():
+def test无来源字段的威胁产物仍只能填威胁类型():
     """无来源字段（user.values）的威胁产物也只能填威胁类型。"""
     session = make_session_state(
         decoded_data={

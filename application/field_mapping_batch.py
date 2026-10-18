@@ -84,7 +84,7 @@ class _BatchExecutionContext:
     total_batches: int
     available_fields: list[str]
     semaphore: asyncio.Semaphore
-    input_session: dict[str, Any]
+    original_log_sample: str
     value_profiles: dict | None
     publish_progress: ProgressCallback
 
@@ -124,7 +124,7 @@ class FieldMappingBatchRunner:
         batch_rows: list[dict[str, Any]],
         fields_batch: list[str],
         *,
-        input_session: dict[str, Any],
+        original_log_sample: str,
         plan_id: str,
         step_id: str,
         batch_number: int,
@@ -167,7 +167,7 @@ class FieldMappingBatchRunner:
                 backfill_input = await asyncio.to_thread(
                     build_batch_llm_input,
                     "补查标准字段映射",
-                    input_session,
+                    original_log_sample,
                     missing,
                     batch_number,
                     total_batches,
@@ -245,9 +245,7 @@ class FieldMappingBatchRunner:
             total_batches=total_batches,
             available_fields=list(fields),
             semaphore=asyncio.Semaphore(policy.max_concurrency),
-            input_session={
-                "simplified_data": {"original_log_sample": original_log_sample}
-            },
+            original_log_sample=original_log_sample,
             value_profiles=value_profiles,
             publish_progress=publish_progress,
         )
@@ -303,7 +301,7 @@ class FieldMappingBatchRunner:
             model_input = await asyncio.to_thread(
                 build_batch_llm_input,
                 "执行标准字段映射",
-                ctx.input_session,
+                ctx.original_log_sample,
                 fields_batch,
                 batch_number,
                 ctx.total_batches,
@@ -513,7 +511,7 @@ class FieldMappingBatchRunner:
             return await self._backfill_rows(
                 parse_json_mapping_result(content),
                 fields_batch,
-                input_session=ctx.input_session,
+                original_log_sample=ctx.original_log_sample,
                 plan_id=ctx.plan_id,
                 step_id=ctx.step_id,
                 batch_number=batch_number,

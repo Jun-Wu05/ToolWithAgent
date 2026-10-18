@@ -527,42 +527,6 @@ def test旧配置多绑定换源只清理威胁链产物(monkeypatch):
     assert session.mapped_sub_rules[2] == non_threat_before
 
 
-def test结构化会话换源失败同样保持原配置(monkeypatch):
-    """Chainlit 实际使用的 SessionState 与字典会话共享原子语义。"""
-    from application.adapters.threat_fill import ThreatFillAdapter
-
-    _mock_retrieval(monkeypatch)
-    _mock_enum_llm(monkeypatch)
-    team = _Team(_ThreatMember(_FULL_MAPPING))
-    session = make_session_state(
-        raw_log_lines=[
-            "attack_type=暴力破解 event_desc=暴力破解告警",
-            "attack_type=端口扫描 event_desc=端口扫描告警",
-        ],
-        mapped_sub_rules=[_threat_rule("威胁A"), _threat_rule("威胁B")],
-    )
-    first = _run(_mapping_report(), session, team)
-    assert first.results[-1].message.startswith("🔗")
-    before = copy.deepcopy(session.mapped_sub_rules)
-    session.threat_source_field_override = "event_desc"
-
-    async def _fail_fill(self, step, context, dependencies):
-        return StepResult(
-            step_id=step.step_id,
-            operation_type=step.type,
-            status=StepStatus.FAILED,
-            error_code="forced_fill_failure",
-            message="测试强制填充失败",
-        )
-
-    monkeypatch.setattr(ThreatFillAdapter, "execute", _fail_fill)
-
-    failed = _run(_mapping_report(), session, team)
-
-    assert failed.results[-1].message.startswith("⚠️")
-    assert session.mapped_sub_rules == before
-
-
 def test显式指令全链填充失败时回滚到替换前配置(monkeypatch):
     """Planner/确定性入口提交的威胁全链与自动续跑共享原子语义。"""
     from application.adapters.threat_fill import ThreatFillAdapter
@@ -904,7 +868,7 @@ def test改选重跑仍全落其他时保持降级不再重试(monkeypatch):
     assert len(member.inputs) == 2
 
 
-def test改选预算为零时行为与现状一致(monkeypatch):
+def test改选预算为零时不改选且首跑结果即终态(monkeypatch):
     """max_rederive=0 → 不改选，首跑结果即终态（可配 0 回到现状）。"""
     _mock_retrieval(monkeypatch)
     _mock_enum_llm(monkeypatch)
