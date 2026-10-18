@@ -8,7 +8,7 @@ import logging
 import re
 from typing import Any
 
-from application.session_state import PrimaryDatasetSnapshot
+from application.session_state import PrimaryDatasetSnapshot, SessionState
 
 
 logger = logging.getLogger("agent")
@@ -185,66 +185,11 @@ def build_simplified_data(decode_result: dict[str, Any]) -> dict[str, Any]:
     return {"fields": indexes, "original_log_sample": original_log_sample}
 
 
-_PRIMARY_DATASET_STATE_KEYS = (
-    "decoded_data",
-    "decoded_fields",
-    "original_log",
-    "simplified_data",
-    "decoded_text",
-    "raw_log_lines",
-    "uploaded_file_name",
-    "uploaded_file_time",
-    "raw_base64",
-    "enum_excel_path",
-    "enum_preview",
-    "enum_mapping_sheets",
-    "enum_fill_contributions",
-    "stale_enum_config_refs",
-    "enum_pending_refills",
-    "last_mapping_data",
-    "excel_data",
-    "excel_filename",
-    "last_threat_data",
-    "last_enum_extract_result",
-    "latest_threat_artifact",
-    "latest_enum_artifact",
-    "log_classification",
-    "log_knowledge_submission",
-    "rule_source_fields",
-    "pending_rule_source_step",
-    "pending_plan",
-    "threat_source_field_override",
-    "current_execution",
-    "previous_execution",
-    "mapped_sub_rules",
-    "sub_rule_mapping_results",
-    "conversation_history",
-)
-
-
 def commit_primary_dataset(
-    session: Any, snapshot: PrimaryDatasetSnapshot
+    session: SessionState, snapshot: PrimaryDatasetSnapshot
 ) -> None:
     """将已完整解析和校验的主数据快照原子提交到会话。"""
-    replace = getattr(session, "replace_primary_dataset", None)
-    if callable(replace):
-        replace(snapshot)
-        return
-    staged_values = {
-        "decoded_data": snapshot.decoded_data,
-        "decoded_fields": list(snapshot.decoded_fields),
-        "original_log": snapshot.original_log,
-        "simplified_data": snapshot.simplified_data,
-        "decoded_text": snapshot.decoded_text,
-        "raw_log_lines": snapshot.raw_log_lines,
-        "raw_base64": snapshot.raw_base64,
-        "uploaded_file_name": snapshot.uploaded_file_name,
-        "uploaded_file_time": snapshot.uploaded_file_time,
-        "conversation_history": [],
-    }
-    for key in _PRIMARY_DATASET_STATE_KEYS:
-        session.pop(key, None)
-    session.update(staged_values)
+    session.replace_primary_dataset(snapshot)
 
 
 __all__ = ["build_simplified_data", "commit_primary_dataset", "simple_decode"]

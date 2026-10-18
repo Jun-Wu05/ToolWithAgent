@@ -7,6 +7,7 @@ from typing import Any, Sequence
 from web.chainlit_progress import get_session_progress_sink
 from application.request_runtime import run_deterministic_plan
 from application.session_projection import build_session_facts
+from application.session_state import SessionState
 from web.plan_renderer import (
     remember_primary_report,
     render_execution_report,
@@ -21,7 +22,7 @@ from contracts.planner_models import (
 
 
 async def execute_deterministic_plan(
-    user_session: Any,
+    user_session: SessionState,
     team: Any,
     plan_id: str,
     steps: Sequence[ExecutableStep],

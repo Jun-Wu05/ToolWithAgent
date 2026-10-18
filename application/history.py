@@ -6,6 +6,7 @@ from typing import Any
 
 from agent.shared.logger import get_logger
 from contracts.planner_models import ConversationTurn
+from application.session_state import SessionState
 
 logger = get_logger("history_store")
 
@@ -14,23 +15,22 @@ DEFAULT_HISTORY_ROUNDS = 5
 DEFAULT_HISTORY_MAX_CHARS = 6000
 
 
-def append_history(session: Any, role: str, content: str) -> None:
+def append_history(session: SessionState, role: str, content: str) -> None:
     """追加一轮历史并保持既有单条截断策略。"""
-    history = getattr(session, "conversation_history", None) or []
+    history = session.conversation_history or []
     truncated = (
         content[:MAX_ENTRY_CHARS] + "...(已截断)"
         if len(content) > MAX_ENTRY_CHARS
         else content
     )
     history.append({"role": role, "content": truncated})
-    if hasattr(session, "conversation_history"):
-        session.conversation_history = history
+    session.conversation_history = history
     logger.debug("[HISTORY] 追加 %s（当前 %s 条）", role, len(history))
 
 
-def typed_conversation_history(session: Any) -> list[ConversationTurn]:
+def typed_conversation_history(session: SessionState) -> list[ConversationTurn]:
     """把会话历史转换为 Planner 接受的受限类型。"""
-    history = getattr(session, "conversation_history", None) or []
+    history = session.conversation_history or []
     typed: list[ConversationTurn] = []
     for item in history:
         if not isinstance(item, dict):
@@ -46,12 +46,12 @@ def typed_conversation_history(session: Any) -> list[ConversationTurn]:
 
 
 def format_history_for_prompt(
-    session: Any,
+    session: SessionState,
     n: int = DEFAULT_HISTORY_ROUNDS,
     max_chars: int = DEFAULT_HISTORY_MAX_CHARS,
 ) -> str:
     """将最近 n 轮历史按既有滑动窗口格式化为文本。"""
-    history = getattr(session, "conversation_history", None) or []
+    history = session.conversation_history or []
     if not history:
         return ""
     recent = history[-(n * 2) :]
@@ -71,8 +71,7 @@ def format_history_for_prompt(
     return "💬 最近对话：\n" + "\n".join(lines)
 
 
-def clear_history(session: Any) -> None:
+def clear_history(session: SessionState) -> None:
     """清空当前会话历史。"""
-    if hasattr(session, "conversation_history"):
-        session.conversation_history = []
-        logger.info("[HISTORY] 对话历史已清空")
+    session.conversation_history = []
+    logger.info("[HISTORY] 对话历史已清空")

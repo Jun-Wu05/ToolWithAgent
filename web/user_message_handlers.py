@@ -13,6 +13,7 @@ from application.request_runtime import (
     run_user_request,
 )
 from application.session_projection import build_session_facts
+from application.session_state import SessionState
 from contracts.planner_models import ExecutionReport
 from web.chainlit_progress import get_session_progress_sink, reset_session_progress_sink
 from web.plan_renderer import (
@@ -23,7 +24,7 @@ from web.plan_renderer import (
 )
 
 
-async def handle_user_message(user_session: Any, team: Any, user_text: str) -> None:
+async def handle_user_message(user_session: SessionState, team: Any, user_text: str) -> None:
     """处理一条用户指令；所有自然语言业务请求恰好调用 Planner 一次。
 
     参数：
@@ -65,7 +66,7 @@ async def handle_user_message(user_session: Any, team: Any, user_text: str) -> N
         # UI 或执行器异常都必须停止心跳，避免请求结束后仍更新旧任务。
         await progress_ledger.finish_request(progress_sink)
 
-async def _clear_session_data(user_session: Any) -> None:
+async def _clear_session_data(user_session: SessionState) -> None:
     """执行确定性清空事件，并只保留统一的完成提示。"""
     clear_session_data(user_session)
     clear_primary_report_anchor()

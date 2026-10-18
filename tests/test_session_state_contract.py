@@ -20,9 +20,6 @@ import pytest
 
 import application.session_state as ss_module
 
-# 会话垫片的允许唯一实现位置（#351 收口：其余拷贝全部改为导入）
-_SHIM_SINGLE_HOME = "application/adapters/shared.py"
-
 
 def _collect_shim_definitions(root_dir: str) -> dict[str, set[str]]:
     """扫描目录下 .py 文件中的会话垫片 def 定义（posix 路径 → 函数名集合）。
@@ -49,16 +46,18 @@ def _collect_shim_definitions(root_dir: str) -> dict[str, set[str]]:
 
 
 def _collect_written_session_keys(root_dir: str) -> set:
-    """扫描目录下所有 .py 文件，收集两类字面量键写入的 key 名。
+    """扫描目录下所有 .py 文件，收集三类字面量键写入的 key 名。
 
-    匹配 ``user_session["key"] =`` / ``session["key"] =`` 直写，与
-    ``_session_set(session, "key", ...)``（允许参数间空白/换行前的同行形态）。
+    匹配 ``user_session["key"] =`` / ``session["key"] =`` 直写、
+    ``_session_set(session, "key", ...)`` 垫片调用（允许参数间空白/换行前的
+    同行形态），以及 ``session.key =`` 属性赋值（``[^=]`` 排除等号比较）。
     """
     written = set()
     session_write_re = re.compile(r'(?:user_)?session\[[\'"](\w+)[\'"]\]\s*=')
     session_set_re = re.compile(
         r'_session_set\(\s*(?:user_)?session\s*,\s*[\'"](\w+)[\'"]'
     )
+    session_attr_re = re.compile(r'(?:user_)?session\.(\w+)\s*=[^=]')
     for dirpath, dirnames, filenames in os.walk(root_dir):
         # 跳过缓存目录
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
@@ -75,6 +74,8 @@ def _collect_written_session_keys(root_dir: str) -> set:
                     for m in session_write_re.finditer(line):
                         written.add(m.group(1))
                     for m in session_set_re.finditer(line):
+                        written.add(m.group(1))
+                    for m in session_attr_re.finditer(line):
                         written.add(m.group(1))
     return written
 
@@ -112,7 +113,7 @@ class TestSessionStateContract:
             )
 
     def test_guard_scan_covers_application_writes(self):
-        """自证守卫未空转：application/ 扫描必须实际命中 _session_set 字面量键。
+        """自证守卫未空转：application/ 扫描必须实际命中会话写入。
 
         写入风格整体迁移后旧守卫曾扫描空集而永远绿（issue #329）；
         本用例钉住「扫描集合非空」，再次漂移时立即变红。
@@ -125,17 +126,19 @@ class TestSessionStateContract:
         assert "pending_plan" in written
 
     def test_guard_detects_session_set_style_writes(self, tmp_path):
-        """自证识别能力：对临时样本同时识别直写与 _session_set 两类形态。"""
+        """自证识别能力：对临时样本识别直写、垫片与属性赋值三类形态。"""
         sample = tmp_path / "sample_writer.py"
         sample.write_text(
             "_session_set(session, \"not_a_real_field_xyz\", 1)\n"
-            "session[\"also_not_real_abc\"] = 2\n",
+            "session[\"also_not_real_abc\"] = 2\n"
+            "session.attr_not_real_def = 3\n",
             encoding="utf-8",
         )
         written = _collect_written_session_keys(str(tmp_path))
 
         assert "not_a_real_field_xyz" in written
         assert "also_not_real_abc" in written
+        assert "attr_not_real_def" in written
         assert "not_a_real_field_xyz" not in _collect_defined_session_fields()
 
     def test_defined_fields_are_writable(self):
@@ -226,18 +229,16 @@ class TestSessionStateContract:
         assert session.pending_rule_source_step is None
         assert session.pending_plan is None
 
-    def test_会话垫片单一实现(self):
-        """垫片 def 全仓唯一：application/web 扫描只允许 adapters/shared 一处。
+    def test_会话垫片已删除(self):
+        """垫片 def 全仓归零：application/web 不再有任何 _session_get/_session_set 定义。
 
-        #351 收口前的形态是 3 文件 6 份 def + session_projection 的
-        ``_read_session_value`` 同体只读变体；任何新拷贝（包括改名前的
-        旧名）在此立即变红。
+        #351 曾把 3 文件 6 份 def 收口为 shared.py 唯一实现；#373 随测试侧
+        dict 会话全部迁移删除了垫片本体。任何复活（含改名前的旧名
+        ``_read_session_value``）在此立即变红。
         """
         definitions: dict[str, set[str]] = {}
         for root in ("application", "web"):
             for path, names in _collect_shim_definitions(root).items():
                 definitions.setdefault(path, set()).update(names)
 
-        assert definitions == {
-            _SHIM_SINGLE_HOME: {"_session_get", "_session_set"},
-        }
+        assert definitions == {}

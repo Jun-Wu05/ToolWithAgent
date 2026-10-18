@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Callable, Mapping
 
-from application.adapters.shared import _failed, _session_get, _success
+from application.adapters.shared import _failed, _success
 from application.execution import ExecutionContext
 from application.parsing import parse_json_safe
 from application.log_knowledge_submission import build_submission_snapshot
@@ -70,9 +70,7 @@ class LogParseAdapter:
         if not isinstance(step, LogParseStep):
             raise TypeError("LogParseAdapter 只接受 LogParseStep")
 
-        log_lines = _session_get(context.session, "raw_log_lines") or _session_get(
-            context.session, "original_log"
-        )
+        log_lines = context.session.raw_log_lines or context.session.original_log
         logs_text = "\n".join(str(line) for line in log_lines)
         format_text = await asyncio.to_thread(self._format_identifier, logs_text)
         format_info = parse_json_safe(format_text)

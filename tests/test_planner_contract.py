@@ -444,10 +444,10 @@ def test_session_facts集中汇总日志分类字段(monkeypatch):
     )
 
     facts = build_session_facts(
-        {
-            "log_classification": {"类型A": {}},
-            "raw_log_lines": ["src_ip=1.1.1.1 event_type3=attack"],
-        }
+        make_session_state(
+            log_classification={"类型A": {}},
+            raw_log_lines=["src_ip=1.1.1.1 event_type3=attack"],
+        )
     )
 
     assert facts.available_fields == ("src_ip", "event_type3")

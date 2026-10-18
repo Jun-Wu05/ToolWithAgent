@@ -10,8 +10,9 @@ from agent.shared.event_classify import (
     read_entity_event_name,
 )
 from agent.shared.mapping_utils import collect_config_names, iter_normalize_entries
-from application.adapters.shared import _read_config, _session_get
+from application.adapters.shared import _read_config
 from application.artifact_targets import resolve_standard_target
+from application.session_state import SessionState
 from contracts.planner_models import ConfigRef, ExecutionReport
 from contracts.session_artifacts import (
     ArtifactTargetBinding,
@@ -45,11 +46,10 @@ def summarize_report(report: ExecutionReport) -> ExecutionSummary:
     )
 
 
-def _recent_execution(session: Any) -> tuple[ExecutionSummary, ...]:
+def _recent_execution(session: SessionState) -> tuple[ExecutionSummary, ...]:
     """按最新优先投影两个类型化摘要槽位，损坏的兼容值按不存在处理。"""
     summaries: list[ExecutionSummary] = []
-    for key in ("current_execution", "previous_execution"):
-        value = _session_get(session, key)
+    for value in (session.current_execution, session.previous_execution):
         if value is None:
             continue
         try:
@@ -85,7 +85,7 @@ def _collect_decoded_field_mapping_state(
 
 
 def _collect_field_pools(
-    session: Any, decoded_mapped_indices: set[str]
+    session: SessionState, decoded_mapped_indices: set[str]
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """构建 Planner 点名词典与字段映射候选池。"""
     from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES
@@ -104,11 +104,11 @@ def _collect_field_pools(
                 seen.add(field_name)
                 target.append(field_name)
 
-    classification = _session_get(session, "log_classification")
-    raw_log_lines = _session_get(session, "raw_log_lines", []) or []
+    classification = session.log_classification
+    raw_log_lines = session.raw_log_lines or []
     log_fields = extract_log_fields_for_mapping(classification, raw_log_lines)
-    mapped_sub_rules = _session_get(session, "mapped_sub_rules", []) or []
-    base_fields = log_fields or _session_get(session, "decoded_fields", []) or []
+    mapped_sub_rules = session.mapped_sub_rules or []
+    base_fields = log_fields or session.decoded_fields or []
     append_fields(base_fields, available_fields, seen_available_fields)
     # 日志/子规则来源仍全量映射；纯上传回退只发送 field 为空的原始字段。
     mappable_base_fields = (
@@ -168,7 +168,7 @@ def _count_normalize_entries(value: Any) -> int:
 
 
 def _target_bindings(
-    session: Any, source_field: str | None, config_refs: tuple[ConfigRef, ...]
+    session: SessionState, source_field: str | None, config_refs: tuple[ConfigRef, ...]
 ) -> tuple[ArtifactTargetBinding, ...]:
     """枚举产物的填充目标仍按 source_field 血缘解析（多目标合法）。"""
     if not source_field:
@@ -197,7 +197,7 @@ def _has_threat_type_entry(config: Any) -> bool:
 
 
 def _threat_target_bindings(
-    session: Any, config_refs: tuple[ConfigRef, ...]
+    session: SessionState, config_refs: tuple[ConfigRef, ...]
 ) -> tuple[ArtifactTargetBinding, ...]:
     """威胁产物填充目标固定为「威胁类型」（#173 修复 1），不再按血缘推导。
 
@@ -212,10 +212,10 @@ def _threat_target_bindings(
 
 
 def _referenceable_artifacts(
-    session: Any, config_refs: tuple[ConfigRef, ...]
+    session: SessionState, config_refs: tuple[ConfigRef, ...]
 ) -> tuple[ReferenceableArtifactFact, ...]:
     facts: list[ReferenceableArtifactFact] = []
-    raw_enum = _session_get(session, "latest_enum_artifact")
+    raw_enum = session.latest_enum_artifact
     try:
         enum_slot = raw_enum if isinstance(raw_enum, EnumArtifactSlot) else EnumArtifactSlot.model_validate(raw_enum) if raw_enum is not None else None
     except (TypeError, ValueError):
@@ -229,7 +229,7 @@ def _referenceable_artifacts(
             target_bindings=_target_bindings(session, enum_slot.source_field, config_refs),
         ))
 
-    raw_threat = _session_get(session, "latest_threat_artifact")
+    raw_threat = session.latest_threat_artifact
     try:
         threat_slot = raw_threat if isinstance(raw_threat, ThreatArtifactSlot) else ThreatArtifactSlot.model_validate(raw_threat) if raw_threat is not None else None
     except (TypeError, ValueError):
@@ -284,11 +284,11 @@ def _collect_threat_source_fields(
     return tuple(field for field in first if field in shared and field != THREAT_TYPE_FIELD)
 
 
-def build_session_facts(session: Any) -> SessionFacts:
+def build_session_facts(session: SessionState) -> SessionFacts:
     """把会话状态投影为不可变安全快照；缺失状态按不可用处理。"""
-    enum_preview = _session_get(session, "enum_preview", []) or []
-    mapped_sub_rules = _session_get(session, "mapped_sub_rules", []) or []
-    decoded_data = _session_get(session, "decoded_data")
+    enum_preview = session.enum_preview or []
+    mapped_sub_rules = session.mapped_sub_rules or []
+    decoded_data = session.decoded_data
     decoded_mapped_indices, decoded_mapped_count, decoded_unmapped_count = (
         _collect_decoded_field_mapping_state(decoded_data)
     )
@@ -306,8 +306,8 @@ def build_session_facts(session: Any) -> SessionFacts:
     )
     return SessionFacts(
         has_decoded_config=bool(decoded_data),
-        has_logs=bool((_session_get(session, "original_log", []) or []) or (_session_get(session, "raw_log_lines", []) or [])),
-        has_log_classification=bool(_session_get(session, "log_classification")),
+        has_logs=bool((session.original_log or []) or (session.raw_log_lines or [])),
+        has_log_classification=bool(session.log_classification),
         has_mapped_sub_rules=bool(mapped_sub_rules),
         available_config_refs=config_refs,
         available_fields=available_fields,
@@ -320,8 +320,8 @@ def build_session_facts(session: Any) -> SessionFacts:
         decoded_unmapped_field_count=decoded_unmapped_count,
         enum_mapping_target_fields=_collect_enum_target_fields(enum_preview),
         enum_mapping_row_count=len(enum_preview),
-        existing_enum_value_count=_count_enum_values(_session_get(session, "last_enum_extract_result")),
-        existing_threat_mapping_count=len(_session_get(session, "last_threat_data", []) or []),
+        existing_enum_value_count=_count_enum_values(session.last_enum_extract_result),
+        existing_threat_mapping_count=len(session.last_threat_data or []),
         mapped_sub_rule_count=len(mapped_sub_rules),
         mapped_sub_rule_names=_collect_rule_names(mapped_sub_rules),
         decoded_config_rule_names=_collect_rule_names(decoded_data),

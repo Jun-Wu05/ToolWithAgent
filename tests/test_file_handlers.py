@@ -13,6 +13,8 @@ from contracts.planner_models import (
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 
+from factories import make_session_state
+
 
 def _referenceable_artifact_slots():
     """构造用于文件生命周期断言的两类成功产物。"""
@@ -87,12 +89,12 @@ def test数据表格缺少原始日志列时拒绝并不写入会话(monkeypatch
         ),
     )
 
-    session = {}
+    session = make_session_state()
     asyncio.run(file_handlers._handle_excel_data_table("fake.xlsx", "fake.xlsx", session))
 
     assert len(captured) == 1
     assert "上传正确的excel，应包含原始日志一列" in captured[0]
-    assert session == {}
+    assert not session.has_decoded_data()
 
 
 def test数据表格含原始日志列时正常提取日志行(monkeypatch):
@@ -117,14 +119,14 @@ def test数据表格含原始日志列时正常提取日志行(monkeypatch):
         ),
     )
 
-    session = {}
+    session = make_session_state()
     asyncio.run(file_handlers._handle_excel_data_table("ok.xlsx", "ok.xlsx", session))
 
     assert len(captured) == 1
     assert "上传正确的excel" not in captured[0]
-    assert session["raw_log_lines"] == ['<1>AUDIT: alarm_name="login"']
-    assert session["decoded_fields"] == ["发生时间", "原始日志", "设备"]
-    assert session["original_log"]
+    assert session.raw_log_lines == ['<1>AUDIT: alarm_name="login"']
+    assert session.decoded_fields == ["发生时间", "原始日志", "设备"]
+    assert session.original_log
     assert cleared == [True]
 
 

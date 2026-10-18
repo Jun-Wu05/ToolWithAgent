@@ -373,7 +373,7 @@ def test适配器删除字段作用于子规则并拒绝未找到字段():
     assert "a" not in indexes
 
     # 混入不存在的字段：适配器在词汇解析层拒绝并列出对照表（#146 新语义）
-    session2 = {"mapped_sub_rules": _sample_entities()}
+    session2 = make_session_state(mapped_sub_rules=_sample_entities())
     step2 = DeleteFieldsStep(
         step_id="d2",
         type="delete_fields",
@@ -384,7 +384,7 @@ def test适配器删除字段作用于子规则并拒绝未找到字段():
     assert result2.status == StepStatus.FAILED
     assert result2.error_code == "field_not_found"
     assert "nope" in result2.message
-    indexes2 = {item["index"] for item in session2["mapped_sub_rules"][0]["normalize"]}
+    indexes2 = {item["index"] for item in session2.mapped_sub_rules[0]["normalize"]}
     assert "a" in indexes2  # 拒绝时不做部分删除
 
 
