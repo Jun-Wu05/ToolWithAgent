@@ -25,6 +25,7 @@ from contracts.planner_models import (
     ThreatMappingStep,
 )
 from application.progress import NullProgressSink
+from application.session_state import SessionState
 from application.recovery import RecoveryBudget, RETRYABLE_STEP_TYPES, is_transient
 from contracts.progress import (
     ProgressEvent,
@@ -42,7 +43,7 @@ _CONFIG_REFS = frozenset(get_args(ConfigRef))
 
 
 def threat_fill_source_precondition(
-    step: ExecutableStep, session: Any
+    step: ExecutableStep, session: SessionState
 ) -> tuple[Any | None, StepResult | None]:
     """威胁映射填充「产物可用 + 固定目标」的唯一前置校验（#314 单一来源）。
 
@@ -55,10 +56,7 @@ def threat_fill_source_precondition(
     """
     if step.source_ref != "session.artifacts.threat_mapping":
         return None, None
-    # 延迟导入：adapters.shared 反向依赖本模块的 ExecutionContext，顶层导入会成环
-    from application.adapters.shared import _session_get
-
-    raw_slot = _session_get(session, "latest_threat_artifact")
+    raw_slot = session.latest_threat_artifact
     try:
         slot = (
             raw_slot
@@ -81,7 +79,7 @@ def threat_fill_source_precondition(
 
 
 def threat_mapping_source_precondition(
-    step: ExecutableStep, session: Any
+    step: ExecutableStep, session: SessionState
 ) -> tuple[Any | None, StepResult | None]:
     """威胁类型映射「枚举值产物可用」的唯一前置校验（#320 单一来源）。
 
@@ -93,10 +91,7 @@ def threat_mapping_source_precondition(
     """
     if step.source_ref != "session.artifacts.enum_values":
         return None, None
-    # 延迟导入：adapters.shared 反向依赖本模块的 ExecutionContext，顶层导入会成环
-    from application.adapters.shared import _session_get
-
-    raw_slot = _session_get(session, "latest_enum_artifact")
+    raw_slot = session.latest_enum_artifact
     try:
         slot = (
             raw_slot
@@ -116,7 +111,7 @@ def threat_mapping_source_precondition(
 class ExecutionContext:
     """保存执行期 session 与其单一事实快照；核心模块不依赖 Chainlit。"""
 
-    session: Any
+    session: SessionState
     session_facts: SessionFacts
     plan_id: str = "pending"
     progress_sink: ProgressSink = field(default_factory=NullProgressSink)

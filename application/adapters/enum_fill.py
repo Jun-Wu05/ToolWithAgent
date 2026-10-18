@@ -17,8 +17,6 @@ from application.adapters.shared import (
     _enum_mapping_table,
     _needs_input,
     _read_config,
-    _session_get,
-    _session_set,
     _write_config,
 )
 from application.execution import ExecutionContext
@@ -44,15 +42,13 @@ class EnumFillAdapter:
         current_config, unbind_note = unbind_fixed_field_bindings(
             current_config, step.target_fields
         )
-        enum_preview = _session_get(context.session, "enum_preview") or []
+        enum_preview = context.session.enum_preview or []
         mapping_table = _enum_mapping_table(enum_preview, step.target_fields)
         if not mapping_table:
             return _needs_input(
                 step, "enum_mapping_required", "当前枚举映射表没有可用于目标字段的规则"
             )
-        all_contributions = dict(
-            _session_get(context.session, "enum_fill_contributions", {}) or {}
-        )
+        all_contributions = dict(context.session.enum_fill_contributions or {})
         config_contributions = dict(all_contributions.get(step.config_ref, {}) or {})
         before_count = count_field_mappings(current_config, step.target_fields)
         without_old_contributions = remove_enum_fill_contributions(
@@ -75,11 +71,11 @@ class EnumFillAdapter:
             all_contributions[step.config_ref] = config_contributions
         else:
             all_contributions.pop(step.config_ref, None)
-        _session_set(context.session, "enum_fill_contributions", all_contributions)
+        context.session.enum_fill_contributions = all_contributions
         pending_refills = {
             config_ref: set(sheet_names)
             for config_ref, sheet_names in (
-                _session_get(context.session, "enum_pending_refills", {}) or {}
+                context.session.enum_pending_refills or {}
             ).items()
         }
         pending_for_config = pending_refills.get(step.config_ref, set())
@@ -88,13 +84,11 @@ class EnumFillAdapter:
             pending_refills[step.config_ref] = pending_for_config
         else:
             pending_refills.pop(step.config_ref, None)
-        _session_set(context.session, "enum_pending_refills", pending_refills)
-        stale_refs = set(
-            _session_get(context.session, "stale_enum_config_refs", set()) or set()
-        )
+        context.session.enum_pending_refills = pending_refills
+        stale_refs = set(context.session.stale_enum_config_refs or set())
         if step.config_ref not in pending_refills:
             stale_refs.discard(step.config_ref)
-        _session_set(context.session, "stale_enum_config_refs", stale_refs)
+        context.session.stale_enum_config_refs = stale_refs
         logger.info(
             "[ENUM_FILL] 填充完成: step_id=%s config_ref=%s target_field_count=%s "
             "mapping_rule_count=%s before_count=%s after_count=%s changed_count=%s",

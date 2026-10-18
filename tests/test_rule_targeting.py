@@ -269,7 +269,7 @@ def test事件名守卫只检查目标范围():
         step_id="a1", type="add_fields", field_name="事件名称", field_value="终端告警",
         target_rule_names=("未标注_子规则",), config_ref="session.mapped_sub_rules",
     )
-    result = _run(FieldSkillAdapter(), step_ok, {"mapped_sub_rules": _annotated_config()})
+    result = _run(FieldSkillAdapter(), step_ok, make_session_state(mapped_sub_rules=_annotated_config()))
     assert result.status.value == "success"
 
     step_conflict = AddFieldsStep(
@@ -424,7 +424,7 @@ def test标注明细行进入产物并区分待确认():
     adapter = FieldMappingAdapter(team=None, event_classifier=fake)
     rules = _annotated_config()[:2]
     step_outcome = asyncio.run(
-        adapter._annotate_event_names(_fm_step(), _context({}), rules)
+        adapter._annotate_event_names(_fm_step(), _context(make_session_state()), rules)
     )
     annotated, summary, rows = step_outcome
     assert len(rows) == 2

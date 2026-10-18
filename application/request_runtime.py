@@ -10,13 +10,13 @@ from agent.core.model_config import model_runtime_scope
 from agent.core.planner import PlannerService
 from agent.shared.logger import get_logger
 from application.adapters.composition import create_default_adapters
-from application.adapters.shared import _session_get, _session_set
 from application.execution import ExecutionContext
 from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
 from application.model_runtime import resolve_session_config
 from application.progress import NullProgressSink
 from application.session_projection import build_session_facts, summarize_report
+from application.session_state import SessionState
 from application.threat_chain import (
     build_threat_source_plan,
     compile_explicit_threat_plan,
@@ -55,7 +55,7 @@ _CLEAR_COMMANDS = {
 
 async def _execute_plan_with_threat_transaction(
     *,
-    session: Any,
+    session: SessionState,
     team: Any,
     plan: PlanDecision | DeterministicPlan,
     progress_sink: ProgressSink,
@@ -104,7 +104,7 @@ def _has_meaningful_threat_mapping(report: ExecutionReport) -> bool:
 
 
 async def _run_auto_threat_source_selection(
-    *, session: Any, team: Any, session_facts: SessionFacts
+    *, session: SessionState, team: Any, session_facts: SessionFacts
 ) -> PlanDecision | ExecutionReport:
     """在隔离会话中最多试三个真实来源，首个有效全链成功后一次提交。"""
     candidates = rank_threat_source_candidates(session_facts.threat_source_fields)
@@ -219,25 +219,21 @@ def _assistant_history_content(result: PlanDecision | ExecutionReport) -> str:
     return f"已执行：{'；'.join(outcomes)}。"
 
 
-def _record_execution_summary(session: Any, report: ExecutionReport) -> None:
+def _record_execution_summary(session: SessionState, report: ExecutionReport) -> None:
     """把一份已完成计划滚动写入当前/上一份安全摘要槽位。"""
-    _session_set(
-        session,
-        "previous_execution",
-        _session_get(session, "current_execution"),
-    )
-    _session_set(session, "current_execution", summarize_report(report))
+    session.previous_execution = session.current_execution
+    session.current_execution = summarize_report(report)
 
 
-def _read_pending_plan(session: Any) -> PendingPlan | None:
+def _read_pending_plan(session: SessionState) -> PendingPlan | None:
     """读取类型化待确认计划；损坏状态按不存在处理。"""
-    value = _session_get(session, "pending_plan")
+    value = session.pending_plan
     if value is None:
         return None
     try:
         return value if isinstance(value, PendingPlan) else PendingPlan.model_validate(value)
     except (TypeError, ValueError):
-        _session_set(session, "pending_plan", None)
+        session.pending_plan = None
         return None
 
 
@@ -263,46 +259,15 @@ def is_explicit_clear_command(user_text: str) -> bool:
     return normalized in _CLEAR_COMMANDS
 
 
-def clear_session_data(session: Any) -> None:
+def clear_session_data(session: SessionState) -> None:
     """清除业务会话状态，不承担界面提示或进度账本重置。"""
-    if hasattr(session, "clear_decoded_data"):
-        session.clear_decoded_data()
-        if hasattr(session, "clear_mapping_results"):
-            session.clear_mapping_results()
-        return
-    for key in (
-        "decoded_data",
-        "decoded_fields",
-        "simplified_data",
-        "decoded_text",
-        "original_log",
-        "raw_log_lines",
-        "uploaded_file_name",
-        "uploaded_file_time",
-        "last_mapping_data",
-        "last_threat_data",
-        "last_enum_extract_result",
-        "latest_threat_artifact",
-        "latest_enum_artifact",
-        "log_classification",
-        "log_knowledge_submission",
-        "rule_source_fields",
-        "pending_rule_source_step",
-        "pending_plan",
-        "threat_source_field_override",
-        "current_execution",
-        "previous_execution",
-        "mapped_sub_rules",
-        "enum_preview",
-        "enum_excel_path",
-        "raw_base64",
-    ):
-        session.pop(key, None)
+    session.clear_decoded_data()
+    session.clear_mapping_results()
 
 
 async def run_user_request(
     *,
-    session: Any,
+    session: SessionState,
     team: Any,
     user_text: str,
     progress_sink: ProgressSink,
@@ -327,7 +292,7 @@ async def run_user_request(
 
 async def _run_user_request_scoped(
     *,
-    session: Any,
+    session: SessionState,
     team: Any,
     user_text: str,
     progress_sink: ProgressSink,
@@ -403,7 +368,7 @@ async def _run_user_request_scoped(
             len(step.depends_on),
         )
     if decision.reason_code == "threat_source_auto_requested":
-        _session_set(session, "pending_plan", None)
+        session.pending_plan = None
         auto_result = await _run_auto_threat_source_selection(
             session=session,
             team=team,
@@ -412,14 +377,10 @@ async def _run_user_request_scoped(
         append_history(session, "assistant", _assistant_history_content(auto_result))
         return auto_result
     if decision.decision == "proposal":
-        _session_set(
-            session,
-            "pending_plan",
-            PendingPlan(
-                plan_id=decision.plan_id,
-                steps=decision.steps,
-                session_facts_digest=_session_facts_digest(session_facts),
-            ),
+        session.pending_plan = PendingPlan(
+            plan_id=decision.plan_id,
+            steps=decision.steps,
+            session_facts_digest=_session_facts_digest(session_facts),
         )
         append_history(session, "assistant", _assistant_history_content(decision))
         return decision
@@ -433,7 +394,7 @@ async def _run_user_request_scoped(
             append_history(session, "assistant", _assistant_history_content(result))
             return result
         if decision.decision == "cancel":
-            _session_set(session, "pending_plan", None)
+            session.pending_plan = None
             result = PlanDecision(
                 decision="guidance",
                 plan_id=decision.plan_id,
@@ -443,7 +404,7 @@ async def _run_user_request_scoped(
             append_history(session, "assistant", _assistant_history_content(result))
             return result
         if pending_plan.session_facts_digest != _session_facts_digest(session_facts):
-            _session_set(session, "pending_plan", None)
+            session.pending_plan = None
             result = _pending_plan_error(
                 decision.plan_id,
                 "pending_plan_stale",
@@ -451,18 +412,18 @@ async def _run_user_request_scoped(
             )
             append_history(session, "assistant", _assistant_history_content(result))
             return result
-        _session_set(session, "pending_plan", None)
+        session.pending_plan = None
         decision = PlanDecision(
             decision="execute",
             plan_id=pending_plan.plan_id,
             steps=pending_plan.steps,
         )
     elif decision.decision != "execute":
-        _session_set(session, "pending_plan", None)
+        session.pending_plan = None
         append_history(session, "assistant", _assistant_history_content(decision))
         return decision
     else:
-        _session_set(session, "pending_plan", None)
+        session.pending_plan = None
     report = await _execute_plan_with_threat_transaction(
         session=session,
         team=team,
@@ -485,7 +446,7 @@ async def _run_user_request_scoped(
 
 async def run_deterministic_plan(
     *,
-    session: Any,
+    session: SessionState,
     team: Any,
     plan: DeterministicPlan,
     progress_sink: ProgressSink,
@@ -504,7 +465,7 @@ async def run_deterministic_plan(
 
 async def _run_deterministic_plan_scoped(
     *,
-    session: Any,
+    session: SessionState,
     team: Any,
     plan: DeterministicPlan,
     progress_sink: ProgressSink,

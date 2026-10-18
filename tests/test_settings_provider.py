@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import agent.core.model_config as model_config
 import web.settings_handler as settings_handler
 
+from factories import make_session_state
+
 
 def _clean_env(monkeypatch):
     """清空提供商/密钥环境变量，回到可控基线。"""
@@ -307,9 +309,7 @@ def test设置保存按最终解析结果校验并放行环境变量密钥(monke
     """界面密钥留空但环境变量已有当前家密钥时不被要求重填。"""
     _clean_env(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
-    session = SimpleNamespace(
-        current_provider=None, model_name=None, api_key=None, team=None
-    )
+    session = make_session_state()
     sent = _install_chainlit_fakes(monkeypatch, session)
     tested = []
 
@@ -340,9 +340,7 @@ def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
     _clean_env(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
     placeholder = settings_handler.build_settings_widgets()[1].values[0]
-    session = SimpleNamespace(
-        current_provider=None, model_name=None, api_key=None, team=None
-    )
+    session = make_session_state()
     _install_chainlit_fakes(monkeypatch, session)
     tested_models = []
     team = object()
@@ -383,9 +381,7 @@ def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
 def test设置保存密钥解析为空时拦截并提示变量名(monkeypatch):
     """当前家与环境变量都解析不出密钥时拦截，提示含具体变量名。"""
     _clean_env(monkeypatch)
-    session = SimpleNamespace(
-        current_provider=None, model_name=None, api_key=None, team=None
-    )
+    session = make_session_state()
     sent = _install_chainlit_fakes(monkeypatch, session)
     called = []
 
@@ -438,7 +434,7 @@ def test环境变量密钥就绪时消息到达自动创建Team(monkeypatch):
     """Team 未初始化且配置可解析时自动懒创建，不再拒绝消息。"""
     _clean_env(monkeypatch)
     monkeypatch.setenv("SILICONFLOW_API_KEY", "sf-key")
-    session = SimpleNamespace(team=None)
+    session = make_session_state(team=None)
     handled = []
     router, sent = _install_router_fakes(monkeypatch, session, handled)
 
@@ -452,7 +448,7 @@ def test环境变量密钥就绪时消息到达自动创建Team(monkeypatch):
 def test密钥缺失时消息到达提示应设置变量名(monkeypatch):
     """配置解析不出密钥时返回包含变量名的明确提示，取代死路文案。"""
     _clean_env(monkeypatch)
-    session = SimpleNamespace(team=None)
+    session = make_session_state(team=None)
     handled = []
     router, sent = _install_router_fakes(monkeypatch, session, handled)
 
