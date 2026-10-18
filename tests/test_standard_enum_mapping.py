@@ -301,9 +301,8 @@ def test场景15_已登记同义词确定性命中():
 def test场景16_值画像进入第一阶段输入且默认路径不变():
     from application.field_mapping_input import build_batch_llm_input
 
-    session = {"simplified_data": {"original_log_sample": "AUDIT result=success"}}
     legacy = build_batch_llm_input(
-        "执行标准字段映射", session, ["zzz"], 1, 1,
+        "执行标准字段映射", "AUDIT result=success", ["zzz"], 1, 1,
         prequery=lambda fields: "",
     )
     profile = FieldValueProfile(
@@ -311,7 +310,7 @@ def test场景16_值画像进入第一阶段输入且默认路径不变():
         values={"1": 3}, empty_count=0, scanned_lines=3, hit_lines=3,
     )
     enhanced = build_batch_llm_input(
-        "执行标准字段映射", session, ["zzz"], 1, 1,
+        "执行标准字段映射", "AUDIT result=success", ["zzz"], 1, 1,
         prequery=lambda fields: "",
         value_profiles={"zzz": [profile]},
     )
@@ -319,7 +318,8 @@ def test场景16_值画像进入第一阶段输入且默认路径不变():
     assert "AUDIT_kv_子规则" in enhanced and "1×3" in enhanced
     assert enhanced.startswith(legacy.split("📋 原始日志样本")[0].rstrip())
     assert legacy == build_batch_llm_input(
-        "执行标准字段映射", session, ["zzz"], 1, 1, prequery=lambda fields: ""
+        "执行标准字段映射", "AUDIT result=success", ["zzz"], 1, 1,
+        prequery=lambda fields: ""
     )
 
 
