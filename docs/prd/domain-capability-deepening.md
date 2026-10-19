@@ -238,7 +238,7 @@ Catalog 只拥有标准字段 schema、资源解析、名称/别名 lookup 和�
 
 | 对象 | 仓库内证据 | 当前分类 | 本 PRD 决策 |
 | --- | --- | --- | --- |
-| `agent/tools/base64_tool.py` | 未发现生产导入、动态注册、重导出或测试 | 强审计候选 | 保留；后续独立审计 |
+| `agent/tools/base64_tool.py` | 未发现生产导入、动态注册、重导出或测试 | 强审计候选 | 已删除（#377 执行独立审计：零生产导入四重实证，characterization 测试随删） |
 | `web/constants.py` | 单常量，未发现调用或测试 | 强审计候选 | 保留；后续独立审计 |
 | Web 日志桥状态 | `global_state.py` 与 `llm_client.py` 各自维护安装状态 | 重复所有权候选 | 保留；后续建立单一生命周期 seam |
 | `agent/tools/log_pattern_store.py` | 被知识库 wrapper 与 Header 路径延迟导入 | 在用能力 | 移出死代码候选；补直接测试 |

@@ -11,7 +11,7 @@ from agent.shared.logger import get_logger
 from application.adapters.shared import (
     REPO_ROOT, _build_config_artifact, _count_tagged_normalize, _failed,
     _publish_progress, _retry_delay_seconds, _needs_input,
-    _success, run_member_stream,
+    _success, require_rule_source_fields, run_member_stream,
 )
 from application.execution import ExecutionContext
 from application.field_mapping_batch import (
@@ -117,18 +117,11 @@ class FieldMappingAdapter:
                 ),
             )
         if isinstance(classification, dict) and classification:
-            from contracts.rule_source import RuleSourceFields
-
-            rule_source_fields = RuleSourceFields.from_value(
-                context.session.rule_source_fields
+            rule_source_fields, blocked = require_rule_source_fields(
+                context.session, step
             )
-            if rule_source_fields is None:
-                context.session.pending_rule_source_step = step
-                return _needs_input(
-                    step,
-                    "data_source_fields_required",
-                    "请填写数据源产品和数据源厂商后继续；数据源可留空自动生成",
-                )
+            if blocked is not None:
+                return blocked
         simplified_data = context.session.simplified_data or {}
         original_log_sample = (
             simplified_data.get("original_log_sample", "")

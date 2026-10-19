@@ -43,7 +43,7 @@ def test_审计记录覆盖五个样本与五类证据() -> None:
         assert set(candidate["evidence"]) == required_evidence
         if candidate["deletion_authorized"]:
             assert candidate["decision"] == "delete-authorized"
-            assert candidate["deleted_in_issue"] in {168, 222}
+            assert candidate["deleted_in_issue"] in {168, 222, 377}
             assert all(not (ROOT / path).exists() for path in candidate["module_paths"])
             assert candidate["evidence"]["external_dependencies"]["status"] == (
                 "confirmed-no-consumers"

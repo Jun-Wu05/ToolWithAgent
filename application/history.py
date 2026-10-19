@@ -69,9 +69,3 @@ def format_history_for_prompt(
         total += len(line)
     lines.reverse()
     return "💬 最近对话：\n" + "\n".join(lines)
-
-
-def clear_history(session: SessionState) -> None:
-    """清空当前会话历史。"""
-    session.conversation_history = []
-    logger.info("[HISTORY] 对话历史已清空")

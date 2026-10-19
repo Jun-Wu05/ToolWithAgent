@@ -21,37 +21,18 @@
       ],
       "evidence": {
         "production_imports": [],
-        "dynamic_registrations": [
-          {
-            "path": "agent/tools/base64_tool.py",
-            "line": 106,
-            "kind": "decorator",
-            "detail": "@tool"
-          },
-          {
-            "path": "agent/tools/base64_tool.py",
-            "line": 172,
-            "kind": "decorator",
-            "detail": "@tool"
-          }
-        ],
+        "dynamic_registrations": [],
         "package_reexports": [],
-        "test_dependencies": [
-          {
-            "path": "tests/test_base64_tool_characterization.py",
-            "line": 8,
-            "kind": "import",
-            "detail": "agent.tools.base64_tool"
-          }
-        ],
+        "test_dependencies": [],
         "external_dependencies": {
-          "status": "pending-human-confirmation",
-          "evidence": "当前仓库无法证明仓库外是否直接导入该模块。"
+          "status": "confirmed-no-consumers",
+          "evidence": "维护者于 2026-10-19 基于四重仓库证据（全仓唯一 import 为其 characterization 测试、包门面无重导出、v2/ 零引用、活解码链路 web/file_handlers.py→application/file_input.simple_decode 不经该模块）确认无仓库外消费者。"
         }
       },
-      "summary": "存在两个定义级 @tool 装饰器和独立 characterization 测试，但未发现生产入口加载或包级重导出；装饰器存在不等于已进入生产工具组合。",
-      "decision": "retain-needs-info",
-      "deletion_authorized": false
+      "summary": "两个 @tool 装饰器从未进入生产工具组合（ADR-0008：agno Skills 机制从未接线）；2026-10-19 复核生产导入仍为空，独立 Issue #377 授权删除，characterization 测试随模块一并删除（删除前曾存在 2 处 @tool 装饰器与 1 个 characterization 测试依赖）。",
+      "decision": "delete-authorized",
+      "deletion_authorized": true,
+      "deleted_in_issue": 377
     },
     {
       "id": "web-constants",
