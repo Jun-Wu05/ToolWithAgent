@@ -1,6 +1,36 @@
 # Issue 实施 SOP：git worktree 隔离工作流
 
-每个 issue 从 master 开短命分支实施、PR 合并后即删分支；**较大改动用独立 git worktree 隔离，小改动在主 worktree 直通**（判据见下）。允许多棵临时 worktree 并行，前提是：并行 issue 的改动面零相交（沿用 AGENTS.md 的 Multi-Agent 并行派发判据）、每棵 worktree 独立补第 2 步环境文件并显式使用树内 `--basetemp`、任一 PR 合并后立即清理对应 worktree。该流程已在 #178（worktree 五组删除）、#179（worktree bug 修复）、#176（主 worktree 直通小修复）上完整验证。
+默认每个 issue 从 master 开短命分支实施、PR 合并后即删分支；V2 集成期的基线例外见下节。**较大改动用独立 git worktree 隔离，小改动在主 worktree 直通**（判据见下）。允许多棵临时 worktree 并行，前提是：并行 issue 的改动面零相交（沿用 AGENTS.md 的 Multi-Agent 并行派发判据）、每棵 worktree 独立补第 2 步环境文件并显式使用树内 `--basetemp`、任一 PR 合并后立即清理对应 worktree。该流程已在 #178（worktree 五组删除）、#179（worktree bug 修复）、#176（主 worktree 直通小修复）上完整验证。
+
+## V2 集成开发（用户确认的流程例外）
+
+长期集成分支为 `codex/v2-development`。V2 Issue 从该分支创建独立 worktree 和短命功能分支；功能通过全量自动验证及独立 Review 后合入集成分支。非 V2 Issue 继续使用 master 流程。master 的 Chainlit 优化保持独立开发，V2 的 API、Worker、依赖与可写数据继续隔离。
+
+### 开工与持续同步
+
+1. 在干净的 V2 集成 worktree 获取最新 `github/master`，用普通 merge 保留双方历史；解决冲突后运行受影响的回归，共享生产 Python 变化先重生成源码快照。记录 master commit、集成 commit 和验证结果。
+2. 验证通过后，从更新后的集成分支创建本次 Issue worktree，补本地环境并执行基线。开发期间 master 出现相关业务修复时及时同步。
+3. 功能合入前再次获取 master；若其已前进，先更新集成分支，再让功能分支合入新的集成基线、解决冲突并验证。完成祖先检查后，功能 PR 的 base 为 `codex/v2-development`。
+
+在集成 worktree 执行：
+
+```powershell
+git fetch github master
+git merge github/master
+git merge-base --is-ancestor github/master HEAD
+git rev-parse github/master
+git rev-parse HEAD
+```
+
+祖先检查 exit 0 只证明包含已获取的 master 提交；业务兼容由测试与 Review 证明。冲突按双方业务意图组合，并审查最终修改和删除；不使用分支替换或强推覆盖 master。Feature 合入后清理短命 worktree/分支；长期集成 worktree 和分支保留。
+
+### 开发集成与最终交付
+
+- 每个 Issue 分别记录「开发已集成」和未完成的人工验收。合入非默认 V2 分支不代表发布，也不自动关闭待验收 Issue；PR 保留 `Closes #NNN` 和验证证据。
+- 可运行成果交付必须给出集成分支、完整 HEAD、纳入功能、精确启动命令与已知限制。服务启动和浏览器操作按现有人工交接授权处理。
+- 最终向 master 提交 PR 前，再合入最新 master，完成组合全量回归、双入口业务与平台导入验收。验收期间 master 再变化则重新同步并验证受影响部分。
+- 合入 master 与切换默认入口是两个独立决定；保持 Chainlit 启动与回退能力，完整成果验收通过后由用户决定是否以 V2 为默认入口。
+- Tracker 发布前确认继续适用，不因内部集成省略正文展示与用户确认。
 
 ## 是否需要建 worktree：自动判据
 
@@ -23,7 +53,7 @@ git checkout master && git fetch github master:master
 git branch -D <分支> && git push github --delete <分支>
 ```
 
-两条路径共享不变式：**从 master 开分支、全量 pytest 绿、PR 带 `Closes #NNN`、做完删分支**；worktree 路径另需第 2 步补环境文件。
+两条路径共享不变式：**按目标开发线开分支（默认 master，V2 集成期见上节）、全量 pytest 绿、PR 带 `Closes #NNN`、做完删短命分支**；worktree 路径另需第 2 步补环境文件。
 
 ## 前提
 
