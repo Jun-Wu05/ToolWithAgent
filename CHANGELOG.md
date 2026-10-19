@@ -4,8 +4,11 @@
 
 ## [Unreleased]
 
+> 注:2026-09-07(#180 时代)至 2026-09 下旬(#356 之前)的条目未回溯补记;以下自 #356 起恢复连续记录。
+
 ### Added
 - V2 字段映射草稿编辑（#267）：按子规则自动保存人工选择，确认占用替换与精确路径联动，以 revision 阻止旧版本覆盖；应用通过确定性 Task/Run 原子发布新 Artifact，失败保留草稿与旧结果，发送新消息前明确应用、丢弃或返回编辑。
+- tests/factories.py 测试会话构造工厂基座:make_session_state 唯一入口 + make_recording_session(写入顺序契约)+ 两个场景预设,40+ 测试文件统一收口(#357 #371)
 - 威胁类型链路自动化（#173，ADR-0010）：字段映射判出威胁子规则后执行后确定性续跑 枚举提取→威胁映射→加字段→填充 四步；来源字段 X=候选检索相似度最高且覆盖全部威胁子规则（会话覆盖优先），判不出降级固定值「其他」；值映射确定性全覆盖兜底；「威胁类型」成为第 4 个映射目标黑名单字段；威胁映射产物填充目标固定为「威胁类型」（修复跨轮血缘漂移）；planner.md 新增四步链路指令与换来源话术（复合指令从 2 步变 4 步，breaking）；威胁类型链路六阶段 threat_chain 日志
 - 统一 Planner 架构（ADR-0005）：独立 PlannerAgent + 类型化 PlanDecision/StepSpec + PlanExecutor 依赖账本，按钮入口复用同一执行器（#45 #53 #58）
 - 七类产物统一渲染：字段映射表、威胁映射表、枚举列表、日志分类详情与规则动作、配置下载一次汇总展示（#63 #68）
@@ -34,6 +37,10 @@
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- 会话类型化收官(三步走):SessionState dict 兼容层退役、生产垫片 _session_get/_session_set 删除(96 处调用点属性直读直写)、ExecutionContext.session 等约 20 处签名收窄 SessionState、file_input/request_runtime/threat_chain 三处 dict 兜底分支拆除、build_batch_llm_input 假会话参数直传 original_log_sample(#366 #368 #374 #376)
+- 全部测试迁移 make_session_state 工厂基座(执行链路 5 文件 + 其余 23 文件两批完成)(#370 #372)
+- 安全区死代码清理:logs_enum_tool 整模块、base64_tool(#161 挂起的独立审计执行完毕)、agent/core/agent.py 迁移残留、enum_extract_tool 四死函数、config 死数据(threat_nomal.txt/knowledge_base//对象.xlsx)删除;message_router 幻影延迟导入拆除;字段映射与导出的数据源守卫双份收口 require_rule_source_fields(#378)
+- 重构批次:ConfigRef 读取双源收口与循环导入修复(#354 #355)、会话垫片 7 份同型拷贝收口(#351)、LLM 响应解析收口共享 parser(#345)、FormatContext 收紧(#347)、plan_renderer kinds 收紧(#348)、FieldMappingBatchRunner.run() 拆阶段(#358)、field_retriever 候选检索主函数拆解(#359)
 - 候选检索新增结构化出口（#180）：`batch_retrieve_candidates_table` 返回 field → [(标准名, 得分, 英文名, by_stripped变体)]，`batch_retrieve_candidates` 改由该表渲染 markdown（字节不变，表征测试零改写保持绿）；一对一冲突裁决改消费结构化表并删除 `_parse_candidate_scores` 正则反解析（web 侧第二套正则已随 #178 删除）；批处理 prompt 仍在注入边界渲染 markdown，生产输入字节不变
 - Application 运行时提取完成：SessionFacts 投影、PlanExecutor、全部业务 Adapter、FieldMappingBatchRunner、文件输入、Prompt 组合、模型/历史/字段运行时与 Web 请求入口统一落位；Web 收缩为 Chainlit 输入、生命周期、进度和渲染，并新增 ADR-0009、静态依赖门禁与最终源码分析快照（#130 #132–#144）
 - 字段映射下载契约显式化：`filled_config` 单载荷改为 `download_kind/download_content`，Excel 日志映射导出 mapped_sub_rules、真实配置导出 mapped_config、无回填目标不附下载；恢复日志分类历史渲染（详情/样本/完整 JSON）与规则导出动作（#75）
@@ -50,9 +57,12 @@
 - Pipeline 分类输出 schema 清理：移除废弃字段
 
 ### Removed
+- 安全区死代码清理包（#378）：logs_enum_tool.py（零外部调用的 2 个 @tool）、base64_tool.py 及其 characterization 测试（#161 审计四重零生产导入实证后授权删除）、agent/core/agent.py 迁移残留、enum_extract_tool.py 四个零引用格式化函数、application/history.py clear_history、web/file_handlers.py enum_excel_path 墓碑读取、config/{threat_nomal.txt, knowledge_base/, 对象.xlsx} 死数据
 - 死代码清理包（#178）：删除零消费的 `agent/tools/pipeline/models.py` TypedDict 层；`agent/core/tracing.py` 的 `sync_wrapper`/`to_dict`/`TraceContext.set/reset`（保留 span 与 trace_request）；零调用的 `agent/shared/threat_fill.py` 遗留副本（生产链路在 `application/adapters/threat_fill.py`）；`generate_rules` 的 `mode="both"` 死分支与 `file_name` 返回键、`generate_sub_rule` 的 `is_pure_json` 死参、零消费导出 `extract_sub_rule_mapping_info`/`apply_enum_fill_to_sub_rules`；`web/action_callbacks.py` 5 个无按钮构造点的死 callback 及仅被死代码读写的 `batch_mapping_results` 会话字段
 
 ### Fixed
+- field_retriever Layer 1.5「去前缀变体精确匹配」因 str 字段名对 int 键 dict 做成员检查从未生效;修复后嵌套字段(如 data.severity)变体精确命中恢复置顶 1.00 候选(#363)
+- 正则生成重试对「无正则失败」构造反馈导致崩溃(#352)
 - 日志保留策略未按设计生效（#176）：`agent/logs` 无限累积（清理只在应用启动触发，pytest/子进程/CLI 等非应用进程不经过）且稳态每类实为 3 份而非 2；清理改挂 `setup_logger` 首次创建共享日志文件分支（每进程至多一次，任何产生日志的进程都会触发），`cleanup_old_logs` 改为每前缀总数 = keep_count（活动文件计入额度且永不删除），稳态回到「当前 + 上一次」2 份/类
 - 导出字段携带错误对象（#177）：事件固定字段 entity 由「日志」改为目录规定的「事件」（目标平台不再显示 event_name日志）；标准字段目录成为名称/对象 SSOT——apply 写入与 validator 校验均按目录确定性解析（英文字段名/前后空白等变体规范化为目录规范名，目录外名称降级未匹配，对象取目录对象列首个，多值逗号分隔与 对象.xlsx 历史语义一致）；退役 对象.xlsx 回填与 object_map_loader 接缝（加载失败静默空表、未知名称默认「事件」两缺陷一并消除）；上传配置既有非法组合只诊断不改写（find_non_catalog_field_entities 报告来源与数量）
 - 纯 KV 日志分类在 format_info 为空（解析为 None）时抛 UnboundLocalError（#179）：`_classify_kv_features` 的 `body_logs` 改为无条件初始化并回退默认分隔符；塌缩永不可达的防御 try/except；删除 `_classify_json_features` 从未使用的 `format_info` 死参与 4 个传 None 调用点
