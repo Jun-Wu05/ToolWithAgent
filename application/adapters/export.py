@@ -9,6 +9,7 @@ from application.adapters.shared import (
     _is_enum_config_stale,
     _needs_input,
     _read_config,
+    require_rule_source_fields,
 )
 from application.execution import ExecutionContext
 from contracts.planner_models import (
@@ -75,18 +76,11 @@ class ExportAdapter:
             classification = context.session.log_classification
             if not isinstance(classification, dict) or not classification:
                 return _needs_input(step, "log_classification_required", "请先完成日志类型提取")
-            from contracts.rule_source import RuleSourceFields
-
-            rule_source_fields = RuleSourceFields.from_value(
-                context.session.rule_source_fields
+            rule_source_fields, blocked = require_rule_source_fields(
+                context.session, step
             )
-            if rule_source_fields is None:
-                context.session.pending_rule_source_step = step
-                return _needs_input(
-                    step,
-                    "data_source_fields_required",
-                    "请填写数据源产品和数据源厂商后继续；数据源可留空自动生成",
-                )
+            if blocked is not None:
+                return blocked
             export_mode = (
                 "entry"
                 if step.source_ref == "session.log_classification.entry_rules"

@@ -23,17 +23,15 @@ def _import_roots(path: Path) -> set[str]:
 
 
 def test上传解码由application唯一实现且web直接调用() -> None:
-    """Web 直接跨 Application 接缝，迁移入口不再重导出。"""
+    """Web 直接跨 Application 接缝，迁移入口模块已删除（#377）。"""
     root = Path(__file__).parents[1]
     module_path = root / "application/file_input.py"
     assert module_path.exists()
     assert _import_roots(module_path).isdisjoint({"agent", "web", "chainlit"})
 
-    agent_source = (root / "agent/core/agent.py").read_text(encoding="utf-8")
+    assert not (root / "agent/core/agent.py").exists()
     web_source = (root / "web/file_handler.py").read_text(encoding="utf-8")
     upload_source = (root / "web/file_handlers.py").read_text(encoding="utf-8")
-    assert "def simple_decode" not in agent_source
-    assert "simple_decode" not in agent_source
     assert "simple_decode" not in web_source
     assert "simple_decode" in upload_source
     assert "def _commit_primary_dataset" not in upload_source
@@ -167,19 +165,3 @@ def test空白文件保持稳定错误且不产生部分结果() -> None:
         "status": "error",
         "error_message": "输入为空",
     }
-
-
-def test历史simple_encode保持独立字典与默认json字节契约() -> None:
-    """本次迁移不得建立通用 Codec 或改变其他编码入口。"""
-    from agent.core.agent import simple_encode
-
-    payload = {"中文": "值", "items": [1, 2]}
-    expected_text = json.dumps(payload, ensure_ascii=False)
-
-    assert simple_encode(payload) == {
-        "status": "success",
-        "encoded": base64.b64encode(expected_text.encode("utf-8")).decode("utf-8"),
-    }
-    assert "simple_encode" not in Path(
-        __file__
-    ).parents[1].joinpath("application/file_input.py").read_text(encoding="utf-8")

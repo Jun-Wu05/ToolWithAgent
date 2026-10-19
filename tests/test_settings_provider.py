@@ -408,11 +408,10 @@ def test设置保存密钥解析为空时拦截并提示变量名(monkeypatch):
 def _install_router_fakes(monkeypatch, session, handled):
     import web.message_router as router
 
-    class _Handlers:
-        async def handle_user_message(self, user_session, team, user_text):
-            handled.append((user_session, team, user_text))
+    async def _fake_handle_user_message(user_session, team, user_text):
+        handled.append((user_session, team, user_text))
 
-    monkeypatch.setattr(router, "get_user_message_handlers", lambda: _Handlers())
+    monkeypatch.setattr(router, "handle_user_message", _fake_handle_user_message)
 
     sent = []
 

@@ -98,6 +98,27 @@ def _write_config(session: SessionState, config_ref: str, config: Any) -> None:
     setattr(session, session_key, config)
 
 
+def require_rule_source_fields(
+    session: SessionState, step: StepSpec
+) -> tuple[Any, StepResult | None]:
+    """数据源字段缺失时的统一守卫（字段映射与规则导出共享）。
+
+    返回 (规范化后的 RuleSourceFields | None, 拦截结果)；拦截结果非 None 时
+    调用方必须原样返回（缺失时同时记忆 pending_rule_source_step 供表单续跑）。
+    """
+    from contracts.rule_source import RuleSourceFields
+
+    fields = RuleSourceFields.from_value(session.rule_source_fields)
+    if fields is None:
+        session.pending_rule_source_step = step
+        return None, _needs_input(
+            step,
+            "data_source_fields_required",
+            "请填写数据源产品和数据源厂商后继续；数据源可留空自动生成",
+        )
+    return fields, None
+
+
 def _enum_mapping_table(
     enum_preview: list[dict[str, Any]],
     target_fields: tuple[str, ...],
