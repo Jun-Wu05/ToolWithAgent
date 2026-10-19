@@ -1,6 +1,6 @@
 # ToolWithAgent V2 独立入口
 
-V2 API、Worker、前端与原 Chainlit 入口并行运行。默认端口为 API `8100`、React `5173`；SQLite、上传文件和 Python 环境只放在当前 worktree 的 `tmp/` 中。当前支持文件校验、日志类型提取、日志知识申请与字段映射。业务通过既有 Application 执行；Run 支持持久恢复、取消和重跑。字段映射结果默认显示对话摘要，可原位放大为编辑器，按子规则搜索、筛选、分页、自动保存 Draft，确认占用替换和精确路径联动，并原子应用为新版本或下载正式结果。
+V2 API、Worker、前端与原 Chainlit 入口并行运行。默认端口为 API `8100`、React `5173`；SQLite、上传文件和 Python 环境只放在当前 worktree 的 `tmp/` 中。当前支持主数据与枚举映射附件校验、日志类型提取、日志知识申请、字段映射、枚举提取、威胁类型映射、枚举/威胁填充、取消映射与兼容导出；成功产物可跨刷新/重启和后续轮次复用。业务通过既有 Application 执行；自然指令创建 Task/Run，方案确认恢复冻结计划而不重新规划，Run 同时支持持久进度、取消和重跑。字段映射结果默认显示对话摘要，可原位放大为编辑器，按子规则搜索、筛选、分页、自动保存 Draft，确认占用替换和精确路径联动，并原子应用为新版本或下载正式结果。
 
 ## 本地启动（PowerShell）
 
@@ -33,7 +33,7 @@ tmp/venv/Scripts/python.exe -m toolwithagent_v2.runtime.worker
 
 - `GET /health/live`、`GET /api/v2/me`
 - `GET/POST /api/v2/conversations`、`GET /api/v2/conversations/{id}`
-- `POST /api/v2/conversations/{id}/messages`（文本投影，不执行自然语言业务）
+- `POST /api/v2/conversations/{id}/messages`（创建自然语言业务 Task/Run；保留消息字段并增加 `task/run`）
 - `POST /api/v2/conversations/{id}/log-parse`（显式文件与可选分类字段）
 - `POST /api/v2/artifacts/{id}/submit-log-knowledge`（当前合格分类的显式申请）
 - `POST /api/v2/conversations/{id}/field-mapping`（`file_id` 或 `classification_artifact_id` 二选一；`product`、`log_vendor` 必填，`data_source` 可留空；接受 `Idempotency-Key`）
@@ -131,4 +131,46 @@ apply 冻结 base 内容、Draft revision/operations、当前目录版本及原 
 
 原生下拉选择即时自动保存，保存期间禁用关联控件。技术规格中的 300–500ms 防抖尚待后续交互完善，快速键盘切换可能需要等待当前保存完成；保存失败的选择可保留并重试。
 
-浏览器视觉、真实 Provider、双入口真实样本与平台导入仍待人工验收；本轮自动验证不能替代这些合入及发布门槛。
+浏览器视觉、真实 Provider、双入口真实样本与平台导入仍待人工验收；本轮自动验证不能替代合入 master、正式发布与入口切换的门槛。
+
+
+## 后处理与跨轮产物（#276 冻结契约）
+
+V2 独立环境通过 `python -m pip install -e "v2/backend[test]"` 安装声明的业务与 API 依赖；不需要 Chainlit。Agno/OpenAI/SQLAlchemy 与现有入口固定版本一致。启动真实业务前仍需项目 `.env` 与只读标准字段及其本地缓存，运行时不会自动生成远程 embeddings。
+
+所有以下路径均带 `/api/v2` 前缀。上传 multipart 增加 `role=primary|enum_mapping`，默认 `primary` 兼容已有客户端。枚举附件必须 `.xlsx`，Sheet 名是目标字段，三列沿既有 `mappingType/orgValue/mappingValue` 协议；完整解析通过才生效。不同 Sheet 累积、同名 Sheet 完整替换，附件不会切换当前主数据。普通文件投影增加 `role`，原 file/task/run 字段保持。
+
+`POST /conversations/{id}/messages` body 仍为 `{"content":"指令"}`，返回原 `id/actor/kind/content/created_at` 加 `{task:{id,status},run:{id,status}}`。自然语言只调用 Planner 一次；缺参/歧义通过助手追问结束本次 Run，不猜测，也不读取未应用 Draft。未应用修改返回 409 `draft_resolution_required`；等待方案确认返回 409 `confirmation_resolution_required`。成功 receipt 重放优先返回原结果。
+
+按钮用 `POST /conversations/{id}/operations`，接受 `Idempotency-Key`，返回 `{task,run}`。body 是 `{"step":<严格既有 StepSpec>,"source_artifact_id":null,"config_artifact_id":null}`，两个 ID 可省略；操作源于结果卡时必须传对应卡的明确 ID，过期卡不能自动换到新产物。UI 使用固定 `step_id="operation"`，不构造 `step:` 引用或 `depends_on`。五种最小示例：
+
+```json
+{"step":{"step_id":"operation","type":"enum_extract","target_field":"alarm","source_ref":"session.logs"}}
+{"step":{"step_id":"operation","type":"threat_mapping","source_ref":"session.artifacts.enum_values"},"source_artifact_id":"当前枚举产物ID"}
+{"step":{"step_id":"operation","type":"fill","fill_kind":"enum","target_fields":["事件结果"],"source_ref":"session.enum_mapping_table","config_ref":"session.decoded_config"},"config_artifact_id":"当前配置产物ID"}
+{"step":{"step_id":"operation","type":"fill","fill_kind":"threat","target_fields":["威胁类型"],"source_ref":"session.artifacts.threat_mapping","config_ref":"session.mapped_sub_rules"},"source_artifact_id":"当前威胁产物ID","config_artifact_id":"当前配置产物ID"}
+{"step":{"step_id":"operation","type":"remove_mapping","target_fields":["status"],"config_ref":"session.decoded_config"},"config_artifact_id":"当前配置产物ID"}
+{"step":{"step_id":"operation","type":"export","source_ref":"session.decoded_config"},"config_artifact_id":"当前配置产物ID"}
+```
+
+`config_ref` 只允许 `session.decoded_config`（上传规则）与 `session.mapped_sub_rules`（日志生成配置）。威胁直接值映射改用 `source_ref="user.values"` 和明确 `values`；威胁填充目标固定为“威胁类型”。规则导出还支持既有 `session.log_classification.entry_rules|sub_rules`，对应分类卡传 `source_artifact_id`。缺参数/非法 Literal 返回 422；按钮依赖返回 400 `button_dependencies_forbidden`；旧卡返回 409 `artifact_source_stale|config_source_stale`。枚举附件更新后须重填，旧来源导出失败 `enum_refill_required`，失败不覆盖旧正式结果。
+
+Artifact 目录 `kind` 增加 `enum_values/threat_mapping/config_export`，配置更改仍属于兼容 `field_mapping` 族，使 mapping-view/Draft 始终基于最新正式配置。目录中的计数是 `summary.item_count`（配置族为原有 summary 计数），另有 `source_field/current/status`，配置族另有明确 `config_ref` 与身份、时间；`message_id` 指向原用户消息，`result_message_id` 指向同事务发布的助手结果。消息投影增加可空 `run_id`，Run 投影增加可空 `message_id`。内部 `business_state` 不进入结果目录或内容/下载接口。原始值只通过本人主动请求 `GET /artifacts/{id}/content` 返回：枚举 `{artifact_type,item_count,values,field,regex,original_log}`，威胁 `{artifact_type,item_count,mappings:[{mapping_type,original_value,mapped_value}],source_field}`，导出 `{artifact_type,item_count,content,download_kind}`；配置沿现有 mapping payload。`GET /artifacts/{id}/download` 按类型返回 JSON/XLSX/Base64 TXT 和既有文件名；旧历史结果仍可本人查看/下载，不参与当前输入自动绑定。
+
+proposal 真实冻结完整类型化计划和输入版本，进入 `waiting_confirmation`；`POST /runs/{id}/confirmation-token` 返回既有 token/checkpoint_revision/kind/expires_at，`kind=business_plan`，payload 为 `{question,choices,operations}`。`POST /runs/{id}/confirm` body 仍为 `{token,checkpoint_revision}`，增加可选 `Idempotency-Key`，同请求重放不重复入队。恢复走同一 Executor 循环，成功步骤账本保留、`step:` 依赖保留、已耗恢复预算不重置，确认不调用 Planner。内容哈希、来源 ID、状态、lease/epoch/fence 在确认和发布边界重查；输入改变返回 `continuation_stale` 或 Run `business_input_stale`，取消/Worker 接管禁止迟到结果发布。
+
+后端离线自动验证覆盖规则 dict 根和未知键保留、附件重填、跨刷新/重启 typed 槽位、原子多产物发布、真实 proposal 确认、成功前缀/恢复预算、本人内容授权和日志隐私。真实 Provider、双入口脱敏业务样本、平台导入与浏览器交互仍按既有人工验收门槛完成。
+
+
+`GET /conversations/{id}` 增加 `session_facts: SafeSessionFacts|null`、`session_facts_error: string|null`。结构是 Contracts `build_session_facts` 的按钮白名单投影，只有 `has_logs/has_log_classification/has_decoded_config: boolean`、`enum_mapping_row_count/mapped_sub_rule_count: number` 与下述三个目录字段；不会把原始字段路径或规则名目录加入普通会话响应。按钮使用 `available_config_refs: string[]`、`enum_mapping_target_fields: string[]`、`referenceable_artifacts: [{source_ref,artifact_type,source_field,item_count,target_bindings:[{config_ref,target_field}]}]`，不包含枚举原值或威胁映射内容。无输入是合法空事实；重建/哈希失败明确返回 `session_facts=null`、`session_facts_error="business_input_unavailable"`，UI 保留历史结果可读、禁用依赖按钮并展示就地错误，不能把此错误当成“没有输入”。
+
+
+真实执行进度通过原 SSE `run_progress` 事件与 `GET /runs/{id}` 的 `events` 恢复。每项事件为 `{sequence,scope_type,scope_id,event_type,status,summary,created_at}`；`summary` 只含 `{phase,progress_status,operation,dependency_scope_ids}`，phase/status 是既有枚举，operation 是既有业务类型或 null，scope/dependency IDs 是单 Run 内稳定生成的匿名哈希。UI 可显示当前步骤、阶段、终态和依赖，不解析模型文本。原始 plan/step ID、用户值、问题、message_code 与任意 Tool detail 不进入该时间线。取消或 lease/epoch/fence 失效后拒绝迟到进度。
+
+
+下载内容与本人内容 API 区分：枚举 JSON 下载保持 Chainlit 的 `{field,regex,original_log,value}`（不是 typed `values` 包装）；日志分类 JSON 下载保持分类对象自身根结构；威胁 XLSX 保持 sheet `threat_mapping` 与列 `mappingType/orgValue/mappingValue`。三者复用既有中文 UTF-8、JSON 缩进与下载文件名契约。
+
+
+明确清空沿原消息接口发送 `POST /conversations/{id}/messages` body `{"content":"清空数据"}`（既有 Application 完整清空命令同样支持），返回原消息字段和 `task/run`（初态 queued，Run kind 为 `business_clear`）。不调用 Planner 或模型；入队事务取消旧活动 Run/确认，释放同会话串行队列，明确清空可越过待确认/未应用 Draft 守卫。Worker 的领取 fence 事务按命令入队时冻结的 ID 范围最终停用原主数据及枚举附件、失效正式配置/typed 状态/贡献/重填/checkpoint，并返回助手回执“业务数据已清空，历史结果仍可查看和下载。”；失败的旧 Worker 无权迟到发布。刷新或重启后的业务事实为空。历史文件保留原 role/parse_status，新增 `active:boolean`，清空后为 false；前端停用其解析与映射动作，保留历史列表。历史 Artifact 为 stale/current=false，配置、分类、枚举、威胁和导出内容仍经本人接口可读/下载。命令入队后上传的新文件及其后续任务保留，创建 active=true 的新输入；清空不解析旧 Blob，旧内容损坏也能完成，提交前再次检查 lease/epoch/fence。
+
+生产运行中首次白名单瞬时失败耗尽自动恢复预算时，保存执行器真实冻结计划、成功前缀账本、已用预算及实际 staging（包括显式威胁事务副本），转入 waiting_confirmation。执行前 proposal 的首次确认执行同样适用。此时 confirmation payload 可附 `reason_code="recovery_exhausted"`，问题和选项为安全静态文案；确认只重试未完成步骤，原恢复预算不重置。人工恢复后的再次失败终止 Run，不反复创建待确认循环；参数缺失或来源歧义仍结束为安全追问，不能靠确认猜参数或改变冻结计划。

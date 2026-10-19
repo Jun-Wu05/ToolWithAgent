@@ -10,12 +10,14 @@ from xml.etree.ElementTree import ParseError
 from uuid import uuid4
 
 from openpyxl import load_workbook
+from application.log_privacy import private_business_logging
 from openpyxl.utils.exceptions import InvalidFileException
 
 from toolwithagent_v2.infrastructure.store import Store
 from toolwithagent_v2.runtime.fake_application import FakeApplication
 from toolwithagent_v2.runtime.business_application import BusinessApplication
 from toolwithagent_v2.settings import Settings
+from toolwithagent_v2.runtime.progress import RunProgressSink
 
 
 class Worker:
@@ -98,7 +100,8 @@ class Worker:
             return self.store.finish(self.worker_id, claim, error)
         try:
             path = self.store.root / snapshot["storage_key"]
-            outcome = asyncio.run(self.business_application.parse(path, snapshot))
+            with private_business_logging():
+                outcome = asyncio.run(self.business_application.parse(path, {**snapshot, "_progress_sink": RunProgressSink(self.store, self.worker_id, claim)}))
             if "classification" not in outcome:
                 return self.store.finish(self.worker_id, claim, outcome.get("error") or "log_parse_failed",
                                          message="日志类型提取失败，请检查文件后重试")
@@ -155,8 +158,14 @@ class Worker:
             if error:
                 return self.store.finish(self.worker_id, claim, error)
             classification = self.store.read_classification(claim) if claim["input"].get("source_artifact_id") else None
-            outcome = asyncio.run(self.business_application.field_mapping(
-                self.store.root / claim["input"]["storage_key"], claim["input"], classification))
+            initial_session = None
+            if claim["input"].get("business_inputs"):
+                with private_business_logging():
+                    initial_session, _ = self.store.read_business_session(claim)
+            snapshot = {**claim["input"], "initial_session": initial_session, "_progress_sink": RunProgressSink(self.store, self.worker_id, claim)}
+            with private_business_logging():
+                outcome = asyncio.run(self.business_application.field_mapping(
+                    self.store.root / claim["input"]["storage_key"], snapshot, classification))
             if outcome.get("error") or not outcome.get("config") or not outcome.get("download_content"):
                 return self.store.finish(self.worker_id, claim, outcome.get("error") or "field_mapping_failed",
                                          message="字段映射失败，请检查输入后重试")
@@ -167,6 +176,18 @@ class Worker:
                 message += f"；事件名称待确认 {summary['uncertain_annotation_count']} 条"
             if summary["warning_codes"]:
                 message += "；自动威胁类型链路有提醒，请查看结果"
+            state = outcome.pop("business_state", None)
+            new_types = outcome.pop("new_typed_artifact_types", ())
+            artifact_sources = outcome.pop("artifact_sources", {})
+            if state is not None:
+                from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+                artifacts = [{"kind": "field_mapping", "payload": outcome}, {"kind": "business_state", "payload": state}]
+                for key, kind, model in (("latest_enum_artifact", "enum_values", EnumArtifactSlot), ("latest_threat_artifact", "threat_mapping", ThreatArtifactSlot)):
+                    if state.get(key) and kind in new_types:
+                        artifacts.append({"kind": kind, "payload": model.model_validate(state[key]).artifact.model_dump(mode="json")})
+                for artifact in artifacts:
+                    artifact["source_kinds"] = artifact_sources.get(artifact["kind"], [])
+                return self.store.publish_business(self.worker_id, claim, artifacts, message)
             return self.store.publish(self.worker_id, claim, json.dumps(outcome, ensure_ascii=False).encode("utf-8"),
                 kind="field_mapping", metadata={"summary":summary}, message=message)
         except Exception:
@@ -187,6 +208,41 @@ class Worker:
         except Exception:
             return self.store.finish(self.worker_id,claim,"mapping_draft_apply_failed",message="映射修改未应用，草稿已保留，请重试")
 
+    def _run_business(self, claim):
+        """独立 Run 内执行冻结业务输入，失败不发布 staging 的部分结果。"""
+        try:
+            if not self.store.business_is_current(claim):
+                return self.store.finish(self.worker_id, claim, "business_input_stale", "输入或配置版本已变化，请重新发起操作。")
+            if claim["input"].get("file_id"):
+                error = self._validate(claim["input"])
+                if error:
+                    return self.store.finish(self.worker_id, claim, error)
+            with private_business_logging():
+                session, base = self.store.read_business_session(claim)
+                outcome = asyncio.run(self.business_application.postprocess(session, claim["input"], base, self.store.continuation(claim["id"]), progress_sink=RunProgressSink(self.store, self.worker_id, claim)))
+            if "continuation" in outcome:
+                return self.store.wait_for_confirmation(self.worker_id, claim, outcome["continuation"], kind="business_plan", payload=outcome["confirmation"]) is not None
+            if "artifacts" in outcome:
+                return self.store.publish_business(self.worker_id, claim, outcome["artifacts"], outcome.get("message"))
+            return self.store.finish(self.worker_id, claim, outcome.get("error"), outcome.get("message"))
+        except (ValueError, LookupError):
+            return self.store.finish(self.worker_id, claim, "business_input_invalid", "业务来源已不可用，请检查输入后重试。")
+        except Exception:
+            return self.store.finish(self.worker_id, claim, "business_operation_failed", "操作失败，请检查输入后重试。")
+
+    def _run_enum_attachment(self, claim):
+        """附件校验完整后才生效，不把枚举 Excel 切成主数据。"""
+        from toolwithagent_v2.runtime.postprocessing import attach_enum
+        error = self._validate(claim["input"])
+        if error:
+            return self.store.finish(self.worker_id, claim, error)
+        try:
+            with private_business_logging():
+                attach_enum({}, self.store.root / claim["input"]["storage_key"], self.store.root / "staging")
+            return self.store.finish(self.worker_id, claim)
+        except Exception:
+            return self.store.finish(self.worker_id, claim, "enum_attachment_invalid", "枚举映射附件未完整通过校验，请检查工作表。")
+
     def once(self) -> bool:
         claim = self.store.claim(self.worker_id, lease_seconds=self.lease_seconds)
         if claim is None:
@@ -201,6 +257,13 @@ class Worker:
         keeper = threading.Thread(target=heartbeat, daemon=True)
         keeper.start()
         try:
+            if claim["task_type"] == "business_clear":
+                with private_business_logging():
+                    return self.store.clear_business(self.worker_id, claim)
+            if claim["task_type"] in {"user_request", "business_operation"}:
+                return self._run_business(claim)
+            if claim["task_type"] == "file_ingest" and claim["input"].get("role") == "enum_mapping":
+                return self._run_enum_attachment(claim)
             if claim["task_type"] == "mapping_draft_apply":
                 return self._run_mapping_draft_apply(claim)
             if claim["task_type"] == "field_mapping":

@@ -2,12 +2,14 @@
 import asyncio
 import json
 from uuid import uuid4
-from fastapi import FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Annotated, Union
+from contracts.planner_models import EnumExtractStep, ThreatMappingStep, FillStep, RemoveMappingStep, ExportStep
 
 from toolwithagent_v2.infrastructure.store import Store
 from toolwithagent_v2.settings import Settings
@@ -19,6 +21,14 @@ class ConversationInput(BaseModel):
 
 class MessageInput(BaseModel):
     content: str
+
+
+class OperationInput(BaseModel):
+    """按钮复用现有严格 StepSpec，不允许前端构造步骤依赖。"""
+    model_config = ConfigDict(extra="forbid")
+    step: Annotated[Union[EnumExtractStep, ThreatMappingStep, FillStep, RemoveMappingStep, ExportStep], Field(discriminator="type")]
+    source_artifact_id: str | None = None
+    config_artifact_id: str | None = None
 
 
 class FakeRunInput(BaseModel):
@@ -112,7 +122,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status = 413 if code == "file_too_large" else (409 if code in {
             "idempotency_key_reused", "run_not_retryable", "task_has_active_run",
             "run_not_cancellable", "run_not_stoppable", "run_not_waiting",
-            "invalid_confirmation_token", "confirmation_expired",
+            "invalid_confirmation_token", "confirmation_expired", "continuation_stale",
+            "confirmation_resolution_required", "artifact_source_stale", "config_source_stale", "business_input_stale",
             "mapping_base_stale", "mapping_catalog_changed", "draft_revision_conflict", "draft_apply_in_progress", "draft_not_editable",
             "draft_resolution_required", "mapping_target_conflict", "mapping_link_conflict", "mapping_draft_apply_stale",
         } else 400)
@@ -163,10 +174,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return store.create_message(user_writer(request)["id"], conversation_id, payload.content, idempotency_key)
 
     @app.post("/api/v2/conversations/{conversation_id}/files", status_code=201)
-    def upload_file(request: Request, conversation_id: str, file: UploadFile = File(...), idempotency_key: str | None = Header(None)):
+    def upload_file(request: Request, conversation_id: str, file: UploadFile = File(...), role: str = Form("primary"), idempotency_key: str | None = Header(None)):
         try:
             store.get_conversation(principal(request)["id"], conversation_id)
-            return store.upload(user_writer(request)["id"], conversation_id, file, idempotency_key)
+            return store.upload(user_writer(request)["id"], conversation_id, file, idempotency_key, role)
         finally:
             file.file.close()
 
@@ -178,6 +189,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def enqueue_field_mapping(request: Request, conversation_id: str, payload: FieldMappingInput, idempotency_key: str | None = Header(None)):
         return store.enqueue_field_mapping(user_writer(request)["id"], conversation_id,
                                           **payload.model_dump(), idempotency_key=idempotency_key)
+
+    @app.post("/api/v2/conversations/{conversation_id}/operations", status_code=201)
+    def enqueue_operation(request: Request, conversation_id: str, payload: OperationInput, idempotency_key: str | None = Header(None)):
+        return store.enqueue_operation(user_writer(request)["id"], conversation_id, payload.step,
+            payload.source_artifact_id, payload.config_artifact_id, idempotency_key)
+
+    @app.get("/api/v2/artifacts/{artifact_id}/content")
+    def artifact_content(request: Request, artifact_id: str):
+        return store.artifact_content(principal(request)["id"], artifact_id)
 
     @app.get("/api/v2/artifacts/{artifact_id}/mapping-view")
     def mapping_view(request: Request, artifact_id: str, sub_rule: str | None = None, page: int = 1, q: str = "", status: str | None = None, draft_id: str | None = None):
@@ -225,8 +245,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v2/artifacts/{artifact_id}/download")
     def mapping_download(request: Request, artifact_id: str):
-        name, content = store.mapping_download(principal(request)["id"], artifact_id)
-        return Response(content=content, media_type="text/plain; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+        name, content, media = store.artifact_download(principal(request)["id"], artifact_id)
+        return Response(content=content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.post("/api/v2/artifacts/{artifact_id}/submit-log-knowledge", status_code=201)
     def submit_log_knowledge(request: Request, artifact_id: str):
@@ -254,8 +274,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return store.issue_resume_token(user_writer(request)["id"], run_id)
 
     @app.post("/api/v2/runs/{run_id}/confirm")
-    def confirm_run(request: Request, run_id: str, payload: ConfirmInput):
-        return store.confirm(user_writer(request)["id"], run_id, payload.token, payload.checkpoint_revision)
+    def confirm_run(request: Request, run_id: str, payload: ConfirmInput, idempotency_key: str | None = Header(None)):
+        return store.confirm(user_writer(request)["id"], run_id, payload.token, payload.checkpoint_revision, idempotency_key)
 
     @app.post("/api/v2/admin/runs/{run_id}/force-stop")
     def force_stop(request: Request, run_id: str, payload: ForceStopInput):

@@ -35,7 +35,7 @@ def test_migration_and_restart(tmp_path):
     assert detail["files"][0]["sha256"] == hashlib.sha256(b"a,b\n1,2\n").hexdigest()
     assert detail["runs"][0]["status"] == "queued"
     with connect(store.path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0003_mapping_drafts"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0005_business_clear"
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -133,7 +133,8 @@ def test_upload_and_message_idempotency(tmp_path):
     assert first.json() == repeated.json()
     assert client.post(url + "/messages", json={"content": "new"}, headers=headers).status_code == 409
     with connect(store.path) as db:
-        assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2
+        assert first.json()["run"]["status"] == "queued"
         assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM idempotency_receipts").fetchone()[0] == 2
 

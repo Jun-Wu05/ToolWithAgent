@@ -38,6 +38,8 @@ class ProgressEvent(BaseModel):
     phase: ProgressPhase
     status: ProgressStatus
     message_code: str = Field(min_length=1)
+    # 执行器声明的依赖只供入口转换为安全 scope，不传参数或业务值。
+    dependency_step_ids: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
     current_batch: int | None = Field(default=None, ge=1)
     total_batches: int | None = Field(default=None, ge=1)
     elapsed_seconds: float = Field(default=0.0, ge=0.0)

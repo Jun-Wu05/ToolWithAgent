@@ -400,6 +400,7 @@ async def run_threat_chain_after_mapping(
     team: Any,
     progress_sink: ProgressSink | None = None,
     recovery_budget: RecoveryBudget | None = None,
+    adapters: Any = None,
 ) -> Any:
     """字段映射成功后的执行后确定性续跑入口（S0-S6）。
 
@@ -411,7 +412,7 @@ async def run_threat_chain_after_mapping(
         return report
     with _stage_span("threat_chain"):
         return await _run_chain(
-            report, plan_steps, session, team, progress_sink, recovery_budget
+            report, plan_steps, session, team, progress_sink, recovery_budget, adapters
         )
 
 
@@ -422,6 +423,7 @@ async def _run_chain(
     team: Any,
     progress_sink: ProgressSink | None,
     recovery_budget: RecoveryBudget | None,
+    adapters: Any,
 ) -> ExecutionReport:
     """链路主体（S0-S6 + 自恢复③改选，stage span 内执行）。"""
     started = time.monotonic()
@@ -496,7 +498,7 @@ async def _run_chain(
     with _stage_span("threat_chain_s2_s5_execute"):
         try:
             chain_report = await create_plan_executor(
-                create_default_adapters(team)
+                adapters if adapters is not None else create_default_adapters(team)
             ).execute(
                 chain_decision,
                 ExecutionContext(
@@ -578,7 +580,7 @@ async def _run_chain(
                 with _stage_span("threat_chain_rederive"):
                     try:
                         rerun_report = await create_plan_executor(
-                            create_default_adapters(team)
+                            adapters if adapters is not None else create_default_adapters(team)
                         ).execute(
                             PlanDecision(
                                 decision="execute",

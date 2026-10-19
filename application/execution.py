@@ -24,6 +24,7 @@ from contracts.planner_models import (
     ThreatMappingStep,
 )
 from application.progress import NullProgressSink
+from application.execution_continuation import ExecutionContinuation
 from application.recovery import RecoveryBudget, RETRYABLE_STEP_TYPES, is_transient
 from contracts.progress import (
     ProgressEvent,
@@ -109,6 +110,7 @@ class ExecutionContext:
     plan_id: str = "pending"
     progress_sink: ProgressSink = field(default_factory=NullProgressSink)
     recovery_budget: RecoveryBudget = field(default_factory=RecoveryBudget)
+    checkpoint: dict | None = None
 
 
 class StepAdapter(Protocol):
@@ -178,6 +180,8 @@ class PlanExecutor:
         self,
         plan: PlanDecision | DeterministicPlan,
         context: ExecutionContext,
+        *,
+        continuation: ExecutionContinuation | None = None,
     ) -> ExecutionReport:
         """执行已校验计划并返回本次步骤账本，绝不回退到关键词路由。"""
         if plan.decision != "execute":
@@ -206,10 +210,25 @@ class PlanExecutor:
             len(context.session_facts.mappable_fields),
             len(context.session_facts.enum_mapping_target_fields),
         )
-        ledger: dict[str, StepResult] = {}
-        ordered_results: list[StepResult] = []
-        recovery_count = 0
-        step_recovery_counts: dict[str, int] = {}
+        restored = []
+        if continuation is not None:
+            if continuation.frozen_plan != plan.model_dump(mode="json"):
+                raise ValueError("continuation_plan_mismatch")
+            restored = [StepResult.model_validate(value) for value in continuation.completed_results]
+            if tuple(result.step_id for result in restored) != continuation.completed_step_refs:
+                raise ValueError("continuation_ledger_invalid")
+            if len(restored) > len(plan.steps) or any(
+                result.status != StepStatus.SUCCESS or result.step_id != step.step_id
+                or result.operation_type != step.type
+                for result, step in zip(restored, plan.steps)
+            ):
+                raise ValueError("continuation_ledger_invalid")
+        ledger: dict[str, StepResult] = {result.step_id: result for result in restored}
+        ordered_results: list[StepResult] = list(restored)
+        recovery_count = continuation.recovery_count if continuation else 0
+        step_recovery_counts: dict[str, int] = dict(continuation.step_recovery_counts) if continuation else {}
+        if continuation is not None:
+            context = replace(context, recovery_budget=RecoveryBudget(**continuation.recovery_budget))
         # 计划级预校验（#148）：事件名的确定性非法值必须在**任何步骤执行前**拦截
         # 整份计划——改名 delete+add 两步中，add 的非法事件名若等到执行期才拒绝，
         # 前面的 delete 已联动删除绑定对并写盘，无法回滚。
@@ -234,6 +253,8 @@ class PlanExecutor:
                 len(plan.steps),
             )
         for step in (plan.steps if plan_level_block is None else ()):
+            if step.step_id in ledger:
+                continue  # 恢复成功前缀账本，保留 step: 依赖且不重复执行。
             await context.progress_sink.publish(
                 ProgressEvent(
                     plan_id=plan.plan_id,
@@ -241,6 +262,7 @@ class PlanExecutor:
                     phase=ProgressPhase.EXECUTION,
                     status=ProgressStatus.RUNNING,
                     message_code=f"{step.type}_started",
+                    dependency_step_ids=step.depends_on,
                 )
             )
             self._logger.info(
@@ -285,6 +307,7 @@ class PlanExecutor:
                 )
                 break
 
+            resumable_failure = False
             adapter = self._adapters.get(step.type)
             if adapter is None:
                 result = self._error_result(step, "adapter_unavailable", "当前操作尚未配置执行适配器")
@@ -310,6 +333,10 @@ class PlanExecutor:
                         )
                     step_recovery_count = step_recovery_counts.get(step.step_id, 0)
                     budget = context.recovery_budget
+                    transient_failure = step.type in RETRYABLE_STEP_TYPES and is_transient(
+                        execution_error if execution_error is not None else result)
+                    resumable_failure = transient_failure and (
+                        recovery_count >= budget.max_per_plan or step_recovery_count >= budget.max_per_step)
                     if not (
                         step.type in RETRYABLE_STEP_TYPES
                         and recovery_count < budget.max_per_plan
@@ -337,6 +364,15 @@ class PlanExecutor:
 
             ledger[step.step_id] = result
             ordered_results.append(result)
+            if context.checkpoint is not None:
+                context.checkpoint.update({
+                    "resumable_failure": resumable_failure,
+                    "recovery_budget": {"max_per_plan": context.recovery_budget.max_per_plan,
+                        "max_per_step": context.recovery_budget.max_per_step, "max_rederive": context.recovery_budget.max_rederive},
+                    "recovery_count": recovery_count,
+                    "step_recovery_counts": dict(step_recovery_counts),
+                    "completed_results": [item.model_dump(mode="json") for item in ordered_results if item.status == StepStatus.SUCCESS],
+                })
             await self._publish_step_terminal(
                 plan.plan_id,
                 step,
@@ -409,6 +445,7 @@ class PlanExecutor:
                     if is_success
                     else ProgressStatus.FAILED
                 ),
+                dependency_step_ids=step.depends_on,
                 message_code=(
                     f"{step.type}_completed"
                     if is_success
