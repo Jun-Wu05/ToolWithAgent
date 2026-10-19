@@ -24,7 +24,7 @@ from application.session_projection import build_session_facts
 from application.adapters import create_default_adapters
 from application.enum_mapping_attachments import commit_enum_mapping_attachment
 from application.execution import ExecutionContext, PlanExecutor
-from application.session_state import SessionState
+from factories import make_session_state
 
 
 def _threat_artifact(source_field: str | None = "alarm_name") -> ThreatMappingArtifact:
@@ -121,14 +121,14 @@ def test新source_ref强制与直接值和步骤依赖互斥():
 
 def testSessionFacts只暴露安全产物目录和固定威胁绑定():
     """Planner 输入包含字段血缘但不得包含真实枚举值或威胁映射行。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "normalize": [
                 {"index": "alarm_name", "field": "event_name", "mappings": []}
             ]
         },
-        "latest_enum_artifact": _enum_slot(value="敏感枚举值"),
-        "latest_threat_artifact": ThreatArtifactSlot(
+        latest_enum_artifact=_enum_slot(value="敏感枚举值"),
+        latest_threat_artifact=ThreatArtifactSlot(
             artifact=ThreatMappingArtifact(
                 mappings=(
                     ThreatMappingRow.model_validate(
@@ -144,7 +144,7 @@ def testSessionFacts只暴露安全产物目录和固定威胁绑定():
             ),
             source_field="alarm_name",
         ),
-    }
+    )
 
     facts = build_session_facts(session)
     assert [item.source_ref for item in facts.referenceable_artifacts] == [
@@ -157,7 +157,7 @@ def testSessionFacts只暴露安全产物目录和固定威胁绑定():
     # 威胁产物填充目标固定为「威胁类型」（#173 修复 1）；配置无该条目时不发布绑定
     assert threat_fact.target_bindings == ()
 
-    session["decoded_data"]["normalize"].append({"index": "威胁类型", "mappings": []})
+    session.decoded_data["normalize"].append({"index": "威胁类型", "mappings": []})
     facts_with_entry = build_session_facts(session)
     threat_bindings = facts_with_entry.referenceable_artifacts[1].target_bindings
     assert [(b.config_ref, b.target_field) for b in threat_bindings] == [
@@ -172,10 +172,10 @@ def testSessionFacts只暴露安全产物目录和固定威胁绑定():
 def test旧last结果不会自动升级为可引用产物():
     """展示兼容键仍可计数，但不能进入 Planner 可执行目录。"""
     facts = build_session_facts(
-        {
-            "last_enum_extract_result": {"value": ["old"]},
-            "last_threat_data": [{"orgValue": "old"}],
-        }
+        make_session_state(
+            last_enum_extract_result={"value": ["old"]},
+            last_threat_data=[{"orgValue": "old"}],
+        )
     )
     assert facts.existing_enum_value_count == 1
     assert facts.existing_threat_mapping_count == 1
@@ -184,7 +184,7 @@ def test旧last结果不会自动升级为可引用产物():
 
 def test主数据清空同时清除两个可引用产物():
     """可引用会话产物与当前主数据共享生命周期。"""
-    session = SessionState(
+    session = make_session_state(
         decoded_data={"normalize": []},
         latest_enum_artifact=_enum_slot(),
         latest_threat_artifact=_threat_slot(),
@@ -198,10 +198,10 @@ def test枚举映射附件上传不清除可引用产物():
     """附件只更新映射表集合，不改变两类成功产物的生命周期。"""
     enum_slot = _enum_slot()
     threat_slot = _threat_slot()
-    session = {
-        "latest_enum_artifact": enum_slot,
-        "latest_threat_artifact": threat_slot,
-    }
+    session = make_session_state(
+        latest_enum_artifact=enum_slot,
+        latest_threat_artifact=threat_slot,
+    )
 
     commit_enum_mapping_attachment(
         session,
@@ -217,8 +217,8 @@ def test枚举映射附件上传不清除可引用产物():
         },
     )
 
-    assert session["latest_enum_artifact"] == enum_slot
-    assert session["latest_threat_artifact"] == threat_slot
+    assert session.latest_enum_artifact == enum_slot
+    assert session.latest_threat_artifact == threat_slot
 
 
 def test上轮枚举产物可直接用于本轮威胁映射():
@@ -230,7 +230,7 @@ def test上轮枚举产物可直接用于本轮威胁映射():
         )
     )
     adapter = create_default_adapters(_Team(member))["threat_mapping"]
-    session = {"latest_enum_artifact": _enum_slot()}
+    session = make_session_state(latest_enum_artifact=_enum_slot())
     step = ThreatMappingStep(
         step_id="threat",
         type="threat_mapping",
@@ -247,16 +247,16 @@ def test上轮枚举产物可直接用于本轮威胁映射():
 
     assert result.status == StepStatus.SUCCESS
     assert json.loads(member.calls[0]) == {"values": ["attack"]}
-    assert session["latest_threat_artifact"].source_field == "alarm_name"
+    assert session.latest_threat_artifact.source_field == "alarm_name"
 
 
 def test威胁映射失败保留上次成功产物():
     """失败步骤没有新产物，不得覆盖可继续使用的成功结果。"""
     previous = _threat_slot("old_field")
-    session = {
-        "latest_enum_artifact": _enum_slot(),
-        "latest_threat_artifact": previous,
-    }
+    session = make_session_state(
+        latest_enum_artifact=_enum_slot(),
+        latest_threat_artifact=previous,
+    )
     adapter = create_default_adapters(_Team(_ThreatMember("[]")))["threat_mapping"]
     step = ThreatMappingStep(
         step_id="threat",
@@ -273,16 +273,16 @@ def test威胁映射失败保留上次成功产物():
     )
 
     assert result.status == StepStatus.FAILED
-    assert session["latest_threat_artifact"] == previous
+    assert session.latest_threat_artifact == previous
 
 
 def test威胁映射覆盖校验失败保留上次成功产物():
     """结构合法但来源外的映射结果必须拒绝，旧成功产物继续可引用（#277）。"""
     previous = _threat_slot("old_field")
-    session = {
-        "latest_enum_artifact": _enum_slot(),
-        "latest_threat_artifact": previous,
-    }
+    session = make_session_state(
+        latest_enum_artifact=_enum_slot(),
+        latest_threat_artifact=previous,
+    )
     member = _ThreatMember(
         json.dumps(
             [
@@ -309,17 +309,17 @@ def test威胁映射覆盖校验失败保留上次成功产物():
 
     assert result.status == StepStatus.FAILED
     assert result.error_code == "threat_mapping_coverage_rejected"
-    assert session["latest_threat_artifact"] == previous
-    assert "last_threat_data" not in session
+    assert session.latest_threat_artifact == previous
+    assert session.last_threat_data is None
 
 
 def test全数字枚举产物触发needs_input不覆盖旧产物():
     """无语义数字代码不允许模型猜测：needs_input 且不污染旧成功产物（#277）。"""
     previous = _threat_slot("old_field")
-    session = {
-        "latest_enum_artifact": _enum_slot(value="30"),
-        "latest_threat_artifact": previous,
-    }
+    session = make_session_state(
+        latest_enum_artifact=_enum_slot(value="30"),
+        latest_threat_artifact=previous,
+    )
     member = _ThreatMember("[]")
     adapter = create_default_adapters(_Team(member))["threat_mapping"]
     step = ThreatMappingStep(
@@ -339,10 +339,10 @@ def test全数字枚举产物触发needs_input不覆盖旧产物():
     assert result.status == StepStatus.NEEDS_INPUT
     assert result.error_code == "threat_mapping_source_context_required"
     assert member.calls == []
-    assert session["latest_threat_artifact"] == previous
+    assert session.latest_threat_artifact == previous
 
 
-def _execute_cross_turn_fill(session: dict, target_field: str) -> StepResult:
+def _execute_cross_turn_fill(session, target_field: str) -> StepResult:
     """通过真实 PlanExecutor 执行单步跨轮威胁填充。"""
     decision = PlanDecision.model_validate(
         {
@@ -371,37 +371,37 @@ def _execute_cross_turn_fill(session: dict, target_field: str) -> StepResult:
 
 def test上轮威胁产物只能填回固定目标威胁类型():
     """威胁填充目标固定为威胁类型（#173），点名其他字段在执行前拒绝。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "normalize": [
                 {"index": "attack_type", "mappings": []},
                 {"index": "威胁类型", "mappings": []},
                 {"index": "other", "field": "other_standard", "mappings": []},
             ]
         },
-        "latest_threat_artifact": _threat_slot("attack_type"),
-    }
+        latest_threat_artifact=_threat_slot("attack_type"),
+    )
     mismatch = _execute_cross_turn_fill(session, "other_standard")
     assert mismatch.status == StepStatus.NEEDS_INPUT
     assert mismatch.error_code == "threat_fill_target_fixed"
-    assert session["decoded_data"]["normalize"][1]["mappings"] == []
+    assert session.decoded_data["normalize"][1]["mappings"] == []
 
     success = _execute_cross_turn_fill(session, "威胁类型")
     assert success.status == StepStatus.SUCCESS
     assert success.changed_count == 1
 
 
-def test直接值威胁产物同样受固定目标约束():
+def test无来源字段的威胁产物仍只能填威胁类型():
     """无来源字段（user.values）的威胁产物也只能填威胁类型。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "normalize": [
                 {"index": "raw_event", "field": "event_name", "mappings": []},
                 {"index": "威胁类型", "mappings": []},
             ]
         },
-        "latest_threat_artifact": _threat_slot(None),
-    }
+        latest_threat_artifact=_threat_slot(None),
+    )
     rejected = _execute_cross_turn_fill(session, "event_name")
     assert rejected.status == StepStatus.NEEDS_INPUT
     assert rejected.error_code == "threat_fill_target_fixed"
@@ -415,18 +415,20 @@ def test产物被清除或执行期类型错配时安全停止():
     config = {
         "normalize": [{"index": "alarm_name", "field": "event_name", "mappings": []}]
     }
-    cleared = _execute_cross_turn_fill({"decoded_data": config}, "event_name")
+    cleared = _execute_cross_turn_fill(
+        make_session_state(decoded_data=config), "event_name"
+    )
     assert cleared.status == StepStatus.NEEDS_INPUT
     assert cleared.error_code == "artifact_source_unavailable"
 
     wrong_type = _execute_cross_turn_fill(
-        {
-            "decoded_data": config,
-            "latest_threat_artifact": _enum_slot(),
-            "last_threat_data": [
+        make_session_state(
+            decoded_data=config,
+            latest_threat_artifact=_enum_slot(),
+            last_threat_data=[
                 {"mappingType": "EQUAL", "orgValue": "old", "mappingValue": "旧值"}
             ],
-        },
+        ),
         "event_name",
     )
     assert wrong_type.status == StepStatus.NEEDS_INPUT
@@ -443,7 +445,7 @@ def test多字段同轮选择B后血缘仍记录但填充目标固定():
         )
     )
     adapter = create_default_adapters(_Team(member))["threat_mapping"]
-    session = {"latest_enum_artifact": _enum_slot("C", "c-value")}
+    session = make_session_state(latest_enum_artifact=_enum_slot("C", "c-value"))
     b_artifact = EnumValuesArtifact(values=("b-value",), item_count=1, field="B")
     dependency = StepResult(
         step_id="enum-b",
@@ -465,9 +467,9 @@ def test多字段同轮选择B后血缘仍记录但填充目标固定():
         )
     )
     assert result.status == StepStatus.SUCCESS
-    assert session["latest_threat_artifact"].source_field == "B"
+    assert session.latest_threat_artifact.source_field == "B"
 
-    session["decoded_data"] = {
+    session.decoded_data = {
         "normalize": [
             {"index": "B", "field": "standard_b", "mappings": []},
             {"index": "威胁类型", "mappings": []},

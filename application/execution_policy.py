@@ -95,7 +95,11 @@ class DefaultExecutionPolicy:
         if not (isinstance(step, LogParseStep) and step.feature_field):
             return None
         session = context.session
-        log_lines = session.get("raw_log_lines") or session.get("original_log") or []
+        log_lines = (
+            session.raw_log_lines
+            or session.original_log
+            or []
+        )
         if not log_lines:
             return None
         available_keys = extract_log_body_keys(log_lines)
@@ -145,7 +149,11 @@ class DefaultExecutionPolicy:
         （链路来源字段逐字契约），只提示最接近字段。
         """
         session = context.session
-        log_lines = session.get("raw_log_lines") or session.get("original_log") or []
+        log_lines = (
+            session.raw_log_lines
+            or session.original_log
+            or []
+        )
         known_fields = sorted(
             {*extract_log_body_keys(log_lines), *context.session_facts.available_fields}
         )

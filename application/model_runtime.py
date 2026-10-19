@@ -11,6 +11,7 @@ from agent.core.model_config import (
     resolve_effective_config,
 )
 from agent.core.team import create_data_mapping_team
+from application.session_state import SessionState
 
 
 def resolve_api_key(provider: str | None) -> str | None:
@@ -18,16 +19,16 @@ def resolve_api_key(provider: str | None) -> str | None:
     return ModelConfig.get_api_key(provider or None)
 
 
-def resolve_session_config(session: Any) -> EffectiveModelConfig:
+def resolve_session_config(session: SessionState) -> EffectiveModelConfig:
     """从会话覆盖解析该会话下一次请求的有效配置快照。"""
     return resolve_effective_config(
-        provider=getattr(session, "current_provider", None),
-        model=getattr(session, "model_name", None),
-        api_key=getattr(session, "api_key", None),
+        provider=session.current_provider,
+        model=session.model_name,
+        api_key=session.api_key,
     )
 
 
-def ensure_team(session: Any) -> Any:
+def ensure_team(session: SessionState) -> Any:
     """Return the session Team, lazily creating it inside the session model scope."""
     if session.team is None:
         with model_runtime_scope(resolve_session_config(session)):
@@ -36,7 +37,7 @@ def ensure_team(session: Any) -> Any:
 
 
 def apply_model_settings(
-    session: Any,
+    session: SessionState,
     provider: str | None,
     model: str | None,
     api_key: str | None,
@@ -56,7 +57,7 @@ def apply_model_settings(
     return session.team
 
 
-def reset_model_settings(session: Any) -> None:
+def reset_model_settings(session: SessionState) -> None:
     """Clear only this session's model overrides and cached Team."""
     session.current_provider = None
     session.model_name = None

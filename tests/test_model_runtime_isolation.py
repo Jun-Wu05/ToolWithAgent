@@ -197,10 +197,10 @@ def test自然语言请求入口绑定会话作用域(monkeypatch):
     """run_user_request 全链在同一会话作用域内（Planner 读到会话配置）。"""
     from application import request_runtime
     from application.progress import NullProgressSink
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import PlanDecision
 
-    session = SessionState()
+    session = make_session_state()
     session.current_provider = "zhipu"
     session.model_name = "glm-4.6"
     session.api_key = "key-z"

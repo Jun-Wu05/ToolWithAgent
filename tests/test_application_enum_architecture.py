@@ -8,6 +8,8 @@ import base64
 import json
 from pathlib import Path
 
+from factories import make_recording_session, make_session_state
+
 
 def _import_roots(path: Path) -> set[str]:
     """提取静态导入根，验证 Application 枚举模块不反向依赖 Web。"""
@@ -92,18 +94,7 @@ def test枚举提取prompt和模型各调用一次且参数与提交顺序冻结
         calls.append(("model", model_input, kwargs))
         return json.dumps({"field": "event_type", "regex": r"event_type=(\w+)"})
 
-    class RecordingSession(dict):
-        """记录成功后的兼容 Session 写入顺序。"""
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.writes: list[str] = []
-
-        def __setitem__(self, key, value):
-            self.writes.append(key)
-            super().__setitem__(key, value)
-
-    session = RecordingSession(
+    session = make_recording_session(
         raw_log_lines=["event_type=attack", "event_type=scan"],
         decoded_fields=["event_type"],
     )
@@ -130,14 +121,14 @@ def test枚举附件在application中累积同名替换并标记待重填() -> N
     """附件提交模块隐藏 Sheet 身份、过期配置和待重填集合的状态转换。"""
     from application.enum_mapping_attachments import commit_enum_mapping_attachment
 
-    session = {
-        "enum_mapping_sheets": {
+    session = make_session_state(
+        enum_mapping_sheets={
             "severity": [{"mappingType": "EQUAL", "orgValue": "high", "mappingValue": "高"}]
         },
-        "enum_fill_contributions": {
+        enum_fill_contributions={
             "session.decoded_config": {"severity": [{"mapping": {"orgValue": "high"}}]}
         },
-    }
+    )
     preview = commit_enum_mapping_attachment(
         session,
         "new.xlsx",
@@ -147,11 +138,11 @@ def test枚举附件在application中累积同名替换并标记待重填() -> N
         },
     )
 
-    assert set(session["enum_mapping_sheets"]) == {"severity", "action"}
-    assert session["enum_mapping_sheets"]["severity"][0]["orgValue"] == "critical"
+    assert set(session.enum_mapping_sheets) == {"severity", "action"}
+    assert session.enum_mapping_sheets["severity"][0]["orgValue"] == "critical"
     assert [row["目标字段"] for row in preview] == ["severity", "action"]
-    assert session["stale_enum_config_refs"] == {"session.decoded_config"}
-    assert session["enum_pending_refills"] == {
+    assert session.stale_enum_config_refs == {"session.decoded_config"}
+    assert session.enum_pending_refills == {
         "session.decoded_config": {"severity", "action"}
     }
 
@@ -167,14 +158,14 @@ def test枚举填充base64解码文本保持中文根结构键顺序与默认空
         "name": "规则一",
         "normalize": [{"index": "severity", "field": "严重级别", "mappings": []}],
     }
-    session = {
-        "decoded_data": config,
-        "decoded_fields": ["severity"],
-        "enum_preview": [{
+    session = make_session_state(
+        decoded_data=config,
+        decoded_fields=["severity"],
+        enum_preview=[{
             "目标字段": "severity", "mappingType": "EQUAL",
             "orgValue": "high", "mappingValue": "高",
         }],
-    }
+    )
     step = FillStep(
         step_id="fill", type="fill", fill_kind="enum",
         target_fields=("severity",), source_ref="session.enum_mapping_table",
@@ -190,6 +181,6 @@ def test枚举填充base64解码文本保持中文根结构键顺序与默认空
 
     assert result.status == StepStatus.SUCCESS
     decoded = base64.b64decode(result.artifact.content).decode("utf-8")
-    assert decoded == json.dumps(session["decoded_data"], ensure_ascii=False)
+    assert decoded == json.dumps(session.decoded_data, ensure_ascii=False)
     assert decoded.startswith('{"name": "规则一", "normalize":')
     assert '"mappingValue": "高"' in decoded

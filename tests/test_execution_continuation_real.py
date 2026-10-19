@@ -10,6 +10,7 @@ from application.log_privacy import private_business_logging
 from contracts.planner_models import DeterministicPlan, EnumExtractStep, ThreatMappingStep, EnumValuesArtifact, StepResult, StepStatus
 from contracts.session_facts import SessionFacts
 import pytest
+from factories import make_session_state
 
 
 def test_resume_keeps_success_dependency_and_exhausted_recovery_budget():
@@ -27,7 +28,7 @@ def test_resume_keeps_success_dependency_and_exhausted_recovery_budget():
         frozen_plan=plan.model_dump(mode="json"),completed_results=(completed.model_dump(mode="json"),),recovery_count=2,step_recovery_counts={"enum":1})
     checkpoint={}
     result=asyncio.run(PlanExecutor({"enum_extract":Adapter(),"threat_mapping":Adapter()}).execute(plan,
-        ExecutionContext({},SessionFacts(has_logs=True),checkpoint=checkpoint),continuation=continuation))
+        ExecutionContext(make_session_state(),SessionFacts(has_logs=True),checkpoint=checkpoint),continuation=continuation))
     assert result.status == StepStatus.SUCCESS and calls == ["threat"]
     assert len(result.results)==2 and checkpoint["recovery_count"]==2 and checkpoint["step_recovery_counts"]=={"enum":1}
 
@@ -36,10 +37,10 @@ def test_resume_rejects_changed_frozen_plan_and_wrong_ledger():
     plan=DeterministicPlan(plan_id="resume",steps=(EnumExtractStep(step_id="enum",type="enum_extract",target_field="alarm"),))
     continuation=ExecutionContinuation("execute_plan",(),asdict(RecoveryBudget()),"digest",frozen_plan={})
     with pytest.raises(ValueError,match="continuation_plan_mismatch"):
-        asyncio.run(PlanExecutor({}).execute(plan,ExecutionContext({},SessionFacts()),continuation=continuation))
+        asyncio.run(PlanExecutor({}).execute(plan,ExecutionContext(make_session_state(),SessionFacts()),continuation=continuation))
     bad=ExecutionContinuation("execute_plan",("wrong",),asdict(RecoveryBudget()),"digest",frozen_plan=plan.model_dump(mode="json"))
     with pytest.raises(ValueError,match="continuation_ledger_invalid"):
-        asyncio.run(PlanExecutor({}).execute(plan,ExecutionContext({},SessionFacts()),continuation=bad))
+        asyncio.run(PlanExecutor({}).execute(plan,ExecutionContext(make_session_state(),SessionFacts()),continuation=bad))
 
 
 def test_resume_does_not_reset_retry_budget():
@@ -50,7 +51,7 @@ def test_resume_does_not_reset_retry_budget():
             calls.append(1); raise TimeoutError("SECRET")
     continuation=ExecutionContinuation("execute_plan",(),asdict(RecoveryBudget()),"digest",frozen_plan=plan.model_dump(mode="json"),recovery_count=2)
     with private_business_logging():
-        result=asyncio.run(PlanExecutor({"enum_extract":Failing()}).execute(plan,ExecutionContext({},SessionFacts(has_logs=True)),continuation=continuation))
+        result=asyncio.run(PlanExecutor({"enum_extract":Failing()}).execute(plan,ExecutionContext(make_session_state(),SessionFacts(has_logs=True)),continuation=continuation))
     assert result.status == StepStatus.FAILED and len(calls)==1
 
 
@@ -91,9 +92,9 @@ def test_clear_removes_attachment_contributions_and_pending_refills():
     """业务清空必须同时移除跨轮附件、填充贡献及重填状态。"""
     from application.request_runtime import clear_session_data, is_explicit_clear_command
     keys = ("decoded_data", "raw_log_lines", "latest_enum_artifact", "latest_threat_artifact",
-        "enum_mapping_sheets", "applied_attachment_ids", "enum_fill_contributions", "stale_enum_config_refs", "enum_pending_refills")
-    session = {key: "PRIVATE" for key in keys}
-    session["ui_only"] = "kept"
+        "enum_mapping_sheets", "enum_fill_contributions", "stale_enum_config_refs", "enum_pending_refills")
+    session = make_session_state(**{key: "PRIVATE" for key in keys}, current_provider="kept")
     assert is_explicit_clear_command("清空数据！")
     clear_session_data(session)
-    assert session == {"ui_only": "kept"}
+    assert all(not getattr(session, key) for key in keys)
+    assert session.current_provider == "kept"

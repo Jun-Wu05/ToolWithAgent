@@ -24,6 +24,8 @@ from application.adapters.shared import (
 )
 from application.adapters.field_skill import FieldSkillAdapter
 
+from factories import make_session_state
+
 
 def _config():
     """req_head/req_body 已映射标准名；src_ip/sip_identify 同映射「源地址」。"""
@@ -108,11 +110,11 @@ def test合并指令标准名源字段自动解析():
         target_field="响应内容", sep="",
         config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _config()}
+    session = make_session_state(mapped_sub_rules=_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success", result.message
     merger = [
-        f for f in session["mapped_sub_rules"][0]["parser"]["filter"]
+        f for f in session.mapped_sub_rules[0]["parser"]["filter"]
         if f.get("name") == "merger"
     ]
     assert merger[0]["fields"] == ["req_head", "req_body"]
@@ -127,7 +129,7 @@ def test合并指令歧义标准名返回专用错误():
         target_field="x", sep="",
         config_ref="session.mapped_sub_rules",
     )
-    result = _run(FieldSkillAdapter(), step, {"mapped_sub_rules": _config()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(mapped_sub_rules=_config()))
     assert result.status.value == "failed"
     assert result.error_code == "field_name_ambiguous"
     assert "src_ip" in result.message and "sip_identify" in result.message
@@ -139,7 +141,7 @@ def test合并指令零命中错误含两套词汇对照():
         source_fields=("ghost", "req_body"), target_field="x", sep="",
         config_ref="session.mapped_sub_rules",
     )
-    result = _run(FieldSkillAdapter(), step, {"mapped_sub_rules": _config()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(mapped_sub_rules=_config()))
     assert result.status.value == "failed"
     assert result.error_code == "field_not_found"
     assert "req_head(HTTP请求头)" in result.message
@@ -150,10 +152,10 @@ def test删除指令标准名解析():
         step_id="d1", type="delete_fields", fields=("HTTP请求头",),
         config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _config()}
+    session = make_session_state(mapped_sub_rules=_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success", result.message
-    indexes = [e["index"] for e in session["mapped_sub_rules"][0]["normalize"]]
+    indexes = [e["index"] for e in session.mapped_sub_rules[0]["normalize"]]
     assert "req_head" not in indexes
     assert "字段解析：HTTP请求头→req_head" in result.message
 
@@ -166,11 +168,11 @@ def test添加引用字段标准名解析与改写():
         value_type="reference",
         config_ref="session.mapped_sub_rules",
     )
-    session = {"mapped_sub_rules": _config()}
+    session = make_session_state(mapped_sub_rules=_config())
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status.value == "success", result.message
     addfields = [
-        f for f in session["mapped_sub_rules"][0]["parser"]["filter"]
+        f for f in session.mapped_sub_rules[0]["parser"]["filter"]
         if f.get("name") == "addFields" and f.get("id") == ""
     ]
     assert addfields[-1]["fields"]["请求内容"] == "%{resp_head}"
@@ -185,7 +187,7 @@ def test添加引用字段目标不可解析被拒绝():
         value_type="reference",
         config_ref="session.mapped_sub_rules",
     )
-    result = _run(FieldSkillAdapter(), step, {"mapped_sub_rules": _config()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(mapped_sub_rules=_config()))
     assert result.status.value == "failed"
     assert result.error_code == "reference_target_not_found"
 
@@ -196,14 +198,14 @@ def test取消映射标准名目标解析():
     config[0]["normalize"][0]["mappings"] = [
         {"mappingType": "EQUAL", "orgValue": "a", "mappingValue": "b"}
     ]
-    session = {"mapped_sub_rules": config}
+    session = make_session_state(mapped_sub_rules=config)
     step = RemoveMappingStep(
         step_id="r1", type="remove_mapping", target_fields=("HTTP请求头",),
         config_ref="session.mapped_sub_rules",
     )
     result = _run(_RemoveMappingRunner(), step, session)
     assert result.status.value == "success", result.message
-    assert session["mapped_sub_rules"][0]["normalize"][0]["mappings"] == []
+    assert session.mapped_sub_rules[0]["normalize"][0]["mappings"] == []
     assert "HTTP请求头→req_head" in result.message
 
 

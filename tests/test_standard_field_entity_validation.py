@@ -19,6 +19,7 @@ from agent.tools.rule_generator.field_mapping import (
     canonical_field_entity,
     resolve_standard_field,
 )
+from factories import make_session_state
 
 
 class _MappingRunner:
@@ -56,15 +57,15 @@ def test产物级导出字段与对象全部属于目录(monkeypatch):
         "generate_sub_rules",
         lambda classification, all_logs_str, rule_source_fields: generated,
     )
-    session = {
-        "log_classification": {"classification_details": [{"logtype": "x"}]},
-        "raw_log_lines": ["attack_type=暴力破解 bad_field=1"],
-        "rule_source_fields": {
+    session = make_session_state(
+        log_classification={"classification_details": [{"logtype": "x"}]},
+        raw_log_lines=["attack_type=暴力破解 bad_field=1"],
+        rule_source_fields={
             "product": "产品",
             "log_vendor": "厂商",
             "data_source": "产品(厂商)",
         },
-    }
+    )
 
     result = asyncio.run(
         FieldMappingAdapter(

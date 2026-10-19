@@ -35,6 +35,7 @@ from agent.prompts import (
 )
 from agent.shared.logger import get_logger
 from agent.tools.pipeline.common.aggregator import aggregate_by_field
+from agent.tools.pipeline.common.format_context import FormatContext
 from agent.tools.pipeline.extractors.header_extractor import (
     aggregate_headers,
     extract_header,
@@ -202,6 +203,11 @@ def _failing_sample_block(
         pattern = _re.compile(regex_str)
     except _re.error:
         pattern = None
+    if pattern is None or pattern.groups < 1:
+        # 反馈块的价值是展示「上次捕获」；编译失败或没有捕获组时
+        # 不可能产出捕获内容，返回空块而非把不可用 pattern 传给判定函数
+        # （空 regex 是合法正则但零宽无组，曾在此崩溃，#352）。
+        return ""
     shown: list[str] = []
     for text in texts:
         if len(shown) >= limit:
@@ -236,7 +242,7 @@ def _select_kv_body_samples(
     clusters = aggregate_headers(
         logs_str,
         format_type="kv",
-        delimit=kv_delimit,
+        kv_delimit=kv_delimit,
         max_clusters=_KV_BODY_SAMPLE_LIMIT,
         header_fn=_cluster_key,
     ).get("clusters", [])
@@ -356,10 +362,11 @@ def _generate_kv_feature_identifier(
     for attempt in range(1, max_attempts + 1):
         logger.debug(f"[_generate_kv_feature_identifier] 尝试 {attempt}/{max_attempts} 开始")
 
-        # CHANGED: 重试时附加错误反馈
+        # 重试时附加错误反馈；llm_call_failed（last_regex 为空）没有可修正的
+        # 正则，直接复用基础 prompt 重试（#352：空 regex 曾在反馈构造中崩溃）
         prompt = base_prompt.replace("{sample_logs}", sample_block)
         prompt = prompt.replace("{observed_facts}", observed_facts)
-        if attempt > 1 and last_error:
+        if attempt > 1 and last_regex:
             feedback = (
                 f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
                 f"- 上次错误：{last_error}\n"
@@ -501,7 +508,7 @@ def _kv_header_cut(
 def _generate_header_logtype_regex(
     sample_lines: list[str],
     format_type: str,
-    delimit: str,
+    kv_delimit: str,
     body_pattern: _re.Pattern | None = None,
 ) -> _re.Pattern:
     """用 LLM 生成日志类型路径提取正则（1 捕获组，≤2 次尝试，#190）。
@@ -512,7 +519,7 @@ def _generate_header_logtype_regex(
     Args:
         sample_lines: header 聚类分层的原始日志行样本。
         format_type:  日志格式（大小写无关）。
-        delimit:      KV 键值分隔符（用于从样本行提取日志头）。
+        kv_delimit:   KV 键值分隔符（用于从样本行提取日志头）。
         body_pattern: 已验证的 KV body 正则；提供时 header 边界以其捕获
                       起点为准（#294），否则退回分隔符猜测。
 
@@ -527,9 +534,9 @@ def _generate_header_logtype_regex(
         h
         for h in (
             (
-                _kv_header_cut(l, body_pattern, delimit)
+                _kv_header_cut(l, body_pattern, kv_delimit)
                 if is_kv
-                else extract_header(l, format_type, delimit)
+                else extract_header(l, format_type, kv_delimit)
             )
             or l
             for l in sample_lines
@@ -547,7 +554,9 @@ def _generate_header_logtype_regex(
         prompt = base_prompt.replace(
             "{sample_logs}", "\n".join(header_texts[:_LOGTYPE_SAMPLE_LIMIT])
         )
-        if attempt > 1 and last_error:
+        # llm_call_failed（last_regex 为空）没有可修正的正则，直接复用基础
+        # prompt 重试（#352：空 regex 曾在反馈构造中崩溃）
+        if attempt > 1 and last_regex:
             feedback = (
                 f"\n\n# ⚠️ 上次生成的正则有误，请修正\n"
                 f"- 上次错误：{last_error}\n"
@@ -598,7 +607,7 @@ def _generate_header_logtype_regex(
 def _make_header_logtype_extractor(
     pattern: _re.Pattern,
     format_type: str,
-    delimit: str,
+    kv_delimit: str,
     body_pattern: _re.Pattern | None = None,
 ):
     """构造类型提取器：正则只作用于日志头文本（#190）。
@@ -611,9 +620,9 @@ def _make_header_logtype_extractor(
 
     def extract(line: str, feature_field: str):
         if is_kv:
-            header = _kv_header_cut(line, body_pattern, delimit)
+            header = _kv_header_cut(line, body_pattern, kv_delimit)
         else:
-            header = extract_header(line, format_type, delimit)
+            header = extract_header(line, format_type, kv_delimit)
         if not header:
             return None
         m = pattern.search(header)
@@ -637,13 +646,14 @@ def classify_header_features(
     header 聚类只提供结构样本；LLM 另按 ≤20 值/批补充 meaning，
     批次或覆盖不完整只降级 PARTIAL，不删类型、不自由枚举。
 
-    CHANGED (2026-06-18): 新增 format_info 参数，优先使用 Step1 确定的 delimit/tab。
+    CHANGED (2026-06-18): 新增 format_info 参数，优先使用 Step1 确定的 delimit/tab；
+    #344 起键值分隔符经 FormatContext.from_format_info 单一解析。
     """
     is_kv = (format_type or "").lower() == "kv"
     kv_feature_identifier = ""
-    kv_delimit = "="
-    if is_kv and format_info:
-        kv_delimit = format_info.get("tab", "=")
+    # 键值分隔符从 format_info 经 FormatContext 单一解析（#344）；
+    # JSON 格式或 format_info 缺失时回落默认 "="，与历史行为一致。
+    kv_delimit = FormatContext.from_format_info(format_info).kv_delimit
 
     def _get_feature_identifier(fmt_type: str) -> str:
         return "" if (fmt_type or "").lower() == "kv" else _JSON_FEATURE_IDENTIFIER
@@ -699,7 +709,7 @@ def classify_header_features(
         clusters = aggregate_headers(
             logs_str,
             format_type=format_type,
-            delimit=kv_delimit,
+            kv_delimit=kv_delimit,
             header_fn=header_fn,
         )["clusters"]
         sample_lines = [

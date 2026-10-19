@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import copy
 import json
 import re
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from application.file_input import simple_decode
-from toolwithagent_v2.runtime.postprocessing import freeze_session
+from toolwithagent_v2.runtime.postprocessing import BusinessSession, freeze_session
 from application.adapters.composition import create_default_adapters
 from application.adapters.log_knowledge_submit import LogKnowledgeSubmitAdapter
 from application.log_knowledge_submission import build_submission_snapshot
@@ -121,7 +122,7 @@ class BusinessApplication:
 
     async def parse(self, path: Path, snapshot: dict) -> dict:
         lines = raw_log_lines(path, snapshot["media_type"])
-        session = {"raw_log_lines": lines, "original_log": lines}
+        session = BusinessSession(raw_log_lines=lines, original_log=lines)
         plan = DeterministicPlan(plan_id="v2-log-parse", steps=(
             LogParseStep(step_id="log-parse", type="log_parse", feature_field=snapshot.get("feature_field")),))
         report = await run_deterministic_plan(session=session, team=None, plan=plan, progress_sink=snapshot.get("_progress_sink") or NullProgressSink(),
@@ -129,23 +130,23 @@ class BusinessApplication:
         if report.status != StepStatus.SUCCESS or not report.results or report.results[0].artifact is None:
             return {"error": (report.results[0].error_code if report.results else None) or "log_parse_failed"}
         artifact = report.results[0].artifact
-        if artifact.artifact_type != "log_classification" or session.get("log_classification") is None:
+        if artifact.artifact_type != "log_classification" or session.log_classification is None:
             return {"error": "log_parse_failed"}
-        return {"classification": session["log_classification"],
+        return {"classification": session.log_classification,
                 "submission_eligible": artifact.submission_eligible,
                 "submission_token": artifact.submission_token,
-                "coverage": session["log_knowledge_submission"].coverage, "total_lines": len(lines)}
+                "coverage": session.log_knowledge_submission.coverage, "total_lines": len(lines)}
 
     async def submit(self, path: Path, snapshot: dict, classification: dict, connection=None) -> dict:
         lines = raw_log_lines(path, snapshot["media_type"])
-        session = {"raw_log_lines": lines, "original_log": lines,
-                   "log_classification": classification["classification"],
-                   "submitter_id": snapshot.get("owner_id", "session-user")}
+        session = BusinessSession(raw_log_lines=lines, original_log=lines,
+                   log_classification=classification["classification"],
+                   submitter_id=snapshot.get("owner_id", "session-user"))
         evidence = build_submission_snapshot(
             classification["classification"], lines,
             selection_mode="explicit" if snapshot.get("feature_field") else "automatic",
             feature_field=snapshot.get("feature_field"))
-        session["log_knowledge_submission"] = evidence
+        session.log_knowledge_submission = evidence
         plan = DeterministicPlan(plan_id="v2-log-knowledge-submit", steps=(
             LogKnowledgeSubmitStep(step_id="submit", type="log_knowledge_submit",
                                    submission_token=classification["submission_token"]),))
@@ -168,9 +169,10 @@ class BusinessApplication:
         from agent.tools.rule_generator import rules_to_base64_text
 
         lines = raw_log_lines(path, snapshot["media_type"])
-        session = dict(snapshot.get("initial_session") or {})
-        session.update({"raw_log_lines": lines, "original_log": lines})
-        before_slots = {key: session.get(key) for key in ("latest_enum_artifact", "latest_threat_artifact")}
+        session = copy.copy(snapshot.get("initial_session") or BusinessSession())
+        session.raw_log_lines = lines
+        session.original_log = lines
+        before_slots = {"enum_values": session.latest_enum_artifact, "threat_mapping": session.latest_threat_artifact}
         team = (self.team_factory or create_data_mapping_team)()
         adapters = self.adapters_factory(team) if self.adapters_factory else create_default_adapters(team)
         if classification is not None:
@@ -181,9 +183,9 @@ class BusinessApplication:
                 LogParseStep(step_id="log-parse", type="log_parse", feature_field=snapshot.get("feature_field")),))
             parsed = await run_deterministic_plan(session=session, team=team, plan=parse_plan,
                 progress_sink=snapshot.get("_progress_sink") or NullProgressSink(), adapters=adapters)
-            if parsed.status != StepStatus.SUCCESS or not session.get("log_classification"):
+            if parsed.status != StepStatus.SUCCESS or not session.log_classification:
                 return {"error": "log_parse_failed"}
-        session["rule_source_fields"] = RuleSourceFields.from_value(snapshot["source_fields"])
+        session.rule_source_fields = RuleSourceFields.from_value(snapshot["source_fields"])
         plan = DeterministicPlan(plan_id="v2-field-mapping", steps=(
             FieldMappingStep(step_id="field-mapping", type="field_mapping", source_ref="session.fields"),))
         report = await run_deterministic_plan(session=session, team=team, plan=plan,
@@ -191,21 +193,21 @@ class BusinessApplication:
         mapped = next((result.artifact for result in report.results
             if result.operation_type == "field_mapping" and result.status == StepStatus.SUCCESS
             and result.artifact is not None), None)
-        config = session.get("mapped_sub_rules")
+        config = session.mapped_sub_rules
         if report.status != StepStatus.SUCCESS or mapped is None or not config:
             result = next((item for item in report.results if item.status != StepStatus.SUCCESS), None)
             return {"error": (result.error_code if result else None) or "field_mapping_failed"}
         warnings = [{"code": "threat_chain_warning", "message": result.message}
             for result in report.results
             if result.operation_type == "threat_chain" and result.message and "⚠️" in result.message]
-        new_types = [kind for key, kind in (("latest_enum_artifact", "enum_values"), ("latest_threat_artifact", "threat_mapping")) if session.get(key) is not None and session.get(key) is not before_slots[key]]
-        published = {kind: session[key].artifact.model_dump(mode="json") for key, kind in (("latest_enum_artifact", "enum_values"), ("latest_threat_artifact", "threat_mapping")) if kind in new_types}
+        new_types = [kind for slot, kind in ((session.latest_enum_artifact, "enum_values"), (session.latest_threat_artifact, "threat_mapping")) if slot is not None and slot is not before_slots[kind]]
+        published = {kind: slot.artifact.model_dump(mode="json") for slot, kind in ((session.latest_enum_artifact, "enum_values"), (session.latest_threat_artifact, "threat_mapping")) if kind in new_types}
         published["field_mapping"] = {}
         return {"artifact_sources": artifact_sources(report, plan, published),
             "config": config, "mapping_rows": [row.model_dump(by_alias=True) for row in mapped.mappings],
             "event_annotations": [row.model_dump() for row in mapped.event_annotations],
             "warnings": warnings,
-            "samples": collect_samples(config, lines, session["log_classification"]),
+            "samples": collect_samples(config, lines, session.log_classification),
             "download_kind": mapped.download_kind or "mapped_sub_rules",
             "download_content": rules_to_base64_text(config),
             "business_state": freeze_session(session),
@@ -226,7 +228,7 @@ class BusinessApplication:
         return outcome
 
 
-    async def postprocess(self, session, snapshot, base=None, continuation=None, *, progress_sink=None):
+    async def postprocess(self, session: BusinessSession, snapshot: dict, base=None, continuation=None, *, progress_sink=None):
         """自然指令恰好规划一次；确认执行冻结计划，不重复 Planner 或成功步骤。"""
         from agent.core.team import create_data_mapping_team
         from application.request_runtime import run_user_request
@@ -239,7 +241,7 @@ class BusinessApplication:
         progress_sink = progress_sink or NullProgressSink()
         initial = freeze_session(session)
         captured, checkpoint = {}, {}
-        before_slots = {key: session.get(key) for key in ("latest_enum_artifact", "latest_threat_artifact")}
+        before_slots = {"enum_values": session.latest_enum_artifact, "threat_mapping": session.latest_threat_artifact}
         team = (self.team_factory or create_data_mapping_team)()
         adapters = self.adapters_factory(team) if self.adapters_factory else create_default_adapters(team)
         if continuation is not None:
@@ -247,7 +249,7 @@ class BusinessApplication:
                 return {"error": "continuation_stale"}
             plan = DeterministicPlan.model_validate(continuation.frozen_plan)
             session = restore_session(continuation.staging_state)
-            before_slots = {key: session.get(key) for key in ("latest_enum_artifact", "latest_threat_artifact")}
+            before_slots = {"enum_values": session.latest_enum_artifact, "threat_mapping": session.latest_threat_artifact}
             result = await run_deterministic_plan(session=session, team=team, plan=plan,
                 progress_sink=progress_sink, adapters=adapters, continuation=continuation, checkpoint=checkpoint)
         elif "plan" in snapshot:
@@ -285,10 +287,10 @@ class BusinessApplication:
         for item in result.results:
             if getattr(item.artifact, "artifact_type", None) == "log_classification":
                 artifact = item.artifact
-                submission = session.get("log_knowledge_submission")
+                submission = session.log_knowledge_submission
                 artifacts.append({"kind": "log_classification", "payload": {
                     "classification": artifact.classification, "submission_eligible": artifact.submission_eligible,
-                    "submission_token": artifact.submission_token, "total_lines": len(session.get("raw_log_lines", [])),
+                    "submission_token": artifact.submission_token, "total_lines": len((session.raw_log_lines or [])),
                     "coverage": submission.coverage if submission else {}}})
         download = next((item.artifact for item in reversed(result.results) if isinstance(item.artifact, ConfigExportArtifact)), None)
         mapping = next((item.artifact for item in result.results if isinstance(item.artifact, FieldMappingArtifact)), None)
@@ -297,22 +299,20 @@ class BusinessApplication:
                     "event_annotations": [row.model_dump() for row in mapping.event_annotations]}
         executed_plan = plan if continuation is not None or "plan" in snapshot else captured.get("plan")
         source = next((step.config_ref for step in reversed(executed_plan.steps) if hasattr(step, "config_ref")), None) if executed_plan else None
-        source = source or ("session.mapped_sub_rules" if session.get("mapped_sub_rules") else "session.decoded_config")
-        config_changed = (session.get("mapped_sub_rules") != initial.get("mapped_sub_rules") or session.get("decoded_data") != initial.get("decoded_data"))
-        config_key = "decoded_data" if source == "session.decoded_config" else "mapped_sub_rules"
-        if config_changed and session.get(config_key):
+        source = source or ("session.mapped_sub_rules" if session.mapped_sub_rules else "session.decoded_config")
+        config_changed = (session.mapped_sub_rules != initial.get("mapped_sub_rules") or session.decoded_data != initial.get("decoded_data"))
+        if config_changed and (session.decoded_data if source == "session.decoded_config" else session.mapped_sub_rules):
             payload = config_payload(session, source, base, download)
             artifacts.append({"kind": "field_mapping", "payload": payload})
         reported_kinds = {getattr(item.artifact, "artifact_type", None) for item in result.results}
         # 执行器已按冻结计划校验成功前缀；同内容的新提交也必须获得本轮产物身份。
         from contracts.planner_models import StepResult
         completed_artifacts = [StepResult.model_validate(item).artifact for item in continuation.completed_results] if continuation else []
-        for key, kind in (("latest_enum_artifact", "enum_values"), ("latest_threat_artifact", "threat_mapping")):
-            resumed_commit = session.get(key) and any(
+        for slot, key, kind in ((session.latest_enum_artifact, "latest_enum_artifact", "enum_values"), (session.latest_threat_artifact, "latest_threat_artifact", "threat_mapping")):
+            resumed_commit = slot and any(
                 artifact is not None and artifact.artifact_type == kind
-                and artifact == session[key].artifact for artifact in completed_artifacts)
-            if session.get(key) and (resumed_commit or (kind in reported_kinds and session.get(key) is not before_slots[key]) or freeze_session(session).get(key) != initial.get(key)):
-                slot = session[key]
+                and artifact == slot.artifact for artifact in completed_artifacts)
+            if slot and (resumed_commit or (kind in reported_kinds and slot is not before_slots[kind]) or freeze_session(session).get(key) != initial.get(key)):
                 artifacts.append({"kind": kind, "payload": slot.artifact.model_dump(mode="json")})
         if download is not None:
             artifacts.append({"kind": "config_export", "payload": download.model_dump(mode="json")})

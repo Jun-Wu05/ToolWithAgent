@@ -31,7 +31,7 @@ def bridge_result(tmp_path, classifier, monkeypatch=None):
         import application.threat_chain as chain
         class FailedAdd:
             async def execute(self, step, context, dependencies=None):
-                context.session['mapped_sub_rules'][0]['normalize'].append({'index': 'PARTIAL-PRIVATE', 'field': 'threat_type'})
+                context.session.mapped_sub_rules[0]['normalize'].append({'index': 'PARTIAL-PRIVATE', 'field': 'threat_type'})
                 return StepResult(step_id=step.step_id, operation_type=step.type, status=StepStatus.FAILED,
                                   error_code='test_chain_failed', message='controlled chain failure')
         monkeypatch.setattr(chain, 'batch_retrieve_candidates_table', lambda *args, **kwargs: {})

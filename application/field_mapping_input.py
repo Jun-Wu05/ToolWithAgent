@@ -66,7 +66,7 @@ def _render_value_profiles(value_profiles: dict, fields_batch: list) -> str:
     )
 
 
-def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list,
+def build_batch_llm_input(user_text: str, original_log_sample: str, fields_batch: list,
                           batch_idx: int, total_batches: int,
                           prequery=None, value_profiles=None) -> str:
     """
@@ -74,7 +74,7 @@ def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list
 
     Args:
         user_text: 用户请求文本
-        user_session: 用户会话
+        original_log_sample: 原始日志样本（所有批次共享同一份，超 2000 字截断）
         fields_batch: 当前批次的字段列表
         batch_idx: 当前批次索引（1-based）
         total_batches: 总批次数
@@ -86,9 +86,6 @@ def build_batch_llm_input(user_text: str, user_session: dict, fields_batch: list
     Returns:
         完整 LLM 输入字符串（字段批次 + 语义候选 + 值画像 + 原始日志样本）
     """
-    simplified_data = user_session.get("simplified_data", {})
-    original_log_sample = simplified_data.get("original_log_sample", "")
-
     fields_json_str = json.dumps(fields_batch, ensure_ascii=False)
 
     # 对当前批次字段做语义检索（注入优先，未注入时回落模块默认实现）

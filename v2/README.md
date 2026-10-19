@@ -138,6 +138,8 @@ apply 冻结 base 内容、Draft revision/operations、当前目录版本及原 
 
 V2 独立环境通过 `python -m pip install -e "v2/backend[test]"` 安装声明的业务与 API 依赖；不需要 Chainlit。Agno/OpenAI/SQLAlchemy 与现有入口固定版本一致。启动真实业务前仍需项目 `.env` 与只读标准字段及其本地缓存，运行时不会自动生成远程 embeddings。
 
+业务 Blob 只保存固定白名单中的业务状态，恢复为共享 `SessionState` 的 V2 类型；不会序列化 Team、模型密钥或其他运行时对象。已有白名单 JSON 状态继续通过同一恢复边界读取。
+
 所有以下路径均带 `/api/v2` 前缀。上传 multipart 增加 `role=primary|enum_mapping`，默认 `primary` 兼容已有客户端。枚举附件必须 `.xlsx`，Sheet 名是目标字段，三列沿既有 `mappingType/orgValue/mappingValue` 协议；完整解析通过才生效。不同 Sheet 累积、同名 Sheet 完整替换，附件不会切换当前主数据。普通文件投影增加 `role`，原 file/task/run 字段保持。
 
 `POST /conversations/{id}/messages` body 仍为 `{"content":"指令"}`，返回原 `id/actor/kind/content/created_at` 加 `{task:{id,status},run:{id,status}}`。自然语言只调用 Planner 一次；缺参/歧义通过助手追问结束本次 Run，不猜测，也不读取未应用 Draft。未应用修改返回 409 `draft_resolution_required`；等待方案确认返回 409 `confirmation_resolution_required`。成功 receipt 重放优先返回原结果。

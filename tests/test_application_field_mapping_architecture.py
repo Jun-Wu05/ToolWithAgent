@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from factories import make_session_state
+
 
 def _import_roots(path: Path) -> set[str]:
     """提取模块的静态导入根，用于约束 Application 不反向依赖 Web。"""
@@ -137,7 +139,7 @@ def test_field_mapping_tracer_preserves_calls_order_and_session_commit() -> None
             yield SimpleNamespace(event="RunCompleted", content=rows)
 
     member = MappingMember()
-    session = {"decoded_fields": ["src", "dst"]}
+    session = make_session_state(decoded_fields=["src", "dst"])
     step = FieldMappingStep(
         step_id="mapping-1", type="field_mapping", source_ref="session.fields"
     )
@@ -158,4 +160,4 @@ def test_field_mapping_tracer_preserves_calls_order_and_session_commit() -> None
     assert report.status == StepStatus.SUCCESS
     assert member.calls == [("src", "dst")]
     assert [row.original_field for row in report.results[0].artifact.mappings] == ["src", "dst"]
-    assert [row["原始字段名"] for row in session["last_mapping_data"]] == ["src", "dst"]
+    assert [row["原始字段名"] for row in session.last_mapping_data] == ["src", "dst"]

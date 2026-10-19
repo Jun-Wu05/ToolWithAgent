@@ -238,7 +238,8 @@ class Worker:
             return self.store.finish(self.worker_id, claim, error)
         try:
             with private_business_logging():
-                attach_enum({}, self.store.root / claim["input"]["storage_key"], self.store.root / "staging")
+                from toolwithagent_v2.runtime.postprocessing import BusinessSession
+                attach_enum(BusinessSession(), self.store.root / claim["input"]["storage_key"], self.store.root / "staging")
             return self.store.finish(self.worker_id, claim)
         except Exception:
             return self.store.finish(self.worker_id, claim, "enum_attachment_invalid", "枚举映射附件未完整通过校验，请检查工作表。")

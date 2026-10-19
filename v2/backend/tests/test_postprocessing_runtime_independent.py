@@ -23,12 +23,16 @@ def forbid_production_planner_and_model_http(monkeypatch):
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", async_denied)
 
 
-def test_real_execution_failure_produces_checkpoint_with_success_ledger_and_spent_budget(tmp_path):
+@pytest.mark.parametrize("initial_decision", ["execute", "proposal"])
+def test_real_execution_failure_produces_checkpoint_with_success_ledger_and_spent_budget(tmp_path, initial_decision):
     class ExecutePlanner:
         calls = 0
         async def plan(self, **kwargs):
             self.calls += 1
-            return PlanDecision.model_validate({"decision": "execute", "plan_id": "failure-producer", "steps": [
+            return PlanDecision.model_validate({"decision": initial_decision, "plan_id": "failure-producer",
+                "reason_code": "confirm_enum_plan" if initial_decision == "proposal" else None,
+                "question": "确认枚举提取计划？" if initial_decision == "proposal" else None,
+                "choices": ["确认", "取消"] if initial_decision == "proposal" else [], "steps": [
                 {"step_id": "prefix", "type": "enum_extract", "target_field": "alarm"},
                 {"step_id": "pending", "type": "enum_extract", "target_field": "status"}]})
     planner = ExecutePlanner()
@@ -51,10 +55,22 @@ def test_real_execution_failure_produces_checkpoint_with_success_ledger_and_spen
     worker.business_application.adapters_factory = adapters
     run = client.post(f"/api/v2/conversations/{conversation}/messages", json={"content": "先提取alarm，再提取status"}).json()["run"]["id"]
     assert worker.once()
+    if initial_decision == "proposal":
+        assert planner.calls == 1 and calls == {}
+        assert store.get_run("dev-user", run)["status"] == "waiting_confirmation"
+        initial = store.continuation(run)
+        assert initial.next_action == "execute_plan"
+        assert initial.completed_step_refs == () and initial.recovery_count == 0
+        approval = client.post(f"/api/v2/runs/{run}/confirmation-token").json()
+        accepted = client.post(f"/api/v2/runs/{run}/confirm", json={"token": approval["token"], "checkpoint_revision": approval["checkpoint_revision"]}, headers={"Idempotency-Key": "initial-plan"})
+        assert accepted.status_code == 200, accepted.text
+        worker = Worker(Store(Settings(data_dir=store.root)), "worker", business_application=worker.business_application)
+        assert worker.once()
     assert calls == {"prefix": 2, "pending": 2}
     assert store.get_run("dev-user", run)["status"] == "waiting_confirmation"
     checkpoint = store.continuation(run)
     assert checkpoint is not None
+    assert checkpoint.next_action == "resume_after_failure"
     assert checkpoint.completed_step_refs == ("prefix",)
     assert checkpoint.recovery_count == 2
     assert checkpoint.step_recovery_counts == {"prefix": 1, "pending": 1}
@@ -66,7 +82,10 @@ def test_real_execution_failure_produces_checkpoint_with_success_ledger_and_spen
     assert Worker(restarted, "worker", business_application=worker.business_application).once()
     assert planner.calls == 1 and calls == {"prefix": 2, "pending": 3}
     assert restarted.continuation(run).recovery_count == 2
-    assert restarted.get_run("dev-user", run)["status"] != "succeeded"
+    assert restarted.continuation(run).step_recovery_counts == {"prefix": 1, "pending": 1}
+    assert restarted.get_run("dev-user", run)["status"] == "failed"
+    assert client.post(f"/api/v2/runs/{run}/confirmation-token").status_code == 409
+    assert not Worker(restarted, "worker", business_application=worker.business_application).once()
 
 
 def test_explicit_clear_is_durable_and_blocks_old_worker_but_preserves_history(tmp_path):

@@ -3,22 +3,24 @@
 import pytest
 from pydantic import ValidationError
 
+from factories import make_session_state
+
 
 def test_session_facts只暴露规划所需事实():
     from application.session_projection import build_session_facts
 
-    session = {
-        "api_key": "secret-key",
-        "enum_excel_path": r"C:\private\mapping.xlsx",
-        "enum_preview": [
+    session = make_session_state(
+        api_key="secret-key",
+        enum_excel_path=r"C:\private\mapping.xlsx",
+        enum_preview=[
             {"目标字段": "event_type3", "原始值": "a", "映射值": "b"},
             {"目标字段": "event_type3", "原始值": "c", "映射值": "d"},
         ],
-        "mapped_sub_rules": [
+        mapped_sub_rules=[
             {"normalize": [{"index": "event_type3", "field": "事件类型"}]}
         ],
-        "raw_base64": "sensitive-payload",
-    }
+        raw_base64="sensitive-payload",
+    )
 
     facts = build_session_facts(session)
 
@@ -37,7 +39,9 @@ def test系统元字段不进入字段映射输入():
     from application.session_projection import build_session_facts
 
     facts = build_session_facts(
-        {"decoded_fields": ["original_log", "日志类型", "src_ip", "event_type3"]}
+        make_session_state(
+            decoded_fields=["original_log", "日志类型", "src_ip", "event_type3"]
+        )
     )
 
     assert "original_log" not in facts.available_fields
@@ -265,8 +269,8 @@ def test_session_facts投影子规则事件标注事实():
     """各子规则事件名称/级别进入 facts；未标注子规则占位（#149 信息型问答）。"""
     from application.session_projection import build_session_facts
 
-    session = {
-        "mapped_sub_rules": [
+    session = make_session_state(
+        mapped_sub_rules=[
             {
                 "name": "AUDIT_kv_子规则",
                 "parser": {
@@ -281,7 +285,7 @@ def test_session_facts投影子规则事件标注事实():
             },
             {"name": "IPS_kv_子规则", "normalize": [{"index": "src_ip", "field": "源IP"}]},
         ]
-    }
+    )
 
     facts = build_session_facts(session)
 
@@ -440,10 +444,10 @@ def test_session_facts集中汇总日志分类字段(monkeypatch):
     )
 
     facts = build_session_facts(
-        {
-            "log_classification": {"类型A": {}},
-            "raw_log_lines": ["src_ip=1.1.1.1 event_type3=attack"],
-        }
+        make_session_state(
+            log_classification={"类型A": {}},
+            raw_log_lines=["src_ip=1.1.1.1 event_type3=attack"],
+        )
     )
 
     assert facts.available_fields == ("src_ip", "event_type3")
@@ -461,11 +465,11 @@ def test有日志字段时Excel列头不进入字段映射输入(monkeypatch):
     )
 
     facts = build_session_facts(
-        {
-            "decoded_fields": ["发生时间", "事件名称", "设备"],
-            "log_classification": {"AUDIT": {}},
-            "raw_log_lines": ['alarm_name="attack" src_ip=1.1.1.1'],
-        }
+        make_session_state(
+            decoded_fields=["发生时间", "事件名称", "设备"],
+            log_classification={"AUDIT": {}},
+            raw_log_lines=['alarm_name="attack" src_ip=1.1.1.1'],
+        )
     )
 
     assert facts.available_fields == ("alarm_name", "src_ip")
@@ -475,7 +479,7 @@ def test无日志字段时回退使用配置字段():
     """Base64/TXT 配置上传场景没有日志字段，decoded_fields 仍参与映射。"""
     from application.session_projection import build_session_facts
 
-    facts = build_session_facts({"decoded_fields": ["event_type3", "src_ip"]})
+    facts = build_session_facts(make_session_state(decoded_fields=["event_type3", "src_ip"]))
 
     assert facts.available_fields == ("event_type3", "src_ip")
 

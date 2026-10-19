@@ -168,3 +168,6 @@ git push github --delete <分支>
 | 独立 worktree 中 pytest 报 `.pytest_cache` / `agent/logs` / tempfile `PermissionError`，或高 CPU 久不结束 | 首次调用未取得 worktree 写权限；用获批权限并显式指定 worktree 内的 `--basetemp` 重跑，结束后清理该精确目录 |
 | `gh pr create` 报 No commits between master and ... | push 没成功，检查 `git ls-remote github` 后重推 |
 | CMD 下 `head`/`tail`/管道转义报错 | Windows CMD 无这些命令；grep 正则含引号/竖线时拆成单条 `git grep -n -E ...` 跑 |
+| 多行 `python -c` 无输出、看似没执行也不报错 | CMD 引号解析静默吞掉多行脚本；文件改写一律用 Read/Write/Edit 工具，确需脚本就写临时 .py 再执行或压成单行 |
+| 命令链里 `;`、`2>nul;` 后半段被跳过 | CMD 不认 `;` 作分隔符（用 `&`/`&&`），`2>nul;` 会截断整条命令；删除/清理类命令单独执行 |
+| 链式 `& echo EXIT=%ERRORLEVEL%` 显示 0 但命令实际失败 | `%ERRORLEVEL%` 在整行解析时展开（早于命令执行）；判成败直接看输出里的 F/E 标记，或把回显单独跑 |

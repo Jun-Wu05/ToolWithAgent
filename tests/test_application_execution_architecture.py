@@ -52,7 +52,7 @@ def test_export_tracer_runs_through_application_without_mutating_session() -> No
     """导出 tracer 保持 ExecutionReport、进度、Base64 字节与下载语义。"""
     from application.adapters.export import ExportAdapter
     from application.execution import ExecutionContext, PlanExecutor
-    from application.session_state import SessionState
+    from factories import make_session_state
     from application.session_projection import build_session_facts
     from contracts.planner_models import ExportStep, PlanDecision, StepStatus
 
@@ -64,7 +64,7 @@ def test_export_tracer_runs_through_application_without_mutating_session() -> No
             self.events.append(event)
 
     config = {"normalize": [{"index": "src", "field": "源IP"}]}
-    session = SessionState(decoded_data=config)
+    session = make_session_state(decoded_data=config)
     before = session.decoded_data.copy()
     sink = RecordingProgressSink()
     step = ExportStep(
@@ -104,6 +104,7 @@ def test_export_tracer_preserves_missing_and_stale_source_errors() -> None:
     from application.session_state import SessionState
     from application.session_projection import build_session_facts
     from contracts.planner_models import ExportStep, PlanDecision, StepStatus
+    from factories import make_session_state
 
     async def execute(session: SessionState, source_ref: str):
         step = ExportStep(step_id="export-1", type="export", source_ref=source_ref)
@@ -112,11 +113,11 @@ def test_export_tracer_preserves_missing_and_stale_source_errors() -> None:
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
         )
 
-    missing = asyncio.run(execute(SessionState(), "session.decoded_config"))
+    missing = asyncio.run(execute(make_session_state(), "session.decoded_config"))
     assert missing.status == StepStatus.NEEDS_INPUT
     assert missing.results[0].error_code == "config_source_unavailable"
 
-    stale_session = SessionState(
+    stale_session = make_session_state(
         decoded_data={"normalize": [{"index": "src", "field": "源IP"}]},
         stale_enum_config_refs={"session.decoded_config"},
     )
@@ -129,11 +130,11 @@ def test_planner_typed_sub_rule_export_cannot_bypass_mapped_rule_guard() -> None
     """自然语言 Planner 产出的同一 source_ref 必须在执行接缝被统一拦截。"""
     from application.adapters.export import ExportAdapter
     from application.execution import ExecutionContext, PlanExecutor
-    from application.session_state import SessionState
+    from factories import make_session_state
     from application.session_projection import build_session_facts
     from contracts.planner_models import ExportStep, PlanDecision, StepStatus
 
-    session = SessionState(
+    session = make_session_state(
         log_classification={"types": ["AUDIT"]},
         mapped_sub_rules=[
             {

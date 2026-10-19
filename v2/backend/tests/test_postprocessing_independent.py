@@ -39,7 +39,7 @@ def test_durable_completed_ledger_and_recovery_budget_survive_confirmation_resta
     pending_step = EnumExtractStep(step_id="pending", type="enum_extract", target_field="alarm")
     plan = DeterministicPlan(plan_id="frozen", steps=(enum_step, pending_step) if exhausted else (enum_step, threat_step))
     completed = StepResult(step_id="enum", operation_type="enum_extract", status=StepStatus.SUCCESS, artifact=enum)
-    session["latest_enum_artifact"] = EnumArtifactSlot(artifact=enum, source_field="alarm")
+    session.latest_enum_artifact = EnumArtifactSlot(artifact=enum, source_field="alarm")
     continuation = ExecutionContinuation(
         "execute_plan", ("enum",), asdict(RecoveryBudget(max_per_plan=1) if exhausted else RecoveryBudget()), state_digest(initial),
         frozen_plan=plan.model_dump(mode="json"),

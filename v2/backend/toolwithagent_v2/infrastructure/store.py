@@ -1286,40 +1286,47 @@ class Store:
 
     def read_business_session(self, claim):
         """从冻结 Blob 重建内存副本，真实值不进入 SessionFacts 或事件投影。"""
-        from toolwithagent_v2.runtime.postprocessing import primary_session, restore_session, attach_enum, configuration_root
+        from toolwithagent_v2.runtime.postprocessing import BusinessSession, primary_session, restore_session, attach_enum, configuration_root
         snapshot = claim["input"]
         refs = snapshot["business_inputs"]["refs"]
         state = json.loads(self._read_blob(refs["business_state"])) if "business_state" in refs else None
-        session = restore_session(state) if state else (primary_session(self.root / snapshot["storage_key"], snapshot) if snapshot["file_id"] else {})
+        session = restore_session(state) if state else (primary_session(self.root / snapshot["storage_key"], snapshot) if snapshot["file_id"] else BusinessSession())
         base = json.loads(self._read_blob(refs["field_mapping"])) if "field_mapping" in refs else None
         if base:
             source = base.get("configuration_source", "session.mapped_sub_rules")
-            session["decoded_data" if source == "session.decoded_config" else "mapped_sub_rules"] = configuration_root(base)
+            if source == "session.decoded_config":
+                session.decoded_data = configuration_root(base)
+            else:
+                session.mapped_sub_rules = configuration_root(base)
             with connect(self.path) as db:
                 previous = db.execute("SELECT input_snapshot_json FROM runs WHERE id=(SELECT run_id FROM artifacts WHERE id=?)", (refs["field_mapping"]["id"],)).fetchone()
                 fields = json.loads(previous[0]).get("source_fields")
             if fields:
                 from contracts.rule_source import RuleSourceFields
-                session["rule_source_fields"] = RuleSourceFields.from_value(fields)
+                session.rule_source_fields = RuleSourceFields.from_value(fields)
         if "log_classification" in refs:
             classification = json.loads(self._read_blob(refs["log_classification"]))["classification"]
-            if base is None and session.get("log_classification") != classification:
+            if base is None and session.log_classification != classification:
                 from application.session_state import commit_log_classification
                 commit_log_classification(session, classification)
             else:
-                session["log_classification"] = classification
+                session.log_classification = classification
         from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
         for kind, key, model in (("enum_values", "latest_enum_artifact", EnumArtifactSlot), ("threat_mapping", "latest_threat_artifact", ThreatArtifactSlot)):
             if kind in refs:
                 artifact = json.loads(self._read_blob(refs[kind]))
-                session[key] = model.model_validate({"artifact": artifact, "source_field": artifact.get("field") if kind == "enum_values" else artifact.get("source_field")})
-        applied = set(session.get("applied_attachment_ids", []))
+                slot = model.model_validate({"artifact": artifact, "source_field": artifact.get("field") if kind == "enum_values" else artifact.get("source_field")})
+                if kind == "enum_values":
+                    session.latest_enum_artifact = slot
+                else:
+                    session.latest_threat_artifact = slot
+        applied = set(session.applied_attachment_ids)
         for attachment in snapshot["business_inputs"]["attachments"]:
             self._read_blob(attachment, "uploads")
             if attachment["id"] not in applied:
                 attach_enum(session, self.root / attachment["storage_key"], self.root / "staging")
                 applied.add(attachment["id"])
-        session["applied_attachment_ids"] = sorted(applied)
+        session.applied_attachment_ids = sorted(applied)
         return session, base
 
     def artifact_content(self, owner_id, artifact_id):
@@ -1377,9 +1384,8 @@ class Store:
                 return False
             boundary = claim["input"]["clear_boundary"]
             # 只清理安全的生命周期引用，不读取或解析即将作废的业务 Blob。
-            lifecycle = {"raw_log_lines": boundary["file_ids"], "decoded_data": boundary["artifact_ids"],
-                "enum_mapping_sheets": boundary["file_ids"], "latest_enum_artifact": boundary["artifact_ids"],
-                "latest_threat_artifact": boundary["artifact_ids"]}
+            from toolwithagent_v2.runtime.postprocessing import BusinessSession
+            lifecycle = BusinessSession(applied_attachment_ids=list(boundary["file_ids"]))
             clear_session_data(lifecycle)
             for file_id in boundary["file_ids"]:
                 db.execute("UPDATE files SET is_active=0 WHERE id=? AND conversation_id=?", (file_id, row["conversation_id"]))

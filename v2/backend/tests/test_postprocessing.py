@@ -436,7 +436,7 @@ def test_clear_preserves_classification_history_and_rejects_inactive_file(tmp_pa
         result = original_factory(team)
         class Parse:
             async def execute(self, step, context, dependencies):
-                context.session["log_classification"] = {"type": "history"}
+                context.session.log_classification = {"type": "history"}
                 return StepResult(step_id=step.step_id, operation_type=step.type, status=StepStatus.SUCCESS,
                     artifact=LogClassificationArtifact(item_count=1, classification={"type": "history"}, submission_eligible=False))
         result["log_parse"] = Parse()

@@ -11,6 +11,8 @@ from contracts.planner_models import (
     StepStatus,
 )
 
+from factories import make_session_state
+
 
 def _classification_report(eligible):
     return ExecutionReport(
@@ -125,7 +127,7 @@ def test回调显示提交中并移除可点击动作后再交给统一确定性
         async def remove(self):
             events.append("submitting-removed")
 
-    session = {"team": object()}
+    session = make_session_state(team=object())
     monkeypatch.setattr(
         callbacks.cl,
         "user_session",
@@ -216,7 +218,7 @@ def test仓储错误后恢复申请按钮而过期结果不恢复(monkeypatch):
         await callbacks.on_submit_log_knowledge(_Action())
         return events
 
-    session = {"team": object()}
+    session = make_session_state(team=object())
     monkeypatch.setattr(
         callbacks.cl,
         "user_session",

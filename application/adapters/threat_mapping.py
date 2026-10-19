@@ -11,7 +11,6 @@ from agent.shared.logger import get_logger
 from application.adapters.shared import (
     _failed,
     _needs_input,
-    _session_set,
     _success,
     run_member_stream,
 )
@@ -127,10 +126,8 @@ class ThreatMappingAdapter:
             item_count=len(typed_mappings),
             source_field=source_field,
         )
-        _session_set(context.session, "last_threat_data", mapping_rows)
-        _session_set(
-            context.session,
-            "latest_threat_artifact",
-            ThreatArtifactSlot(artifact=artifact, source_field=source_field),
+        context.session.last_threat_data = mapping_rows
+        context.session.latest_threat_artifact = ThreatArtifactSlot(
+            artifact=artifact, source_field=source_field
         )
         return _success(step, artifact)

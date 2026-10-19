@@ -5,14 +5,25 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 
 from application.file_input import simple_decode, build_simplified_data, commit_primary_dataset
-from application.session_state import PrimaryDatasetSnapshot
+from application.session_state import PrimaryDatasetSnapshot, SessionState
 from application.enum_mapping_attachments import commit_enum_mapping_attachment
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 from contracts.rule_source import RuleSourceFields
-from contracts.planner_models import PendingPlan
+
+@dataclass
+class BusinessSession(SessionState):
+    """V2 运行态附加身份和附件 ID；共享业务逻辑只消费 typed SessionState。"""
+    applied_attachment_ids: list[str] = field(default_factory=list)
+    submitter_id: str = "session-user"
+
+    def clear_decoded_data(self) -> None:
+        """沿用共享主数据生命周期，并清除 V2 附件提交去重状态。"""
+        super().clear_decoded_data()
+        self.applied_attachment_ids = []
+
 
 STATE_KEYS = (
     "current_execution", "previous_execution", "applied_attachment_ids", "decoded_data", "decoded_fields", "original_log", "simplified_data", "decoded_text",
@@ -38,26 +49,28 @@ def plain(value):
     return value
 
 
-def freeze_session(session):
-    """只保存业务生命周期所需状态，不序列化 Team、路径或运行时对象。"""
-    return {key: plain(session[key]) for key in STATE_KEYS if key in session and session[key] is not None}
+def freeze_session(session: SessionState) -> dict:
+    """只冻结明确的业务白名单属性，不序列化 Team、密钥或运行时路径。"""
+    if not isinstance(session, SessionState):
+        raise TypeError("typed_session_required")
+    return {key: plain(value) for key in STATE_KEYS if (value := getattr(session, key, None)) is not None}
 
 
-def restore_session(state):
-    """重建类型化引用槽与附件贡献集合，不读取展示用 last_* 作为输入。"""
-    session = copy.deepcopy(state)
+def restore_session(state: dict) -> BusinessSession:
+    """旧保护 Blob 仍是 JSON；运行态始终重建为 typed 子类，不恢复 dict 垫片。"""
+    values = {key: copy.deepcopy(state[key]) for key in STATE_KEYS if key in state}
     for key, model in (("latest_enum_artifact", EnumArtifactSlot), ("latest_threat_artifact", ThreatArtifactSlot)):
-        if session.get(key) is not None:
-            session[key] = model.model_validate(session[key])
-    if session.get("rule_source_fields") is not None:
-        session["rule_source_fields"] = RuleSourceFields.from_value(session["rule_source_fields"])
+        if values.get(key) is not None:
+            values[key] = model.model_validate(values[key])
+    if values.get("rule_source_fields") is not None:
+        values["rule_source_fields"] = RuleSourceFields.from_value(values["rule_source_fields"])
     from contracts.session_facts import ExecutionSummary
     for key in ("current_execution", "previous_execution"):
-        if session.get(key) is not None:
-            session[key] = ExecutionSummary.model_validate(session[key])
-    session["stale_enum_config_refs"] = set(session.get("stale_enum_config_refs", ()))
-    session["enum_pending_refills"] = {key: set(values) for key, values in session.get("enum_pending_refills", {}).items()}
-    return session
+        if values.get(key) is not None:
+            values[key] = ExecutionSummary.model_validate(values[key])
+    values["stale_enum_config_refs"] = set(values.get("stale_enum_config_refs") or ())
+    values["enum_pending_refills"] = {key: set(items) for key, items in (values.get("enum_pending_refills") or {}).items()}
+    return BusinessSession(**values)
 
 
 def state_digest(state):
@@ -79,7 +92,7 @@ def primary_session(path, snapshot):
         if result.get("status") != "success":
             raise ValueError("invalid_file_content")
         lines = raw_log_lines(path, media)
-    session = {}
+    session = BusinessSession()
     commit_primary_dataset(session, PrimaryDatasetSnapshot(
         decoded_data=result.get("decoded_json") if result.get("fields") else None, decoded_fields=result.get("fields", []),
         original_log=result.get("original_log"), simplified_data=build_simplified_data(result),
@@ -118,8 +131,7 @@ def config_payload(session, source, base=None, download=None):
     """把最新正式配置放入兼容映射族，Draft 始终编辑该版本而非旧配置。"""
     from agent.shared.mapping_utils import iter_normalize_entries
     from application.adapters.shared import _build_config_artifact
-    key = "decoded_data" if source == "session.decoded_config" else "mapped_sub_rules"
-    root = session[key]
+    root = session.decoded_data if source == "session.decoded_config" else session.mapped_sub_rules
     rules, paths, seen = [], [], set()
     for path, _, owner, _ in iter_normalize_entries(root, require_index=False):
         if path not in seen:

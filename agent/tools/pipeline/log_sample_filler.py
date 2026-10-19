@@ -11,6 +11,7 @@ from __future__ import annotations
 import re as _re
 
 from agent.shared.logger import get_logger
+from agent.tools.pipeline.common.json_utils import extract_json_body
 
 logger = get_logger("log_parser_pipeline")
 
@@ -84,7 +85,7 @@ def fill_sample_logs(
                 if not body_from_sample:
                     body_from_sample = _strip_header(existing_sample, header_end_marker)
                 if body_from_sample == existing_sample and "{" in existing_sample:
-                    body_from_sample = _extract_json_body(existing_sample) or existing_sample
+                    body_from_sample = extract_json_body(existing_sample) or existing_sample
                 detail_copy["real_samples"] = body_from_sample or existing_sample
             result["classification_details"].append(detail_copy)
             continue
@@ -141,21 +142,3 @@ def _strip_header(line: str, header_end_marker: str) -> str:
 
     body = strip_header_to_body(line, header_end_marker, is_json=True)
     return body.strip() if body and body != line else body
-
-
-def _extract_json_body(line: str) -> str | None:
-    """从一行日志中提取 JSON 子串（从第一个 { 到最后一个 }）。
-
-    适用于 syslog头+JSON 格式的日志行。
-
-    参数:
-        line: 完整日志行
-
-    返回:
-        JSON 子串（不含 syslog 头部），未找到时返回 None
-    """
-    json_start = line.find("{")
-    json_end = line.rfind("}")
-    if json_start != -1 and json_end > json_start:
-        return line[json_start:json_end + 1]
-    return None
