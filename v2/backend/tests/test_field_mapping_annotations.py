@@ -23,17 +23,18 @@ def bridge_result(tmp_path, classifier, monkeypatch=None):
     def adapters(team):
         result = create_default_adapters(team)
         result['field_mapping'] = FieldMappingAdapter(team, candidate_retriever=lambda _: {}, event_classifier=classifier)
+        if monkeypatch is not None:
+            result["add_fields"] = FailedAdd()
         return result
 
     if monkeypatch is not None:
         import application.threat_chain as chain
         class FailedAdd:
             async def execute(self, step, context, dependencies=None):
-                context.session['mapped_sub_rules'][0]['normalize'].append({'index': 'PARTIAL-PRIVATE', 'field': 'threat_type'})
+                context.session.mapped_sub_rules[0]['normalize'].append({'index': 'PARTIAL-PRIVATE', 'field': 'threat_type'})
                 return StepResult(step_id=step.step_id, operation_type=step.type, status=StepStatus.FAILED,
                                   error_code='test_chain_failed', message='controlled chain failure')
         monkeypatch.setattr(chain, 'batch_retrieve_candidates_table', lambda *args, **kwargs: {})
-        monkeypatch.setattr(chain, 'create_default_adapters', lambda team: {'add_fields': FailedAdd()})
 
     source = tmp_path/'input.txt'
     source.write_text('kind=a src=one\nkind=a src=two\nkind=a src=three\n', encoding='utf-8')

@@ -11,6 +11,7 @@ from agent.core.planner import PlannerService
 from agent.shared.logger import get_logger
 from application.adapters.composition import create_default_adapters
 from application.execution import ExecutionContext
+from application.execution_continuation import ExecutionContinuation
 from application.execution_policy import create_plan_executor
 from application.history import append_history, typed_conversation_history
 from application.model_runtime import resolve_session_config
@@ -61,6 +62,8 @@ async def _execute_plan_with_threat_transaction(
     progress_sink: ProgressSink,
     session_facts: SessionFacts | None = None,
     adapters: Mapping[str, Any] | None = None,
+    continuation: ExecutionContinuation | None = None,
+    checkpoint: dict | None = None,
 ) -> ExecutionReport:
     """显式威胁全链在配置副本上执行，整计划成功后才提交。"""
     transactional = is_threat_type_replacement_plan(plan.steps)
@@ -78,8 +81,14 @@ async def _execute_plan_with_threat_transaction(
             session=execution_session,
             session_facts=execution_facts,
             progress_sink=progress_sink,
+            checkpoint=checkpoint,
         ),
+        **({"continuation": continuation} if continuation is not None else {}),
     )
+    if checkpoint is not None:
+        # 持久化入口使用实际执行副本，不能把失败后未提交的外层会话当成 staging。
+        checkpoint["execution_session"] = execution_session
+        checkpoint["frozen_plan"] = DeterministicPlan(plan_id=plan.plan_id, steps=plan.steps).model_dump(mode="json")
     if transactional and report.status == StepStatus.SUCCESS:
         commit_threat_chain_session(execution_session, session)
     return report
@@ -266,6 +275,7 @@ def clear_session_data(session: SessionState) -> None:
     session.clear_mapping_results()
 
 
+
 async def run_user_request(
     *,
     session: SessionState,
@@ -274,6 +284,9 @@ async def run_user_request(
     progress_sink: ProgressSink,
     progress_plan_id: str,
     planner: PlannerService | Any | None = None,
+    adapters: Mapping[str, Any] | None = None,
+    on_plan: Callable[[PlanDecision], None] | None = None,
+    checkpoint: dict | None = None,
 ) -> PlanDecision | ExecutionReport:
     """规划并按决策执行一次自然语言请求，不包含界面渲染。
 
@@ -288,6 +301,9 @@ async def run_user_request(
             progress_sink=progress_sink,
             progress_plan_id=progress_plan_id,
             planner=planner,
+            adapters=adapters,
+            on_plan=on_plan,
+            checkpoint=checkpoint,
         )
 
 
@@ -299,6 +315,9 @@ async def _run_user_request_scoped(
     progress_sink: ProgressSink,
     progress_plan_id: str,
     planner: PlannerService | Any | None = None,
+    adapters: Mapping[str, Any] | None = None,
+    on_plan: Callable[[PlanDecision], None] | None = None,
+    checkpoint: dict | None = None,
 ) -> PlanDecision | ExecutionReport:
     """会话作用域内的实际规划与执行链（入口见 run_user_request）。"""
     logger.info(
@@ -342,6 +361,8 @@ async def _run_user_request_scoped(
         progress_plan_id=progress_plan_id,
     )
     decision = compile_explicit_threat_plan(decision, session)
+    if on_plan is not None:
+        on_plan(decision)
     logger.info(
         "[PLANNER] 决策完成: plan_id=%s decision=%s step_count=%s operations=%s",
         decision.plan_id,
@@ -431,6 +452,8 @@ async def _run_user_request_scoped(
         plan=decision,
         progress_sink=progress_sink,
         session_facts=session_facts,
+        adapters=adapters,
+        checkpoint=checkpoint,
     )
     # 执行后确定性续跑（#173）：字段映射判出威胁子规则时自动补全威胁类型链路
     final_report = await run_threat_chain_after_mapping(
@@ -439,6 +462,7 @@ async def _run_user_request_scoped(
         session=session,
         team=team,
         progress_sink=progress_sink,
+        adapters=adapters,
     )
     _record_execution_summary(session, final_report)
     append_history(session, "assistant", _assistant_history_content(final_report))
@@ -453,6 +477,8 @@ async def run_deterministic_plan(
     progress_sink: ProgressSink,
     on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None = None,
     adapters: Mapping[str, Any] | None = None,
+    continuation: ExecutionContinuation | None = None,
+    checkpoint: dict | None = None,
 ) -> ExecutionReport:
     """执行入口已提供全部参数的类型化确定性计划（同样绑定会话配置快照）。"""
     with model_runtime_scope(resolve_session_config(session)):
@@ -463,6 +489,8 @@ async def run_deterministic_plan(
             progress_sink=progress_sink,
             on_primary_report=on_primary_report,
             adapters=adapters,
+            continuation=continuation,
+            checkpoint=checkpoint,
         )
 
 
@@ -474,6 +502,8 @@ async def _run_deterministic_plan_scoped(
     progress_sink: ProgressSink,
     on_primary_report: Callable[[ExecutionReport], Awaitable[None]] | None,
     adapters: Mapping[str, Any] | None,
+    continuation: ExecutionContinuation | None,
+    checkpoint: dict | None,
 ) -> ExecutionReport:
     """会话作用域内的确定性计划执行链（入口见 run_deterministic_plan）。"""
     report = await _execute_plan_with_threat_transaction(
@@ -482,6 +512,8 @@ async def _run_deterministic_plan_scoped(
         plan=plan,
         progress_sink=progress_sink,
         adapters=adapters,
+        continuation=continuation,
+        checkpoint=checkpoint,
     )
     if on_primary_report is not None:
         await on_primary_report(report)
@@ -492,6 +524,7 @@ async def _run_deterministic_plan_scoped(
         session=session,
         team=team,
         progress_sink=progress_sink,
+        adapters=adapters,
     )
     _record_execution_summary(session, final_report)
     return final_report

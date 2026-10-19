@@ -231,6 +231,10 @@ def test_failed_or_late_apply_preserves_draft_and_formal_result(tmp_path,failure
 def test_old_failed_retry_cannot_overwrite_newer_edit_and_message_receipt_replays(tmp_path):
     client,store,conversation,worker,business,artifact,draft,file_id = setup(tmp_path)
     message = client.post(f"/api/v2/conversations/{conversation}/messages",json={"content":"original"},headers={"Idempotency-Key":"message"})
+    # 消息如今创建真实业务 Run；本用例专测 Draft 重试，明确取消该排队任务。
+    message_run = message.json()["run"]["id"]
+    cancel = store.issue_cancel_token("dev-user",message_run)
+    store.cancel("dev-user",message_run,cancel["token"])
     draft = save(client,draft,"a","源端口").json()["draft"]
     assert client.post(f"/api/v2/conversations/{conversation}/messages",json={"content":"original"},headers={"Idempotency-Key":"message"}).json()==message.json()
     queued = apply(client,draft).json()

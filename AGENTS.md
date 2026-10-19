@@ -8,7 +8,11 @@ GitHub Issues（`Jun-Wu05/ToolWithAgent`，用 `gh` CLI）。见 `docs/agents/is
 
 ### Issue 实施 SOP（worktree 隔离 + 小改动直通）
 
-每个 issue 从 master 开短命分支、PR 合并后即删分支：开分支 → 领取协议复核 → 实施（全量 pytest 绿）→ PR（`Closes #NNN`）→ 清理。**较大改动（≥3 文件/跨模块/需分组提交/主 worktree 有相交 WIP）建独立 git worktree 隔离；小改动按判据直通**，判据表见 `docs/agents/issue-workflow.md`。凡往 tracker 发布产物（issue/PR/spec），成文先给用户过目再发布，细则见 `docs/agents/issue-workflow.md` 的「Tracker 发布前确认」。
+默认每个 issue 从 master 开短命分支、PR 合并后即删分支；V2 集成期的基线例外见下节。流程：开分支 → 领取协议复核 → 实施（全量 pytest 绿）→ PR（`Closes #NNN`）→ 清理。**较大改动（≥3 文件/跨模块/需分组提交/主 worktree 有相交 WIP）建独立 git worktree 隔离；小改动按判据直通**，判据表见 `docs/agents/issue-workflow.md`。凡往 tracker 发布产物（issue/PR/spec），成文先给用户过目再发布，细则见 `docs/agents/issue-workflow.md` 的「Tracker 发布前确认」。
+
+### V2 集成开发
+
+V2 Issue 开工、同步 master、功能合入和最终交付时，先执行 [Issue 实施 SOP](docs/agents/issue-workflow.md) 的「V2 集成开发」规则。长期集成分支为 `codex/v2-development`；Chainlit 优化继续进入 master，代码合入与默认入口切换分别验收。
 
 ### 自动验证授权
 

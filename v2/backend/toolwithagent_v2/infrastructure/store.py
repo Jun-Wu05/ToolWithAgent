@@ -73,13 +73,17 @@ class Store:
             row = self.owns(db, conversation_id, owner_id)
             messages = [dict(r) for r in db.execute("SELECT id,actor,kind,content_json,created_at FROM messages WHERE conversation_id=? ORDER BY created_at,id", (conversation_id,))]
             for m in messages:
-                m["content"] = json.loads(m.pop("content_json"))["text"]
+                payload = json.loads(m.pop("content_json"))
+                m["content"] = payload["text"]
+                m["run_id"] = payload.get("run_id")
             files = [self._file(r) for r in db.execute("SELECT * FROM files WHERE conversation_id=? ORDER BY created_at,id", (conversation_id,))]
             current_file, _ = self._current_mapping_input(db, conversation_id)
             for file in files:
                 file["mapping_eligible"] = bool(current_file and file["id"] == current_file["id"] and file["parse_status"] == "succeeded")
             runs = [self._run(r) for r in db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? ORDER BY r.queued_at,r.id", (conversation_id,))]
-            return {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs, "artifacts": self._artifacts(db, conversation_id), "drafts": [self._draft_response(db,draft,summary=True) for draft in db.execute("SELECT * FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') ORDER BY created_at,id", (conversation_id,owner_id))]}
+            result = {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs, "artifacts": self._artifacts(db, conversation_id), "drafts": [self._draft_response(db,draft,summary=True) for draft in db.execute("SELECT * FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') ORDER BY created_at,id", (conversation_id,owner_id))]}
+            result.update(self._conversation_facts(db, owner_id, conversation_id))
+            return result
 
     def create_message(self, owner_id, conversation_id, content, idempotency_key=None):
         content = content.strip()
@@ -96,18 +100,35 @@ class Store:
                     if receipt["request_sha256"] != request_hash:
                         raise ValueError("idempotency_key_reused")
                     return json.loads(receipt["result_json"])
-            if db.execute("SELECT 1 FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') AND changed_count>0 LIMIT 1", (conversation_id,owner_id)).fetchone():
-                raise ValueError("draft_resolution_required")
+            from application.request_runtime import is_explicit_clear_command
+            clear = is_explicit_clear_command(content)
+            if clear:
+                # 冻结清空范围，之后上传的新输入不属于本次用户命令。
+                clear_boundary = {"file_ids": [row["id"] for row in db.execute("SELECT id FROM files WHERE conversation_id=?", (conversation_id,))],
+                    "artifact_ids": [row["id"] for row in db.execute("SELECT id FROM artifacts WHERE conversation_id=?", (conversation_id,))],
+                    "run_ids": [row["id"] for row in db.execute("SELECT r.id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=?", (conversation_id,))]}
+                # 入队即取消旧活动运行，释放同会话串行队列并关闭旧 Worker 的发布资格。
+                self._cancel_business_runs(db, conversation_id)
+                db.execute("UPDATE drafts SET status='discarded',updated_at=?,revision=revision+1 WHERE conversation_id=? AND status IN ('active','applying')", (timestamp, conversation_id))
+            else:
+                if db.execute("SELECT 1 FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') AND changed_count>0 LIMIT 1", (conversation_id,owner_id)).fetchone():
+                    raise ValueError("draft_resolution_required")
+                self._business_command_guard(db, owner_id, conversation_id)
             db.execute("INSERT INTO messages(id,conversation_id,actor,kind,content_json,created_at) VALUES(?,?,?,?,?,?)", (message_id, conversation_id, "user", "text", json.dumps({"text": content}, ensure_ascii=False), timestamp))
             db.execute("UPDATE conversations SET updated_at=?,revision=revision+1 WHERE id=?", (timestamp, conversation_id))
             self._event(db, conversation_id, "message_created", "message", message_id, {"actor": "user"})
-            result = {"id": message_id, "actor": "user", "kind": "text", "content": content, "created_at": timestamp}
+            snapshot = {"clear_boundary": clear_boundary} if clear else self._freeze_business(db, conversation_id)
+            snapshot.update({"message_id": message_id, "user_text": content})
+            queued = self._enqueue_task(db, owner_id, conversation_id, "business_clear" if clear else "user_request", snapshot)
+            result = {"id": message_id, "actor": "user", "kind": "text", "content": content, "created_at": timestamp, **queued}
             if idempotency_key:
                 db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(), owner_id, "message:" + conversation_id, idempotency_key, request_hash, "completed", json.dumps(result, ensure_ascii=False), timestamp))
             db.commit()
         return result
 
-    def upload(self, owner_id, conversation_id, upload, idempotency_key=None):
+    def upload(self, owner_id, conversation_id, upload, idempotency_key=None, role="primary"):
+        if role not in {"primary", "enum_mapping"}:
+            raise ValueError("invalid_upload_role")
         with connect(self.path) as db:
             self.owns(db, conversation_id, owner_id)
         original = Path(upload.filename or "upload").name[:255]
@@ -115,6 +136,8 @@ class Store:
         media = {".csv":"text/csv", ".txt":"text/plain", ".log":"text/plain", ".json":"application/json", ".jsonl":"application/x-ndjson", ".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".b64":"text/plain"}.get(suffix)
         if media is None:
             raise ValueError("unsupported_file_type")
+        if role == "enum_mapping" and suffix != ".xlsx":
+            raise ValueError("enum_attachment_requires_xlsx")
         stage = self.root / "uploads" / (uid() + ".stage")
         digest = hashlib.sha256()
         size = 0
@@ -131,7 +154,7 @@ class Store:
             if size == 0:
                 raise ValueError("empty_file")
             sha = digest.hexdigest()
-            request_hash = hashlib.sha256(json.dumps([conversation_id, original, media, sha], separators=(",", ":")).encode()).hexdigest()
+            request_hash = hashlib.sha256(json.dumps([conversation_id, original, media, sha, role], separators=(",", ":")).encode()).hexdigest()
             key = f"uploads/{sha[:2]}/{sha}"
             final = self.root / key
             final.parent.mkdir(parents=True, exist_ok=True)
@@ -150,13 +173,14 @@ class Store:
                             raise ValueError("idempotency_key_reused")
                         return json.loads(receipt["result_json"])
                 db.execute("INSERT INTO files(id,owner_id,conversation_id,original_name,media_type,size,sha256,storage_key,parse_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (file_id, owner_id, conversation_id, original, media, size, sha, key, "queued", timestamp, timestamp))
+                db.execute("UPDATE files SET role=? WHERE id=?", (role, file_id))
                 db.execute("INSERT INTO tasks(id,conversation_id,owner_id,type,status,current_run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (task_id, conversation_id, owner_id, "file_ingest", "queued", run_id, timestamp, timestamp))
-                db.execute("INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,queued_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (run_id, task_id, 1, "queued", json.dumps({"file_id": file_id, "sha256": sha, "storage_key": key, "media_type": media}, separators=(",", ":")), timestamp, timestamp, timestamp))
+                db.execute("INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,queued_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (run_id, task_id, 1, "queued", json.dumps({"file_id": file_id, "sha256": sha, "storage_key": key, "media_type": media, "role": role, "original_name": original}, separators=(",", ":")), timestamp, timestamp, timestamp))
                 db.execute("UPDATE conversations SET updated_at=?,revision=revision+1 WHERE id=?", (timestamp, conversation_id))
                 self._run_event(db, run_id, "run_queued", "queued")
                 self._event(db, conversation_id, "file_uploaded", "file", file_id, {"file_id": file_id, "name": original})
                 self._event(db, conversation_id, "run_queued", "run", run_id, {"run_id": run_id, "status": "queued"})
-                result = {"file": {"id": file_id, "name": original, "media_type": media, "size": size, "sha256": sha, "parse_status": "queued", "created_at": timestamp}, "task": {"id": task_id, "status": "queued"}, "run": {"id": run_id, "status": "queued"}}
+                result = {"file": {"id": file_id, "name": original, "media_type": media, "size": size, "sha256": sha, "parse_status": "queued", "role": role, "created_at": timestamp}, "task": {"id": task_id, "status": "queued"}, "run": {"id": run_id, "status": "queued"}}
                 if idempotency_key:
                     db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(), owner_id, "upload:" + conversation_id, idempotency_key, request_hash, "completed", json.dumps(result, ensure_ascii=False), timestamp))
                 db.commit()
@@ -183,7 +207,7 @@ class Store:
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             self.owns(db, conversation_id, owner_id)
-            file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=?", (file_id, conversation_id, owner_id)).fetchone()
+            file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=? AND is_active=1", (file_id, conversation_id, owner_id)).fetchone()
             if file is None:
                 raise LookupError("file_not_found")
             if file["parse_status"] != "succeeded":
@@ -197,8 +221,8 @@ class Store:
             return result
 
     def _current_mapping_input(self, db, conversation_id):
-        file = db.execute("SELECT * FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
-        classification = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind='log_classification' AND a.status='published' ORDER BY a.created_at DESC,a.id DESC LIMIT 1", (conversation_id,)).fetchone()
+        file = db.execute("SELECT * FROM files WHERE conversation_id=? AND role='primary' AND is_active=1 AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
+        classification = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind='log_classification' AND a.status='published' AND json_extract(r.input_snapshot_json,'$.file_id')=? ORDER BY a.created_at DESC,a.id DESC LIMIT 1", (conversation_id, file['id'] if file else None)).fetchone()
         return file, classification
 
     def enqueue_field_mapping(self, owner_id, conversation_id, *, file_id=None, classification_artifact_id=None,
@@ -235,7 +259,7 @@ class Store:
                     raise ValueError("mapping_input_stale")
             else:
                 source = None
-            file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=?", (file_id, conversation_id, owner_id)).fetchone()
+            file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=? AND is_active=1", (file_id, conversation_id, owner_id)).fetchone()
             if file is None:
                 raise LookupError("file_not_found")
             if file["parse_status"] != "succeeded":
@@ -249,6 +273,7 @@ class Store:
             if source is not None:
                 snapshot.update({"source_artifact_id":source["id"], "source_sha256":source["sha256"], "source_storage_key":source["storage_key"],
                                  "feature_field":json.loads(source["input_snapshot_json"]).get("feature_field")})
+            snapshot["business_inputs"] = self._freeze_business(db, conversation_id)["business_inputs"]
             result = self._enqueue_task(db, owner_id, conversation_id, "field_mapping", snapshot)
             if idempotency_key:
                 db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(), owner_id, scope, idempotency_key, request_hash, "completed", json.dumps(result), now()))
@@ -538,7 +563,7 @@ class Store:
             metadata = json.loads(artifact["metadata_json"])
             if not metadata.get("submission_eligible"):
                 raise ValueError("submission_not_eligible")
-            latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
+            latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? AND role='primary' AND is_active=1 AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
             latest_artifact = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='log_classification' AND status='published' ORDER BY created_at DESC,id DESC LIMIT 1", (artifact["conversation_id"],)).fetchone()
             if (not latest_file or latest_file["id"] != json.loads(artifact["input_snapshot_json"])["file_id"]
                 or not latest_artifact or latest_artifact["id"] != artifact_id):
@@ -558,7 +583,7 @@ class Store:
 
     def _submission_is_current_db(self, db, claim):
         snapshot = claim["input"]
-        file = db.execute("SELECT id FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1",
+        file = db.execute("SELECT id FROM files WHERE conversation_id=? AND role='primary' AND is_active=1 AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1",
                           (claim["conversation_id"],)).fetchone()
         artifact = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind='log_classification' AND status='published' ORDER BY created_at DESC,id DESC LIMIT 1",
                               (claim["conversation_id"],)).fetchone()
@@ -594,10 +619,10 @@ class Store:
     def _artifacts(self, db, conversation_id):
         rows = db.execute("""SELECT a.*,r.input_snapshot_json FROM artifacts a
             JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=?
-            AND a.kind='log_classification' AND a.status='published' ORDER BY a.created_at,a.id""",
+            AND a.kind='log_classification' AND a.status IN ('published','stale') ORDER BY a.created_at,a.id""",
             (conversation_id,)).fetchall()
         result = []
-        latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
+        latest_file = db.execute("SELECT id FROM files WHERE conversation_id=? AND role='primary' AND is_active=1 AND parse_status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1", (conversation_id,)).fetchone()
         latest_artifact_id = rows[-1]["id"] if rows else None
         for row in rows:
             metadata = json.loads(row["metadata_json"])
@@ -620,8 +645,9 @@ class Store:
             result.append({"id": row["id"], "run_id": row["run_id"],
                 "file_id": json.loads(row["input_snapshot_json"])["file_id"],
                 "kind": row["kind"], "status": row["status"], "summary": metadata.get("summary", {}),
-                "submission_eligible": bool(metadata.get("submission_eligible")) and bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
-                "mapping_eligible": bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
+                "submission_eligible": row["status"] == "published" and bool(metadata.get("submission_eligible")) and bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
+                "current": row["status"] == "published" and bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
+                "mapping_eligible": row["status"] == "published" and bool(latest_file) and latest_file["id"] == json.loads(row["input_snapshot_json"])["file_id"] and row["id"] == latest_artifact_id,
                 "submission_status": status, "application_id": application_id,
                 "created_at": row["created_at"]})
         mapping_rows = db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind='field_mapping' AND a.status IN ('published','stale') ORDER BY a.created_at,a.id", (conversation_id,)).fetchall()
@@ -632,22 +658,34 @@ class Store:
             current = row["id"] == latest_mapping_id and self._mapping_is_current_db(db, {"conversation_id":conversation_id, "input":snapshot})
             result.append({"id":row["id"], "run_id":row["run_id"], "file_id":snapshot["file_id"],
                 "kind":row["kind"], "status":"published" if current else "stale", "current":current,
-                "source_artifact_id":snapshot.get("source_artifact_id"), "summary":json.loads(row["metadata_json"]).get("summary",{}),
+                "source_artifact_id":snapshot.get("source_artifact_id"), "message_id": snapshot.get("message_id"), "result_message_id": json.loads(row["metadata_json"]).get("result_message_id"), "config_ref": json.loads(row["metadata_json"]).get("config_ref", "session.mapped_sub_rules"), "summary":json.loads(row["metadata_json"]).get("summary",{}),
                 "created_at":row["created_at"]})
+        for row in db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind IN ('enum_values','threat_mapping','config_export') AND a.status IN ('published','stale') ORDER BY a.created_at,a.id", (conversation_id,)):
+            metadata = json.loads(row["metadata_json"])
+            snapshot = json.loads(row["input_snapshot_json"])
+            current = row["status"] == "published" and bool(latest_file) and latest_file["id"] == snapshot.get("file_id")
+            if row["kind"] == "config_export":
+                sources = db.execute("SELECT a.status,r.input_snapshot_json FROM artifact_edges e JOIN artifacts a ON a.id=e.source_artifact_id JOIN runs r ON r.id=a.run_id WHERE e.derived_artifact_id=? AND a.kind='field_mapping'", (row["id"],)).fetchall()
+                current = current and all(source["status"] == "published" and self._mapping_is_current_db(db, {"conversation_id": conversation_id, "input": json.loads(source["input_snapshot_json"])}) for source in sources)
+            result.append({"id": row["id"], "run_id": row["run_id"], "file_id": snapshot.get("file_id"), "kind": row["kind"], "status": "published" if current else "stale", "current": current, "summary": metadata.get("summary", {}), "source_field": metadata.get("source_field"), "message_id": metadata.get("message_id"), "result_message_id": metadata.get("result_message_id"), "created_at": row["created_at"]})
         return result
 
     def _file(self, row):
-        return {"id": row["id"], "name": row["original_name"], "media_type": row["media_type"], "size": row["size"], "sha256": row["sha256"], "parse_status": row["parse_status"], "created_at": row["created_at"]}
+        return {"id": row["id"], "name": row["original_name"], "media_type": row["media_type"], "size": row["size"], "sha256": row["sha256"], "parse_status": row["parse_status"], "role": row["role"], "active": bool(row["is_active"]), "created_at": row["created_at"]}
 
     def _run(self, row):
-        return {"id": row["id"], "task_id": row["task_id"], "kind": row["task_type"], "file_id": json.loads(row["input_snapshot_json"]).get("file_id"), "status": row["status"], "attempt": row["attempt"], "queued_at": row["queued_at"], "started_at": row["started_at"], "finished_at": row["finished_at"], "error_code": row["error_code"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+        return {"id": row["id"], "task_id": row["task_id"], "kind": row["task_type"], "message_id": json.loads(row["input_snapshot_json"]).get("message_id"), "file_id": json.loads(row["input_snapshot_json"]).get("file_id"), "status": row["status"], "attempt": row["attempt"], "queued_at": row["queued_at"], "started_at": row["started_at"], "finished_at": row["finished_at"], "error_code": row["error_code"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     def get_run(self, owner_id, run_id):
         with connect(self.path) as db:
             row = db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND t.owner_id=?", (run_id, owner_id)).fetchone()
             if row is None:
                 raise LookupError("run_not_found")
-            return self._run(row)
+            result = self._run(row)
+            result["events"] = [{**dict(event), "summary": json.loads(event["summary_json"])} for event in db.execute("SELECT sequence,scope_type,scope_id,event_type,status,summary_json,created_at FROM run_events WHERE run_id=? ORDER BY sequence", (run_id,))]
+            for event in result["events"]:
+                event.pop("summary_json")
+            return result
 
     def events(self, owner_id, conversation_id, after):
         with connect(self.path) as db:
@@ -727,11 +765,12 @@ class Store:
             db.commit()
             return True
 
-    def _assistant_message(self, db, conversation_id, message):
+    def _assistant_message(self, db, conversation_id, message, run_id=None):
         message_id = uid()
         db.execute("INSERT INTO messages(id,conversation_id,actor,kind,content_json,created_at) VALUES(?,?,?,?,?,?)",
-                   (message_id, conversation_id, "assistant", "text", json.dumps({"text": message}, ensure_ascii=False), now()))
+                   (message_id, conversation_id, "assistant", "text", json.dumps({"text": message, "run_id": run_id}, ensure_ascii=False), now()))
         self._event(db, conversation_id, "message_created", "message", message_id, {"actor": "assistant"})
+        return message_id
 
     def _owned_run(self, db, owner_id, run_id):
         row = db.execute("SELECT r.*,t.owner_id,t.conversation_id,t.current_run_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=? AND t.owner_id=?", (run_id, owner_id)).fetchone()
@@ -767,6 +806,9 @@ class Store:
                                      (owner_id, scope, idempotency_key)).fetchone()
                 if receipt:
                     return json.loads(receipt["result_json"])
+            frozen_input = json.loads(source["input_snapshot_json"])
+            if frozen_input.get("file_id") and not db.execute("SELECT 1 FROM files WHERE id=? AND is_active=1", (frozen_input["file_id"],)).fetchone():
+                raise ValueError("business_input_stale")
             if source["status"] not in ("succeeded", "failed", "cancelled"):
                 raise ValueError("run_not_retryable")
             current = db.execute("SELECT status FROM runs WHERE id=?", (source["current_run_id"],)).fetchone()
@@ -876,6 +918,10 @@ class Store:
             if row is None:
                 db.rollback()
                 return None
+            if claim["input"].get("business_inputs") and not self._business_current_db(db, claim):
+                self._record_state(db, row, "failed", "business_input_stale")
+                db.commit()
+                return None
             revision = db.execute("SELECT COALESCE(MAX(revision),0)+1 FROM execution_checkpoints WHERE run_id=?", (row["id"],)).fetchone()[0]
             checkpoint_id = uid()
             db.execute("INSERT INTO execution_checkpoints(id,run_id,continuation_json,revision,created_at) VALUES(?,?,?,?,?)",
@@ -905,13 +951,20 @@ class Store:
             return {"token": token, "run_id": run_id, "checkpoint_revision": prior["checkpoint_revision"],
                     "kind": prior["kind"], "payload": json.loads(prior["payload_json"]), "expires_at": prior["expires_at"]}
 
-    def confirm(self, owner_id, run_id, token, checkpoint_revision):
+    def confirm(self, owner_id, run_id, token, checkpoint_revision, idempotency_key=None):
         digest = hashlib.sha256(token.encode()).hexdigest()
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._owned_run(db, owner_id, run_id)
+            scope = "confirmation:" + run_id
+            request_digest, receipt = self._draft_receipt(db, owner_id, scope, idempotency_key, [digest, checkpoint_revision]) if idempotency_key else (None, None)
+            if receipt is not None:
+                return receipt
             if row["current_run_id"] != run_id or row["status"] != "waiting_confirmation":
                 raise ValueError("run_not_waiting")
+            frozen = json.loads(row["input_snapshot_json"])
+            if frozen.get("business_inputs") and not self._business_current_db(db, {"conversation_id": row["conversation_id"], "input": frozen}):
+                raise ValueError("continuation_stale")
             latest = db.execute("SELECT * FROM execution_checkpoints WHERE run_id=? ORDER BY revision DESC LIMIT 1", (run_id,)).fetchone()
             confirmation = db.execute("SELECT * FROM confirmations WHERE run_id=? AND status='pending' AND kind<>'cancel' AND token_sha256=?", (run_id, digest)).fetchone()
             if (latest is None or confirmation is None or latest["revision"] != checkpoint_revision
@@ -923,8 +976,11 @@ class Store:
             db.execute("UPDATE tasks SET status='queued',updated_at=?,revision=revision+1 WHERE id=?", (now(), row["task_id"]))
             self._run_event(db, run_id, "run_queued", "queued")
             self._event(db, row["conversation_id"], "run_queued", "run", run_id, {"run_id": run_id, "status": "queued", "resumed": True})
+            result = {"id": run_id, "status": "queued"}
+            if idempotency_key:
+                self._save_draft_receipt(db, owner_id, scope, idempotency_key, request_digest, result)
             db.commit()
-            return {"id": run_id, "status": "queued"}
+            return result
 
     def continuation(self, run_id):
         from application.execution_continuation import ExecutionContinuation
@@ -981,6 +1037,9 @@ class Store:
                 else:
                     version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE task_id=? AND kind=?", (row["task_id"],kind)).fetchone()[0]
                 artifact_id = uid()
+                metadata = dict(metadata or {})
+                if message:
+                    metadata["result_message_id"] = self._assistant_message(db, row["conversation_id"], message, row["id"])
                 db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                            (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata or {}, ensure_ascii=False), now(), len(content)))
                 if kind == "field_mapping" and claim["input"].get("source_artifact_id"):
@@ -991,8 +1050,6 @@ class Store:
                     db.execute("UPDATE drafts SET status='applied',updated_at=? WHERE id=? AND apply_run_id=?", (now(),claim["input"]["draft_id"],row["id"]))
                 self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id,
                             {"artifact_id": artifact_id, "run_id": row["id"], "kind": kind, "version": version})
-                if message:
-                    self._assistant_message(db, row["conversation_id"], message)
                 self._record_state(db, row, "succeeded")
                 db.commit()
                 return True
@@ -1131,3 +1188,308 @@ class Store:
             self._event(db, conversation_id, "run_queued", "run", run_id, {"run_id": run_id, "status": "queued"})
             db.commit()
         return {"task": {"id": task_id, "status": "queued"}, "run": {"id": run_id, "status": "queued"}}
+
+
+    def _business_command_guard(self, db, owner_id, conversation_id):
+        """未应用 Draft 或待确认方案必须先明确处理。"""
+        if db.execute("SELECT 1 FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') AND changed_count>0", (conversation_id, owner_id)).fetchone():
+            raise ValueError("draft_resolution_required")
+        if db.execute("SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? AND r.status='waiting_confirmation'", (conversation_id,)).fetchone():
+            raise ValueError("confirmation_resolution_required")
+
+    def _freeze_business(self, db, conversation_id):
+        """固定主数据、所有附件和唯一兼容类型化产物的身份与哈希。"""
+        file, classification = self._current_mapping_input(db, conversation_id)
+        snapshot = {key: file[key] for key in ("sha256", "storage_key", "media_type", "original_name")} if file else {}
+        snapshot["file_id"] = file["id"] if file else None
+        attachments = [dict(row) for row in db.execute("SELECT id,sha256,storage_key,media_type,original_name FROM files WHERE conversation_id=? AND role='enum_mapping' AND is_active=1 AND parse_status='succeeded' AND created_at>=? ORDER BY created_at,id", (conversation_id, file["created_at"] if file else "9999"))]
+        snapshot["classification_anchor"] = classification["id"] if classification else None
+        refs = {}
+        if file:
+            for row in db.execute("SELECT a.id,a.sha256,a.storage_key,a.kind FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.status='published' AND a.kind IN ('field_mapping','log_classification','enum_values','threat_mapping','business_state') AND json_extract(r.input_snapshot_json,'$.file_id')=? ORDER BY a.created_at,a.id", (conversation_id, file["id"])):
+                if row["kind"] == "field_mapping":
+                    source = db.execute("SELECT input_snapshot_json FROM runs WHERE id=(SELECT run_id FROM artifacts WHERE id=?)", (row["id"],)).fetchone()
+                    if json.loads(source[0]).get("classification_anchor") != snapshot["classification_anchor"]:
+                        continue
+                refs[row["kind"]] = dict(row)
+        snapshot["classification_anchor"] = classification["id"] if classification else None
+        snapshot["business_inputs"] = {"primary": {"id": snapshot["file_id"], "sha256": snapshot.get("sha256")}, "attachments": attachments, "refs": refs}
+        return snapshot
+
+    def _business_current_db(self, db, claim):
+        """发布和确认重查真实版本，安全事实计数相同也不能放过内容变化。"""
+        current = self._freeze_business(db, claim["conversation_id"])
+        frozen = claim["input"].get("business_inputs")
+        if frozen != current["business_inputs"]:
+            return False
+        if claim["input"].get("file_id"):
+            try:
+                self._read_blob(claim["input"], "uploads")
+            except ValueError:
+                return False
+        for reference in [*frozen["attachments"], *frozen["refs"].values()]:
+            try:
+                self._read_blob(reference, "uploads" if reference in frozen["attachments"] else "artifacts")
+            except ValueError:
+                return False
+        return True
+
+    def business_is_current(self, claim):
+        with connect(self.path) as db:
+            return self._business_current_db(db, claim)
+
+    def enqueue_operation(self, owner_id, conversation_id, step, source_artifact_id=None, config_artifact_id=None, idempotency_key=None):
+        """按钮只接受完整 StepSpec；结果卡 ID 必须匹配当前显式来源。"""
+        from contracts.planner_models import DeterministicPlan
+        if step.depends_on or getattr(step, "source_ref", "").startswith("step:"):
+            raise ValueError("button_dependencies_forbidden")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.owns(db, conversation_id, owner_id)
+            scope = "operation:" + conversation_id
+            request = [step.model_dump(mode="json"), source_artifact_id, config_artifact_id]
+            digest, receipt = self._draft_receipt(db, owner_id, scope, idempotency_key, request) if idempotency_key else (None, None)
+            if receipt is not None:
+                return receipt
+            self._business_command_guard(db, owner_id, conversation_id)
+            snapshot = self._freeze_business(db, conversation_id)
+            refs = snapshot["business_inputs"]["refs"]
+            source = getattr(step, "source_ref", None)
+            kind = {"session.artifacts.enum_values": "enum_values", "session.artifacts.threat_mapping": "threat_mapping", "session.log_classification.entry_rules": "log_classification", "session.log_classification.sub_rules": "log_classification"}.get(source)
+            if source_artifact_id and (not kind or refs.get(kind, {}).get("id") != source_artifact_id):
+                raise ValueError("artifact_source_stale")
+            if config_artifact_id and refs.get("field_mapping", {}).get("id") != config_artifact_id:
+                raise ValueError("config_source_stale")
+            plan = DeterministicPlan(plan_id=uid(), steps=(step,))
+            snapshot["plan"] = plan.model_dump(mode="json")
+            result = self._enqueue_task(db, owner_id, conversation_id, "business_operation", snapshot)
+            if idempotency_key:
+                self._save_draft_receipt(db, owner_id, scope, idempotency_key, digest, result)
+            db.commit()
+            return result
+
+    def _read_blob(self, reference, directory="artifacts"):
+        """固定目录与 SHA 校验用于所有输入和本人内容接口。"""
+        key = reference["storage_key"]
+        if not isinstance(key, str) or not key.startswith(directory + "/") or ".." in key.split("/"):
+            raise ValueError("artifact_corrupt")
+        path = (self.root / key).resolve()
+        if not path.is_relative_to((self.root / directory).resolve()):
+            raise ValueError("artifact_corrupt")
+        try:
+            content = path.read_bytes()
+        except OSError:
+            raise ValueError("artifact_corrupt") from None
+        if hashlib.sha256(content).hexdigest() != reference["sha256"]:
+            raise ValueError("artifact_corrupt")
+        return content
+
+    def read_business_session(self, claim):
+        """从冻结 Blob 重建内存副本，真实值不进入 SessionFacts 或事件投影。"""
+        from toolwithagent_v2.runtime.postprocessing import BusinessSession, primary_session, restore_session, attach_enum, configuration_root
+        snapshot = claim["input"]
+        refs = snapshot["business_inputs"]["refs"]
+        state = json.loads(self._read_blob(refs["business_state"])) if "business_state" in refs else None
+        session = restore_session(state) if state else (primary_session(self.root / snapshot["storage_key"], snapshot) if snapshot["file_id"] else BusinessSession())
+        base = json.loads(self._read_blob(refs["field_mapping"])) if "field_mapping" in refs else None
+        if base:
+            source = base.get("configuration_source", "session.mapped_sub_rules")
+            if source == "session.decoded_config":
+                session.decoded_data = configuration_root(base)
+            else:
+                session.mapped_sub_rules = configuration_root(base)
+            with connect(self.path) as db:
+                previous = db.execute("SELECT input_snapshot_json FROM runs WHERE id=(SELECT run_id FROM artifacts WHERE id=?)", (refs["field_mapping"]["id"],)).fetchone()
+                fields = json.loads(previous[0]).get("source_fields")
+            if fields:
+                from contracts.rule_source import RuleSourceFields
+                session.rule_source_fields = RuleSourceFields.from_value(fields)
+        if "log_classification" in refs:
+            classification = json.loads(self._read_blob(refs["log_classification"]))["classification"]
+            if base is None and session.log_classification != classification:
+                from application.session_state import commit_log_classification
+                commit_log_classification(session, classification)
+            else:
+                session.log_classification = classification
+        from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
+        for kind, key, model in (("enum_values", "latest_enum_artifact", EnumArtifactSlot), ("threat_mapping", "latest_threat_artifact", ThreatArtifactSlot)):
+            if kind in refs:
+                artifact = json.loads(self._read_blob(refs[kind]))
+                slot = model.model_validate({"artifact": artifact, "source_field": artifact.get("field") if kind == "enum_values" else artifact.get("source_field")})
+                if kind == "enum_values":
+                    session.latest_enum_artifact = slot
+                else:
+                    session.latest_threat_artifact = slot
+        applied = set(session.applied_attachment_ids)
+        for attachment in snapshot["business_inputs"]["attachments"]:
+            self._read_blob(attachment, "uploads")
+            if attachment["id"] not in applied:
+                attach_enum(session, self.root / attachment["storage_key"], self.root / "staging")
+                applied.add(attachment["id"])
+        session.applied_attachment_ids = sorted(applied)
+        return session, base
+
+    def artifact_content(self, owner_id, artifact_id):
+        with connect(self.path) as db:
+            row = db.execute("SELECT a.* FROM artifacts a JOIN tasks t ON t.id=a.task_id WHERE a.id=? AND t.owner_id=? AND a.kind IN ('field_mapping','log_classification','enum_values','threat_mapping','config_export') AND a.status IN ('published','stale')", (artifact_id, owner_id)).fetchone()
+            if row is None:
+                raise LookupError("artifact_not_found")
+        return json.loads(self._read_blob(row))
+
+    def artifact_download(self, owner_id, artifact_id):
+        from contracts.download_naming import download_filename
+        from io import BytesIO
+        from openpyxl import Workbook
+        payload = self.artifact_content(owner_id, artifact_id)
+        with connect(self.path) as db:
+            row = db.execute("SELECT kind,created_at FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
+        kind = row["kind"]
+        if kind == "field_mapping":
+            name, content = self.mapping_download(owner_id, artifact_id)
+            return name, content, "text/plain; charset=utf-8"
+        timestamp = datetime.fromisoformat(row["created_at"]).strftime("%Y%m%d_%H%M%S")
+        if kind == "config_export":
+            name, content, media = download_filename(payload["download_kind"], timestamp), payload["content"].encode("utf-8"), "text/plain; charset=utf-8"
+        elif kind == "threat_mapping":
+            workbook = Workbook(); sheet = workbook.active; sheet.title = "threat_mapping"
+            sheet.append(["mappingType", "orgValue", "mappingValue"])
+            for item in payload["mappings"]:
+                sheet.append([item["mapping_type"], item["original_value"], item["mapped_value"]])
+            output = BytesIO(); workbook.save(output); workbook.close()
+            name, content, media = download_filename(kind, timestamp), output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        else:
+            downloadable = ({"field": payload["field"], "regex": payload["regex"], "original_log": payload["original_log"], "value": payload["values"]}
+                            if kind == "enum_values" else payload["classification"])
+            name, content, media = download_filename(kind, timestamp), json.dumps(downloadable, ensure_ascii=False, indent=4).encode("utf-8"), "application/json; charset=utf-8"
+        with connect(self.path) as db:
+            db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason) VALUES(?,?,?,?,?,?,?)", (uid(), owner_id, "artifact_download", "artifact", artifact_id, now(), ""))
+        return name, content, media
+
+    def _cancel_business_runs(self, db, conversation_id, exclude_run_id=None):
+        """显式清空取消旧运行及令牌，保留消息、草稿和产物历史。"""
+        rows = db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? AND r.status IN ('queued','running','waiting_confirmation')", (conversation_id,)).fetchall()
+        for row in rows:
+            if row["id"] == exclude_run_id:
+                continue
+            db.execute("UPDATE confirmations SET status='superseded',rotated_at=? WHERE run_id=? AND status='pending'", (now(), row["id"]))
+            self._record_state(db, row, "cancelled", "business_cleared")
+
+    def clear_business(self, worker_id, claim):
+        """在领取 fence 的同一事务中清空业务输入，历史 Blob 保持本人可读。"""
+        from application.request_runtime import clear_session_data
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._valid_claim(db, worker_id, claim)
+            if row is None:
+                return False
+            boundary = claim["input"]["clear_boundary"]
+            # 只清理安全的生命周期引用，不读取或解析即将作废的业务 Blob。
+            from toolwithagent_v2.runtime.postprocessing import BusinessSession
+            lifecycle = BusinessSession(applied_attachment_ids=list(boundary["file_ids"]))
+            clear_session_data(lifecycle)
+            for file_id in boundary["file_ids"]:
+                db.execute("UPDATE files SET is_active=0 WHERE id=? AND conversation_id=?", (file_id, row["conversation_id"]))
+            for artifact_id in boundary["artifact_ids"]:
+                db.execute("UPDATE artifacts SET status='stale' WHERE id=? AND conversation_id=? AND status='published'", (artifact_id, row["conversation_id"]))
+                db.execute("UPDATE drafts SET status='discarded',updated_at=?,revision=revision+1 WHERE base_artifact_id=? AND conversation_id=? AND status IN ('active','applying')", (now(), artifact_id, row["conversation_id"]))
+            for run_id in boundary["run_ids"]:
+                db.execute("DELETE FROM execution_checkpoints WHERE run_id=?", (run_id,))
+            if self._valid_claim(db, worker_id, claim) is None:
+                db.rollback()
+                return False
+            self._assistant_message(db, row["conversation_id"], "业务数据已清空，历史结果仍可查看和下载。", row["id"])
+            self._event(db, row["conversation_id"], "business_cleared", "run", row["id"], {"run_id": row["id"]})
+            self._record_state(db, row, "succeeded")
+            db.commit()
+            return True
+
+    def publish_business(self, worker_id, claim, artifacts, message=None):
+        """同一事务发布本次全部产物、血缘、消息与 outbox，拒绝迟到写入。"""
+        staged = []
+        try:
+            for artifact in artifacts:
+                content = json.dumps(artifact["payload"], ensure_ascii=False).encode("utf-8")
+                sha = hashlib.sha256(content).hexdigest(); key = f"artifacts/{sha[:2]}/{sha}"
+                stage = self.root / "staging" / (uid() + ".stage")
+                with stage.open("wb") as handle:
+                    handle.write(content); handle.flush(); os.fsync(handle.fileno())
+                if hashlib.sha256(stage.read_bytes()).hexdigest() != sha:
+                    raise ValueError("staging_hash_mismatch")
+                staged.append((artifact, content, sha, key, stage))
+            with connect(self.path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = self._valid_claim(db, worker_id, claim)
+                if row is None:
+                    return False
+                if claim["input"].get("business_inputs") and not self._business_current_db(db, claim):
+                    self._record_state(db, row, "failed", "business_input_stale")
+                    self._assistant_message(db, row["conversation_id"], "输入或配置版本已变化，请重新发起操作。")
+                    db.commit(); return True
+                result_message_id = self._assistant_message(db, row["conversation_id"], message, row["id"]) if message else None
+                created = {}
+                for artifact, content, sha, key, stage in staged:
+                    final = self.root / key; final.parent.mkdir(parents=True, exist_ok=True); os.replace(stage, final)
+                    kind = artifact["kind"]; payload = artifact["payload"]
+                    version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM artifacts WHERE conversation_id=? AND kind=?", (row["conversation_id"], kind)).fetchone()[0]
+                    db.execute("UPDATE artifacts SET status='stale' WHERE conversation_id=? AND kind=? AND status='published'", (row["conversation_id"], kind))
+                    artifact_id = uid()
+                    created[kind] = artifact_id
+                    summary = {"item_count": payload.get("item_count", 0)}
+                    if kind == "log_classification":
+                        from toolwithagent_v2.runtime.worker import Worker
+                        summary = Worker._summary(payload, payload["total_lines"])
+                    if kind == "field_mapping":
+                        from toolwithagent_v2.runtime.mapping_projection import mapping_summary
+                        summary = mapping_summary(payload)
+                    metadata = {"summary": summary, "submission_eligible": bool(payload.get("submission_eligible")), "config_ref": payload.get("configuration_source", "session.mapped_sub_rules") if kind == "field_mapping" else None, "source_field": payload.get("field", payload.get("source_field")), "message_id": claim["input"].get("message_id"), "result_message_id": result_message_id}
+                    db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata, ensure_ascii=False), now(), len(content)))
+                    for source in claim["input"].get("business_inputs", {}).get("refs", {}).values():
+                        if kind == "config_export" and "field_mapping" in created and source["kind"] == "field_mapping":
+                            continue  # 导出绑定本轮新配置，旧配置仍是新配置的输入血缘。
+                        db.execute("INSERT OR IGNORE INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) VALUES(?,?,?)", (source["id"], artifact_id, kind))
+                    self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id, {"artifact_id": artifact_id, "run_id": row["id"], "kind": kind, "version": version})
+                for artifact in artifacts:
+                    for source_kind in artifact.get("source_kinds", ()):
+                        if source_kind in created and source_kind != artifact["kind"]:
+                            db.execute("INSERT OR IGNORE INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) VALUES(?,?,?)", (created[source_kind], created[artifact["kind"]], artifact["kind"]))
+                if "config_export" in created and "field_mapping" in created:
+                    db.execute("INSERT OR IGNORE INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) VALUES(?,?,?)", (created["field_mapping"], created["config_export"], "config_export"))
+                if self._valid_claim(db, worker_id, claim) is None:
+                    return False
+                self._record_state(db, row, "succeeded")
+                db.commit(); return True
+        finally:
+            for _, _, _, _, stage in staged:
+                stage.unlink(missing_ok=True)
+
+
+    def _conversation_facts(self, db, owner_id, conversation_id):
+        """复用安全事实投影供按钮点名；内容损坏明确禁用，不冒充空会话。"""
+        from application.log_privacy import private_business_logging
+        from application.session_projection import build_session_facts
+        snapshot = self._freeze_business(db, conversation_id)
+        try:
+            if snapshot.get("file_id"):
+                self._read_blob(snapshot, "uploads")
+            with private_business_logging():
+                session, _ = self.read_business_session({"owner_id": owner_id, "conversation_id": conversation_id, "input": snapshot})
+                full = build_session_facts(session).model_dump(mode="json")
+                facts = {key: full[key] for key in ("has_logs", "has_log_classification", "has_decoded_config", "available_config_refs", "enum_mapping_target_fields", "enum_mapping_row_count", "mapped_sub_rule_count", "referenceable_artifacts")}
+            return {"session_facts": facts, "session_facts_error": None}
+        except (ValueError, LookupError, OSError, KeyError, TypeError):
+            return {"session_facts": None, "session_facts_error": "business_input_unavailable"}
+
+
+    def record_progress(self, worker_id, claim, scope_id, summary):
+        """在写锁内验证当前发布资格，只记录 V2 sink 的安全白名单。"""
+        safe = {key: summary[key] for key in ("phase", "progress_status", "operation", "dependency_scope_ids")}
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._valid_claim(db, worker_id, claim)
+            if row is None:
+                return False
+            sequence = db.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM run_events WHERE run_id=?", (claim["id"],)).fetchone()[0]
+            db.execute("INSERT INTO run_events(id,run_id,sequence,scope_type,scope_id,event_type,status,summary_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (uid(), claim["id"], sequence, "step", scope_id, "run_progress", "running", json.dumps(safe, separators=(",", ":")), now()))
+            self._event(db, row["conversation_id"], "run_progress", "run", claim["id"], {"run_id": claim["id"], "status": "running", "scope_id": scope_id, **safe})
+            db.commit()
+            return True
