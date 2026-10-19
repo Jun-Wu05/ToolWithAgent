@@ -56,7 +56,6 @@ toolswithagent/
 │   ├── core/                        # 核心层
 │   │   ├── team.py                  # 专业 Agent 注册表（FieldMappingAgent / ThreatAgent，无自主路由）
 │   │   ├── planner.py               # 独立 PlannerAgent（ADR-0005）
-│   │   ├── agent.py                 # 上传解码兼容入口与历史 simple_encode
 │   │   ├── model_config.py          # 多 Provider 模型配置（SiFlow/DeepSeek）
 │   │   ├── standard_field_catalog.py # 只读标准字段 schema、资源与确定性 lookup
 │   │   ├── field_retriever.py       # Embedding 语义检索（缓存 + 排除 + 候选排序）
@@ -64,7 +63,6 @@ toolswithagent/
 │   ├── tools/                       # Agent 工具集
 │   │   ├── standard_mapper.py       # 字段映射工具
 │   │   ├── enum_field_tool.py       # 枚举映射表读取
-│   │   ├── base64_tool.py           # Base64 编解码
 │   │   ├── rule_generator/          # 解析规则生成（入口/子规则、字段映射回写）
 │   │   ├── pipeline/                # 日志解析 Pipeline（格式识别/特征定位/分类策略）
 │   │   └── log_pattern_store.py     # 日志模式知识库
@@ -80,9 +78,7 @@ toolswithagent/
 │   ├── threat_type_config.json      # 威胁类型映射配置
 │   ├── field_synonyms.json          # 字段同义词表（en/zh 双字段，缩写展开 + 中文桥接）
 │   ├── tag_rules.json               # 字段标签规则（token 级匹配）
-│   ├── knowledge_base/              # 实体模式与合并报告
-│   ├── 标准字段.txt / 空规则.txt     # 标准字段列表（625条）等
-│   └── 对象.xlsx                    # 系统属性映射表
+│   └── 标准字段.txt / 空规则.txt     # 标准字段列表（625条）等
 │
 ├── evaluation/                      # 真实模型语义评测
 │   └── planner_semantic_eval.py     # Planner 语义稳定性评测脚本
@@ -90,7 +86,7 @@ toolswithagent/
 ├── tests/                           # 离线回归测试（pytest）
 │
 └── docs/                            # 项目文档
-    ├── adr/                         # 架构决策记录（ADR-0001 ~ 0009）
+    ├── adr/                         # 架构决策记录（ADR-0001 ~ 0016）
     ├── architecture/                # 架构概览、代码级设计、统一 Planner 架构、测试场景手册等
     ├── prd/                         # 产品需求文档
     └── agents/                      # Agent 工作流说明（issue 跟踪 / triage 标签 / 领域文档）
@@ -144,7 +140,7 @@ chainlit run web/chainlit_app.py
 | [测试场景手册](docs/architecture/测试场景手册.md) | 冒烟测试场景与预期 |
 | [ADR-0009](docs/adr/0009-application-runtime-ownership.md) | Application 运行时归属、依赖方向与迁移边界 |
 | [源码分析地图](docs/source-code-analysis.html) | 最终生产文件、物理行数、语义层、依赖与推荐阅读顺序 |
-| [PRD](docs/prd/unified-planner-routing.md) | 产品需求文档（最新：统一 Planner 路由） |
+| [PRD](docs/prd/) | 产品需求文档目录（统一 Planner 路由、会话数据生命周期、意图理解等） |
 | [CHANGELOG](CHANGELOG.md) | 按版本整理的完整变更记录 |
 | [项目概要](docs/architecture/项目概要.md) | 项目背景、目标、功能全景 |
 | [文档维护规范](docs/architecture/文档维护规范.md) | 文档编写、命名、更新标准 |

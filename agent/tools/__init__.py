@@ -8,10 +8,6 @@ from agent.tools.enum_field_tool import (
     flatten_enum_mappings,
     read_enum_mappings_from_excel,
 )
-from agent.tools.logs_enum_tool import (
-    extract_enum_from_logs,
-    extract_enum_with_regex,
-)
 from agent.tools.pipeline.log_format_identifier import identify_log_format
 from agent.tools.pipeline.log_classifier import classify_log_features
 
@@ -67,8 +63,6 @@ def call_llm_direct(*args, **kwargs):
 __all__ = [
     'flatten_enum_mappings',
     'read_enum_mappings_from_excel',
-    'extract_enum_from_logs',
-    'extract_enum_with_regex',
     'identify_log_format',
     'classify_log_features',
     'identify_log_format_headless',

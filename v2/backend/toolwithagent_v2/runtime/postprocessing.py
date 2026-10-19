@@ -127,8 +127,8 @@ def configuration_root(payload):
     return root
 
 
-def config_payload(session, source, base=None, download=None):
-    """把最新正式配置放入兼容映射族，Draft 始终编辑该版本而非旧配置。"""
+def config_payload(session, source, base=None):
+    """配置卡及下载始终使用自身配置根，独立导出由单独产物发布。"""
     from agent.shared.mapping_utils import iter_normalize_entries
     from application.adapters.shared import _build_config_artifact
     root = session.decoded_data if source == "session.decoded_config" else session.mapped_sub_rules
@@ -153,6 +153,6 @@ def config_payload(session, source, base=None, download=None):
     payload.setdefault("samples", {})
     payload.setdefault("event_annotations", [])
     payload.setdefault("warnings", [])
-    artifact = download or _build_config_artifact(root, len(rules), "current_config" if source == "session.decoded_config" else "mappedconfig_subrules")
+    artifact = _build_config_artifact(root, len(rules), "current_config" if source == "session.decoded_config" else "mappedconfig_subrules")
     payload.update({"download_content": artifact.content, "download_kind": artifact.download_kind})
     return payload

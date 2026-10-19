@@ -302,7 +302,7 @@ class BusinessApplication:
         source = source or ("session.mapped_sub_rules" if session.mapped_sub_rules else "session.decoded_config")
         config_changed = (session.mapped_sub_rules != initial.get("mapped_sub_rules") or session.decoded_data != initial.get("decoded_data"))
         if config_changed and (session.decoded_data if source == "session.decoded_config" else session.mapped_sub_rules):
-            payload = config_payload(session, source, base, download)
+            payload = config_payload(session, source, base)
             artifacts.append({"kind": "field_mapping", "payload": payload})
         reported_kinds = {getattr(item.artifact, "artifact_type", None) for item in result.results}
         # 执行器已按冻结计划校验成功前缀；同内容的新提交也必须获得本轮产物身份。
