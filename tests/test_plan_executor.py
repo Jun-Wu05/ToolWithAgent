@@ -13,6 +13,8 @@ from contracts.planner_models import (
 )
 from contracts.session_facts import SessionFacts
 
+from factories import make_session_state
+
 
 class RecordingAdapter:
     """记录调用并返回预设结果的测试适配器。"""
@@ -32,20 +34,22 @@ def _execute(decision, adapters, facts=None):
     return asyncio.run(
         create_plan_executor(adapters).execute(
             decision,
-            ExecutionContext(session={}, session_facts=facts or SessionFacts()),
+            ExecutionContext(
+                session=make_session_state(), session_facts=facts or SessionFacts()
+            ),
         )
     )
 
 
-KV_SESSION = {
-    "raw_log_lines": ["category=attack src=10.0.0.1", "category=scan src=10.0.0.2"]
-}
-JSON_SESSION = {
-    "raw_log_lines": [
+KV_SESSION = make_session_state(
+    raw_log_lines=["category=attack src=10.0.0.1", "category=scan src=10.0.0.2"]
+)
+JSON_SESSION = make_session_state(
+    raw_log_lines=[
         '{"detail":{"event_type":"attack"},"src":"10.0.0.1"}',
         '{"detail":{"event_type":"scan"},"src":"10.0.0.2"}',
     ]
-}
+)
 
 
 def _log_parse_decision(feature_field=None):
@@ -97,8 +101,10 @@ def test显式分类特征字段不存在时执行前拦截():
 
 def test显式分类特征字段不存在时保留旧分类结果():
     """NEEDS_INPUT 不改变会话中已有分类结果。"""
-    session = dict(KV_SESSION)
-    session["log_classification"] = {"旧类型": {"feature": "old"}}
+    session = make_session_state(
+        raw_log_lines=KV_SESSION.raw_log_lines,
+        log_classification={"旧类型": {"feature": "old"}},
+    )
     adapter = RecordingAdapter([_success_log_result()])
 
     report = _execute_with_session(
@@ -106,7 +112,7 @@ def test显式分类特征字段不存在时保留旧分类结果():
     )
 
     assert report.status == StepStatus.NEEDS_INPUT
-    assert session["log_classification"] == {"旧类型": {"feature": "old"}}
+    assert session.log_classification == {"旧类型": {"feature": "old"}}
 
 
 def test显式分类特征字段大小写不敏感唯一匹配时规范化执行():
@@ -125,9 +131,9 @@ def test显式分类特征字段大小写不敏感唯一匹配时规范化执行
 
 def test显式分类特征字段大小写歧义时仍拦截():
     """存在多个仅大小写不同的键时不得代用户选择，停下追问并列明歧义。"""
-    session = {
-        "raw_log_lines": ["Category=a src=1.1.1.1", "CATEGORY=b src=2.2.2.2"]
-    }
+    session = make_session_state(
+        raw_log_lines=["Category=a src=1.1.1.1", "CATEGORY=b src=2.2.2.2"]
+    )
     adapter = RecordingAdapter([_success_log_result()])
 
     report = _execute_with_session(
@@ -301,12 +307,12 @@ def _success_enum_result():
 
 def test枚举提取目标字段在原始日志键中时放行进适配器():
     """目标字段存在于日志体键（未进映射投影）时放行（回归 #66/#70 语义）。"""
-    session = {
-        "raw_log_lines": [
+    session = make_session_state(
+        raw_log_lines=[
             "event_name=attack src=10.0.0.1",
             "event_name=scan src=10.0.0.2",
         ]
-    }
+    )
     adapter = RecordingAdapter([_success_enum_result()])
 
     report = _execute_with_session(
@@ -323,7 +329,7 @@ def test枚举提取目标字段在原始日志键中时放行进适配器():
 
 def test枚举提取词典为空时放行保持旧行为():
     """日志体键与映射投影都提不出词典（如分隔符语料未分类）时不拦截（回归 #70）。"""
-    session = {"raw_log_lines": ["aaa,bbb,ccc", "ddd,eee,fff"]}
+    session = make_session_state(raw_log_lines=["aaa,bbb,ccc", "ddd,eee,fff"])
     adapter = RecordingAdapter([_success_enum_result()])
 
     report = _execute_with_session(
@@ -558,11 +564,11 @@ def _rename_decision(field_value="僵尸网络入侵", value_type="fixed"):
 
 def test改名计划携带非法事件名时整计划执行前拦截():
     """add 的事件名非法：delete 不得先落盘删绑定对，任何适配器零调用（回归 #148）。"""
-    session = {
-        "mapped_sub_rules": [
+    session = make_session_state(
+        mapped_sub_rules=[
             {"name": "RUN_INFO", "normalize": [{"index": "事件名称"}, {"index": "事件级别"}]}
         ]
-    }
+    )
     delete_adapter = RecordingAdapter([])
     add_adapter = RecordingAdapter([])
 
@@ -582,7 +588,7 @@ def test改名计划携带非法事件名时整计划执行前拦截():
     assert "必须是以下分类名之一" in message
     assert "网络攻击" in message
     assert "整份计划未执行" in message
-    assert session["mapped_sub_rules"][0]["normalize"] == [
+    assert session.mapped_sub_rules[0]["normalize"] == [
         {"index": "事件名称"},
         {"index": "事件级别"},
     ]
@@ -600,7 +606,7 @@ def test改名计划合法事件名仍按两步计划执行():
     report = _execute_with_session(
         _rename_decision(field_value="终端告警"),
         {"delete_fields": delete_adapter, "add_fields": add_adapter},
-        {"mapped_sub_rules": []},
+        make_session_state(mapped_sub_rules=[]),
     )
 
     assert report.status == StepStatus.SUCCESS
@@ -616,7 +622,7 @@ def test事件名称引用型值在计划级拦截():
     report = _execute_with_session(
         _rename_decision(field_value="%{x}", value_type="reference"),
         {"delete_fields": delete_adapter, "add_fields": add_adapter},
-        {"mapped_sub_rules": []},
+        make_session_state(mapped_sub_rules=[]),
     )
 
     assert report.status == StepStatus.FAILED
@@ -647,7 +653,7 @@ def test确定性提交步骤复用同一执行器账本():
     report = asyncio.run(
         create_plan_executor({"log_knowledge_submit": adapter}).execute_deterministic(
             plan,
-            ExecutionContext(session={}, session_facts=SessionFacts()),
+            ExecutionContext(session=make_session_state(), session_facts=SessionFacts()),
         )
     )
 

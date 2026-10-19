@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import agent.core.model_config as model_config
 import web.settings_handler as settings_handler
 
+from factories import make_session_state
+
 
 def _clean_env(monkeypatch):
     """清空提供商/密钥环境变量，回到可控基线。"""
@@ -99,8 +101,8 @@ def test连接测试无密钥返回静态表成功():
     result = asyncio.run(
         settings_handler.ModelManager.test_connection("siliconflow", None)
     )
-    assert result["success"] is True
-    assert result["models"]
+    assert result.success is True
+    assert result.models
 
 
 # ---------- 模型列表按厂家分组展示 ----------
@@ -198,10 +200,10 @@ def test连接测试发对话探测并注明精选数(monkeypatch):
         )
     )
 
-    assert result["success"] is True
-    assert "对话链路已验证" in result["message"]
-    assert "可用模型 2 个" in result["message"]
-    assert "下拉精选" in result["message"]
+    assert result.success is True
+    assert "对话链路已验证" in result.message
+    assert "可用模型 2 个" in result.message
+    assert "下拉精选" in result.message
     # 探测请求：规格聊天端点 + 鉴权头 + 所选模型 + max_tokens=1
     spec = model_config.get_provider_spec("siliconflow")
     assert len(_ProbeAsyncClient.post_calls) == 1
@@ -222,7 +224,7 @@ def test连接测试未选模型时用规格默认表首个探测(monkeypatch):
         settings_handler.ModelManager.test_connection("siliconflow", "sf-key", model="")
     )
 
-    assert result["success"] is True
+    assert result.success is True
     spec = model_config.get_provider_spec("siliconflow")
     assert _ProbeAsyncClient.post_calls[0]["json"]["model"] == spec.default_models[0]
 
@@ -237,9 +239,9 @@ def test连接测试余额不足返回四十二(monkeypatch):
         settings_handler.ModelManager.test_connection("openrouter", "or-key")
     )
 
-    assert result["success"] is False
-    assert "余额/配额不足" in result["message"]
-    assert "402" in result["message"]
+    assert result.success is False
+    assert "余额/配额不足" in result.message
+    assert "402" in result.message
 
 
 def test连接测试模型不可用返回四零四(monkeypatch):
@@ -251,9 +253,9 @@ def test连接测试模型不可用返回四零四(monkeypatch):
         settings_handler.ModelManager.test_connection("siliconflow", "sf-key", model="m-alpha")
     )
 
-    assert result["success"] is False
-    assert "模型不可用" in result["message"]
-    assert "m-alpha" in result["message"]
+    assert result.success is False
+    assert "模型不可用" in result.message
+    assert "m-alpha" in result.message
 
 
 def test连接测试无密钥静态分支文案含精选数():
@@ -261,8 +263,8 @@ def test连接测试无密钥静态分支文案含精选数():
     result = asyncio.run(
         settings_handler.ModelManager.test_connection("siliconflow", None)
     )
-    assert result["success"] is True
-    assert "下拉精选" in result["message"]
+    assert result.success is True
+    assert "下拉精选" in result.message
 
 
 def test未超上限的列表不做精选():
@@ -307,20 +309,15 @@ def test设置保存按最终解析结果校验并放行环境变量密钥(monke
     """界面密钥留空但环境变量已有当前家密钥时不被要求重填。"""
     _clean_env(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
-    session = SimpleNamespace(
-        current_provider=None, model_name=None, api_key=None, team=None
-    )
+    session = make_session_state()
     sent = _install_chainlit_fakes(monkeypatch, session)
     tested = []
 
     async def _fake_test(provider, key, model=None):
         tested.append(key)
-        return {
-            "success": True,
-            "message": "ok",
-            "models_count": 2,
-            "models": ["deepseek-chat", "deepseek-reasoner"],
-        }
+        return settings_handler.ConnectionTestResult.success_with(
+            ["deepseek-chat", "deepseek-reasoner"], "ok"
+        )
 
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
@@ -343,21 +340,16 @@ def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
     _clean_env(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
     placeholder = settings_handler.build_settings_widgets()[1].values[0]
-    session = SimpleNamespace(
-        current_provider=None, model_name=None, api_key=None, team=None
-    )
+    session = make_session_state()
     _install_chainlit_fakes(monkeypatch, session)
     tested_models = []
     team = object()
 
     async def _fake_test(provider, key, model=None):
         tested_models.append(model)
-        return {
-            "success": True,
-            "message": "ok",
-            "models_count": 2,
-            "models": ["deepseek-chat", "deepseek-reasoner"],
-        }
+        return settings_handler.ConnectionTestResult.success_with(
+            ["deepseek-chat", "deepseek-reasoner"], "ok"
+        )
 
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
@@ -389,15 +381,13 @@ def test首次设置不把模型占位文本提交给连接探针(monkeypatch):
 def test设置保存密钥解析为空时拦截并提示变量名(monkeypatch):
     """当前家与环境变量都解析不出密钥时拦截，提示含具体变量名。"""
     _clean_env(monkeypatch)
-    session = SimpleNamespace(
-        current_provider=None, model_name=None, api_key=None, team=None
-    )
+    session = make_session_state()
     sent = _install_chainlit_fakes(monkeypatch, session)
     called = []
 
     async def _fake_test(provider, key, model=None):
         called.append(provider)
-        return {"success": True, "message": "ok", "models_count": 0, "models": []}
+        return settings_handler.ConnectionTestResult.success_with([], "ok")
 
     monkeypatch.setattr(
         settings_handler.ModelManager, "test_connection", staticmethod(_fake_test)
@@ -444,7 +434,7 @@ def test环境变量密钥就绪时消息到达自动创建Team(monkeypatch):
     """Team 未初始化且配置可解析时自动懒创建，不再拒绝消息。"""
     _clean_env(monkeypatch)
     monkeypatch.setenv("SILICONFLOW_API_KEY", "sf-key")
-    session = SimpleNamespace(team=None)
+    session = make_session_state(team=None)
     handled = []
     router, sent = _install_router_fakes(monkeypatch, session, handled)
 
@@ -458,7 +448,7 @@ def test环境变量密钥就绪时消息到达自动创建Team(monkeypatch):
 def test密钥缺失时消息到达提示应设置变量名(monkeypatch):
     """配置解析不出密钥时返回包含变量名的明确提示，取代死路文案。"""
     _clean_env(monkeypatch)
-    session = SimpleNamespace(team=None)
+    session = make_session_state(team=None)
     handled = []
     router, sent = _install_router_fakes(monkeypatch, session, handled)
 

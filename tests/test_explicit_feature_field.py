@@ -8,6 +8,7 @@ import json
 
 import agent.tools.pipeline.log_classifier as log_classifier
 import agent.tools.pipeline.log_feature_locator as log_feature_locator
+import agent.tools.pipeline.log_header_processor as log_header_processor
 import agent.tools.pipeline.common.knowledge_store as knowledge_store
 from agent.tools import classify_log_features_headless
 
@@ -35,6 +36,8 @@ def _locate_tries_other_field(**kwargs):
 def test显式分类特征字段压制定位器修正(monkeypatch):
     """用户点名 category 作为日志类型时，定位器的 other_field 修正不得生效。"""
     monkeypatch.setattr(log_feature_locator, "locate_feature", _locate_tries_other_field)
+    # 头部/日志体正则由独立专业模型生成，测试同样必须显式提供离线输出。
+    monkeypatch.setattr(log_header_processor, "_call_llm_direct", lambda *a, **kw: r"app: (.+)$")
     monkeypatch.setattr(
         log_classifier,
         "_call_llm_direct",

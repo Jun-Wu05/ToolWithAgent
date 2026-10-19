@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, get_args
 
 from contracts.planner_models import (
+    ConfigRef,
     EnumExtractStep,
     DeterministicPlan,
     ExecutionReport,
@@ -24,6 +25,7 @@ from contracts.planner_models import (
     ThreatMappingStep,
 )
 from application.progress import NullProgressSink
+from application.session_state import SessionState
 from application.recovery import RecoveryBudget, RETRYABLE_STEP_TYPES, is_transient
 from contracts.progress import (
     ProgressEvent,
@@ -34,9 +36,14 @@ from contracts.progress import (
 from contracts.session_facts import SessionFacts
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 
+# ConfigRef 词汇表成员判定；与 adapters.shared._CONFIG_SESSION_KEYS 的键集由
+# test_application_config_architecture 双向钉死（#350）。此处不导入
+# adapters.shared——shared 反向依赖本模块的 ExecutionContext，会成环。
+_CONFIG_REFS = frozenset(get_args(ConfigRef))
+
 
 def threat_fill_source_precondition(
-    step: ExecutableStep, session: Any
+    step: ExecutableStep, session: SessionState
 ) -> tuple[Any | None, StepResult | None]:
     """威胁映射填充「产物可用 + 固定目标」的唯一前置校验（#314 单一来源）。
 
@@ -49,7 +56,7 @@ def threat_fill_source_precondition(
     """
     if step.source_ref != "session.artifacts.threat_mapping":
         return None, None
-    raw_slot = session.get("latest_threat_artifact")
+    raw_slot = session.latest_threat_artifact
     try:
         slot = (
             raw_slot
@@ -72,7 +79,7 @@ def threat_fill_source_precondition(
 
 
 def threat_mapping_source_precondition(
-    step: ExecutableStep, session: Any
+    step: ExecutableStep, session: SessionState
 ) -> tuple[Any | None, StepResult | None]:
     """威胁类型映射「枚举值产物可用」的唯一前置校验（#320 单一来源）。
 
@@ -84,7 +91,7 @@ def threat_mapping_source_precondition(
     """
     if step.source_ref != "session.artifacts.enum_values":
         return None, None
-    raw_slot = session.get("latest_enum_artifact")
+    raw_slot = session.latest_enum_artifact
     try:
         slot = (
             raw_slot
@@ -104,7 +111,7 @@ def threat_mapping_source_precondition(
 class ExecutionContext:
     """保存执行期 session 与其单一事实快照；核心模块不依赖 Chainlit。"""
 
-    session: Any
+    session: SessionState
     session_facts: SessionFacts
     plan_id: str = "pending"
     progress_sink: ProgressSink = field(default_factory=NullProgressSink)
@@ -446,7 +453,7 @@ class PlanExecutor:
                 )
         if (
             isinstance(step, ExportStep)
-            and step.source_ref in {"session.decoded_config", "session.mapped_sub_rules"}
+            and step.source_ref in _CONFIG_REFS
             and step.source_ref not in session_facts.available_config_refs
         ):
             return self._needs_input_result(

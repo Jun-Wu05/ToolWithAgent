@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any, Callable
 
-from application.adapters.shared import _failed, _session_get, _session_set, _success
+from application.adapters.shared import _failed, _success
 from application.execution import ExecutionContext
 from application.parsing import parse_json_safe
 from contracts.planner_models import (
@@ -53,9 +53,7 @@ class EnumExtractAdapter:
             validate_regex_with_stats,
         )
 
-        log_lines = _session_get(context.session, "raw_log_lines") or _session_get(
-            context.session, "original_log"
-        )
+        log_lines = context.session.raw_log_lines or context.session.original_log
         logs_text = "\n".join(str(line) for line in log_lines)
         sampled_logs = sample_logs(logs_text, sample_size=20)
         llm_input = (
@@ -94,11 +92,9 @@ class EnumExtractAdapter:
             regex=str(enum_result.get("regex") or regex),
             original_log=tuple(str(line) for line in enum_result.get("original_log", [])),
         )
-        _session_set(context.session, "last_enum_extract_result", enum_result)
-        _session_set(
-            context.session,
-            "latest_enum_artifact",
-            EnumArtifactSlot(artifact=artifact, source_field=artifact.field),
+        context.session.last_enum_extract_result = enum_result
+        context.session.latest_enum_artifact = EnumArtifactSlot(
+            artifact=artifact, source_field=artifact.field
         )
         return _success(step, artifact)
 

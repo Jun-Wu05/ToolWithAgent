@@ -23,12 +23,12 @@ from agent.core.tracing import TraceContext
 from agent.shared.event_classify import THREAT_EVENT_NAMES
 from agent.shared.logger import get_logger
 from application.adapters.composition import create_default_adapters
-from application.adapters.shared import _session_get, _session_set
 from application.execution import ExecutionContext
 from application.execution_policy import create_plan_executor
 from application.progress import NullProgressSink
 from application.recovery import RecoveryBudget
 from application.session_projection import build_session_facts
+from application.session_state import SessionState
 from application.threat_chain_policy import (
     ChainTrigger,
     SourceFieldDecision,
@@ -68,42 +68,28 @@ CHAIN_PLAN_ID = "threat-chain-auto"
 SUMMARY_STEP_ID = "threat-chain"
 """链路汇总行的 step_id（渲染为报告末尾的 🔗/⚠️ 段落）。"""
 
-SESSION_OVERRIDE_KEY = "threat_source_field_override"
-"""会话级来源覆盖键（#129 临时字段模式）：用户显式纠正过 X 后记忆。"""
-
 CHAIN_CONFIG_REF = "session.mapped_sub_rules"
 """自动链路的目标配置：事件标注所在处（mapped_sub_rules）。"""
 
-_CHAIN_COMMIT_KEYS = (
-    "mapped_sub_rules",
-    "last_enum_extract_result",
-    "latest_enum_artifact",
-    "last_threat_data",
-    "latest_threat_artifact",
-)
-"""威胁链成功后才从配置副本会话提交的领域产物。"""
-
-
-def stage_threat_chain_session(session: Any) -> Any:
+def stage_threat_chain_session(session: SessionState) -> SessionState:
     """为威胁链构造隔离会话，其他输入只读共享、目标配置深拷贝。"""
-    staged = dict(session) if isinstance(session, dict) else copy.copy(session)
-    _session_set(
-        staged,
-        "mapped_sub_rules",
-        copy.deepcopy(_session_get(session, "mapped_sub_rules")),
-    )
+    staged = copy.copy(session)
+    staged.mapped_sub_rules = copy.deepcopy(session.mapped_sub_rules)
     return staged
 
 
-def commit_threat_chain_session(staged: Any, session: Any) -> None:
-    """整条链成功后一次性提交配置与可引用产物。"""
-    for key in _CHAIN_COMMIT_KEYS:
-        _session_set(session, key, _session_get(staged, key))
+def commit_threat_chain_session(staged: SessionState, session: SessionState) -> None:
+    """整条链成功后一次性提交配置与可引用产物（显式五键，纳入写入守卫视野）。"""
+    session.mapped_sub_rules = staged.mapped_sub_rules
+    session.last_enum_extract_result = staged.last_enum_extract_result
+    session.latest_enum_artifact = staged.latest_enum_artifact
+    session.last_threat_data = staged.last_threat_data
+    session.latest_threat_artifact = staged.latest_threat_artifact
 
 
-def set_threat_source_override(session: Any, source_field: str) -> None:
+def set_threat_source_override(session: SessionState, source_field: str) -> None:
     """记录已成功验证的威胁来源，供本会话后续自动链复用。"""
-    _session_set(session, SESSION_OVERRIDE_KEY, source_field)
+    session.threat_source_field_override = source_field
 
 
 def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
@@ -121,7 +107,7 @@ def is_threat_type_replacement_plan(plan_steps: tuple[StepSpec, ...]) -> bool:
     return has_generated_field and has_threat_fill
 
 
-def compile_explicit_threat_plan(plan: PlanDecision, session: Any) -> PlanDecision:
+def compile_explicit_threat_plan(plan: PlanDecision, session: SessionState) -> PlanDecision:
     """把 Planner 的威胁来源语义骨架编译为匹配当前配置的确定性链路。"""
     if plan.decision not in {"execute", "proposal"}:
         return plan
@@ -184,7 +170,7 @@ def compile_explicit_threat_plan(plan: PlanDecision, session: Any) -> PlanDecisi
 
 
 def build_threat_source_plan(
-    session: Any, source_field: str, *, plan_id: str
+    session: SessionState, source_field: str, *, plan_id: str
 ) -> PlanDecision | None:
     """按当前真实配置为一个明确来源构造原子威胁类型链路。"""
     facts = build_session_facts(session)
@@ -196,7 +182,7 @@ def build_threat_source_plan(
     if not threat_rule_names:
         return None
     field_state = inspect_threat_field_state(
-        _session_get(session, "mapped_sub_rules"), threat_rule_names
+        session.mapped_sub_rules, threat_rule_names
     )
     chain = build_threat_chain_steps(
         SourceFieldDecision(source_field, 1.0, len(threat_rule_names), "explicit"),
@@ -236,7 +222,7 @@ def _extended_report(report: ExecutionReport, extra: tuple[StepResult, ...]) -> 
 
 
 def record_explicit_source_override(
-    report: ExecutionReport, plan_steps: tuple[StepSpec, ...], session: Any
+    report: ExecutionReport, plan_steps: tuple[StepSpec, ...], session: SessionState
 ) -> str | None:
     """显式指令入口成功后记录会话级来源覆盖（用户纠正过 X，此后自动入口直接用）。
 
@@ -309,13 +295,13 @@ def rank_threat_source_candidates(
 def _determine_source(
     pools: dict[str, tuple[str, ...]],
     trigger: ChainTrigger,
-    session: Any,
+    session: SessionState,
 ) -> tuple[Any, dict[str, list[tuple[str, float, str, str]]]]:
     """S1：会话覆盖优先，否则相似度最高；检索失败按无候选降级。
 
     返回判定结论与候选表（自恢复③改选需在同一得分表上取下一候选）。
     """
-    override = _session_get(session, SESSION_OVERRIDE_KEY)
+    override = session.threat_source_field_override
     ordered_fields: list[str] = []
     for indexes in pools.values():
         for index in indexes:
@@ -396,7 +382,7 @@ async def run_threat_chain_after_mapping(
     *,
     report: Any,
     plan_steps: tuple[StepSpec, ...] = (),
-    session: Any,
+    session: SessionState,
     team: Any,
     progress_sink: ProgressSink | None = None,
     recovery_budget: RecoveryBudget | None = None,
@@ -418,7 +404,7 @@ async def run_threat_chain_after_mapping(
 async def _run_chain(
     report: ExecutionReport,
     plan_steps: tuple[StepSpec, ...],
-    session: Any,
+    session: SessionState,
     team: Any,
     progress_sink: ProgressSink | None,
     recovery_budget: RecoveryBudget | None,
@@ -439,7 +425,7 @@ async def _run_chain(
     if trigger.hint_only:
         report = refresh_report_event_annotations(
             report,
-            _session_get(session, "mapped_sub_rules"),
+            session.mapped_sub_rules,
             chain_succeeded=False,
         )
         return _extended_report(
@@ -452,7 +438,7 @@ async def _run_chain(
             ),
         )
 
-    mapped_rules = _session_get(session, "mapped_sub_rules")
+    mapped_rules = session.mapped_sub_rules
     pools = collect_threat_field_pools(mapped_rules, trigger.threat_rule_names)
     if not pools:
         logger.error(
@@ -556,7 +542,7 @@ async def _run_chain(
         else:
             # 按提交后的最新配置重建（首次成功已改变威胁类型字段现状，幂等语义自带）
             next_state = inspect_threat_field_state(
-                _session_get(session, "mapped_sub_rules"),
+                session.mapped_sub_rules,
                 trigger.threat_rule_names,
             )
             next_plan = build_threat_chain_steps(
@@ -642,7 +628,7 @@ async def _run_chain(
 
     report = refresh_report_event_annotations(
         report,
-        _session_get(session, "mapped_sub_rules"),
+        session.mapped_sub_rules,
         chain_succeeded=chain_report.status == StepStatus.SUCCESS,
     )
 

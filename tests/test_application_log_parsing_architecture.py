@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from factories import make_session_state
+
 
 def _import_roots(path: Path) -> set[str]:
     """提取模块静态导入根，避免运行导入掩盖依赖方向。"""
@@ -85,7 +87,7 @@ def test_log_parse_adapter_preserves_call_order_session_and_progress() -> None:
         async def publish(self, event) -> None:
             self.events.append(event)
 
-    session = {"raw_log_lines": ["kind=attack src=1", "kind=scan src=2"]}
+    session = make_session_state(raw_log_lines=["kind=attack src=1", "kind=scan src=2"])
     sink = RecordingSink()
     step = LogParseStep(step_id="log-1", type="log_parse", feature_field="kind")
     report = asyncio.run(
@@ -118,7 +120,7 @@ def test_log_parse_adapter_preserves_call_order_session_and_progress() -> None:
         "kind",
     )
     assert classify_kwargs == {"feature_field_explicit": True}
-    assert session["log_classification"] == report.results[0].artifact.classification
+    assert session.log_classification == report.results[0].artifact.classification
     assert report.results[0].artifact.item_count == 1
     assert [event.message_code for event in sink.events] == [
         "plan_execution_started",
@@ -136,7 +138,7 @@ def test日志解析只生成提交资格快照且不会写知识库() -> None:
     from contracts.planner_models import LogParseStep
 
     lines = ["kind=a src=1", "kind=b src=2", "kind=c src=3"]
-    session = {"raw_log_lines": lines}
+    session = make_session_state(raw_log_lines=lines)
     classification = {
         "status": "SUCCESS",
         "log_format": "kv",
@@ -160,8 +162,8 @@ def test日志解析只生成提交资格快照且不会写知识库() -> None:
     )
 
     assert result.status.value == "success"
-    assert session["log_knowledge_submission"].eligible is True
-    assert "log_knowledge_application" not in session
+    assert session.log_knowledge_submission.eligible is True
+    assert not hasattr(session, "log_knowledge_application")
 
 
 def test非KV_JSON格式以稳定错误明确告知且不产生伪成功() -> None:
@@ -173,7 +175,9 @@ def test非KV_JSON格式以稳定错误明确告知且不产生伪成功() -> No
     from application.session_projection import build_session_facts
     from contracts.planner_models import LogParseStep
 
-    session = {"raw_log_lines": ["<190>Aug 10 12:44:51 2026 AC %%10STAMGR/6/X: Client MAC: 1"]}
+    session = make_session_state(
+        raw_log_lines=["<190>Aug 10 12:44:51 2026 AC %%10STAMGR/6/X: Client MAC: 1"]
+    )
     unsupported = json.dumps(
         {"status": "UNSUPPORTED", "error": "不支持的日志格式: unknown"}
     )
@@ -214,40 +218,40 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
 
     mapped_ref = "session.mapped_sub_rules"
     decoded_ref = "session.decoded_config"
-    session = {
-        "raw_log_lines": ["kind=new src=1"],
-        "decoded_data": {"name": "uploaded", "normalize": []},
-        "log_classification": {"classification_details": [{"logtype": "old"}]},
-        "mapped_sub_rules": [
+    session = make_session_state(
+        raw_log_lines=["kind=new src=1"],
+        decoded_data={"name": "uploaded", "normalize": []},
+        log_classification={"classification_details": [{"logtype": "old"}]},
+        mapped_sub_rules=[
             {
                 "name": "old",
                 "normalize": [{"index": "kind", "field": "事件名称"}],
             }
         ],
-        "sub_rule_mapping_results": [{"rule_name": "old"}],
-        "last_mapping_data": [{"原始字段名": "kind"}],
-        "excel_data": b"old-workbook",
-        "excel_filename": "old.xlsx",
-        "enum_fill_contributions": {
+        sub_rule_mapping_results=[{"rule_name": "old"}],
+        last_mapping_data=[{"原始字段名": "kind"}],
+        excel_data=b"old-workbook",
+        excel_filename="old.xlsx",
+        enum_fill_contributions={
             mapped_ref: {"kind": [{"orgValue": "old"}]},
             decoded_ref: {"severity": [{"orgValue": "high"}]},
         },
-        "stale_enum_config_refs": {mapped_ref, decoded_ref},
-        "enum_pending_refills": {
+        stale_enum_config_refs={mapped_ref, decoded_ref},
+        enum_pending_refills={
             mapped_ref: {"kind"},
             decoded_ref: {"severity"},
         },
-        "rule_source_fields": {
+        rule_source_fields={
             "product": "旧产品",
             "log_vendor": "旧厂商",
             "data_source": "旧来源",
         },
-        "pending_rule_source_step": ExportStep(
+        pending_rule_source_step=ExportStep(
             step_id="old-export",
             type="export",
             source_ref="session.log_classification.entry_rules",
         ),
-    }
+    )
     classification = {
         "status": "SUCCESS",
         "classification_details": [{"logtype": "new", "sample": "kind=new src=1"}]
@@ -268,22 +272,19 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
     )
 
     assert result.status == StepStatus.SUCCESS
-    assert session["log_classification"] == classification
-    for key in (
-        "mapped_sub_rules",
-        "sub_rule_mapping_results",
-        "last_mapping_data",
-        "excel_data",
-        "excel_filename",
-    ):
-        assert session[key] is None
-    assert session["enum_fill_contributions"] == {
+    assert session.log_classification == classification
+    assert session.mapped_sub_rules is None
+    assert session.sub_rule_mapping_results is None
+    assert session.last_mapping_data is None
+    assert session.excel_data is None
+    assert session.excel_filename is None
+    assert session.enum_fill_contributions == {
         decoded_ref: {"severity": [{"orgValue": "high"}]}
     }
-    assert session["stale_enum_config_refs"] == {decoded_ref}
-    assert session["enum_pending_refills"] == {decoded_ref: {"severity"}}
-    assert session["rule_source_fields"] is None
-    assert session["pending_rule_source_step"] is None
+    assert session.stale_enum_config_refs == {decoded_ref}
+    assert session.enum_pending_refills == {decoded_ref: {"severity"}}
+    assert session.rule_source_fields is None
+    assert session.pending_rule_source_step is None
     assert "⚠️" in result.message
     assert "映射" in result.message
     assert "事件标注" in result.message
@@ -331,7 +332,7 @@ def test重新提取日志类型原子清理映射派生状态并释放白板导
     from contracts.rule_source import RuleSourceFields
 
     source_fields = RuleSourceFields.create(product="新产品", log_vendor="新厂商")
-    session["rule_source_fields"] = source_fields
+    session.rule_source_fields = source_fields
     whiteboard_export = asyncio.run(
         ExportAdapter().execute(
             ExportStep(
@@ -365,11 +366,11 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
         )
 
     previous = {"classification_details": [{"logtype": "old"}]}
-    invalid_session = {
-        "raw_log_lines": ["kind=attack"],
-        "log_classification": previous,
-        "mapped_sub_rules": [{"name": "old-mapped"}],
-    }
+    invalid_session = make_session_state(
+        raw_log_lines=["kind=attack"],
+        log_classification=previous,
+        mapped_sub_rules=[{"name": "old-mapped"}],
+    )
     invalid = asyncio.run(
         execute(
             LogParseAdapter(
@@ -382,13 +383,13 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
     )
     assert invalid.status == StepStatus.FAILED
     assert invalid.error_code == "log_format_invalid"
-    assert invalid_session["log_classification"] is previous
-    assert invalid_session["mapped_sub_rules"] == [{"name": "old-mapped"}]
+    assert invalid_session.log_classification is previous
+    assert invalid_session.mapped_sub_rules == [{"name": "old-mapped"}]
 
-    empty_session = {
-        "raw_log_lines": ["kind=attack"],
-        "log_classification": previous,
-    }
+    empty_session = make_session_state(
+        raw_log_lines=["kind=attack"],
+        log_classification=previous,
+    )
     empty = asyncio.run(
         execute(
             LogParseAdapter(
@@ -401,7 +402,7 @@ def test_log_parse_adapter_preserves_stable_errors_without_overwriting_session()
     )
     assert empty.status == StepStatus.FAILED
     assert empty.error_code == "log_parse_failed"
-    assert empty_session["log_classification"] is previous
+    assert empty_session.log_classification is previous
 
 
 def test_nonempty_failed_classification_preserves_historical_success_result() -> None:
@@ -412,11 +413,11 @@ def test_nonempty_failed_classification_preserves_historical_success_result() ->
     from contracts.planner_models import LogParseStep, StepStatus
 
     previous = {"classification_details": [{"logtype": "old"}]}
-    session = {
-        "raw_log_lines": ["kind=attack"],
-        "log_classification": previous,
-        "mapped_sub_rules": [{"name": "old-mapped"}],
-    }
+    session = make_session_state(
+        raw_log_lines=["kind=attack"],
+        log_classification=previous,
+        mapped_sub_rules=[{"name": "old-mapped"}],
+    )
     result = asyncio.run(
         LogParseAdapter(
             format_identifier=lambda _: '{"format":"kv"}',
@@ -432,8 +433,8 @@ def test_nonempty_failed_classification_preserves_historical_success_result() ->
     assert result.status == StepStatus.FAILED
     assert result.error_code == "log_parse_failed"
     assert "历史失败结构" in (result.message or "")
-    assert session["log_classification"] is previous
-    assert session["mapped_sub_rules"] == [{"name": "old-mapped"}]
+    assert session.log_classification is previous
+    assert session.mapped_sub_rules == [{"name": "old-mapped"}]
 
 
 def test_partial_classification_preserves_historical_success_and_submission() -> None:
@@ -455,11 +456,11 @@ def test_partial_classification_preserves_historical_success_and_submission() ->
         previous, lines, selection_mode="automatic"
     )
     assert submission.eligible is True
-    session = {
-        "raw_log_lines": lines,
-        "log_classification": previous,
-        "log_knowledge_submission": submission,
-    }
+    session = make_session_state(
+        raw_log_lines=lines,
+        log_classification=previous,
+        log_knowledge_submission=submission,
+    )
     partial = {
         "status": "PARTIAL",
         "error": "部分日志未能分类",
@@ -480,8 +481,8 @@ def test_partial_classification_preserves_historical_success_and_submission() ->
     assert result.status == StepStatus.FAILED
     assert result.error_code == "log_parse_failed"
     assert result.artifact is None
-    assert session["log_classification"] is previous
-    assert session["log_knowledge_submission"] is submission
+    assert session.log_classification is previous
+    assert session.log_knowledge_submission is submission
 
 def test_legacy_json_prompt_and_adapter_paths_reexport_identical_objects() -> None:
     """迁移期旧入口必须引用同一对象，不能保留第二份实现。"""
@@ -626,7 +627,7 @@ def test_default_composition_traces_log_classification_to_rule_export(monkeypatc
 
     adapters = create_default_adapters(None)
     assert isinstance(adapters["log_parse"], LogParseAdapter)
-    session = {"raw_log_lines": ["kind=attack src=1"]}
+    session = make_session_state(raw_log_lines=["kind=attack src=1"])
     log_plan = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -643,7 +644,7 @@ def test_default_composition_traces_log_classification_to_rule_export(monkeypatc
     from contracts.rule_source import RuleSourceFields
 
     source_fields = RuleSourceFields.create(product="产品", log_vendor="厂商")
-    session["rule_source_fields"] = source_fields
+    session.rule_source_fields = source_fields
     export_plan = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -668,7 +669,7 @@ def test_default_composition_traces_log_classification_to_rule_export(monkeypatc
     assert export_report.status == StepStatus.SUCCESS
     assert [result.step_id for result in log_report.results] == ["log"]
     assert [result.step_id for result in export_report.results] == ["export"]
-    assert session["log_classification"] == classification
+    assert session.log_classification == classification
     assert export_report.results[0].artifact.content == encoded
     assert export_report.results[0].artifact.download_kind == "unmappedconfig_subrules"
     assert calls[:3] == ["identify", "classify", "fill"]

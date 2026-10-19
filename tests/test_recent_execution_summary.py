@@ -85,10 +85,10 @@ def test连续计划滚动两份摘要并进入下一轮Planner输入() -> None:
     from application.progress import NullProgressSink
     from application.request_runtime import run_deterministic_plan
     from application.session_projection import build_session_facts
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import PlanDecision
 
-    session = SessionState(
+    session = make_session_state(
         decoded_data={
             "name": "public-rule-name",
             "normalize": [
@@ -147,7 +147,7 @@ def test自然语言入口记录威胁链合并后的最终报告(monkeypatch) -
     from application import request_runtime
     from application.progress import NullProgressSink
     from application.session_projection import build_session_facts
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import (
         ExecutionReport,
         PlanDecision,
@@ -190,7 +190,7 @@ def test自然语言入口记录威胁链合并后的最终报告(monkeypatch) -
         "run_threat_chain_after_mapping",
         append_chain_result,
     )
-    session = SessionState(decoded_data={"normalize": []})
+    session = make_session_state(decoded_data={"normalize": []})
 
     asyncio.run(
         request_runtime.run_user_request(
@@ -214,7 +214,7 @@ def test自然语言入口记录威胁链合并后的最终报告(monkeypatch) -
 def test自动威胁来源试选按完成顺序记录每个候选(monkeypatch) -> None:
     from application import request_runtime
     from application.session_projection import build_session_facts
-    from application.session_state import SessionState
+    from factories import make_session_state
     from contracts.planner_models import (
         ExecutionReport,
         PlanDecision,
@@ -273,7 +273,7 @@ def test自动威胁来源试选按完成顺序记录每个候选(monkeypatch) -
     )
     monkeypatch.setattr(request_runtime, "commit_threat_chain_session", lambda *_args: None)
     monkeypatch.setattr(request_runtime, "set_threat_source_override", lambda *_args: None)
-    session = SessionState()
+    session = make_session_state()
 
     asyncio.run(
         request_runtime._run_auto_threat_source_selection(
@@ -292,19 +292,14 @@ def test自动威胁来源试选按完成顺序记录每个候选(monkeypatch) -
     assert "secret-source" not in facts.model_dump_json()
 
 
-def test主数据与日志分类变化清空执行摘要且兼容字典会话() -> None:
-    from application.file_input import commit_primary_dataset
-    from application.request_runtime import clear_session_data
+def test主数据与日志分类变化清空执行摘要() -> None:
     from application.session_projection import summarize_report
-    from application.session_state import (
-        PrimaryDatasetSnapshot,
-        SessionState,
-        commit_log_classification,
-    )
+    from application.session_state import PrimaryDatasetSnapshot, commit_log_classification
     from contracts.planner_models import ExecutionReport
+    from factories import make_session_state
 
     summary = summarize_report(ExecutionReport(plan_id="old-plan", results=()))
-    session = SessionState(current_execution=summary, previous_execution=summary)
+    session = make_session_state(current_execution=summary, previous_execution=summary)
 
     session.replace_primary_dataset(
         PrimaryDatasetSnapshot(
@@ -325,30 +320,3 @@ def test主数据与日志分类变化清空执行摘要且兼容字典会话() 
     commit_log_classification(session, {"type": "new"})
     assert session.current_execution is None
     assert session.previous_execution is None
-
-    dictionary_session = {
-        "current_execution": summary.model_dump(mode="json"),
-        "previous_execution": summary.model_dump(mode="json"),
-    }
-    commit_primary_dataset(
-        dictionary_session,
-        PrimaryDatasetSnapshot(
-            decoded_data={"normalize": []},
-            decoded_fields=[],
-            original_log=None,
-            simplified_data={},
-            decoded_text="",
-            uploaded_file_name="new.txt",
-            uploaded_file_time="now",
-        ),
-    )
-    assert "current_execution" not in dictionary_session
-    assert "previous_execution" not in dictionary_session
-
-    dictionary_session.update(
-        current_execution=summary.model_dump(mode="json"),
-        previous_execution=summary.model_dump(mode="json"),
-    )
-    clear_session_data(dictionary_session)
-    assert "current_execution" not in dictionary_session
-    assert "previous_execution" not in dictionary_session

@@ -15,11 +15,11 @@ import httpx
 from agno.tools import tool
 
 from agent.prompts import load_log_format_identify_prompt
+from agent.shared.llm_response import parse_json_object
 from agent.shared.logger import get_logger
 from agent.tools.enum_extract_tool import sample_logs
 from agent.tools.pipeline.llm_client import (
     _call_llm_direct,
-    _try_parse_json,
     normalize_log_format,
 )
 
@@ -202,7 +202,7 @@ def _do_identify_log_format(logs_str: str) -> str:
         prompt = load_log_format_identify_prompt().format(sampled_logs=sampled)
         response = _call_llm_direct(prompt, temperature=0.1, max_tokens=500, timeout=90)
 
-        parsed = _try_parse_json(response)
+        parsed = parse_json_object(response, extract_block=True)
         if parsed is None:
             logger.warning(f"[identify_log_format] LLM 返回非 JSON: {response[:200]}")
             return json.dumps(
@@ -307,7 +307,7 @@ def _do_identify_log_format(logs_str: str) -> str:
             retry_response = _call_llm_direct(
                 retry_prompt, temperature=0.1, max_tokens=500, timeout=90
             )
-            retry_parsed = _try_parse_json(retry_response)
+            retry_parsed = parse_json_object(retry_response, extract_block=True)
             retry_field = (
                 str(retry_parsed.get("feature_field", "") or "")
                 if isinstance(retry_parsed, dict)

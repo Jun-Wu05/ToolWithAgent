@@ -4,6 +4,8 @@ import asyncio
 
 from contracts.planner_models import FillStep, StepStatus
 
+from factories import make_session_state
+
 
 def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch):
     """execute_deterministic_plan 把按钮的类型化 FillStep 经同一 PlanExecutor + 适配器
@@ -46,9 +48,9 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
     )
     monkeypatch.setattr(deterministic_plan, "render_execution_report", capture_render)
 
-    session = {
-        "mapped_sub_rules": [{"name": "rule-1", "normalize": [{"index": "event_type3", "mappings": []}]}],
-        "enum_preview": [
+    session = make_session_state(
+        mapped_sub_rules=[{"name": "rule-1", "normalize": [{"index": "event_type3", "mappings": []}]}],
+        enum_preview=[
             {
                 "目标字段": "event_type3",
                 "mappingType": "EQUAL",
@@ -56,7 +58,7 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
                 "mappingValue": "攻击",
             }
         ],
-    }
+    )
     step = FillStep(
         step_id="enum-fill",
         type="fill",
@@ -80,7 +82,7 @@ def test确定性计划复用统一执行器执行按钮填充步骤(monkeypatch
     assert captured["session_facts"].has_mapped_sub_rules is True
     assert lifecycle == ["begin", "finish"]
     # 真实领域结果：按钮入口同样把枚举映射写回 normalize。
-    mappings = session["mapped_sub_rules"][0]["normalize"][0]["mappings"]
+    mappings = session.mapped_sub_rules[0]["normalize"][0]["mappings"]
     assert mappings == [{"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}]
 
 
@@ -138,7 +140,7 @@ def test确定性计划需要输入时不以旧模板覆盖生成说明(monkeypa
 
     asyncio.run(
         deterministic_plan.execute_deterministic_plan(
-            {}, team=None, plan_id=primary.plan_id, steps=[step]
+            make_session_state(), team=None, plan_id=primary.plan_id, steps=[step]
         )
     )
 
@@ -206,7 +208,7 @@ def test应用入口在慢速威胁链前发布主报告且保持合并返回(mo
     async def scenario():
         task = asyncio.create_task(
             runtime.run_deterministic_plan(
-                session={},
+                session=make_session_state(),
                 team=None,
                 plan=plan,
                 progress_sink=NullProgressSink(),
@@ -357,7 +359,7 @@ def test网页入口先渲染主报告并仅追加威胁链结果(monkeypatch):
     async def scenario():
         task = asyncio.create_task(
             deterministic_plan.execute_deterministic_plan(
-                {}, team=None, plan_id=primary.plan_id, steps=[step]
+                make_session_state(), team=None, plan_id=primary.plan_id, steps=[step]
             )
         )
         await asyncio.wait_for(chain_started.wait(), timeout=1)

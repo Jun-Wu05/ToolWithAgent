@@ -8,6 +8,8 @@ from web.chainlit_progress import ChainlitProgressSink
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
 from contracts.session_facts import SessionFacts
 
+from factories import make_session_state
+
 
 class _RecordingProgressSink:
     """在内存中保存类型化进度事件。"""
@@ -465,7 +467,7 @@ def testPlanExecutor为每个成功业务步骤发布终态事件():
         PlanExecutor({"export": _SuccessfulExportAdapter()}).execute(
             plan,
             ExecutionContext(
-                session={},
+                session=make_session_state(),
                 session_facts=SessionFacts(
                     available_config_refs=("session.decoded_config",),
                 ),
@@ -510,7 +512,7 @@ def testPlanExecutor执行前拦截终结当前步骤且不展示后续步骤():
         PlanExecutor({}).execute(
             plan,
             ExecutionContext(
-                session={},
+                session=make_session_state(),
                 session_facts=SessionFacts(),
                 progress_sink=sink,
             ),

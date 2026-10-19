@@ -5,6 +5,8 @@ import logging
 
 import pytest
 
+from factories import make_session_state
+
 
 def test瞬时异常原样重试一次并在报告与审计中标记恢复(caplog) -> None:
     from application.execution import ExecutionContext
@@ -41,7 +43,7 @@ def test瞬时异常原样重试一次并在报告与审计中标记恢复(caplo
             create_plan_executor({"log_parse": adapter}).execute(
                 plan,
                 ExecutionContext(
-                    session={"raw_log_lines": ["event=login"]},
+                    session=make_session_state(raw_log_lines=["event=login"]),
                     session_facts=SessionFacts(has_logs=True),
                 ),
             )
@@ -89,7 +91,7 @@ def test恢复预算为零时保持失败即停且不改变报告序列化() -> 
         create_plan_executor({"log_parse": adapter}).execute(
             plan,
             ExecutionContext(
-                session={"raw_log_lines": ["event=login"]},
+                session=make_session_state(raw_log_lines=["event=login"]),
                 session_facts=SessionFacts(has_logs=True),
                 recovery_budget=RecoveryBudget(max_per_plan=0),
             ),
@@ -150,7 +152,7 @@ def test同一步骤连续两次瞬时失败后停止且不做第三次尝试() 
         create_plan_executor({"enum_extract": adapter}).execute(
             plan,
             ExecutionContext(
-                session={"raw_log_lines": ["event=login"]},
+                session=make_session_state(raw_log_lines=["event=login"]),
                 session_facts=SessionFacts(
                     has_logs=True,
                     available_fields=("event",),
@@ -203,7 +205,7 @@ def test计划级预算耗尽后第三个瞬时失败不再重试() -> None:
         create_plan_executor({"log_parse": adapter}).execute(
             plan,
             ExecutionContext(
-                session={"raw_log_lines": ["event=login"]},
+                session=make_session_state(raw_log_lines=["event=login"]),
                 session_facts=SessionFacts(has_logs=True),
             ),
         )
@@ -258,7 +260,7 @@ def test模型结构解析失败结果可原样重试后恢复() -> None:
         create_plan_executor({"enum_extract": adapter}).execute(
             plan,
             ExecutionContext(
-                session={"raw_log_lines": ["event=login"]},
+                session=make_session_state(raw_log_lines=["event=login"]),
                 session_facts=SessionFacts(
                     has_logs=True,
                     available_fields=("event",),
@@ -313,7 +315,7 @@ def test待输入与业务失败不触发恢复重试(status, error_code) -> Non
         create_plan_executor({"enum_extract": adapter}).execute(
             plan,
             ExecutionContext(
-                session={"raw_log_lines": ["event=login"]},
+                session=make_session_state(raw_log_lines=["event=login"]),
                 session_facts=SessionFacts(
                     has_logs=True,
                     available_fields=("event",),
@@ -362,7 +364,7 @@ def test灰度白名单外的写步骤即使超时也不自动重试() -> None:
         create_plan_executor({"add_fields": adapter}).execute(
             plan,
             ExecutionContext(
-                session={"decoded_data": {"normalize": []}},
+                session=make_session_state(decoded_data={"normalize": []}),
                 session_facts=SessionFacts(
                     has_decoded_config=True,
                     available_config_refs=("session.decoded_config",),

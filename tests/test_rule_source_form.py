@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from factories import make_session_state
+
 
 def _fake_chainlit(sent: list, session: object):
     class Message:
@@ -51,12 +53,12 @@ def test_prompt_sends_non_blocking_modal_and_remembers_exact_step(monkeypatch) -
         type="export",
         source_ref="session.log_classification.entry_rules",
     )
-    session = {}
+    session = make_session_state()
     monkeypatch.setattr(source_form, "cl", _fake_chainlit(sent, session))
 
     asyncio.run(source_form.prompt_rule_source_fields(session, pending_step=step))
 
-    assert session["pending_rule_source_step"] is step
+    assert session.pending_rule_source_step is step
     message = sent[0][1]
     assert message.elements[0].name == "RuleSourceDialog"
     assert message.elements[0].props["timeout_seconds"] == 300
@@ -75,7 +77,7 @@ def test_submission_stores_fields_and_resumes_exact_step(monkeypatch) -> None:
         type="export",
         source_ref="session.log_classification.entry_rules",
     )
-    session = {"team": object(), "pending_rule_source_step": step}
+    session = make_session_state(team=object(), pending_rule_source_step=step)
     monkeypatch.setattr(source_form, "cl", _fake_chainlit(sent, session))
 
     async def fake_execute(**kwargs):
@@ -90,8 +92,8 @@ def test_submission_stores_fields_and_resumes_exact_step(monkeypatch) -> None:
     )
 
     assert completed is True
-    assert session["rule_source_fields"].data_source == "产品A(厂商B)"
-    assert session["pending_rule_source_step"] is None
+    assert session.rule_source_fields.data_source == "产品A(厂商B)"
+    assert session.pending_rule_source_step is None
     assert calls[0]["steps"] == (step,)
     assert calls[0]["user_session"] is session
 
@@ -105,7 +107,7 @@ def test_invalid_submission_reopens_modal_with_preserved_values(monkeypatch) -> 
     step = FieldMappingStep(
         step_id="mapping", type="field_mapping", source_ref="session.fields"
     )
-    session = {"pending_rule_source_step": step}
+    session = make_session_state(pending_rule_source_step=step)
     monkeypatch.setattr(source_form, "cl", _fake_chainlit(sent, session))
 
     async def fail_execute(**kwargs):
@@ -121,7 +123,7 @@ def test_invalid_submission_reopens_modal_with_preserved_values(monkeypatch) -> 
     )
 
     assert completed is False
-    assert session["pending_rule_source_step"] is step
+    assert session.pending_rule_source_step is step
     assert "数据源产品" in sent[0][1].content
     reopened = sent[1][1].elements[0]
     assert reopened.props["rule_source_log_vendor"] == "厂商B"
@@ -139,18 +141,18 @@ def test_cancel_or_timeout_clears_pending_step(
     from contracts.planner_models import ExportStep
 
     sent = []
-    session = {
-        "pending_rule_source_step": ExportStep(
+    session = make_session_state(
+        pending_rule_source_step=ExportStep(
             step_id="entry",
             type="export",
             source_ref="session.log_classification.entry_rules",
         )
-    }
+    )
     monkeypatch.setattr(source_form, "cl", _fake_chainlit(sent, session))
 
     asyncio.run(source_form.handle_rule_source_cancel({"reason": reason}, session))
 
-    assert session["pending_rule_source_step"] is None
+    assert session.pending_rule_source_step is None
     assert expected_text in sent[0][1].content
 
 
@@ -158,7 +160,7 @@ def test_submit_and_cancel_actions_route_custom_element_payload(monkeypatch) -> 
     import web.action_callbacks as action_callbacks
     import web.rule_source_form as source_form
 
-    session = {}
+    session = make_session_state()
     routed = []
     monkeypatch.setattr(action_callbacks, "cl", _fake_chainlit([], session))
 
@@ -204,7 +206,7 @@ def test_three_rule_buttons_open_modal_before_execution_when_fields_missing(
     import web.deterministic_plan as deterministic_plan
     import web.rule_source_form as source_form
 
-    session = {"log_classification": {"classification_details": []}}
+    session = make_session_state(log_classification={"classification_details": []})
     prompted = []
     monkeypatch.setattr(action_callbacks, "cl", _fake_chainlit([], session))
     monkeypatch.setattr(
@@ -241,12 +243,12 @@ def test_three_rule_buttons_execute_directly_when_session_fields_exist(
     import web.rule_source_form as source_form
     from contracts.rule_source import RuleSourceFields
 
-    session = {
-        "log_classification": {"classification_details": []},
-        "rule_source_fields": RuleSourceFields.create(
+    session = make_session_state(
+        log_classification={"classification_details": []},
+        rule_source_fields=RuleSourceFields.create(
             product="产品A", log_vendor="厂商B"
         ),
-    }
+    )
     calls = []
     monkeypatch.setattr(action_callbacks, "cl", _fake_chainlit([], session))
     monkeypatch.setattr(

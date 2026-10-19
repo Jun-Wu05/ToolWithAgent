@@ -19,6 +19,8 @@ from application.execution import ExecutionContext, PlanExecutor
 from contracts.planner_models import ExportStep, FieldMappingStep, FillStep, PlanDecision, StepStatus
 from application.session_projection import build_session_facts
 
+from factories import make_session_state
+
 
 def _mapping_registry(team, *, candidate_retriever=None, mapping_policy=None):
     """生产组合根基座，字段映射按需注入假件（#312：测试走生产分派真相）。"""
@@ -31,11 +33,11 @@ def _mapping_registry(team, *, candidate_retriever=None, mapping_policy=None):
 
 
 def test枚举映射表上下文执行填充而非枚举提取():
-    session = {
-        "mapped_sub_rules": [
+    session = make_session_state(
+        mapped_sub_rules=[
             {"name": "rule-1", "normalize": [{"index": "event_type3", "mappings": []}]}
         ],
-        "enum_preview": [
+        enum_preview=[
             {
                 "目标字段": "event_type3",
                 "mappingType": "EQUAL",
@@ -43,8 +45,8 @@ def test枚举映射表上下文执行填充而非枚举提取():
                 "mappingValue": "攻击",
             }
         ],
-        "raw_base64": "存在即可，不能写入 Planner 输入",
-    }
+        raw_base64="存在即可，不能写入 Planner 输入",
+    )
     step = FillStep(
         step_id="enum-fill",
         type="fill",
@@ -64,7 +66,7 @@ def test枚举映射表上下文执行填充而非枚举提取():
 
     assert result.status == StepStatus.SUCCESS
     assert result.changed_count == 1
-    mappings = session["mapped_sub_rules"][0]["normalize"][0]["mappings"]
+    mappings = session.mapped_sub_rules[0]["normalize"][0]["mappings"]
     assert mappings == [
         {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}
     ]
@@ -74,14 +76,14 @@ def test枚举映射表上下文执行填充而非枚举提取():
 
 def test真实Base64上传状态可直接填充完整解码配置():
     """复现上传只产生 decoded_data 时被错误要求先生成 mapped_sub_rules 的回归。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "name": "uploaded-rule",
             "normalize": [{"index": "event_type3", "mappings": []}],
         },
-        "decoded_fields": ["event_type3"],
-        "raw_base64": "present",
-        "enum_preview": [
+        decoded_fields=["event_type3"],
+        raw_base64="present",
+        enum_preview=[
             {
                 "目标字段": "event_type3",
                 "mappingType": "EQUAL",
@@ -89,7 +91,7 @@ def test真实Base64上传状态可直接填充完整解码配置():
                 "mappingValue": "攻击",
             }
         ],
-    }
+    )
     step = FillStep(
         step_id="enum-fill",
         type="fill",
@@ -109,21 +111,21 @@ def test真实Base64上传状态可直接填充完整解码配置():
 
     assert result.status == StepStatus.SUCCESS
     assert result.changed_count == 1
-    assert session["decoded_data"]["normalize"][0]["mappings"] == [
+    assert session.decoded_data["normalize"][0]["mappings"] == [
         {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}
     ]
     assert result.artifact.artifact_type == "config_export"
 
 def test真实Base64状态通过PlanExecutor完成枚举填充():
     """覆盖上传状态、事实投影、前置校验和真实填充适配器的完整链路。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "name": "uploaded-rule",
             "normalize": [{"index": "event_type3", "mappings": []}],
         },
-        "decoded_fields": ["event_type3"],
-        "raw_base64": "present",
-        "enum_preview": [
+        decoded_fields=["event_type3"],
+        raw_base64="present",
+        enum_preview=[
             {
                 "目标字段": "event_type3",
                 "mappingType": "EQUAL",
@@ -131,7 +133,7 @@ def test真实Base64状态通过PlanExecutor完成枚举填充():
                 "mappingValue": "攻击",
             }
         ],
-    }
+    )
     decision = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -158,18 +160,18 @@ def test真实Base64状态通过PlanExecutor完成枚举填充():
 
     assert report.status == StepStatus.SUCCESS
     assert report.results[0].changed_count == 1
-    assert session["decoded_data"]["normalize"][0]["mappings"][0]["orgValue"] == "attack"
+    assert session.decoded_data["normalize"][0]["mappings"][0]["orgValue"] == "attack"
     assert report.results[0].artifact.content
 
 def test同一枚举映射重复填充返回零变更供执行器拦截():
     existing_mapping = {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}
-    session = {
-        "mapped_sub_rules": [
+    session = make_session_state(
+        mapped_sub_rules=[
             {"normalize": [{"index": "event_type3", "mappings": [existing_mapping]}]}
         ],
-        "enum_preview": [{"目标字段": "event_type3", **existing_mapping}],
-        "raw_base64": "present",
-    }
+        enum_preview=[{"目标字段": "event_type3", **existing_mapping}],
+        raw_base64="present",
+    )
     step = FillStep(
         step_id="enum-fill",
         type="fill",
@@ -193,14 +195,14 @@ def test同一枚举映射重复填充返回零变更供执行器拦截():
 
 def test真实PlanExecutor将枚举删除计为变化():
     """新版规则删除多于新增时仍成功，避免总数减少被误判为零变化。"""
-    session = {
-        "decoded_data": {
+    session = make_session_state(
+        decoded_data={
             "name": "uploaded-rule",
             "normalize": [{"index": "event_type3", "mappings": []}],
         },
-        "decoded_fields": ["event_type3"],
-        "raw_base64": "present",
-        "enum_preview": [
+        decoded_fields=["event_type3"],
+        raw_base64="present",
+        enum_preview=[
             {
                 "目标字段": "event_type3",
                 "mappingType": "EQUAL",
@@ -214,7 +216,7 @@ def test真实PlanExecutor将枚举删除计为变化():
                 "mappingValue": "旧规则",
             },
         ],
-    }
+    )
     decision = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -240,9 +242,9 @@ def test真实PlanExecutor将枚举删除计为变化():
     )
     assert first_report.status == StepStatus.SUCCESS
 
-    session["enum_preview"] = [session["enum_preview"][0]]
-    session["enum_pending_refills"] = {"session.decoded_config": {"event_type3"}}
-    session["stale_enum_config_refs"] = {"session.decoded_config"}
+    session.enum_preview = [session.enum_preview[0]]
+    session.enum_pending_refills = {"session.decoded_config": {"event_type3"}}
+    session.stale_enum_config_refs = {"session.decoded_config"}
     replacement_report = asyncio.run(
         executor.execute(
             decision,
@@ -252,7 +254,7 @@ def test真实PlanExecutor将枚举删除计为变化():
 
     assert replacement_report.status == StepStatus.SUCCESS
     assert replacement_report.results[0].changed_count == 1
-    assert session["decoded_data"]["normalize"][0]["mappings"] == [
+    assert session.decoded_data["normalize"][0]["mappings"] == [
         {"mappingType": "EQUAL", "orgValue": "attack", "mappingValue": "攻击"}
     ]
 
@@ -344,7 +346,7 @@ def test字段映射批次只消费原始字段候选池():
                 type="field_mapping",
                 source_ref="session.fields",
             ),
-            ExecutionContext(session={}, session_facts=facts),
+            ExecutionContext(session=make_session_state(), session_facts=facts),
             {},
         )
     )
@@ -379,15 +381,15 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
         "generate_sub_rules",
         lambda classification, all_logs_str, rule_source_fields: generated_sub_rules,
     )
-    session = {
-        "log_classification": {"类型A": {}},
-        "raw_log_lines": ["field_0=value"],
-        "rule_source_fields": {
+    session = make_session_state(
+        log_classification={"类型A": {}},
+        raw_log_lines=["field_0=value"],
+        rule_source_fields={
             "product": "产品",
             "log_vendor": "厂商",
             "data_source": "产品(厂商)",
         },
-    }
+    )
     member = _MappingMember()
     step = FieldMappingStep(
         step_id="mapping",
@@ -406,7 +408,7 @@ def test字段映射超过25个字段时分批并回写子规则(monkeypatch):
     assert result.status == StepStatus.SUCCESS
     assert result.artifact.item_count == 26
     assert len(member.calls) == 2
-    normalized_fields = [item["field"] for item in session["mapped_sub_rules"][0]["normalize"]]
+    normalized_fields = [item["field"] for item in session.mapped_sub_rules[0]["normalize"]]
     assert normalized_fields == [f"标准_{field}" for field in fields]
 
 
@@ -434,19 +436,19 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
         ],
     )
     excel_rows = [{"原始日志": 'alarm_name="attack"', "设备": "ips"}]
-    session = {
-        "decoded_data": copy.deepcopy(excel_rows),
-        "raw_log_lines": ['alarm_name="attack"'],
-        "log_classification": {
+    session = make_session_state(
+        decoded_data=copy.deepcopy(excel_rows),
+        raw_log_lines=['alarm_name="attack"'],
+        log_classification={
             "status": "SUCCESS",
             "classification_details": [{"logtype": "AUDIT"}],
         },
-        "rule_source_fields": {
+        rule_source_fields={
             "product": "产品",
             "log_vendor": "厂商",
             "data_source": "产品(厂商)",
         },
-    }
+    )
     facts = build_session_facts(session)
     assert facts.available_config_refs == ()
 
@@ -467,19 +469,19 @@ def testExcel日志字段映射导出映射后子规则而不是Excel记录配�
     decoded_download = json.loads(
         base64.b64decode(result.artifact.download_content).decode("utf-8")
     )
-    assert decoded_download == session["mapped_sub_rules"]
+    assert decoded_download == session.mapped_sub_rules
     downloaded_normalize = decoded_download[0]["normalize"][0]
     assert downloaded_normalize["index"] == "alarm_name"
     assert downloaded_normalize["field"] == "标准_alarm_name"
     assert downloaded_normalize["mappings"] == []
-    assert session["decoded_data"] == excel_rows
+    assert session.decoded_data == excel_rows
     assert "原始日志" not in json.dumps(decoded_download, ensure_ascii=False)
 
 
 def test字段映射无可回填目标时不产出下载(monkeypatch):
     """既无真实配置也无子规则来源时，产物不得携带任何下载契约字段。"""
 
-    session = {"decoded_fields": ["alpha", "beta"]}
+    session = make_session_state(decoded_fields=["alpha", "beta"])
     facts = build_session_facts(session)
     assert facts.available_config_refs == ()
 
@@ -498,7 +500,7 @@ def test字段映射无可回填目标时不产出下载(monkeypatch):
     assert result.status == StepStatus.SUCCESS
     assert result.artifact.download_kind is None
     assert result.artifact.download_content is None
-    assert "mapped_sub_rules" not in session
+    assert session.mapped_sub_rules is None
 
 
 class _AsyncMappingMember:
@@ -540,7 +542,7 @@ def test字段映射通过异步事件流并发执行三个批次(monkeypatch):
     """51 个字段应形成三个并发批次，且结果按原字段顺序合并。"""
 
     fields = [f"field_{index:02d}" for index in reversed(range(51))]
-    session = {"decoded_fields": fields}
+    session = make_session_state(decoded_fields=fields)
     member = _AsyncMappingMember()
     step = FieldMappingStep(
         step_id="mapping",
@@ -620,8 +622,8 @@ def test字段映射漏字段时补查缺失项后成功(monkeypatch):
         adapter.execute(
             step,
             ExecutionContext(
-                session={"decoded_fields": fields},
-                session_facts=build_session_facts({"decoded_fields": fields}),
+                session=make_session_state(decoded_fields=fields),
+                session_facts=build_session_facts(make_session_state(decoded_fields=fields)),
             ),
             {},
         )
@@ -680,8 +682,8 @@ def test字段映射补查仍缺时兜底未匹配(monkeypatch):
         adapter.execute(
             step,
             ExecutionContext(
-                session={"decoded_fields": ["lonely"]},
-                session_facts=build_session_facts({"decoded_fields": ["lonely"]}),
+                session=make_session_state(decoded_fields=["lonely"]),
+                session_facts=build_session_facts(make_session_state(decoded_fields=["lonely"])),
             ),
             {},
         )
@@ -742,8 +744,8 @@ def test字段映射乱序返回不再判为失败(monkeypatch):
         adapter.execute(
             step,
             ExecutionContext(
-                session={"decoded_fields": fields},
-                session_facts=build_session_facts({"decoded_fields": fields}),
+                session=make_session_state(decoded_fields=fields),
+                session_facts=build_session_facts(make_session_state(decoded_fields=fields)),
             ),
             {},
         )
@@ -797,8 +799,8 @@ def test字段映射重复字段去重后不失败(monkeypatch):
         adapter.execute(
             step,
             ExecutionContext(
-                session={"decoded_fields": fields},
-                session_facts=build_session_facts({"decoded_fields": fields}),
+                session=make_session_state(decoded_fields=fields),
+                session_facts=build_session_facts(make_session_state(decoded_fields=fields)),
             ),
             {},
         )
@@ -812,13 +814,13 @@ def test字段映射重复字段去重后不失败(monkeypatch):
 def test字段映射回填解码配置并产出下载(monkeypatch):
     """有真实 decoded_config 时，字段映射回填配置并标记为 mapped_config（回归 #51）。"""
     _permissive_standard_catalog(monkeypatch)
-    session = {
-        "decoded_fields": ["alpha", "beta"],
+    session = make_session_state(
+        decoded_fields=["alpha", "beta"],
         # simple_decode 的真实 decoded_json 根对象是规则列表，而不是包装字典。
-        "decoded_data": [
+        decoded_data=[
             {"name": "r", "normalize": [{"index": "alpha"}, {"index": "beta"}]}
         ],
-    }
+    )
     member = _AsyncMappingMember()
     step = FieldMappingStep(step_id="mapping", type="field_mapping", source_ref="session.fields")
     adapter = _mapping_registry(
@@ -848,22 +850,22 @@ def test字段映射回填解码配置并产出下载(monkeypatch):
     assert result.status == StepStatus.SUCCESS
     assert result.artifact.download_kind == "mapped_config"
     assert result.artifact.download_content is not None
-    norm = {entry["index"]: entry for entry in session["decoded_data"][0]["normalize"]}
+    norm = {entry["index"]: entry for entry in session.decoded_data[0]["normalize"]}
     assert norm["alpha"]["field"] == "标准_alpha"
     assert norm["beta"]["field"] == "标准_beta"
     downloaded = json.loads(
         base64.b64decode(result.artifact.download_content).decode("utf-8")
     )
     assert isinstance(downloaded, list)
-    assert downloaded == session["decoded_data"]
+    assert downloaded == session.decoded_data
 
 
 def test上传规则字段映射仅处理未映射字段并报告差分(monkeypatch):
     """纯上传路径的 LLM 输入、写回与用户消息共用同一语义。"""
     _permissive_standard_catalog(monkeypatch)
-    session = {
-        "decoded_fields": ["alpha", "beta"],
-        "decoded_data": [
+    session = make_session_state(
+        decoded_fields=["alpha", "beta"],
+        decoded_data=[
             {
                 "name": "r",
                 "normalize": [
@@ -878,7 +880,7 @@ def test上传规则字段映射仅处理未映射字段并报告差分(monkeypa
                 ],
             }
         ],
-    }
+    )
     member = _MappingMember()
     adapter = _mapping_registry(
         _Team(member),
@@ -901,7 +903,7 @@ def test上传规则字段映射仅处理未映射字段并报告差分(monkeypa
     assert len(member.calls) == 1
     assert '"beta"' in member.calls[0]
     assert '"alpha"' not in member.calls[0]
-    normalized = {entry["index"]: entry for entry in session["decoded_data"][0]["normalize"]}
+    normalized = {entry["index"]: entry for entry in session.decoded_data[0]["normalize"]}
     assert normalized["alpha"]["field"] == "外部标准"
     assert normalized["alpha"]["entity"] == "外部对象"
     assert normalized["alpha"]["sim"] is False
@@ -913,16 +915,16 @@ def test上传规则字段映射仅处理未映射字段并报告差分(monkeypa
 
 def test上传规则全部已映射时直接成功且不调模型():
     """全已映射不是无数据，Executor 应放行 Adapter 返回零调用成功。"""
-    session = {
-        "decoded_fields": ["alpha", "beta"],
-        "decoded_data": {
+    session = make_session_state(
+        decoded_fields=["alpha", "beta"],
+        decoded_data={
             "normalize": [
                 {"index": "alpha", "field": "标准_alpha"},
                 {"index": "beta", "field": "标准_beta"},
             ]
         },
-        "log_classification": {"classification_details": [{"logtype": "旧分类"}]},
-    }
+        log_classification={"classification_details": [{"logtype": "旧分类"}]},
+    )
     member = _MappingMember()
     adapter = _mapping_registry(
         _Team(member),
@@ -982,15 +984,15 @@ def test字段映射一对一冲突裁决后仅写回保留者(monkeypatch, capl
             "client": [("源IP", 1.00, "client", "")],
         }
 
-    session = {
-        "decoded_fields": ["src", "client"],
-        "decoded_data": {
+    session = make_session_state(
+        decoded_fields=["src", "client"],
+        decoded_data={
             "normalize": [
                 {"index": "src", "field": ""},
                 {"index": "client", "field": ""},
             ]
         },
-    }
+    )
     member = CollisionMember()
     result = asyncio.run(
         _mapping_registry(
@@ -1008,11 +1010,11 @@ def test字段映射一对一冲突裁决后仅写回保留者(monkeypatch, capl
     assert result.status == StepStatus.SUCCESS
     assert len(member.calls) == 1
     assert candidate_calls == [("src", "client"), ("src", "client")]
-    assert [row["匹配状态"] for row in session["last_mapping_data"]] == [
+    assert [row["匹配状态"] for row in session.last_mapping_data] == [
         "未匹配",
         "匹配成功",
     ]
-    normalized = {entry["index"]: entry for entry in session["decoded_data"]["normalize"]}
+    normalized = {entry["index"]: entry for entry in session.decoded_data["normalize"]}
     assert normalized["src"].get("field", "") == ""
     assert normalized["client"]["field"] == "源IP"
     assert [row.match_status for row in result.artifact.mappings] == ["未匹配", "匹配成功"]
@@ -1051,9 +1053,9 @@ def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch
                 }
             ]
 
-    session = {
-        "decoded_fields": ["external_src", "client_ip"],
-        "decoded_data": {
+    session = make_session_state(
+        decoded_fields=["external_src", "client_ip"],
+        decoded_data={
             "normalize": [
                 {
                     "index": "external_src",
@@ -1065,7 +1067,7 @@ def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch
                 {"index": "client_ip", "field": ""},
             ]
         },
-    }
+    )
     result = asyncio.run(
         FieldMappingAdapter(
             team=None,
@@ -1084,7 +1086,7 @@ def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch
         )
     )
 
-    normalized = {entry["index"]: entry for entry in session["decoded_data"]["normalize"]}
+    normalized = {entry["index"]: entry for entry in session.decoded_data["normalize"]}
     assert result.status == StepStatus.SUCCESS
     assert normalized["external_src"] == {
         "index": "external_src",
@@ -1094,7 +1096,7 @@ def test字段映射新行撞上传配置既有标准字段时落选(monkeypatch
         "core": True,
     }
     assert normalized["client_ip"].get("field", "") == ""
-    assert session["last_mapping_data"][0]["匹配状态"] == "未匹配"
+    assert session.last_mapping_data[0]["匹配状态"] == "未匹配"
     assert "检测到 1 组占用冲突，保留 1 个、1 个置未匹配" in (result.message or "")
     assert "落选" not in (result.message or "")
     conflict_logs = [
@@ -1125,7 +1127,7 @@ def test威胁映射依赖产物不是枚举值时失败():
         artifact=ConfigExportArtifact(content="e30=", item_count=1),
     )
     adapter = create_default_adapters(_Team(None))["threat_mapping"]
-    session = {}
+    session = make_session_state()
 
     result = asyncio.run(
         adapter.execute(
@@ -1183,11 +1185,11 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
             )
         )
     )
-    session = {
-        "raw_log_lines": ["event_type3=attack src=10.0.0.1", "event_type3=scan src=10.0.0.2"],
-        "decoded_fields": ["event_type3"],
-        "decoded_data": [{"name": "rule-1", "normalize": [{"index": "event_type3", "mappings": []}]}],
-    }
+    session = make_session_state(
+        raw_log_lines=["event_type3=attack src=10.0.0.1", "event_type3=scan src=10.0.0.2"],
+        decoded_fields=["event_type3"],
+        decoded_data=[{"name": "rule-1", "normalize": [{"index": "event_type3", "mappings": []}]}],
+    )
     decision = PlanDecision.model_validate(
         {
             "decision": "execute",
@@ -1238,15 +1240,15 @@ def test三步复合真实链路依次传递账本并产出唯一导出(monkeypa
     assert report.results[0].artifact.regex
     assert report.results[0].artifact.original_log
     assert isinstance(report.results[1].artifact, ThreatMappingArtifact)
-    assert isinstance(session["latest_enum_artifact"], EnumArtifactSlot)
-    assert session["latest_enum_artifact"].source_field == "event_type3"
-    assert isinstance(session["latest_threat_artifact"], ThreatArtifactSlot)
-    assert session["latest_threat_artifact"].source_field == "event_type3"
+    assert isinstance(session.latest_enum_artifact, EnumArtifactSlot)
+    assert session.latest_enum_artifact.source_field == "event_type3"
+    assert isinstance(session.latest_threat_artifact, ThreatArtifactSlot)
+    assert session.latest_threat_artifact.source_field == "event_type3"
     assert isinstance(report.results[2].artifact, ConfigExportArtifact)
     assert report.results[2].artifact.download_kind == "threatmapping_config"
     assert report.results[2].changed_count == 2
     # 威胁填充真实写回目标字段 mappings。
-    mappings = session["decoded_data"][0]["normalize"][0]["mappings"]
+    mappings = session.decoded_data[0]["normalize"][0]["mappings"]
     assert {mapping["orgValue"] for mapping in mappings} == {"attack", "scan"}
 
     # 渲染：汇总先发，枚举/威胁表格逐条展示，下载文件随后独立发送。
@@ -1322,7 +1324,9 @@ def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypa
     """任一批次超时应取消剩余任务，并保持 session 原子不变。"""
     import application.field_mapping_input as input_builder
 
-    session = {"decoded_fields": [f"field_{index:02d}" for index in range(51)]}
+    session = make_session_state(
+        decoded_fields=[f"field_{index:02d}" for index in range(51)]
+    )
     member = _TimeoutMappingMember()
     adapter = _mapping_registry(
         _Team(member),
@@ -1354,8 +1358,8 @@ def test字段映射禁用拆分时批次超时且不写入部分结果(monkeypa
     assert result.error_code == "field_mapping_timeout"
     assert member.call_count == 3
     assert member.cancel_count == 3
-    assert "last_mapping_data" not in session
-    assert "mapped_sub_rules" not in session
+    assert session.last_mapping_data is None
+    assert session.mapped_sub_rules is None
 
 
 
@@ -1364,7 +1368,7 @@ def test字段映射291字段形成12批且最大并发为3(monkeypatch):
     import application.field_mapping_input as input_builder
 
     fields = [f"field_{index:03d}" for index in range(291)]
-    session = {"decoded_fields": fields}
+    session = make_session_state(decoded_fields=fields)
     member = _AsyncMappingMember()
     adapter = _mapping_registry(
         _Team(member),
@@ -1418,7 +1422,7 @@ def test字段映射不可重试错误只调用一次(monkeypatch):
     """非连接、限流、服务端或超时错误不得浪费第二次模型调用。"""
     import application.field_mapping_input as input_builder
 
-    session = {"decoded_fields": ["field_a"]}
+    session = make_session_state(decoded_fields=["field_a"])
     member = _PermanentMappingErrorMember()
     adapter = _mapping_registry(
         _Team(member),
@@ -1461,12 +1465,12 @@ def test字段映射写回阶段异常时不留下部分状态(monkeypatch):
         "apply_field_mapping_to_sub_rules",
         fail_writeback,
     )
-    session = {
-        "decoded_fields": ["field_a"],
-        "mapped_sub_rules": [
+    session = make_session_state(
+        decoded_fields=["field_a"],
+        mapped_sub_rules=[
             {"name": "rule-a", "normalize": [{"index": "field_a", "field": ""}]}
         ],
-    }
+    )
     member = _AsyncMappingMember()
     step = FieldMappingStep(
         step_id="mapping-writeback-failed",
@@ -1487,9 +1491,9 @@ def test字段映射写回阶段异常时不留下部分状态(monkeypatch):
     else:
         raise AssertionError("预期子规则计算异常向执行核心传播")
 
-    assert "last_mapping_data" not in session
-    assert "sub_rule_mapping_results" not in session
-    assert session["mapped_sub_rules"][0]["normalize"][0]["field"] == ""
+    assert session.last_mapping_data is None
+    assert session.sub_rule_mapping_results is None
+    assert session.mapped_sub_rules[0]["normalize"][0]["field"] == ""
 
 def test字段映射Agent不再挂载业务工具(monkeypatch):
     """字段映射 Agent 应只生成结构化映射，不在模型循环中回写配置。"""
@@ -1528,10 +1532,10 @@ def test入口规则导出按钮与自然语言共用ExportAdapter(monkeypatch):
     from contracts.rule_source import RuleSourceFields
 
     source_fields = RuleSourceFields.create(product="产品", log_vendor="厂商")
-    session = {
-        "log_classification": {"类型A": {}},
-        "rule_source_fields": source_fields,
-    }
+    session = make_session_state(
+        log_classification={"类型A": {}},
+        rule_source_fields=source_fields,
+    )
     step = ExportStep(
         step_id="export-entry",
         type="export",
@@ -1555,7 +1559,7 @@ def test入口规则导出按钮与自然语言共用ExportAdapter(monkeypatch):
 
 def test日志分类规则导出缺少数据源字段时统一gate并记住步骤():
     """按钮和自然语言入口必须共享同一 needs_input 与续跑状态。"""
-    session = {"log_classification": {"类型A": {}}}
+    session = make_session_state(log_classification={"类型A": {}})
     step = ExportStep(
         step_id="export-entry-missing-source",
         type="export",
@@ -1572,7 +1576,7 @@ def test日志分类规则导出缺少数据源字段时统一gate并记住步�
 
     assert result.status == StepStatus.NEEDS_INPUT
     assert result.error_code == "data_source_fields_required"
-    assert session["pending_rule_source_step"] is step
+    assert session.pending_rule_source_step is step
     assert result.artifact is None
 
 
@@ -1597,10 +1601,10 @@ def test未映射子规则导出保留明确下载语义(monkeypatch):
     from contracts.rule_source import RuleSourceFields
 
     source_fields = RuleSourceFields.create(product="产品", log_vendor="厂商")
-    session = {
-        "log_classification": {"类型A": {}},
-        "rule_source_fields": source_fields,
-    }
+    session = make_session_state(
+        log_classification={"类型A": {}},
+        rule_source_fields=source_fields,
+    )
     step = ExportStep(
         step_id="export-sub",
         type="export",
@@ -1629,10 +1633,10 @@ def test标准字段映射生成日志子规则前要求数据源字段():
         async def run(self, *args, **kwargs):
             raise AssertionError("缺少数据源字段时不应调用字段映射模型")
 
-    session = {
-        "decoded_fields": ["src_ip"],
-        "log_classification": {"classification_details": [{"logtype": "审计"}]},
-    }
+    session = make_session_state(
+        decoded_fields=["src_ip"],
+        log_classification={"classification_details": [{"logtype": "审计"}]},
+    )
     step = FieldMappingStep(
         step_id="mapping-missing-source",
         type="field_mapping",
@@ -1649,7 +1653,7 @@ def test标准字段映射生成日志子规则前要求数据源字段():
 
     assert result.status == StepStatus.NEEDS_INPUT
     assert result.error_code == "data_source_fields_required"
-    assert session["pending_rule_source_step"] is step
+    assert session.pending_rule_source_step is step
 
 
 def test已有映射结果时白板子规则导出被统一gate拦截(monkeypatch):
@@ -1662,15 +1666,15 @@ def test已有映射结果时白板子规则导出被统一gate拦截(monkeypatc
         "generate_rules",
         lambda classification, mode: calls.append((classification, mode)),
     )
-    session = {
-        "log_classification": {"类型A": {}},
-        "mapped_sub_rules": [
+    session = make_session_state(
+        log_classification={"类型A": {}},
+        mapped_sub_rules=[
             {
                 "name": "类型A",
                 "normalize": [{"index": "alarm_name", "field": "事件名称"}],
             }
         ],
-    }
+    )
     step = ExportStep(
         step_id="export-whiteboard",
         type="export",
@@ -1700,14 +1704,14 @@ def test映射后子规则导出消费mapped_sub_rules而不是重新生成配�
     import base64
     import json
 
-    session = {
-        "mapped_sub_rules": [
+    session = make_session_state(
+        mapped_sub_rules=[
             {
                 "name": "AUDIT",
                 "normalize": [{"index": "alarm_name", "field": "事件名称"}],
             }
         ]
-    }
+    )
     step = ExportStep(
         step_id="export-mapped",
         type="export",

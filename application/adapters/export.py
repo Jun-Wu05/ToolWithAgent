@@ -9,8 +9,6 @@ from application.adapters.shared import (
     _is_enum_config_stale,
     _needs_input,
     _read_config,
-    _session_get,
-    _session_set,
 )
 from application.execution import ExecutionContext
 from contracts.planner_models import (
@@ -66,7 +64,7 @@ class ExportAdapter:
 
             if (
                 step.source_ref == "session.log_classification.sub_rules"
-                and _session_get(context.session, "mapped_sub_rules")
+                and context.session.mapped_sub_rules
             ):
                 return _needs_input(
                     step,
@@ -74,16 +72,16 @@ class ExportAdapter:
                     "当前已存在包含字段映射、事件标注和手动调整的完整子规则；"
                     "请使用「生成映射后子规则」导出，避免下载会丢失这些内容的白板版本",
                 )
-            classification = _session_get(context.session, "log_classification")
+            classification = context.session.log_classification
             if not isinstance(classification, dict) or not classification:
                 return _needs_input(step, "log_classification_required", "请先完成日志类型提取")
             from contracts.rule_source import RuleSourceFields
 
             rule_source_fields = RuleSourceFields.from_value(
-                _session_get(context.session, "rule_source_fields")
+                context.session.rule_source_fields
             )
             if rule_source_fields is None:
-                _session_set(context.session, "pending_rule_source_step", step)
+                context.session.pending_rule_source_step = step
                 return _needs_input(
                     step,
                     "data_source_fields_required",

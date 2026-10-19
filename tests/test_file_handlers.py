@@ -13,6 +13,8 @@ from contracts.planner_models import (
 )
 from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
 
+from factories import make_session_state
+
 
 def _referenceable_artifact_slots():
     """构造用于文件生命周期断言的两类成功产物。"""
@@ -87,12 +89,12 @@ def test数据表格缺少原始日志列时拒绝并不写入会话(monkeypatch
         ),
     )
 
-    session = {}
+    session = make_session_state()
     asyncio.run(file_handlers._handle_excel_data_table("fake.xlsx", "fake.xlsx", session))
 
     assert len(captured) == 1
     assert "上传正确的excel，应包含原始日志一列" in captured[0]
-    assert session == {}
+    assert not session.has_decoded_data()
 
 
 def test数据表格含原始日志列时正常提取日志行(monkeypatch):
@@ -117,14 +119,14 @@ def test数据表格含原始日志列时正常提取日志行(monkeypatch):
         ),
     )
 
-    session = {}
+    session = make_session_state()
     asyncio.run(file_handlers._handle_excel_data_table("ok.xlsx", "ok.xlsx", session))
 
     assert len(captured) == 1
     assert "上传正确的excel" not in captured[0]
-    assert session["raw_log_lines"] == ['<1>AUDIT: alarm_name="login"']
-    assert session["decoded_fields"] == ["发生时间", "原始日志", "设备"]
-    assert session["original_log"]
+    assert session.raw_log_lines == ['<1>AUDIT: alarm_name="login"']
+    assert session.decoded_fields == ["发生时间", "原始日志", "设备"]
+    assert session.original_log
     assert cleared == [True]
 
 
@@ -132,7 +134,7 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     """新 Base64/TXT 提交后，旧日志数据集及其附件和派生结果全部失效。"""
     import web.file_handlers as file_handlers
     from application.session_projection import build_session_facts
-    from application.session_state import SessionState
+    from factories import make_session_state_with_stale_derived_state
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -154,7 +156,7 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
         },
     )
 
-    session = SessionState(
+    session = make_session_state_with_stale_derived_state(
         team=object(),
         current_provider="deepseek",
         api_key="configured",
@@ -171,14 +173,6 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
         last_threat_data=[{"orgValue": "old"}],
         excel_data=b"old",
         excel_filename="old.xlsx",
-        enum_excel_path="old-enum.xlsx",
-        enum_preview=[{"目标字段": "old_field"}],
-        enum_mapping_sheets={"old_field": [{"orgValue": "old"}]},
-        enum_fill_contributions={
-            "session.decoded_config": {"old_field": [{"mapping": {"orgValue": "old"}}]}
-        },
-        stale_enum_config_refs={"session.decoded_config"},
-        enum_pending_refills={"session.decoded_config": {"old_field"}},
         conversation_history=[{"role": "user", "content": "处理旧文件"}],
     )
 
@@ -223,7 +217,7 @@ def test真实base64上传贯通application解码原子提交与既有反馈(mon
     import json
 
     import web.file_handlers as file_handlers
-    from application.session_state import SessionState
+    from factories import make_session_state
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -239,7 +233,7 @@ def test真实base64上传贯通application解码原子提交与既有反馈(mon
     ).decode("ascii")
     monkeypatch.setattr(file_handlers, "read_element_content", lambda element: encoded)
     enum_slot, threat_slot = _referenceable_artifact_slots()
-    session = SessionState(
+    session = make_session_state(
         decoded_data={"name": "old-rule"},
         enum_excel_path="old.xlsx",
         latest_enum_artifact=enum_slot,
@@ -272,7 +266,7 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
     """新日志 Excel 提交后，旧配置引用、附件和派生结果对称失效。"""
     import web.file_handlers as file_handlers
     from application.session_projection import build_session_facts
-    from application.session_state import SessionState
+    from factories import make_session_state_with_stale_derived_state
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -287,7 +281,7 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
             }
         ),
     )
-    session = SessionState(
+    session = make_session_state_with_stale_derived_state(
         decoded_data={
             "name": "old-config",
             "normalize": [{"index": "old_index", "field": "old_field"}],
@@ -296,14 +290,6 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
         raw_base64="old-encoded",
         mapped_sub_rules=[{"normalize": [{"index": "old_index"}]}],
         log_classification={"types": ["AUDIT"]},
-        enum_excel_path="old-enum.xlsx",
-        enum_preview=[{"目标字段": "old_field"}],
-        enum_mapping_sheets={"old_field": [{"orgValue": "old"}]},
-        enum_fill_contributions={
-            "session.decoded_config": {"old_field": [{"mapping": {"orgValue": "old"}}]}
-        },
-        stale_enum_config_refs={"session.decoded_config"},
-        enum_pending_refills={"session.decoded_config": {"old_field"}},
         conversation_history=[{"role": "assistant", "content": "旧配置"}],
     )
 
@@ -333,7 +319,7 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
 def test无效配置上传保持当前有效会话(monkeypatch):
     """配置解码失败时不得提前清除旧主数据、附件或派生结果。"""
     import web.file_handlers as file_handlers
-    from application.session_state import SessionState
+    from factories import make_session_state_with_current_dataset
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -344,12 +330,8 @@ def test无效配置上传保持当前有效会话(monkeypatch):
         lambda content: {"status": "error", "error_message": "invalid base64"},
     )
     enum_slot, threat_slot = _referenceable_artifact_slots()
-    session = SessionState(
-        decoded_data={"name": "current"},
-        decoded_fields=["current_field"],
+    session = make_session_state_with_current_dataset(
         mapped_sub_rules=[{"normalize": [{"index": "current_field"}]}],
-        enum_excel_path="current-enum.xlsx",
-        enum_preview=[{"目标字段": "current_field"}],
         latest_enum_artifact=enum_slot,
         latest_threat_artifact=threat_slot,
         conversation_history=[{"role": "user", "content": "当前文件"}],
@@ -371,7 +353,7 @@ def test无效配置上传保持当前有效会话(monkeypatch):
 def test无效日志表上传保持当前有效会话(monkeypatch):
     """缺少原始日志列的 Excel 在提交前拒绝，旧会话完整保留。"""
     import web.file_handlers as file_handlers
-    from application.session_state import SessionState
+    from factories import make_session_state_with_current_dataset
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -381,12 +363,8 @@ def test无效日志表上传保持当前有效会话(monkeypatch):
         lambda path: pd.DataFrame({"发生时间": ["2026-08-19"], "设备": ["ips"]}),
     )
     enum_slot, threat_slot = _referenceable_artifact_slots()
-    session = SessionState(
-        decoded_data={"name": "current"},
-        decoded_fields=["current_field"],
+    session = make_session_state_with_current_dataset(
         log_classification={"types": ["IPS"]},
-        enum_excel_path="current-enum.xlsx",
-        enum_preview=[{"目标字段": "current_field"}],
         latest_enum_artifact=enum_slot,
         latest_threat_artifact=threat_slot,
         conversation_history=[{"role": "assistant", "content": "当前结果"}],
@@ -413,7 +391,7 @@ def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_p
     from application.session_projection import build_session_facts
     from application.adapters import EnumFillAdapter
     from application.execution import ExecutionContext
-    from application.session_state import SessionState
+    from factories import make_session_state
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -423,7 +401,7 @@ def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_p
     second_path = tmp_path / "second.xlsx"
     _write_enum_workbook(first_path, {"event_type3": [("EQUAL", "attack", "攻击")]})
     _write_enum_workbook(second_path, {"action": [("EQUAL", "allow", "允许")]})
-    session = SessionState(
+    session = make_session_state(
         decoded_data={
             "name": "current",
             "normalize": [
@@ -516,7 +494,7 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
     from application.session_projection import build_session_facts
     from application.adapters import EnumFillAdapter, ExportAdapter, create_default_adapters
     from application.execution import ExecutionContext, PlanExecutor
-    from application.session_state import SessionState
+    from factories import make_session_state
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -543,7 +521,7 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
         },
     )
     base_mapping = {"mappingType": "EQUAL", "orgValue": "base", "mappingValue": "基础"}
-    session = SessionState(
+    session = make_session_state(
         decoded_data={
             "name": "current",
             "normalize": [
@@ -627,7 +605,7 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
 def test多Sheet工作簿任一Sheet无有效规则时整份拒绝(monkeypatch, tmp_path):
     """多 Sheet 上传必须先完整校验，失败时原附件和输出有效性均不变。"""
     import web.file_handlers as file_handlers
-    from application.session_state import SessionState
+    from factories import make_session_state
 
     captured = []
     _mount_message_capture(monkeypatch, captured)
@@ -657,7 +635,7 @@ def test多Sheet工作簿任一Sheet无有效规则时整份拒绝(monkeypatch, 
             "mappingValue": "高",
         }
     ]
-    session = SessionState(
+    session = make_session_state(
         decoded_data={"name": "current"},
         enum_excel_path="original.xlsx",
         enum_preview=original_preview.copy(),

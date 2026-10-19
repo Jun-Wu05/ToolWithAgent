@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from agent.shared.event_classify import apply_event_fields_to_sub_rules
+from factories import make_session_state
 from contracts.planner_models import (
     AddFieldsStep,
     DeleteFieldsStep,
@@ -312,7 +313,7 @@ def _run(adapter, step, session):
 
 def test适配器添加字段写回session并产出下载产物():
     """add_fields 成功：session 同字段更新，产物 base64 可解回。"""
-    session = {"decoded_data": _sample_entities()}
+    session = make_session_state(decoded_data=_sample_entities())
     step = AddFieldsStep(
         step_id="a1",
         type="add_fields",
@@ -325,7 +326,7 @@ def test适配器添加字段写回session并产出下载产物():
     assert result.artifact.download_kind == "field_adjusted_config"
     decoded = json.loads(base64.b64decode(result.artifact.content))
     assert decoded[0]["parser"]["filter"][0]["fields"] == {"主机ip": "1.1.1.1"}
-    assert session["decoded_data"][0]["normalize"][-1]["index"] == "主机ip"
+    assert session.decoded_data[0]["normalize"][-1]["index"] == "主机ip"
 
 
 def test适配器缺配置返回config_required():
@@ -337,14 +338,14 @@ def test适配器缺配置返回config_required():
         field_value="1",
         config_ref="session.mapped_sub_rules",
     )
-    result = _run(FieldSkillAdapter(), step, {"decoded_data": _sample_entities()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(decoded_data=_sample_entities()))
     assert result.status == StepStatus.FAILED
     assert result.error_code == "config_required"
 
 
 def test适配器合并源缺失映射field_not_found():
     """skill 脚本错误消息映射为稳定错误码。"""
-    session = {"decoded_data": _sample_entities()}
+    session = make_session_state(decoded_data=_sample_entities())
     step = MergeFieldsStep(
         step_id="m1",
         type="merge_fields",
@@ -359,7 +360,7 @@ def test适配器合并源缺失映射field_not_found():
 
 def test适配器删除字段作用于子规则并拒绝未找到字段():
     """delete_fields 对 mapped_sub_rules 生效；不存在的字段被前置拒绝（#146）。"""
-    session = {"mapped_sub_rules": _sample_entities()}
+    session = make_session_state(mapped_sub_rules=_sample_entities())
     step = DeleteFieldsStep(
         step_id="d1",
         type="delete_fields",
@@ -368,11 +369,11 @@ def test适配器删除字段作用于子规则并拒绝未找到字段():
     )
     result = _run(FieldSkillAdapter(), step, session)
     assert result.status == StepStatus.SUCCESS
-    indexes = {item["index"] for item in session["mapped_sub_rules"][0]["normalize"]}
+    indexes = {item["index"] for item in session.mapped_sub_rules[0]["normalize"]}
     assert "a" not in indexes
 
     # 混入不存在的字段：适配器在词汇解析层拒绝并列出对照表（#146 新语义）
-    session2 = {"mapped_sub_rules": _sample_entities()}
+    session2 = make_session_state(mapped_sub_rules=_sample_entities())
     step2 = DeleteFieldsStep(
         step_id="d2",
         type="delete_fields",
@@ -383,13 +384,13 @@ def test适配器删除字段作用于子规则并拒绝未找到字段():
     assert result2.status == StepStatus.FAILED
     assert result2.error_code == "field_not_found"
     assert "nope" in result2.message
-    indexes2 = {item["index"] for item in session2["mapped_sub_rules"][0]["normalize"]}
+    indexes2 = {item["index"] for item in session2.mapped_sub_rules[0]["normalize"]}
     assert "a" in indexes2  # 拒绝时不做部分删除
 
 
 def test适配器删除保留字段返回reserved_field_rejected():
     """保留字段拦截透传为稳定错误码。"""
-    session = {"mapped_sub_rules": _sample_entities()}
+    session = make_session_state(mapped_sub_rules=_sample_entities())
     step = DeleteFieldsStep(
         step_id="d1",
         type="delete_fields",
@@ -403,7 +404,7 @@ def test适配器删除保留字段返回reserved_field_rejected():
 
 def test适配器事件名称非法值被白名单拒绝():
     """非法分类名返回 invalid_event_name 并列出合法值。"""
-    session = {"decoded_data": _sample_entities()}
+    session = make_session_state(decoded_data=_sample_entities())
     step = AddFieldsStep(
         step_id="a1",
         type="add_fields",
@@ -428,7 +429,7 @@ def test适配器事件名称不支持引用型值():
         value_type="reference",
         config_ref="session.decoded_config",
     )
-    result = _run(FieldSkillAdapter(), step, {"decoded_data": _sample_entities()})
+    result = _run(FieldSkillAdapter(), step, make_session_state(decoded_data=_sample_entities()))
     assert result.status == StepStatus.FAILED
     assert result.error_code == "invalid_event_name"
 
@@ -439,7 +440,7 @@ def test适配器事件名称不支持引用型值():
 )
 def test适配器事件名称自动联动绑定级别(event_name, expected_level):
     """合法事件名称添加后，事件级别按绑定表自动写入。"""
-    session = {"decoded_data": _sample_entities()}
+    session = make_session_state(decoded_data=_sample_entities())
     step = AddFieldsStep(
         step_id="a1",
         type="add_fields",
@@ -451,7 +452,7 @@ def test适配器事件名称自动联动绑定级别(event_name, expected_level
     assert result.status == StepStatus.SUCCESS
     assert expected_level in result.message
     fields_written = {}
-    for entity in session["decoded_data"]:
+    for entity in session.decoded_data:
         for filter_item in entity["parser"]["filter"]:
             if filter_item.get("name") == "addFields" and filter_item.get("id") == "":
                 fields_written.update(filter_item.get("fields", {}))
@@ -462,12 +463,12 @@ def test适配器事件名称自动联动绑定级别(event_name, expected_level
 def test适配器事件名称删除后重加保留标准元数据并撤销删除标记():
     """回归 #152：合法改名沿用删加计划，不得降级事件 normalize 元数据。"""
     entities = _sample_entities()
-    session = {
-        "decoded_data": apply_event_fields_to_sub_rules(
+    session = make_session_state(
+        decoded_data=apply_event_fields_to_sub_rules(
             entities,
             {entity["name"]: "登录事件" for entity in entities},
         )
-    }
+    )
     adapter = FieldSkillAdapter()
 
     deleted = _run(
@@ -509,7 +510,7 @@ def test适配器事件名称删除后重加保留标准元数据并撤销删除
             "core": False,
         },
     }
-    for entity in session["decoded_data"]:
+    for entity in session.decoded_data:
         event_entries = {
             item["index"]: item
             for item in entity["normalize"]
@@ -532,7 +533,7 @@ def test适配器事件级别已存在时阻止联动写入():
     """事件级别已存在时返回 event_level_conflict，提示先删除再改。"""
     entities = _sample_entities()
     entities[0]["normalize"].append({"index": "事件级别", "result": ["低危"]})
-    session = {"decoded_data": entities}
+    session = make_session_state(decoded_data=entities)
     step = AddFieldsStep(
         step_id="a1",
         type="add_fields",

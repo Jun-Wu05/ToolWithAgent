@@ -4,6 +4,8 @@ import asyncio
 
 from application.log_knowledge_submission import build_submission_snapshot
 
+from factories import make_session_state
+
 
 def _classification(**overrides):
     value = {
@@ -133,13 +135,13 @@ def _eligible_session():
     lines = ["kind=a", "kind=b", "kind=c"]
     classification = _classification(feature_field="kind")
     classification["coverage"] = {"total_lines": 3, "matched_lines": 3}
-    return {
-        "raw_log_lines": lines,
-        "log_classification": classification,
-        "log_knowledge_submission": build_submission_snapshot(
+    return make_session_state(
+        raw_log_lines=lines,
+        log_classification=classification,
+        log_knowledge_submission=build_submission_snapshot(
             classification, lines, selection_mode="automatic"
         ),
-    }
+    )
 
 
 def _execute_submit(session, repository):
@@ -151,7 +153,7 @@ def _execute_submit(session, repository):
     step = LogKnowledgeSubmitStep(
         step_id="submit",
         type="log_knowledge_submit",
-        submission_token=session["log_knowledge_submission"].submission_token,
+        submission_token=session.log_knowledge_submission.submission_token,
     )
     return asyncio.run(
         LogKnowledgeSubmitAdapter(repository=repository).execute(
@@ -164,7 +166,7 @@ def _execute_submit(session, repository):
 
 def test_submit_adapter重验新鲜度后原子提交且保留分类结果():
     session = _eligible_session()
-    classification = session["log_classification"]
+    classification = session.log_classification
     repository = _Repository("created")
 
     result = _execute_submit(session, repository)
@@ -174,13 +176,13 @@ def test_submit_adapter重验新鲜度后原子提交且保留分类结果():
     assert result.status.value == "success"
     assert "7" in (result.message or "")
     assert len(repository.calls) == 1
-    assert session["log_classification"] is classification
+    assert session.log_classification is classification
 
 
 def test_submit_adapter过期与仓储错误都不改变分类结果():
     session = _eligible_session()
-    classification = session["log_classification"]
-    session["raw_log_lines"].append("kind=changed")
+    classification = session.log_classification
+    session.raw_log_lines.append("kind=changed")
     repository = _Repository()
 
     stale = _execute_submit(session, repository)
@@ -189,16 +191,16 @@ def test_submit_adapter过期与仓储错误都不改变分类结果():
     assert stale.status.value == "failed"
     assert stale.error_code == "log_knowledge_submission_stale"
     assert repository.calls == []
-    assert session["log_classification"] is classification
+    assert session.log_classification is classification
 
     session = _eligible_session()
-    classification = session["log_classification"]
+    classification = session.log_classification
     failed = _execute_submit(session, _Repository(error=RuntimeError("raw-secret")))
     assert failed.artifact.submission_status == "error"
     assert failed.status.value == "failed"
     assert failed.error_code == "log_knowledge_submission_error"
     assert "raw-secret" not in (failed.message or "")
-    assert session["log_classification"] is classification
+    assert session.log_classification is classification
 
 
 def test_submit_adapter映射pending重复与已批准状态():
@@ -231,8 +233,8 @@ def test新主数据原子替换时旧提交快照失效():
         ),
     )
 
-    assert "log_knowledge_submission" not in session
-    assert "log_classification" not in session
+    assert session.log_knowledge_submission is None
+    assert session.log_classification is None
 
 
 def test旧结果按钮在重解析产生新快照后必须stale且零写入():
@@ -242,15 +244,13 @@ def test旧结果按钮在重解析产生新快照后必须stale且零写入():
     from contracts.planner_models import LogKnowledgeSubmitStep
 
     session = _eligible_session()
-    old_token = session["log_knowledge_submission"].submission_token
+    old_token = session.log_knowledge_submission.submission_token
     new_lines = ["kind=x", "kind=y", "kind=z"]
     new_classification = _classification(feature_field="kind")
-    session.update(
-        raw_log_lines=new_lines,
-        log_classification=new_classification,
-        log_knowledge_submission=build_submission_snapshot(
-            new_classification, new_lines, selection_mode="automatic"
-        ),
+    session.raw_log_lines = new_lines
+    session.log_classification = new_classification
+    session.log_knowledge_submission = build_submission_snapshot(
+        new_classification, new_lines, selection_mode="automatic"
     )
     repository = _Repository()
     result = asyncio.run(

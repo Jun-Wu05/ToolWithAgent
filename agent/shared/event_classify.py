@@ -18,6 +18,7 @@ import json
 from typing import Any
 
 from agent.prompts import load_event_classify_prompt
+from agent.shared.llm_response import strip_code_fences
 from agent.shared.logger import get_logger
 from contracts.planner_models import THREAT_TYPE_FIELD
 
@@ -138,11 +139,12 @@ def _build_rule_signals(sub_rules: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _extract_results(raw_text: str) -> list[dict[str, Any]]:
-    """从 LLM 响应提取 results 数组；容忍 markdown 代码块包装。"""
-    text = raw_text.strip()
-    if text.startswith("```"):
-        lines = [line for line in text.split("\n") if not line.strip().startswith("```")]
-        text = "\n".join(lines).strip()
+    """从 LLM 响应提取 results 数组；容忍 markdown 代码块包装。
+
+    json.loads 的异常上抛语义保持不变（调用方依赖异常触发重试），
+    围栏剥离统一走共享原语。
+    """
+    text = strip_code_fences(raw_text)
     data = json.loads(text)
     if isinstance(data, dict):
         results = data.get("results")

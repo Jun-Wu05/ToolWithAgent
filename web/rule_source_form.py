@@ -8,6 +8,7 @@ from typing import Any
 import chainlit as cl
 
 from agent.shared.logger import get_logger
+from application.session_state import SessionState
 from contracts.planner_models import ExportStep, FieldMappingStep, StepSpec
 from contracts.rule_source import RuleSourceFields
 
@@ -19,22 +20,9 @@ RULE_SOURCE_DIALOG_TIMEOUT_SECONDS = 300
 logger = get_logger("rule_source_form")
 
 
-def _session_get(session: Any, key: str, default: Any = None) -> Any:
-    if isinstance(session, Mapping):
-        return session.get(key, default)
-    return getattr(session, key, default)
-
-
-def _session_set(session: Any, key: str, value: Any) -> None:
-    if isinstance(session, dict):
-        session[key] = value
-    else:
-        setattr(session, key, value)
-
-
-def get_rule_source_fields(session: Any) -> RuleSourceFields | None:
+def get_rule_source_fields(session: SessionState) -> RuleSourceFields | None:
     """读取并规范化当前会话的数据源字段。"""
-    return RuleSourceFields.from_value(_session_get(session, "rule_source_fields"))
+    return RuleSourceFields.from_value(session.rule_source_fields)
 
 
 def _build_dialog_props(
@@ -50,7 +38,7 @@ def _build_dialog_props(
 
 
 async def prompt_rule_source_fields(
-    user_session: Any | None = None,
+    user_session: SessionState | None = None,
     *,
     pending_step: StepSpec | None = None,
     product: str = "",
@@ -64,8 +52,8 @@ async def prompt_rule_source_fields(
         else cl.user_session.get("user_session")
     )
     if pending_step is not None:
-        _session_set(session, "pending_rule_source_step", pending_step)
-    step_for_log = pending_step or _session_get(session, "pending_rule_source_step")
+        session.pending_rule_source_step = pending_step
+    step_for_log = pending_step or session.pending_rule_source_step
     logger.info(
         "[RULE_SOURCE_DIALOG] 打开数据源表单: step_id=%s step_type=%s",
         getattr(step_for_log, "step_id", None),
@@ -87,10 +75,10 @@ async def prompt_rule_source_fields(
 
 
 async def handle_rule_source_cancel(
-    payload: Mapping[str, Any], user_session: Any
+    payload: Mapping[str, Any], user_session: SessionState
 ) -> None:
     """取消或前端超时时清理待执行步骤，保证下次点击可重新开始。"""
-    _session_set(user_session, "pending_rule_source_step", None)
+    user_session.pending_rule_source_step = None
     timed_out = payload.get("reason") == "timeout"
     logger.info(
         "[RULE_SOURCE_DIALOG] %s，已清理待执行步骤",
@@ -105,7 +93,7 @@ async def handle_rule_source_cancel(
 
 
 async def handle_rule_source_submission(
-    payload: Mapping[str, Any], user_session: Any
+    payload: Mapping[str, Any], user_session: SessionState
 ) -> bool:
     """校验表单并保存会话字段；成功时精确续跑原始步骤。"""
     product = str(payload.get(RULE_SOURCE_PRODUCT_ID) or "").strip()
@@ -128,9 +116,9 @@ async def handle_rule_source_submission(
         )
         return False
 
-    _session_set(user_session, "rule_source_fields", fields)
-    step_to_resume = _session_get(user_session, "pending_rule_source_step")
-    _session_set(user_session, "pending_rule_source_step", None)
+    user_session.rule_source_fields = fields
+    step_to_resume = user_session.pending_rule_source_step
+    user_session.pending_rule_source_step = None
     logger.info(
         "[RULE_SOURCE_DIALOG] 数据源字段已保存: resume_step_id=%s resume_step_type=%s",
         getattr(step_to_resume, "step_id", None),
@@ -155,7 +143,7 @@ async def handle_rule_source_submission(
     )
     await execute_deterministic_plan(
         user_session=user_session,
-        team=_session_get(user_session, "team"),
+        team=user_session.team,
         plan_id="resume-rule-source-fields",
         steps=(step_to_resume,),
     )

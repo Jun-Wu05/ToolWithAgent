@@ -73,12 +73,13 @@ def test文件输入接受直接json与base64_json且保持根结构(encoded: bo
 def testapplication文件输入原子替换主数据并保留模型配置() -> None:
     """成功快照使附件与派生结果失效，但不影响会话级模型配置。"""
     from application.file_input import commit_primary_dataset
-    from application.session_state import PrimaryDatasetSnapshot, SessionState
+    from application.session_state import PrimaryDatasetSnapshot
+    from factories import make_session_state
     from contracts.planner_models import EnumValuesArtifact, ExportStep
     from contracts.rule_source import RuleSourceFields
     from contracts.session_artifacts import EnumArtifactSlot
 
-    session = SessionState(
+    session = make_session_state(
         team=object(),
         current_provider="deepseek",
         api_key="configured",

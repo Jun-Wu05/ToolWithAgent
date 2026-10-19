@@ -10,8 +10,8 @@ from typing import Any
 from agent.shared.logger import get_logger
 from application.adapters.shared import (
     REPO_ROOT, _build_config_artifact, _count_tagged_normalize, _failed,
-    _publish_progress, _retry_delay_seconds, _needs_input, _session_get,
-    _session_set, _success, run_member_stream,
+    _publish_progress, _retry_delay_seconds, _needs_input,
+    _success, run_member_stream,
 )
 from application.execution import ExecutionContext
 from application.field_mapping_batch import (
@@ -97,7 +97,7 @@ class FieldMappingAdapter:
         self, step: FieldMappingStep, context: ExecutionContext
     ) -> StepResult:
         """运行批处理，验证完整结果，再计算产物并一次性提交 Session。"""
-        classification = _session_get(context.session, "log_classification")
+        classification = context.session.log_classification
         rule_source_fields = None
         mappable_fields = list(context.session_facts.mappable_fields)
         if (
@@ -120,26 +120,26 @@ class FieldMappingAdapter:
             from contracts.rule_source import RuleSourceFields
 
             rule_source_fields = RuleSourceFields.from_value(
-                _session_get(context.session, "rule_source_fields")
+                context.session.rule_source_fields
             )
             if rule_source_fields is None:
-                _session_set(context.session, "pending_rule_source_step", step)
+                context.session.pending_rule_source_step = step
                 return _needs_input(
                     step,
                     "data_source_fields_required",
                     "请填写数据源产品和数据源厂商后继续；数据源可留空自动生成",
                 )
-        simplified_data = _session_get(context.session, "simplified_data", {}) or {}
+        simplified_data = context.session.simplified_data or {}
         original_log_sample = (
             simplified_data.get("original_log_sample", "")
             if isinstance(simplified_data, Mapping) else ""
         )
-        decoded_data = _session_get(context.session, "decoded_data")
+        decoded_data = context.session.decoded_data
 
         # 子规则获取前置（#189）：语义与原先后置获取一致（session 优先，缺失时生成）。
-        had_existing_mapped_rules = bool(_session_get(context.session, "mapped_sub_rules"))
-        sub_rules = copy.deepcopy(_session_get(context.session, "mapped_sub_rules") or [])
-        raw_log_lines = _session_get(context.session, "raw_log_lines", []) or []
+        had_existing_mapped_rules = bool(context.session.mapped_sub_rules)
+        sub_rules = copy.deepcopy(context.session.mapped_sub_rules or [])
+        raw_log_lines = context.session.raw_log_lines or []
         if not sub_rules:
             if isinstance(classification, dict) and classification:
                 from agent.tools.rule_generator import generate_sub_rules
@@ -365,12 +365,12 @@ class FieldMappingAdapter:
             context, step, ProgressPhase.WRITEBACK, ProgressStatus.RUNNING,
             "field_mapping_writing",
         )
-        _session_set(context.session, "last_mapping_data", mapping_rows)
+        context.session.last_mapping_data = mapping_rows
         if staged_sub_rule_results is not None and staged_mapped_sub_rules is not None:
-            _session_set(context.session, "sub_rule_mapping_results", staged_sub_rule_results)
-            _session_set(context.session, "mapped_sub_rules", staged_mapped_sub_rules)
+            context.session.sub_rule_mapping_results = staged_sub_rule_results
+            context.session.mapped_sub_rules = staged_mapped_sub_rules
         if staged_decoded_data is not None:
-            _session_set(context.session, "decoded_data", staged_decoded_data)
+            context.session.decoded_data = staged_decoded_data
 
         updated_normalize_count = 0
         decoded_added_count = 0

@@ -98,8 +98,9 @@ def test显式模式JSON点分路径混合样本输出未匹配覆盖信息(monk
     assert {detail["logtype"] for detail in result["classification_details"]} == {"attack", "scan"}
 
 
-def test全匹配时覆盖信息为全匹配且无样本():
+def test全匹配时覆盖信息为全匹配且无样本(monkeypatch):
     """所有行都含分类特征字段时，未匹配为 0、样本为空。"""
+    _mock_llm(monkeypatch, "category", ["attack"])
     result = json.loads(
         classify_log_features_headless(
             MIXED_KV_LOGS.split("\n")[0],

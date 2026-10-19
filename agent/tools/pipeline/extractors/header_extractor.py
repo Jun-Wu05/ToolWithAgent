@@ -27,13 +27,13 @@ _HEADER_DESENSITIZE_RE = _re.compile(
 )
 
 
-def extract_header(line: str, format_type: str = "json", delimit: str = "=") -> str:
+def extract_header(line: str, format_type: str = "json", kv_delimit: str = "=") -> str:
     """提取日志行的头部部分（JSON/数组/KV 分隔符之前的文本）。
 
     Args:
         line: 单条日志行。
         format_type: 日志格式（"json" 或 "kv"）。
-        delimit: KV 格式的 key-value 连接符（如 "=" 或 ":"）。
+        kv_delimit: KV 格式的键值分隔符（如 "=" 或 ":"）。
 
     Returns:
         头部文本，未找到分隔符时返回整行。
@@ -45,12 +45,12 @@ def extract_header(line: str, format_type: str = "json", delimit: str = "=") -> 
     if json_start > 0:
         return line[:json_start].strip()
 
-    # 2. KV 分割：用 delimit 字符定位第一个 KV 对
-    # CHANGED: 支持 -前缀、(数字)后缀的字段名（如 -Slot=、SrcZoneName(1025)=）
-    # CHANGED: 大小写无关（#190：生产侧 format_type 为大写 "KV"）
-    if format_type and format_type.lower() == "kv" and delimit:
-        # 匹配：空格/行首 + 字段名(含.-前缀和(数字)后缀) + delimit
-        pattern = rf'(?:^|\s)[\w.-]+(?:\(\d+\))?\s*{_re.escape(delimit)}'
+    # 2. KV 分割：用 kv_delimit 字符定位第一个 KV 对
+    # 支持 -前缀、(数字)后缀的字段名（如 -Slot=、SrcZoneName(1025)=）
+    # 大小写无关（#190：生产侧 format_type 为大写 "KV"）
+    if format_type and format_type.lower() == "kv" and kv_delimit:
+        # 匹配：空格/行首 + 字段名(含.-前缀和(数字)后缀) + kv_delimit
+        pattern = rf'(?:^|\s)[\w.-]+(?:\(\d+\))?\s*{_re.escape(kv_delimit)}'
         match = _re.search(pattern, line)
         if match:
             # 如果 match 在行首，说明无 header
@@ -76,7 +76,7 @@ def desensitize_header(header: str) -> str:
 def aggregate_headers(
     logs_str: str,
     format_type: str = "json",
-    delimit: str = "=",
+    kv_delimit: str = "=",
     max_clusters: int = 50,
     max_header_len: int = 3000,
     header_fn: Callable[[str], str] | None = None,
@@ -86,7 +86,7 @@ def aggregate_headers(
     Args:
         logs_str:       原始多行日志字符串。
         format_type:    日志格式（"json" 或 "kv"）。
-        delimit:        KV 格式的 key-value 连接符。
+        kv_delimit:     KV 格式的键值分隔符。
         max_clusters:   最大唯一头部聚类数。
         max_header_len: 每条头部样本的最大字符数。
         header_fn:      可选的自定义单行 header 切分函数，``None`` 时用
@@ -114,7 +114,7 @@ def aggregate_headers(
         if len(cluster_map) >= max_clusters:
             break
 
-        header = header_fn(line) if header_fn else extract_header(line, format_type, delimit)
+        header = header_fn(line) if header_fn else extract_header(line, format_type, kv_delimit)
         if not header:
             continue
 

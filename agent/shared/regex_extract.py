@@ -15,6 +15,7 @@ import json
 import re
 from typing import Any
 
+from agent.shared.llm_response import strip_code_fences
 from agent.shared.logger import get_logger
 
 logger = get_logger("regex_extract")
@@ -50,11 +51,12 @@ class RegexGenerationError(RuntimeError):
 
 
 def _extract_pattern(raw_text: str) -> str:
-    """从 LLM 响应提取 pattern 字段；容忍 markdown 代码块包装。"""
-    text = raw_text.strip()
-    if text.startswith("```"):
-        lines = [line for line in text.split("\n") if not line.strip().startswith("```")]
-        text = "\n".join(lines).strip()
+    """从 LLM 响应提取 pattern 字段；容忍 markdown 代码块包装。
+
+    json.loads 的异常上抛语义保持不变（调用方依赖异常触发重试），
+    围栏剥离统一走共享原语。
+    """
+    text = strip_code_fences(raw_text)
     data = json.loads(text)
     if isinstance(data, dict) and data.get("pattern"):
         return str(data["pattern"])

@@ -11,7 +11,6 @@ import base64
 import inspect
 import json
 from collections import defaultdict
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ from agent.shared.logger import get_logger
 from agent.shared.mapping_utils import iter_config_entities, iter_normalize_entries
 
 from application.execution import ExecutionContext
+from application.session_state import SessionState
 from application.execution_policy import _failed, _needs_input
 from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
 from contracts.planner_models import (
@@ -71,25 +71,9 @@ async def _publish_progress(
     )
 
 
-def _session_get(session: Any, key: str, default: Any = None) -> Any:
-    """在迁移期集中兼容 SessionState 与字典，适配器外不传播裸 key 判断。"""
-    if isinstance(session, Mapping):
-        return session.get(key, default)
-    return getattr(session, key, default)
-
-
-def _session_set(session: Any, key: str, value: Any) -> None:
-    """集中写入会话字段，并在未知字段时立即失败。"""
-    if isinstance(session, dict):
-        session[key] = value
-        return
-    setattr(session, key, value)
-
-
-def _is_enum_config_stale(session: Any, config_ref: str) -> bool:
+def _is_enum_config_stale(session: SessionState, config_ref: str) -> bool:
     """判断配置是否因枚举附件变化而需要重新填充。"""
-    stale_refs = _session_get(session, "stale_enum_config_refs", set()) or set()
-    return config_ref in stale_refs
+    return config_ref in (session.stale_enum_config_refs or set())
 
 
 _CONFIG_SESSION_KEYS = {
@@ -98,20 +82,20 @@ _CONFIG_SESSION_KEYS = {
 }
 
 
-def _read_config(session: Any, config_ref: str) -> Any:
+def _read_config(session: SessionState, config_ref: str) -> Any:
     """按显式配置引用读取 session，未知引用立即失败且不尝试其他来源。"""
     session_key = _CONFIG_SESSION_KEYS.get(config_ref)
     if session_key is None:
         raise ValueError(f"不支持的配置来源: {config_ref}")
-    return _session_get(session, session_key)
+    return getattr(session, session_key)
 
 
-def _write_config(session: Any, config_ref: str, config: Any) -> None:
+def _write_config(session: SessionState, config_ref: str, config: Any) -> None:
     """把更新结果写回原配置来源，禁止在两个 session 字段之间隐式迁移。"""
     session_key = _CONFIG_SESSION_KEYS.get(config_ref)
     if session_key is None:
         raise ValueError(f"不支持的配置来源: {config_ref}")
-    _session_set(session, session_key, config)
+    setattr(session, session_key, config)
 
 
 def _enum_mapping_table(

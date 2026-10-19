@@ -6,7 +6,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from application.adapters.shared import _session_get, _success
+from application.adapters.shared import _success
 from application.execution import ExecutionContext
 from application.log_knowledge_submission import (
     LogKnowledgeSubmissionSnapshot,
@@ -57,11 +57,9 @@ class LogKnowledgeSubmitAdapter:
         if not isinstance(step, LogKnowledgeSubmitStep):
             raise TypeError("LogKnowledgeSubmitAdapter 只接受 LogKnowledgeSubmitStep")
 
-        snapshot = _session_get(context.session, "log_knowledge_submission")
-        classification = _session_get(context.session, "log_classification")
-        raw_lines = _session_get(context.session, "raw_log_lines") or _session_get(
-            context.session, "original_log"
-        )
+        snapshot = context.session.log_knowledge_submission
+        classification = context.session.log_classification
+        raw_lines = context.session.raw_log_lines or context.session.original_log
         if not isinstance(snapshot, LogKnowledgeSubmissionSnapshot) or not isinstance(
             classification, dict
         ):
@@ -106,7 +104,7 @@ class LogKnowledgeSubmitAdapter:
             feature_field=snapshot.feature_field,
             extractor_type=snapshot.extractor_type,
             extractor_spec=snapshot.extractor_spec,
-            submitter=str(_session_get(context.session, "submitter_id") or "session-user"),
+            submitter=str(getattr(context.session, "submitter_id", None) or "session-user"),
         )
         try:
             kwargs = {"connection": self._connection} if self._connection is not None else {}

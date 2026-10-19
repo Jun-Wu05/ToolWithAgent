@@ -74,7 +74,7 @@ US-3：作为新用户，我想要在说"我不清楚怎么用"时，系统列�
 - 不重写 RouterAgent 为 TeamMode.tasks（非确定性风险，见 ADR-0002）
 - 不做跨进程持久化（见 ADR-0001）
 - 不改 FieldMappingAgent/ThreatAgent/EnumAgent 的内部逻辑（只改路由和编排层）
-- 不清理 eval/ 旧测试（独立任务，用户确认后处理）
+- eval/ 死文件已按用户确认清理（conftest/test_candidate_recall/test_full_mapping_cli/test_llm_accuracy/test_skills_e2e；test_logtype_regex_generation、scripts/、tools/、golden/、test_data/ 保留）
 - 不做 NLU/意图分类模型（保持关键词+规则+LLM fallback 的三层架构）
 
 ## 补充说明

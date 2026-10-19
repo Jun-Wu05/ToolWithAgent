@@ -56,7 +56,7 @@ async def on_start_enum_fill(action: cl.Action):
     )
     await execute_deterministic_plan(
         user_session=user_session,
-        team=user_session.get("team"),
+        team=user_session.team,
         plan_id="button-enum-fill",
         steps=(step,),
     )
@@ -76,12 +76,12 @@ async def on_export_rules(action: cl.Action):
     )
     from web.rule_source_form import get_rule_source_fields, prompt_rule_source_fields
 
-    if user_session.get("log_classification") and not get_rule_source_fields(user_session):
+    if user_session.log_classification and not get_rule_source_fields(user_session):
         await prompt_rule_source_fields(user_session, pending_step=step)
         return
     await execute_deterministic_plan(
         user_session=user_session,
-        team=user_session.get("team"),
+        team=user_session.team,
         plan_id="button-export-entry-rules",
         steps=(step,),
     )
@@ -102,15 +102,15 @@ async def on_export_sub_rules(action: cl.Action):
     from web.rule_source_form import get_rule_source_fields, prompt_rule_source_fields
 
     if (
-        user_session.get("log_classification")
-        and not user_session.get("mapped_sub_rules")
+        user_session.log_classification
+        and not user_session.mapped_sub_rules
         and not get_rule_source_fields(user_session)
     ):
         await prompt_rule_source_fields(user_session, pending_step=step)
         return
     await execute_deterministic_plan(
         user_session=user_session,
-        team=user_session.get("team"),
+        team=user_session.team,
         plan_id="button-export-sub-rules",
         steps=(step,),
     )
@@ -135,12 +135,12 @@ async def on_apply_field_mapping(action: cl.Action):
     )
     from web.rule_source_form import get_rule_source_fields, prompt_rule_source_fields
 
-    if user_session.get("log_classification") and not get_rule_source_fields(user_session):
+    if user_session.log_classification and not get_rule_source_fields(user_session):
         await prompt_rule_source_fields(user_session, pending_step=step)
         return
     await execute_deterministic_plan(
         user_session=user_session,
-        team=user_session.get("team"),
+        team=user_session.team,
         plan_id="button-field-mapping",
         steps=(step,),
     )
@@ -160,7 +160,7 @@ async def on_export_mapped_sub_rules(action: cl.Action):
     )
     await execute_deterministic_plan(
         user_session=user_session,
-        team=user_session.get("team"),
+        team=user_session.team,
         plan_id="button-export-mapped-sub-rules",
         steps=(step,),
     )
@@ -188,7 +188,7 @@ async def on_submit_log_knowledge(action: cl.Action):
     try:
         report = await execute_deterministic_plan(
             user_session=user_session,
-            team=user_session.get("team"),
+            team=user_session.team,
             plan_id="button-submit-log-knowledge",
             steps=(step,),
         )
