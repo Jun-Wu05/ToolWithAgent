@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { api, saveDownload, type Conversation, type FieldMappingArtifact } from './api'
@@ -250,7 +250,9 @@ describe('mapping integration boundaries', () => {
     await screen.findByText('网络连接中断')
     fireEvent.click(screen.getByRole('button', { name: '开始映射' }))
     await screen.findByText('标准字段映射已排队。')
-    await screen.findByText('标准字段映射排队中')
+    const hint = await screen.findByRole('status', { name: '当前任务提示' })
+    expect(hint).toHaveTextContent('标准字段映射')
+    expect(within(hint).getByText('排队中')).toBeVisible()
     const calls = vi.mocked(api.fieldMapping).mock.calls
     expect(calls[0][1]).toEqual({ classification_artifact_id: 'class-1', product: '测试产品', log_vendor: '测试厂商', data_source: '测试数据源' })
     expect(calls[1][2]).toBe(calls[0][2])
