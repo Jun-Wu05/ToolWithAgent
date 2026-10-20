@@ -75,10 +75,9 @@ toolswithagent/
 │       └── log_*.md / kv_*.md       # 日志解析 Pipeline 各步指令
 │
 ├── config/                          # 共享配置
-│   ├── threat_type_config.json      # 威胁类型映射配置
 │   ├── field_synonyms.json          # 字段同义词表（en/zh 双字段，缩写展开 + 中文桥接）
 │   ├── tag_rules.json               # 字段标签规则（token 级匹配）
-│   └── 标准字段.txt / 空规则.txt     # 标准字段列表（625条）等
+│   └── 标准字段.txt                  # 标准字段列表（625条，威胁类型标准枚举单一事实源）
 │
 ├── evaluation/                      # 真实模型语义评测
 │   └── planner_semantic_eval.py     # Planner 语义稳定性评测脚本
