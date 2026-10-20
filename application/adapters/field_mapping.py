@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from agent.shared.logger import get_logger
@@ -24,6 +25,39 @@ from contracts.planner_models import (
 )
 
 logger = get_logger("execution_adapters")
+
+
+@dataclass(frozen=True)
+class _MappingPreparation:
+    """字段映射输入准备结果（守卫后的 B-F 段产出，跨阶段只读共享，#382 拆阶段）。"""
+
+    mappable_fields: list[str]
+    original_log_sample: str
+    decoded_data: Any
+    sub_rules: list
+    had_existing_mapped_rules: bool
+    resolved_enum_fields: dict[str, tuple[str, str]]
+    llm_fields: list[str]
+    value_profiles_by_field: dict[str, list]
+    enum_profiles_sub: dict
+    enum_profiles_config: dict
+
+
+@dataclass(frozen=True)
+class _StagedOutputs:
+    """K-M 段暂存产出：写回前全部 staged，_commit_and_report 一次性提交（原子性契约）。"""
+
+    mapping_rows: list
+    typed_mappings: tuple
+    staged_sub_rule_results: list | None
+    staged_mapped_sub_rules: list | None
+    staged_decoded_data: Any
+    download_kind: str | None
+    download_content: str | None
+    enum_summary: str
+    conflict_summary: str
+    event_annotation_summary: str | None
+    event_annotation_rows: tuple
 
 
 class FieldMappingAdapter:
@@ -97,6 +131,24 @@ class FieldMappingAdapter:
         self, step: FieldMappingStep, context: ExecutionContext
     ) -> StepResult:
         """运行批处理，验证完整结果，再计算产物并一次性提交 Session。"""
+        prepared = await self._prepare_mapping_inputs(step, context)
+        if isinstance(prepared, StepResult):
+            return prepared
+        resolved = await self._run_and_resolve_rows(prepared, step, context)
+        if isinstance(resolved, StepResult):
+            return resolved
+        mapping_rows, conflict_summary = resolved
+        staged = await self._stage_outputs(
+            prepared, mapping_rows, conflict_summary, step, context
+        )
+        if isinstance(staged, StepResult):
+            return staged
+        return await self._commit_and_report(prepared, staged, step, context)
+
+    async def _prepare_mapping_inputs(
+        self, step: FieldMappingStep, context: ExecutionContext
+    ) -> _MappingPreparation | StepResult:
+        """守卫（全映射跳过/数据源字段）与输入准备：子规则前置、确定性分流、值画像。"""
         classification = context.session.log_classification
         rule_source_fields = None
         mappable_fields = list(context.session_facts.mappable_fields)
@@ -176,6 +228,32 @@ class FieldMappingAdapter:
                 enum_profiles_config = build_value_profiles_from_config(decoded_data)
             for profile in (*enum_profiles_sub.values(), *enum_profiles_config.values()):
                 value_profiles_by_field.setdefault(profile.field, []).append(profile)
+        return _MappingPreparation(
+            mappable_fields=mappable_fields,
+            original_log_sample=original_log_sample,
+            decoded_data=decoded_data,
+            sub_rules=sub_rules,
+            had_existing_mapped_rules=had_existing_mapped_rules,
+            resolved_enum_fields=resolved_enum_fields,
+            llm_fields=llm_fields,
+            value_profiles_by_field=value_profiles_by_field,
+            enum_profiles_sub=enum_profiles_sub,
+            enum_profiles_config=enum_profiles_config,
+        )
+
+    async def _run_and_resolve_rows(
+        self,
+        prepared: _MappingPreparation,
+        step: FieldMappingStep,
+        context: ExecutionContext,
+    ) -> tuple[list[dict[str, Any]], str] | StepResult:
+        """批处理调用、行合并与顺序恢复、数量校验、冲突裁决。"""
+        mappable_fields = prepared.mappable_fields
+        llm_fields = prepared.llm_fields
+        original_log_sample = prepared.original_log_sample
+        value_profiles_by_field = prepared.value_profiles_by_field
+        resolved_enum_fields = prepared.resolved_enum_fields
+        decoded_data = prepared.decoded_data
 
         async def publish_batch_progress(
             phase: ProgressPhase, status: ProgressStatus, message_code: str, **details: Any
@@ -234,6 +312,22 @@ class FieldMappingAdapter:
         log_field_mapping_conflicts(
             conflict_outcome.details, plan_id=context.plan_id, step_id=step.step_id
         )
+        return mapping_rows, conflict_summary
+
+    async def _stage_outputs(
+        self,
+        prepared: _MappingPreparation,
+        mapping_rows: list[dict[str, Any]],
+        conflict_summary: str,
+        step: FieldMappingStep,
+        context: ExecutionContext,
+    ) -> _StagedOutputs | StepResult:
+        """枚举二阶段归类、子规则应用与事件标注、产物构造；全部 staged 后才写回。"""
+        enum_profiles_sub = prepared.enum_profiles_sub
+        enum_profiles_config = prepared.enum_profiles_config
+        resolved_enum_fields = prepared.resolved_enum_fields
+        sub_rules = prepared.sub_rules
+        decoded_data = prepared.decoded_data
 
         # #189 第二阶段：仅对本轮新命中 8 类枚举字段的画像调用一次受约束归类，
         # 之后全部硬校验；失败画像局部关闭（零写入 + 对应子规则内降级未匹配）。
@@ -353,6 +447,42 @@ class FieldMappingAdapter:
                 context.plan_id, step.step_id, len(staged_mapped_sub_rules),
                 len(download_content.encode("utf-8")),
             )
+        return _StagedOutputs(
+            mapping_rows=mapping_rows,
+            typed_mappings=typed_mappings,
+            staged_sub_rule_results=staged_sub_rule_results,
+            staged_mapped_sub_rules=staged_mapped_sub_rules,
+            staged_decoded_data=staged_decoded_data,
+            download_kind=download_kind,
+            download_content=download_content,
+            enum_summary=enum_summary,
+            conflict_summary=conflict_summary,
+            event_annotation_summary=event_annotation_summary,
+            event_annotation_rows=event_annotation_rows,
+        )
+
+    async def _commit_and_report(
+        self,
+        prepared: _MappingPreparation,
+        staged: _StagedOutputs,
+        step: FieldMappingStep,
+        context: ExecutionContext,
+    ) -> StepResult:
+        """一次性提交 staged 产物到会话，组装计数、日志与用户消息。"""
+        sub_rules = prepared.sub_rules
+        decoded_data = prepared.decoded_data
+        had_existing_mapped_rules = prepared.had_existing_mapped_rules
+        mapping_rows = staged.mapping_rows
+        typed_mappings = staged.typed_mappings
+        staged_sub_rule_results = staged.staged_sub_rule_results
+        staged_mapped_sub_rules = staged.staged_mapped_sub_rules
+        staged_decoded_data = staged.staged_decoded_data
+        download_kind = staged.download_kind
+        download_content = staged.download_content
+        enum_summary = staged.enum_summary
+        conflict_summary = staged.conflict_summary
+        event_annotation_summary = staged.event_annotation_summary
+        event_annotation_rows = staged.event_annotation_rows
 
         await _publish_progress(
             context, step, ProgressPhase.WRITEBACK, ProgressStatus.RUNNING,

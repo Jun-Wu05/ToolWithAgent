@@ -309,3 +309,43 @@ def test_派生候选来自高频结构符号并排除结构字符():
     assert derived_noisy == ["|"]
     for structural in (":", ".", "-", "="):
         assert structural not in derived_noisy
+
+
+# ---------------------------------------------------------------------------
+# 默认分隔符零匹配时的对称备选重试（#382 钉桩：先锁现行为再收口实现）
+# ---------------------------------------------------------------------------
+
+COLON_KV_LOGS = "\n".join(
+    [
+        "name:auth sip:1.1.1.1",
+        "name:mail sip:2.2.2.2",
+        "name:auth sip:3.3.3.3",
+    ]
+)
+EQUALS_KV_LOGS = "\n".join(
+    [
+        "name=auth sip=1.1.1.1",
+        "name=mail sip=2.2.2.2",
+        "name=auth sip=3.3.3.3",
+    ]
+)
+
+
+def test_空格等号零匹配时冒号备选成功且回显修正分隔符(monkeypatch):
+    """声称 tab='=' 但日志实为冒号 KV：备选 ':' 重试成功，analysis.tab 回显修正值。"""
+    result = _classify_kv(monkeypatch, COLON_KV_LOGS, {"delimit": " ", "tab": "="})
+
+    assert result["status"] == "SUCCESS"
+    assert result["coverage"]["matched_lines"] == 3
+    assert result["analysis"]["tab"] == ":"
+    assert {d["logtype"] for d in result["classification_details"]} == {"auth", "mail"}
+
+
+def test_空格冒号零匹配时等号备选成功且回显修正分隔符(monkeypatch):
+    """声称 tab=':' 但日志实为等号 KV：备选 '=' 重试成功，analysis.tab 回显修正值。"""
+    result = _classify_kv(monkeypatch, EQUALS_KV_LOGS, {"delimit": " ", "tab": ":"})
+
+    assert result["status"] == "SUCCESS"
+    assert result["coverage"]["matched_lines"] == 3
+    assert result["analysis"]["tab"] == "="
+    assert {d["logtype"] for d in result["classification_details"]} == {"auth", "mail"}

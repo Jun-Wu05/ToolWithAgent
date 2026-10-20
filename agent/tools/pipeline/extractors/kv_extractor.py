@@ -14,17 +14,31 @@ from agent.tools.pipeline.extractors.base import ValueExtractor
 _DEFAULT_KV_PATTERN = _re.compile(r'(?:^|\s)(\w+)=(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^\s"]+))')
 
 
-# CHANGED: 定义需要清理的异常字符常量（2026-06-16 新增）
-# BOM 字符
-BOM_CHARS = ['\ufeff', '\ufeff', '\ufeff']
-# 零宽字符
-ZERO_WIDTH_CHARS = ['\u200b', '\u200c', '\u200d', '\u200e', '\u200f']
-# 控制字符（保留换行、回车、制表符）
-CONTROL_CHARS = [chr(i) for i in range(0x00, 0x20) if i not in [0x09, 0x0a, 0x0d]]
-# 其他特殊字符
-SPECIAL_CHARS = ['\ufffe', '\uffff', '\u2028', '\u2029', '\u00a0', '\u3000']
-# 所有异常字符
-ALL_SPECIAL_CHARS = BOM_CHARS + ZERO_WIDTH_CHARS + CONTROL_CHARS + SPECIAL_CHARS
+# 清理类别表：(stats 键, type 标签, 字符元组)；顺序即 stats['chars'] 明细顺序。
+_CLEAN_CHAR_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        "bom",
+        "bom",
+        ("\ufeff",),
+    ),
+    (
+        "zero_width",
+        "zero_width",
+        ("\u200b", "\u200c", "\u200d", "\u200e", "\u200f"),
+    ),
+    (
+        "control",
+        "control",
+        tuple(
+            chr(i) for i in range(0x00, 0x20) if i not in (0x09, 0x0A, 0x0D)
+        ),
+    ),
+    (
+        "special",
+        "special",
+        ("\ufffe", "\uffff", "\u2028", "\u2029", "\u00a0", "\u3000"),
+    ),
+)
 
 
 class KvExtractor(ValueExtractor):
@@ -112,7 +126,7 @@ class KvExtractor(ValueExtractor):
         """
         if not text or not self.clean_special_chars:
             return text, {}
-        
+
         cleaned = text
         stats = {
             'bom': 0,
@@ -122,42 +136,15 @@ class KvExtractor(ValueExtractor):
             'total': 0,
             'chars': []
         }
-        
-        # 1. 清理 BOM
-        for char in BOM_CHARS:
-            count = cleaned.count(char)
-            if count > 0:
-                stats['bom'] += count
-                stats['total'] += count
-                stats['chars'].append({'char': repr(char), 'count': count, 'type': 'bom'})
-                cleaned = cleaned.replace(char, '')
-        
-        # 2. 清理零宽字符
-        for char in ZERO_WIDTH_CHARS:
-            count = cleaned.count(char)
-            if count > 0:
-                stats['zero_width'] += count
-                stats['total'] += count
-                stats['chars'].append({'char': repr(char), 'count': count, 'type': 'zero_width'})
-                cleaned = cleaned.replace(char, '')
-        
-        # 3. 清理控制字符（保留换行、回车、制表符）
-        for char in CONTROL_CHARS:
-            count = cleaned.count(char)
-            if count > 0:
-                stats['control'] += count
-                stats['total'] += count
-                stats['chars'].append({'char': repr(char), 'count': count, 'type': 'control'})
-                cleaned = cleaned.replace(char, '')
-        
-        # 4. 清理其他特殊字符
-        for char in SPECIAL_CHARS:
-            count = cleaned.count(char)
-            if count > 0:
-                stats['special'] += count
-                stats['total'] += count
-                stats['chars'].append({'char': repr(char), 'count': count, 'type': 'special'})
-                cleaned = cleaned.replace(char, '')
+
+        for category, type_label, chars in _CLEAN_CHAR_CATEGORIES:
+            for char in chars:
+                count = cleaned.count(char)
+                if count > 0:
+                    stats[category] += count
+                    stats['total'] += count
+                    stats['chars'].append({'char': repr(char), 'count': count, 'type': type_label})
+                    cleaned = cleaned.replace(char, '')
         
         # 记录日志
         if stats['total'] > 0:
