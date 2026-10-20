@@ -176,3 +176,9 @@ proposal 真实冻结完整类型化计划和输入版本，进入 `waiting_conf
 明确清空沿原消息接口发送 `POST /conversations/{id}/messages` body `{"content":"清空数据"}`（既有 Application 完整清空命令同样支持），返回原消息字段和 `task/run`（初态 queued，Run kind 为 `business_clear`）。不调用 Planner 或模型；入队事务取消旧活动 Run/确认，释放同会话串行队列，明确清空可越过待确认/未应用 Draft 守卫。Worker 的领取 fence 事务按命令入队时冻结的 ID 范围最终停用原主数据及枚举附件、失效正式配置/typed 状态/贡献/重填/checkpoint，并返回助手回执“业务数据已清空，历史结果仍可查看和下载。”；失败的旧 Worker 无权迟到发布。刷新或重启后的业务事实为空。历史文件保留原 role/parse_status，新增 `active:boolean`，清空后为 false；前端停用其解析与映射动作，保留历史列表。历史 Artifact 为 stale/current=false，配置、分类、枚举、威胁和导出内容仍经本人接口可读/下载。命令入队后上传的新文件及其后续任务保留，创建 active=true 的新输入；清空不解析旧 Blob，旧内容损坏也能完成，提交前再次检查 lease/epoch/fence。
 
 生产运行中首次白名单瞬时失败耗尽自动恢复预算时，保存执行器真实冻结计划、成功前缀账本、已用预算及实际 staging（包括显式威胁事务副本），转入 waiting_confirmation。执行前 proposal 的首次确认执行同样适用。此时 confirmation payload 可附 `reason_code="recovery_exhausted"`，问题和选项为安全静态文案；确认只重试未完成步骤，原恢复预算不重置。人工恢复后的再次失败终止 Run，不反复创建待确认循环；参数缺失或来源歧义仍结束为安全追问，不能靠确认猜参数或改变冻结计划。
+
+## 视觉基线自检（#307）
+
+颜色、字体、圆角、焦点及明暗主题按 `docs/design/v2-visual-baseline.md` 实施。运行 `python scripts/check_v2_visual_tokens.py` 可逐项对照规格中的 21 项浅色和 21 项深色颜色，并输出源码行号；同时检查变量引用、组件硬编码颜色和四个工具类。脚本只读，不更新规格。
+
+主题沿用本机 `twa-v2-theme` 记忆，在首次绘制前初始化；系统原生控件随主题切换。颜色自检和自动回归不代替 #310 的明暗视觉人工终验。
