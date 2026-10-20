@@ -229,9 +229,15 @@ def test枚举提取与显式字段日志类型提取复合计划两步各留产
 
 def test字段映射单步可运行(monkeypatch):
     """字段映射使用 SessionFacts 字段并调用明确命名的专业 Agent。"""
-    import application.field_mapping_input as input_builder
+    import agent.core.field_retriever as field_retriever
 
-    monkeypatch.setattr(input_builder, "_pre_query_field_candidates", lambda fields: "")
+    retrieved_fields = []
+
+    def retrieve_candidates(fields):
+        retrieved_fields.append(list(fields))
+        return {}
+
+    monkeypatch.setattr(field_retriever, "batch_retrieve_candidates_table", retrieve_candidates)
     member = _StaticMember(
         "FieldMappingAgent",
         json.dumps(
@@ -255,6 +261,7 @@ def test字段映射单步可运行(monkeypatch):
 
     assert report.status == StepStatus.SUCCESS
     assert session.last_mapping_data[0]["原始字段名"] == "event_type3"
+    assert retrieved_fields == [["event_type3"]]
 
 
 def test枚举提取单步可运行(monkeypatch):
