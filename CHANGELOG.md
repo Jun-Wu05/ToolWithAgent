@@ -1,5 +1,7 @@
 # Changelog
 
+- feat(v2): 字段变更分组预览、一次删除确认、确定性原子应用与版本化撤销（#268）；复用共享 Skill，支持上传配置根结构与递归下游过期传播。
+
 本文件记录 ToolWithAgent 项目的所有重要变更，遵循 [Keep a Changelog](https://keepachangelog.com/) 格式，版本号采用 Bug 修复递增规则 (`v0.0.x`)。
 
 ## [Unreleased]

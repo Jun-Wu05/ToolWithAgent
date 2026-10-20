@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { BusinessConfirmation, BusinessOperations, RunProgress } from './BusinessWorkspace'
 import { api, type Conversation } from './api'
-vi.mock('./api', () => ({saveDownload: vi.fn(), api: {me: vi.fn(), identities: vi.fn(), conversations: vi.fn(), conversation: vi.fn(), eventsUrl: vi.fn(), uploadFile: vi.fn(), sendMessage: vi.fn(), operation: vi.fn(), artifactContent: vi.fn(), confirmationToken: vi.fn(), confirmRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), selectIdentity: vi.fn()}}))
+vi.mock('./api', () => ({saveDownload: vi.fn(), api: {me: vi.fn(), identities: vi.fn(), conversations: vi.fn(), conversation: vi.fn(), eventsUrl: vi.fn(), uploadFile: vi.fn(), sendMessage: vi.fn(), operation: vi.fn(), artifactContent: vi.fn(), confirmationToken: vi.fn(), confirmRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), selectIdentity: vi.fn(), fieldPreview: vi.fn()}}))
 const summary = {id: 'c1', title: '后处理任务', created_at: '', updated_at: ''}
 const config = {id: 'config-1', run_id: 'r0', file_id: 'f1', kind: 'field_mapping' as const, status: 'published', current: true, config_ref: 'session.decoded_config', summary: {rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0}}
 const enumeration = {id: 'enum-1', run_id: 'r1', kind: 'enum_values' as const, status: 'published', current: true, summary: {item_count: 2}, result_message_id: 'answer-1', message_id: 'message-1'}
@@ -284,4 +284,24 @@ it('does not describe a corrupt artifact as successfully published', async () =>
   fireEvent.click(within(panel).getByRole('tab', {name: '来源信息'}))
   expect(within(panel).getByText('产物不可用')).toBeVisible()
   expect(within(panel).queryByText('已发布')).not.toBeInTheDocument()
+})
+it('embeds field changes and opens the middle workspace without generic confirmation',async()=>{
+ const field={run_id:'r1',revision:1,status:'ready',apply_run_id:null,applied_artifact_id:null,undo_run_id:null,restored_artifact_id:null}
+ vi.mocked(api.conversation).mockResolvedValue({...detail,field_changes:[field],runs:[{id:'r1',status:'waiting_confirmation',kind:'user_request'}]})
+ vi.mocked(api.fieldPreview).mockResolvedValue({...field,task_id:'task',current:true,selected_group_ids:['g1'],groups:[{id:'g1',fields:['新增字段'],deletes:[],status:'selected',changes:[{sub_rule_id:'rule',sub_rule_name:'规则一',field:'新增字段',kind:'add',before:null,after:{index:'新增字段'}}]}]})
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'查看变更'}))
+ expect(await screen.findByRole('region',{name:'字段变更预览'})).toBeInTheDocument()
+ expect(screen.getByLabelText('消息内容')).toBeInTheDocument()
+ expect(api.confirmationToken).not.toHaveBeenCalled()
+ fireEvent.click(screen.getByRole('button',{name:'返回对话'}))
+ expect(await screen.findByRole('button',{name:'查看变更'})).toBeInTheDocument()
+})
+it('preserves unsent text and opens pending field changes before a new message',async()=>{
+ const field={run_id:'r1',revision:1,status:'ready',apply_run_id:null,applied_artifact_id:null,undo_run_id:null,restored_artifact_id:null}
+ vi.mocked(api.conversation).mockResolvedValue({...detail,field_changes:[field]})
+ vi.mocked(api.fieldPreview).mockResolvedValue({...field,task_id:'task',current:true,selected_group_ids:[],groups:[]})
+ render(<App/>);await screen.findByRole('heading',{name:'后处理任务'})
+ fireEvent.change(screen.getByLabelText('消息内容'),{target:{value:'继续导出'}});fireEvent.click(screen.getByRole('button',{name:'发送'}))
+ expect(await screen.findByRole('region',{name:'字段变更预览'})).toBeInTheDocument()
+ expect(api.sendMessage).not.toHaveBeenCalled();expect(screen.getByLabelText('消息内容')).toHaveValue('继续导出')
 })
