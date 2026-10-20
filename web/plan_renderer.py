@@ -284,39 +284,120 @@ async def refresh_primary_report_anchor(
     return True
 
 
-async def render_execution_report(
-    execution_report: ExecutionReport,
-    *,
-    threat_pending: bool = False,
-    session_facts: SessionFacts | None = None,
-    clarification_runner: ClarificationRunner | None = None,
+def _render_config_export_artifact(
+    artifact, timestamp, download_allowed,
+    dataframe_elements, download_elements, field_mapping_downloads,
 ):
-    """先发送步骤汇总，再按顺序纵向发送表格和下载，并返回主消息句柄。"""
-    clarification_text = None
-    needs_input = next(
-        (
-            result
-            for result in execution_report.results
-            if result.status == StepStatus.NEEDS_INPUT
-        ),
-        None,
+    """config_export：整产物受威胁链下载门控，未过即跳过。"""
+    if not download_allowed:
+        return
+    content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
+    download_elements.append(
+        cl.File(
+            name=download_filename(artifact.download_kind, timestamp),
+            content=content,
+            mime="text/plain",
+        )
     )
-    if session_facts is not None and needs_input is not None:
-        recovered_count = sum(result.recovered for result in execution_report.results)
-        recovery_summary = (
-            f"retry_as_is={recovered_count}" if recovered_count else ""
+
+
+def _render_field_mapping_artifact(
+    artifact, timestamp, download_allowed,
+    dataframe_elements, download_elements, field_mapping_downloads,
+):
+    """field_mapping：必须落表展示，下载走延迟发送列表，不受门控。"""
+    # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
+    rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
+    dataframe_elements.extend(create_dataframe_elements(rows))
+    if artifact.download_kind and artifact.download_content:
+        field_mapping_downloads.append(
+            (
+                artifact.download_kind,
+                download_filename(artifact.download_kind, timestamp),
+                artifact.download_content.encode("utf-8"),
+            )
         )
-        clarification_text = await compose_clarification(
-            "needs_input",
-            session_facts,
-            needs_input.error_code,
-            needs_input.choices,
-            recovery_summary,
-            runner=clarification_runner,
+
+
+def _render_threat_mapping_artifact(
+    artifact, timestamp, download_allowed,
+    dataframe_elements, download_elements, field_mapping_downloads,
+):
+    """threat_mapping：表格不受门控，xlsx 下载受门控。"""
+    rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
+    dataframe_elements.extend(create_dataframe_elements(rows))
+    if download_allowed:
+        dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
+        download_elements.append(
+            cl.File(
+                name=download_filename(artifact.artifact_type, timestamp),
+                content=output.getvalue(),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
         )
+
+
+def _render_enum_values_artifact(
+    artifact, timestamp, download_allowed,
+    dataframe_elements, download_elements, field_mapping_downloads,
+):
+    """enum_values：表格不受门控，json 下载受门控。"""
+    # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
+    rows = [{"枚举值": value} for value in artifact.values]
+    dataframe_elements.extend(create_dataframe_elements(rows))
+    if download_allowed:
+        download_elements.append(
+            cl.File(
+                name=download_filename(artifact.artifact_type, timestamp),
+                content=json.dumps(
+                    {
+                        "field": artifact.field,
+                        "regex": artifact.regex,
+                        "original_log": list(artifact.original_log),
+                        "value": list(artifact.values),
+                    },
+                    ensure_ascii=False,
+                    indent=4,
+                ).encode("utf-8"),
+                mime="application/json",
+            )
+        )
+
+
+def _render_log_classification_artifact(
+    artifact, timestamp, download_allowed,
+    dataframe_elements, download_elements, field_mapping_downloads,
+):
+    """log_classification：json 下载不受门控。"""
+    download_elements.append(
+        cl.File(
+            name=download_filename(artifact.artifact_type, timestamp),
+            content=json.dumps(
+                artifact.classification,
+                ensure_ascii=False,
+                indent=4,
+            ).encode("utf-8"),
+            mime="application/json",
+        )
+    )
+
+
+# 五路门控语义刻意不对称，各自持有；未知类型跳过（原 if/elif 落空行为）。
+_ARTIFACT_ELEMENT_BUILDERS = {
+    "config_export": _render_config_export_artifact,
+    "field_mapping": _render_field_mapping_artifact,
+    "threat_mapping": _render_threat_mapping_artifact,
+    "enum_values": _render_enum_values_artifact,
+    "log_classification": _render_log_classification_artifact,
+}
+
+
+def _collect_artifact_elements(execution_report: ExecutionReport, timestamp: str):
+    """按结果顺序收集表格元素、下载元素与延迟发送的字段映射下载。"""
     dataframe_elements, download_elements = [], []
-    actions = _build_result_actions(execution_report)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     field_mapping_downloads: list[tuple[str, str, bytes]] = []
     threat_download_steps = _threat_chain_download_step_ids(execution_report)
     for result in execution_report.results:
@@ -326,102 +407,20 @@ async def render_execution_report(
         download_allowed = (
             threat_download_steps is None or result.step_id in threat_download_steps
         )
-        if artifact.artifact_type == "config_export":
-            if not download_allowed:
-                continue
-            content = artifact.content if isinstance(artifact.content, bytes) else str(artifact.content).encode("utf-8")
-            download_elements.append(
-                cl.File(
-                    name=download_filename(artifact.download_kind, timestamp),
-                    content=content,
-                    mime="text/plain",
-                )
+        handler = _ARTIFACT_ELEMENT_BUILDERS.get(artifact.artifact_type)
+        if handler is not None:
+            handler(
+                artifact, timestamp, download_allowed,
+                dataframe_elements, download_elements, field_mapping_downloads,
             )
-        elif artifact.artifact_type == "field_mapping":
-            # 字段映射产物必须落表展示，否则用户只看到一行「步骤执行成功」。
-            rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
-            dataframe_elements.extend(create_dataframe_elements(rows))
-            if artifact.download_kind and artifact.download_content:
-                field_mapping_downloads.append(
-                    (
-                        artifact.download_kind,
-                        download_filename(artifact.download_kind, timestamp),
-                        artifact.download_content.encode("utf-8"),
-                    )
-                )
-        elif artifact.artifact_type == "threat_mapping":
-            rows = [mapping.model_dump(by_alias=True) for mapping in artifact.mappings]
-            dataframe_elements.extend(create_dataframe_elements(rows))
-            if download_allowed:
-                dataframe = pd.DataFrame(rows, columns=["mappingType", "orgValue", "mappingValue"])
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    dataframe.to_excel(writer, index=False, sheet_name="threat_mapping")
-                download_elements.append(
-                    cl.File(
-                        name=download_filename(artifact.artifact_type, timestamp),
-                        content=output.getvalue(),
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                )
-        elif artifact.artifact_type == "enum_values":
-            # 枚举提取产物落表展示，并附可下载文件，保留旧的「下载行为」。
-            rows = [{"枚举值": value} for value in artifact.values]
-            dataframe_elements.extend(create_dataframe_elements(rows))
-            if download_allowed:
-                download_elements.append(
-                    cl.File(
-                        name=download_filename(artifact.artifact_type, timestamp),
-                        content=json.dumps(
-                            {
-                                "field": artifact.field,
-                                "regex": artifact.regex,
-                                "original_log": list(artifact.original_log),
-                                "value": list(artifact.values),
-                            },
-                            ensure_ascii=False,
-                            indent=4,
-                        ).encode("utf-8"),
-                        mime="application/json",
-                    )
-                )
-        elif artifact.artifact_type == "log_classification":
-            download_elements.append(
-                cl.File(
-                    name=download_filename(artifact.artifact_type, timestamp),
-                    content=json.dumps(
-                        artifact.classification,
-                        ensure_ascii=False,
-                        indent=4,
-                    ).encode("utf-8"),
-                    mime="application/json",
-                )
-            )
-    message_kwargs = {
-        "content": build_execution_report_content(
-            execution_report,
-            threat_pending=threat_pending,
-            clarification_text=clarification_text,
-        ),
-        "elements": [],
-    }
-    if actions:
-        message_kwargs["actions"] = actions
-    main_message = cl.Message(**message_kwargs)
-    await main_message.send()
+    return dataframe_elements, download_elements, field_mapping_downloads
 
-    for element_group in (dataframe_elements, download_elements):
-        for element in element_group:
-            await cl.Message(content="", elements=[element]).send()
 
-    if any(
-        result.error_code == "data_source_fields_required"
-        for result in execution_report.results
-    ):
-        from web.rule_source_form import prompt_rule_source_fields
-
-        await prompt_rule_source_fields()
-
+async def _send_field_mapping_downloads(
+    execution_report: ExecutionReport,
+    field_mapping_downloads: list[tuple[str, str, bytes]],
+):
+    """逐条发送字段映射下载，保留发送前后的结构化日志。"""
     for download_kind, file_name, content in field_mapping_downloads:
         title = (
             "✅ **字段映射已回填到上传配置**"
@@ -457,4 +456,67 @@ async def render_execution_report(
             download_kind,
             file_name,
         )
+
+
+async def render_execution_report(
+    execution_report: ExecutionReport,
+    *,
+    threat_pending: bool = False,
+    session_facts: SessionFacts | None = None,
+    clarification_runner: ClarificationRunner | None = None,
+):
+    """先发送步骤汇总，再按顺序纵向发送表格和下载，并返回主消息句柄。"""
+    clarification_text = None
+    needs_input = next(
+        (
+            result
+            for result in execution_report.results
+            if result.status == StepStatus.NEEDS_INPUT
+        ),
+        None,
+    )
+    if session_facts is not None and needs_input is not None:
+        recovered_count = sum(result.recovered for result in execution_report.results)
+        recovery_summary = (
+            f"retry_as_is={recovered_count}" if recovered_count else ""
+        )
+        clarification_text = await compose_clarification(
+            "needs_input",
+            session_facts,
+            needs_input.error_code,
+            needs_input.choices,
+            recovery_summary,
+            runner=clarification_runner,
+        )
+    actions = _build_result_actions(execution_report)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    dataframe_elements, download_elements, field_mapping_downloads = (
+        _collect_artifact_elements(execution_report, timestamp)
+    )
+    message_kwargs = {
+        "content": build_execution_report_content(
+            execution_report,
+            threat_pending=threat_pending,
+            clarification_text=clarification_text,
+        ),
+        "elements": [],
+    }
+    if actions:
+        message_kwargs["actions"] = actions
+    main_message = cl.Message(**message_kwargs)
+    await main_message.send()
+
+    for element_group in (dataframe_elements, download_elements):
+        for element in element_group:
+            await cl.Message(content="", elements=[element]).send()
+
+    if any(
+        result.error_code == "data_source_fields_required"
+        for result in execution_report.results
+    ):
+        from web.rule_source_form import prompt_rule_source_fields
+
+        await prompt_rule_source_fields()
+
+    await _send_field_mapping_downloads(execution_report, field_mapping_downloads)
     return main_message
