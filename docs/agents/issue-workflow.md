@@ -1,6 +1,6 @@
 # Issue 实施 SOP：git worktree 隔离工作流
 
-默认每个 issue 从 master 开短命分支实施、PR 合并后即删分支；V2 集成期的基线例外见下节。**较大改动用独立 git worktree 隔离，小改动在主 worktree 直通**（判据见下）。允许多棵临时 worktree 并行，前提是：并行 issue 的改动面零相交（沿用 AGENTS.md 的 Multi-Agent 并行派发判据）、每棵 worktree 独立补第 2 步环境文件并显式使用树内 `--basetemp`、任一 PR 合并后立即清理对应 worktree。该流程已在 #178（worktree 五组删除）、#179（worktree bug 修复）、#176（主 worktree 直通小修复）上完整验证。
+默认每个 issue 从 master 开短命分支实施、PR 合并后即删分支；V2 集成期的基线例外见下节。**较大改动用独立 git worktree 隔离，小改动在主 worktree 直通**（判据见下）。允许多棵临时 worktree 并行，前提是：并行 issue 的改动面零相交、每棵 worktree 独立补第 2 步环境文件并显式使用树内 `--basetemp`、任一 PR 合并后立即清理对应 worktree。该流程已在 #178（worktree 五组删除）、#179（worktree bug 修复）、#176（主 worktree 直通小修复）上完整验证。
 
 ## V2 集成开发（用户确认的流程例外）
 

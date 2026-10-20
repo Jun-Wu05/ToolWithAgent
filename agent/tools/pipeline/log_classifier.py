@@ -634,6 +634,269 @@ def _normalize_body_key_lines(
     return "\n".join(normalized)
 
 
+def _classify_explicit_feature_field(
+    logs_str: str,
+    format_type: str,
+    format_detail: str,
+    feature_field: str,
+    format_info: str,
+    header_end_marker: str,
+    *,
+    is_kv: bool,
+) -> str:
+    """用户显式指定的分类特征字段：跳过 Step 2a，强制按日志体路径使用该字段。
+
+    不做任何头部剥离（Step 1 幻觉的 header_end_marker 可能等于字段分隔符，
+    会把行首第一个字段——常为用户点名的特征字段——当日志头剥掉）。
+    """
+    logger.info(
+        f"[_do_classify_log_features] 显式分类特征字段 '{feature_field}'，"
+        f"跳过 Step 2a 直接按日志体提取"
+    )
+    explicit_info = _parse_format_info_dict(format_info)
+    if is_kv:
+        normalized = _normalize_body_key_lines(
+            logs_str,
+            feature_field,
+            FormatContext.from_format_info(explicit_info),
+        )
+        return _classify_kv_features(
+            logs_str=normalized,
+            format_type=format_type,
+            format_detail=format_detail,
+            feature_field=feature_field,
+            format_info=explicit_info,
+            header_end_marker="",
+        )
+    return _classify_json_features(
+        logs_str=logs_str,
+        format_type=format_type,
+        format_detail=format_detail,
+        feature_field=feature_field,
+        header_end_marker=header_end_marker,
+    )
+
+
+def _route_body_key_feature(
+    logs_str: str,
+    format_type: str,
+    format_detail: str,
+    feature_field: str,
+    format_info: str,
+    header_end_marker: str,
+    *,
+    is_kv: bool,
+) -> str | None:
+    """确定性路由：特征键作为日志体键覆盖绝大多数行时，跳过头部路由。
+
+    特征键明明是日志体键时不走 Step 2a 头部聚类采样（避免采样覆盖丢失），
+    有效 marker 由 KV 探针确认后剥头，无效 marker 回退整行；真头部特征保持原路由。
+    命中体键路径时返回结果 JSON，未命中返回 None 继续后续路由。
+    """
+    routing_info = _parse_format_info_dict(format_info) or {}
+    if is_kv:
+        routing_ctx = FormatContext.from_format_info(routing_info)
+        normalized = _normalize_body_key_lines(
+            logs_str, feature_field, routing_ctx
+        )
+        coverage = _kv_key_line_coverage(
+            normalized, feature_field, routing_ctx
+        )
+        route = decide_body_key_route(feature_field, coverage)
+        if route.use_body_path:
+            logger.info(
+                f"[_do_classify_log_features] 特征键 '{feature_field}' 行覆盖率 "
+                f"{route.coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
+            )
+            return _classify_kv_features(
+                logs_str=normalized,
+                format_type=format_type,
+                format_detail=format_detail,
+                feature_field=feature_field,
+                format_info=routing_info,
+                header_end_marker=header_end_marker,
+            )
+    else:
+        coverage = _json_key_line_coverage(logs_str, feature_field)
+        route = decide_body_key_route(feature_field, coverage)
+        if route.use_body_path:
+            logger.info(
+                f"[_do_classify_log_features] JSON 特征键 '{feature_field}' 行覆盖率 "
+                f"{route.coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
+            )
+            return _classify_json_features(
+                logs_str=logs_str,
+                format_type=format_type,
+                format_detail=format_detail,
+                feature_field=feature_field,
+                header_end_marker="",
+            )
+    return None
+
+
+def _classify_header_kv_step2a(
+    logs_str: str,
+    format_type: str,
+    format_detail: str,
+    feature_field: str,
+    format_info: str,
+    header_end_marker: str,
+) -> str:
+    """日志头+KV：Step 2a 特征定位、结果校验后分派 Path A / Path KV。
+
+    与 JSON 版刻意不对称：定位器经 ``fmt=FormatContext`` 传参（#344 单一
+    解析约定），并执行 body 须有字段、header 须为 ``__header__`` 的校验，
+    body_candidates≥10 时仅警告不失败（信任豁免）。
+    """
+    from agent.tools.pipeline.log_feature_locator import locate_feature
+
+    # 分隔符经 FormatContext 单一解析后按名传递，杜绝历史上
+    # log_classifier（delimit=字段分隔符）与 locate_feature（delimit=键值
+    # 分隔符）两套同名反义约定在调用点交叉的活 bug（#344）。
+    step2a_ctx = FormatContext.from_format_info(
+        _parse_format_info_dict(format_info) or {}
+    )
+
+    logger.info("[_do_classify_log_features] 日志头+KV → Step 2a 特征定位")
+    locate_result = locate_feature(
+        logs_str=logs_str,
+        feature_field=feature_field,
+        format_type=format_type,
+        format_detail=format_detail,
+        fmt=step2a_ctx,
+    )
+    located = locate_result.get("feature_location", "body")
+    located_field = locate_result.get("feature_field", "")
+    reason = locate_result.get("reason", "")
+    body_candidates = locate_result.get("body_candidates", 0)
+    logger.info(
+        f"[_do_classify_log_features] Step 2a 结果: "
+        f"location={located}, field={located_field}, reason={reason[:80]}, body_candidates={body_candidates}"
+    )
+
+    # CHANGED: 添加验证逻辑（无兜底策略）
+    if located == "body":
+        # body 路径必须有 feature_field
+        if not located_field:
+            logger.error("[_do_classify_log_features] feature_location=body 但 feature_field 为空")
+            return _build_failed_result(
+                format_type, format_detail, feature_field,
+                "Step 2a 判断错误：body 路径必须有 feature_field"
+            )
+    elif located == "header":
+        # header 路径必须有正确的 feature_field
+        if located_field != "__header__":
+            logger.error(f"[_do_classify_log_features] feature_location=header 但 feature_field={located_field}")
+            return _build_failed_result(
+                format_type, format_detail, feature_field,
+                f"Step 2a 判断错误：header 路径 feature_field 必须为 __header__（实际为 {located_field}）"
+            )
+        # CHANGED: 仅在 body 有大量候选（≥10）时记录警告，不强制失败（2026-06-05 修复数据1）
+        if body_candidates >= 10:
+            logger.warning(
+                f"[_do_classify_log_features] feature_location=header 但 body 有 {body_candidates} 个候选（可能误判），"
+                f"LLM 理由: {reason}，已信任 LLM 判断继续处理"
+            )
+    elif located == "unknown":
+        logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
+        return _build_failed_result(
+            format_type, format_detail, feature_field,
+            f"特征定位失败: {reason}"
+        )
+
+    if located == "header":
+        # Path A: 特征在日志头中
+        logger.info("[_do_classify_log_features] → Path A (header)")
+        from agent.tools.pipeline.log_header_processor import classify_header_features
+
+        return classify_header_features(
+            logs_str=logs_str,
+            format_type=format_type,
+            format_detail=format_detail,
+            header_end_marker=header_end_marker,
+            format_info=step2a_ctx.as_format_info(),  # 传递 Step1 确定的分隔符
+        )
+
+    if located == "body":
+        # Path KV: 特征在 body 中，可能修正了 feature_field
+        logger.info("[_do_classify_log_features] → Path KV (body, via Step 2a)")
+        return _classify_kv_features(
+            logs_str=logs_str,
+            format_type=format_type,
+            format_detail=format_detail,
+            feature_field=located_field or feature_field,
+            format_info=step2a_ctx.as_format_info(),  # 保留分隔符，修复 KV 分隔符丢失问题
+            header_end_marker=header_end_marker,
+        )
+
+    # unknown → FAILED
+    logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
+    return _build_failed_result(
+        format_type, format_detail, feature_field,
+        f"特征定位失败: {reason}",
+    )
+
+
+def _classify_header_json_step2a(
+    logs_str: str,
+    format_type: str,
+    format_detail: str,
+    feature_field: str,
+    header_end_marker: str,
+) -> str:
+    """日志头+JSON：Step 2a 特征定位后分派 Path A / Path Main。
+
+    与 KV 版刻意不对称：定位器不传 ``fmt``（JSON 无 KV 分隔符约定），
+    ``located_field`` 默认回退 ``feature_field``，且无 body/header 字段校验段。
+    """
+    from agent.tools.pipeline.log_feature_locator import locate_feature
+
+    logger.info("[_do_classify_log_features] 日志头+JSON → Step 2a 特征定位")
+    locate_result = locate_feature(
+        logs_str=logs_str,
+        feature_field=feature_field,
+        format_type=format_type,
+        format_detail=format_detail,
+    )
+    located = locate_result.get("feature_location", "body")
+    located_field = locate_result.get("feature_field", feature_field)
+    reason = locate_result.get("reason", "")
+    logger.info(
+        f"[_do_classify_log_features] Step 2a 结果: "
+        f"location={located}, field={located_field}, reason={reason[:80]}"
+    )
+
+    if located == "header":
+        # Path A: 特征在日志头中
+        logger.info("[_do_classify_log_features] → Path A (header)")
+        from agent.tools.pipeline.log_header_processor import classify_header_features
+
+        return classify_header_features(
+            logs_str=logs_str,
+            format_type=format_type,
+            format_detail=format_detail,
+            header_end_marker=header_end_marker,
+        )
+
+    if located == "body":
+        # Path Main: 特征在 body 中，可能修正了 feature_field
+        logger.info("[_do_classify_log_features] → Path Main (body, via Step 2a)")
+        return _classify_json_features(
+            logs_str=logs_str,
+            format_type=format_type,
+            format_detail=format_detail,
+            feature_field=located_field or feature_field,
+            header_end_marker=header_end_marker,
+        )
+
+    # unknown → FAILED
+    logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
+    return _build_failed_result(
+        format_type, format_detail, feature_field,
+        f"特征定位失败: {reason}",
+    )
+
+
 def _do_classify_log_features(
     logs_str: str,
     format_type: str = "unknown",
@@ -680,167 +943,40 @@ def _do_classify_log_features(
         )
 
     # ---- 用户显式指定的分类特征字段：跳过 Step 2a，强制按日志体路径使用该字段 ----
-    # 不做任何头部剥离（Step 1 幻觉的 header_end_marker 可能等于字段分隔符，
-    # 会把行首第一个字段——常为用户点名的特征字段——当日志头剥掉）。
     if feature_field_explicit and feature_field and feature_field.strip():
-        logger.info(
-            f"[_do_classify_log_features] 显式分类特征字段 '{feature_field}'，"
-            f"跳过 Step 2a 直接按日志体提取"
-        )
-        explicit_info = _parse_format_info_dict(format_info)
-        if is_kv:
-            normalized = _normalize_body_key_lines(
-                logs_str,
-                feature_field,
-                FormatContext.from_format_info(explicit_info),
-            )
-            return _classify_kv_features(
-                logs_str=normalized,
-                format_type=format_type,
-                format_detail=format_detail,
-                feature_field=feature_field,
-                format_info=explicit_info,
-                header_end_marker="",
-            )
-        return _classify_json_features(
-            logs_str=logs_str,
-            format_type=format_type,
-            format_detail=format_detail,
-            feature_field=feature_field,
-            header_end_marker=header_end_marker,
+        return _classify_explicit_feature_field(
+            logs_str,
+            format_type,
+            format_detail,
+            feature_field,
+            format_info,
+            header_end_marker,
+            is_kv=is_kv,
         )
 
     # ---- 确定性路由：特征键作为日志体键覆盖绝大多数行时，跳过头部路由 ----
-    # 特征键明明是日志体键时不走 Step 2a 头部聚类采样（避免采样覆盖丢失），
-    # 有效 marker 由 KV 探针确认后剥头，无效 marker 回退整行；真头部特征保持原路由。
     if feature_field and feature_field.strip() and feature_field != "__header__":
-        routing_info = _parse_format_info_dict(format_info) or {}
-        if is_kv:
-            routing_ctx = FormatContext.from_format_info(routing_info)
-            normalized = _normalize_body_key_lines(
-                logs_str, feature_field, routing_ctx
-            )
-            coverage = _kv_key_line_coverage(
-                normalized, feature_field, routing_ctx
-            )
-            route = decide_body_key_route(feature_field, coverage)
-            if route.use_body_path:
-                logger.info(
-                    f"[_do_classify_log_features] 特征键 '{feature_field}' 行覆盖率 "
-                    f"{route.coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
-                )
-                return _classify_kv_features(
-                    logs_str=normalized,
-                    format_type=format_type,
-                    format_detail=format_detail,
-                    feature_field=feature_field,
-                    format_info=routing_info,
-                    header_end_marker=header_end_marker,
-                )
-        else:
-            coverage = _json_key_line_coverage(logs_str, feature_field)
-            route = decide_body_key_route(feature_field, coverage)
-            if route.use_body_path:
-                logger.info(
-                    f"[_do_classify_log_features] JSON 特征键 '{feature_field}' 行覆盖率 "
-                    f"{route.coverage:.0%}，跳过 Step 2a 按日志体确定性聚合"
-                )
-                return _classify_json_features(
-                    logs_str=logs_str,
-                    format_type=format_type,
-                    format_detail=format_detail,
-                    feature_field=feature_field,
-                    header_end_marker="",
-                )
+        routed = _route_body_key_feature(
+            logs_str,
+            format_type,
+            format_detail,
+            feature_field,
+            format_info,
+            header_end_marker,
+            is_kv=is_kv,
+        )
+        if routed is not None:
+            return routed
 
     # ---- 日志头+KV：执行 Step 2a 特征定位 ----
     if is_kv and has_header:
-        from agent.tools.pipeline.log_feature_locator import locate_feature
-
-        # 分隔符经 FormatContext 单一解析后按名传递，杜绝历史上
-        # log_classifier（delimit=字段分隔符）与 locate_feature（delimit=键值
-        # 分隔符）两套同名反义约定在调用点交叉的活 bug（#344）。
-        step2a_ctx = FormatContext.from_format_info(
-            _parse_format_info_dict(format_info) or {}
-        )
-
-        logger.info("[_do_classify_log_features] 日志头+KV → Step 2a 特征定位")
-        locate_result = locate_feature(
-            logs_str=logs_str,
-            feature_field=feature_field,
-            format_type=format_type,
-            format_detail=format_detail,
-            fmt=step2a_ctx,
-        )
-        located = locate_result.get("feature_location", "body")
-        located_field = locate_result.get("feature_field", "")
-        reason = locate_result.get("reason", "")
-        body_candidates = locate_result.get("body_candidates", 0)
-        logger.info(
-            f"[_do_classify_log_features] Step 2a 结果: "
-            f"location={located}, field={located_field}, reason={reason[:80]}, body_candidates={body_candidates}"
-        )
-
-        # CHANGED: 添加验证逻辑（无兜底策略）
-        if located == "body":
-            # body 路径必须有 feature_field
-            if not located_field:
-                logger.error("[_do_classify_log_features] feature_location=body 但 feature_field 为空")
-                return _build_failed_result(
-                    format_type, format_detail, feature_field,
-                    "Step 2a 判断错误：body 路径必须有 feature_field"
-                )
-        elif located == "header":
-            # header 路径必须有正确的 feature_field
-            if located_field != "__header__":
-                logger.error(f"[_do_classify_log_features] feature_location=header 但 feature_field={located_field}")
-                return _build_failed_result(
-                    format_type, format_detail, feature_field,
-                    f"Step 2a 判断错误：header 路径 feature_field 必须为 __header__（实际为 {located_field}）"
-                )
-            # CHANGED: 仅在 body 有大量候选（≥10）时记录警告，不强制失败（2026-06-05 修复数据1）
-            if body_candidates >= 10:
-                logger.warning(
-                    f"[_do_classify_log_features] feature_location=header 但 body 有 {body_candidates} 个候选（可能误判），"
-                    f"LLM 理由: {reason}，已信任 LLM 判断继续处理"
-                )
-        elif located == "unknown":
-            logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
-            return _build_failed_result(
-                format_type, format_detail, feature_field,
-                f"特征定位失败: {reason}"
-            )
-
-        if located == "header":
-            # Path A: 特征在日志头中
-            logger.info("[_do_classify_log_features] → Path A (header)")
-            from agent.tools.pipeline.log_header_processor import classify_header_features
-
-            return classify_header_features(
-                logs_str=logs_str,
-                format_type=format_type,
-                format_detail=format_detail,
-                header_end_marker=header_end_marker,
-                format_info=step2a_ctx.as_format_info(),  # 传递 Step1 确定的分隔符
-            )
-
-        if located == "body":
-            # Path KV: 特征在 body 中，可能修正了 feature_field
-            logger.info("[_do_classify_log_features] → Path KV (body, via Step 2a)")
-            return _classify_kv_features(
-                logs_str=logs_str,
-                format_type=format_type,
-                format_detail=format_detail,
-                feature_field=located_field or feature_field,
-                format_info=step2a_ctx.as_format_info(),  # 保留分隔符，修复 KV 分隔符丢失问题
-                header_end_marker=header_end_marker,
-            )
-
-        # unknown → FAILED
-        logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
-        return _build_failed_result(
-            format_type, format_detail, feature_field,
-            f"特征定位失败: {reason}",
+        return _classify_header_kv_step2a(
+            logs_str,
+            format_type,
+            format_detail,
+            feature_field,
+            format_info,
+            header_end_marker,
         )
 
     # ---- 纯 KV：直接走 Path KV ----
@@ -860,51 +996,12 @@ def _do_classify_log_features(
 
     # ---- 日志头+JSON：执行 Step 2a 特征定位 ----
     if has_header:
-        from agent.tools.pipeline.log_feature_locator import locate_feature
-
-        logger.info("[_do_classify_log_features] 日志头+JSON → Step 2a 特征定位")
-        locate_result = locate_feature(
-            logs_str=logs_str,
-            feature_field=feature_field,
-            format_type=format_type,
-            format_detail=format_detail,
-        )
-        located = locate_result.get("feature_location", "body")
-        located_field = locate_result.get("feature_field", feature_field)
-        reason = locate_result.get("reason", "")
-        logger.info(
-            f"[_do_classify_log_features] Step 2a 结果: "
-            f"location={located}, field={located_field}, reason={reason[:80]}"
-        )
-
-        if located == "header":
-            # Path A: 特征在日志头中
-            logger.info("[_do_classify_log_features] → Path A (header)")
-            from agent.tools.pipeline.log_header_processor import classify_header_features
-
-            return classify_header_features(
-                logs_str=logs_str,
-                format_type=format_type,
-                format_detail=format_detail,
-                header_end_marker=header_end_marker,
-            )
-
-        if located == "body":
-            # Path Main: 特征在 body 中，可能修正了 feature_field
-            logger.info("[_do_classify_log_features] → Path Main (body, via Step 2a)")
-            return _classify_json_features(
-                logs_str=logs_str,
-                format_type=format_type,
-                format_detail=format_detail,
-                feature_field=located_field or feature_field,
-                header_end_marker=header_end_marker,
-            )
-
-        # unknown → FAILED
-        logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
-        return _build_failed_result(
-            format_type, format_detail, feature_field,
-            f"特征定位失败: {reason}",
+        return _classify_header_json_step2a(
+            logs_str,
+            format_type,
+            format_detail,
+            feature_field,
+            header_end_marker,
         )
 
     # ---- 纯 JSON：直接走 Path Main ----
