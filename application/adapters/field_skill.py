@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
+from functools import wraps
 from collections.abc import Mapping
 from typing import Any
 
@@ -98,8 +100,43 @@ def _load_skill_function(step_type: str) -> Any:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     function = getattr(module, function_name)
-    _skill_function_cache[step_type] = function
-    return function
+
+    @wraps(function)
+    def run(config, *args, **kwargs):
+        # Skill scripts consume entity lists; keep an uploaded dict root intact.
+        if isinstance(config, list) and all(
+            isinstance(item, dict) and ("normalize" in item or "parser" in item)
+            for item in config
+        ):
+            return function(config, *args, **kwargs)
+        root = copy.deepcopy(config)
+        entities, paths = [], []
+        def collect(node, path=()):
+            if isinstance(node, dict):
+                if isinstance(node.get("normalize"), list) or isinstance(node.get("parser"), dict):
+                    paths.append(path)
+                    entities.append(node)
+                for key, value in node.items():
+                    collect(value, (*path, key))
+            elif isinstance(node, list):
+                for index, value in enumerate(node):
+                    collect(value, (*path, index))
+        collect(root)
+        outcome = function(entities, *args, **kwargs)
+        if outcome.get("status") != "success":
+            return outcome
+        for path, replacement in zip(paths, outcome["data"]):
+            if not path:
+                root = replacement
+            else:
+                parent = root
+                for part in path[:-1]:
+                    parent = parent[part]
+                parent[path[-1]] = replacement
+        return {**outcome, "data": root}
+
+    _skill_function_cache[step_type] = run
+    return run
 
 
 def _map_skill_error(message: str) -> str:

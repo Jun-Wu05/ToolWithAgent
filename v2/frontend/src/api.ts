@@ -46,7 +46,10 @@ export type ArtifactDownload = { name: string; blob: Blob }
 export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; events?: RunEvent[] }
-export type Conversation = ConversationSummary & { messages: Message[]; files: FileRecord[]; runs: Run[]; artifacts?: Artifact[]; drafts?: MappingDraftSummary[]; session_facts?: SessionFacts | null; session_facts_error?: string | null }
+export type FieldChangeSummary = { run_id: string; revision: number; status: string; apply_run_id: string | null; applied_artifact_id: string | null; undo_run_id: string | null; restored_artifact_id: string | null }
+export type FieldChangePreview = FieldChangeSummary & { task_id: string; current: boolean; selected_group_ids: string[]; groups: { id: string; fields: string[]; deletes: string[]; status: string; changes: { sub_rule_id: string; sub_rule_name: string; field: string; kind: 'add' | 'modify' | 'delete'; before: unknown; after: unknown }[] }[] }
+export type FieldDeleteConfirmation = { token: string; checkpoint_revision: number; payload: { deletes: string[]; downstream: { id: string; kind: string; version: number }[] } }
+export type Conversation = ConversationSummary & { messages: Message[]; files: FileRecord[]; runs: Run[]; artifacts?: Artifact[]; drafts?: MappingDraftSummary[]; field_changes?: FieldChangeSummary[]; session_facts?: SessionFacts | null; session_facts_error?: string | null }
 export type BusinessArtifact = { id: string; run_id: string; kind: 'enum_values' | 'threat_mapping' | 'config_export'; status: string; current: boolean; item_count?: number; source_field?: string; summary?: Record<string, unknown>; message_id?: string | null; result_message_id?: string | null; created_at?: string }
 export type Artifact = ClassificationArtifact | FieldMappingArtifact | BusinessArtifact
 export type SessionFacts = { has_logs?: boolean; has_decoded_config?: boolean; has_log_classification?: boolean; available_config_refs: string[]; enum_mapping_target_fields: string[]; referenceable_artifacts: { source_ref: string; artifact_type: string; source_field: string | null; item_count: number; target_bindings: {config_ref: string; target_field: string}[] }[] }
@@ -56,6 +59,11 @@ export type EventRecord = { sequence: number; event_type: string; resource_type:
 export type ApiError = Error & { code?: string; status?: number; details?: unknown }
 const base = '/api/v2'
 const messages: Record<string, string> = {
+  field_preview_resolution_required: '有未处理的字段变更，请先查看变更并应用或取消。',
+  field_revision_conflict: '变更选择已在其他页面更新，请重新加载。',
+  field_preview_not_editable: '当前变更不能继续编辑，请检查执行状态。',
+  field_undo_stale: '当前版本已变化，不能撤销这次提交；请查看最新结果。',
+  business_input_stale: '输入或配置已变化，请取消旧变更并重新发起。',
   confirmation_resolution_required: '有待确认的执行方案，请先确认或取消。',
   continuation_stale: '执行输入已变化，请取消旧方案后重新发起。',
   artifact_source_stale: '来源结果已过期，请选择当前结果。',
@@ -148,6 +156,12 @@ export const api = {
     return request<MappingView>('/artifacts/' + encodeURIComponent(id) + '/mapping-view?' + params, { signal })
   },
   mappingDownload,
+  cancelFields: (id: string, revision: number, key: string) => request('/runs/' + encodeURIComponent(id) + '/field-change-cancel', {method: 'POST', headers: {'If-Match': String(revision), 'Idempotency-Key': key}}),
+  fieldPreview: (id: string) => request<FieldChangePreview>('/runs/' + encodeURIComponent(id) + '/field-change-preview'),
+  selectFields: (id: string, revision: number, selected: string[], key: string) => request<FieldChangePreview>('/runs/' + encodeURIComponent(id) + '/field-change-selection', {method: 'POST', headers: {'Content-Type': 'application/json', 'If-Match': String(revision), 'Idempotency-Key': key}, body: JSON.stringify({selected_group_ids: selected})}),
+  confirmFieldDeletion: (task: string, revision: number, key: string) => request<FieldDeleteConfirmation>('/tasks/' + encodeURIComponent(task) + '/confirmations', {method: 'POST', headers: {'If-Match': String(revision), 'Idempotency-Key': key}}),
+  applyFields: (id: string, revision: number, key: string, token?: string) => request<{run: Run}>('/runs/' + encodeURIComponent(id) + '/field-change-apply', {method: 'POST', headers: {'Content-Type': 'application/json', 'If-Match': String(revision), 'Idempotency-Key': key}, body: JSON.stringify({token})}),
+  undoFields: (id: string, key: string) => request<{run: Run}>('/artifacts/' + encodeURIComponent(id) + '/undo', {method: 'POST', headers: {'Idempotency-Key': key}}),
   artifactContent: (id: string) => request<Record<string, unknown>>('/artifacts/' + encodeURIComponent(id) + '/content'),
   operation: (id: string, input: OperationInput, key: string) => request<{task: {id: string; status: string}; run: Run}>('/conversations/' + encodeURIComponent(id) + '/operations', {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': key}, body: JSON.stringify(input)}),
   confirmationToken: (id: string) => request<Confirmation>('/runs/' + encodeURIComponent(id) + '/confirmation-token', {method: 'POST'}),

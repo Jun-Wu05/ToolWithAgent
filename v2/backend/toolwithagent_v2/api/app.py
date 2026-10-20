@@ -31,6 +31,16 @@ class OperationInput(BaseModel):
     config_artifact_id: str | None = None
 
 
+class FieldSelectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selected_group_ids: list[str] = Field(max_length=1000)
+
+
+class FieldApplyInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str | None = None
+
+
 class FakeRunInput(BaseModel):
     scenario: str = "success"
     session_facts: dict = Field(default_factory=dict)
@@ -120,6 +130,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def invalid(request: Request, exc: ValueError):
         code = str(exc)
         status = 413 if code == "file_too_large" else (409 if code in {
+            "field_revision_conflict", "field_preview_not_editable", "field_undo_stale", "field_preview_resolution_required",
             "idempotency_key_reused", "run_not_retryable", "task_has_active_run",
             "run_not_cancellable", "run_not_stoppable", "run_not_waiting",
             "invalid_confirmation_token", "confirmation_expired", "continuation_stale",
@@ -155,6 +166,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(404, "user_not_found")
             response.set_cookie("v2_dev_user", user["id"], httponly=True, samesite="lax")
             return user
+
+    def field_revision(value):
+        if value is None:
+            raise HTTPException(428, "field_revision_required")
+        try:
+            revision = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("invalid_field_revision") from None
+        if revision < 1:
+            raise ValueError("invalid_field_revision")
+        return revision
+
+    @app.get("/api/v2/runs/{run_id}/field-change-preview")
+    def field_preview(request: Request, run_id: str):
+        from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+        return FieldChanges(store).get(principal(request)["id"], run_id)
+
+    @app.post("/api/v2/runs/{run_id}/field-change-selection")
+    def field_selection(request: Request, run_id: str, payload: FieldSelectionInput, if_match: str | None = Header(default=None), idempotency_key: str | None = Header(default=None)):
+        from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+        return FieldChanges(store).select(user_writer(request)["id"], run_id, field_revision(if_match), payload.selected_group_ids, idempotency_key)
+
+    @app.post("/api/v2/runs/{run_id}/field-change-cancel")
+    def field_cancel(request: Request, run_id: str, if_match: str | None = Header(default=None), idempotency_key: str | None = Header(default=None)):
+        from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+        return FieldChanges(store).cancel(user_writer(request)["id"], run_id, field_revision(if_match), idempotency_key)
+
+    @app.post("/api/v2/tasks/{task_id}/confirmations")
+    def field_confirmation(request: Request, task_id: str, if_match: str | None = Header(default=None), idempotency_key: str | None = Header(default=None)):
+        from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+        return FieldChanges(store).confirmation(user_writer(request)["id"], task_id, field_revision(if_match), idempotency_key)
+
+    @app.post("/api/v2/runs/{run_id}/field-change-apply", status_code=201)
+    def field_apply(request: Request, run_id: str, payload: FieldApplyInput, if_match: str | None = Header(default=None), idempotency_key: str | None = Header(default=None)):
+        from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+        return FieldChanges(store).apply(user_writer(request)["id"], run_id, field_revision(if_match), idempotency_key, payload.token)
+
+    @app.post("/api/v2/artifacts/{artifact_id}/undo", status_code=201)
+    def field_undo(request: Request, artifact_id: str, idempotency_key: str | None = Header(default=None)):
+        from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+        return FieldChanges(store).undo(user_writer(request)["id"], artifact_id, idempotency_key)
 
     @app.get("/api/v2/conversations")
     def list_conversations(request: Request):

@@ -239,6 +239,7 @@ class BusinessApplication:
         from dataclasses import asdict
 
         progress_sink = progress_sink or NullProgressSink()
+        from toolwithagent_v2.runtime.field_changes import FieldPlanCaptured, capture_field_plan, prepare_fields
         initial = freeze_session(session)
         captured, checkpoint = {}, {}
         before_slots = {"enum_values": session.latest_enum_artifact, "threat_mapping": session.latest_threat_artifact}
@@ -254,12 +255,25 @@ class BusinessApplication:
                 progress_sink=progress_sink, adapters=adapters, continuation=continuation, checkpoint=checkpoint)
         elif "plan" in snapshot:
             plan = DeterministicPlan.model_validate(snapshot["plan"])
+            from contracts.planner_models import PlanDecision
+            if any(step.type in {"add_fields", "delete_fields", "merge_fields", "decode_fields", "regex_extract"} for step in plan.steps):
+                return {"field_changes": await prepare_fields(session, PlanDecision(decision="execute", plan_id=plan.plan_id, steps=plan.steps), base=base)}
             result = await run_deterministic_plan(session=session, team=team, plan=plan,
                 progress_sink=progress_sink, adapters=adapters, checkpoint=checkpoint)
         else:
-            result = await run_user_request(session=session, team=team, user_text=snapshot["user_text"],
-                progress_sink=progress_sink, progress_plan_id=snapshot["message_id"],
-                planner=self.planner, adapters=adapters, on_plan=lambda plan: captured.update(plan=plan), checkpoint=checkpoint)
+            def on_plan(decision):
+                captured.update(plan=decision)
+                capture_field_plan(decision)
+            try:
+                result = await run_user_request(session=session, team=team, user_text=snapshot["user_text"],
+                    progress_sink=progress_sink, progress_plan_id=snapshot["message_id"],
+                    planner=self.planner, adapters=adapters, on_plan=on_plan, checkpoint=checkpoint)
+            except FieldPlanCaptured as pending:
+                if snapshot.get("field_followup"):
+                    return {"error": "field_followup_requires_review", "message": "后续计划再次涉及字段变更，请在新一轮明确要求后继续。"}
+                from application.adapters.field_skill import FieldSkillAdapter
+                adapter = next((value for value in adapters.values() if isinstance(value, FieldSkillAdapter)), None)
+                return {"field_changes": await prepare_fields(session, pending.plan, adapter=adapter, base=base)}
         if isinstance(result, PlanDecision):
             if result.decision == "proposal":
                 frozen = DeterministicPlan(plan_id=result.plan_id, steps=result.steps)

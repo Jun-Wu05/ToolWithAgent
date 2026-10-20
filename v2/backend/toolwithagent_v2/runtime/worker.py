@@ -220,6 +220,9 @@ class Worker:
             with private_business_logging():
                 session, base = self.store.read_business_session(claim)
                 outcome = asyncio.run(self.business_application.postprocess(session, claim["input"], base, self.store.continuation(claim["id"]), progress_sink=RunProgressSink(self.store, self.worker_id, claim)))
+            if "field_changes" in outcome:
+                from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+                return FieldChanges(self.store).prepare(self.worker_id, claim, outcome["field_changes"])
             if "continuation" in outcome:
                 return self.store.wait_for_confirmation(self.worker_id, claim, outcome["continuation"], kind="business_plan", payload=outcome["confirmation"]) is not None
             if "artifacts" in outcome:
@@ -229,6 +232,34 @@ class Worker:
             return self.store.finish(self.worker_id, claim, "business_input_invalid", "业务来源已不可用，请检查输入后重试。")
         except Exception:
             return self.store.finish(self.worker_id, claim, "business_operation_failed", "操作失败，请检查输入后重试。")
+
+    def _run_field_change(self, claim):
+        from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+        from toolwithagent_v2.runtime.field_changes import apply_fields
+        from toolwithagent_v2.runtime.postprocessing import restore_session, freeze_session, config_payload
+        try:
+            prepared = FieldChanges(self.store).read_command(claim)
+            with private_business_logging():
+                if claim["task_type"] == "field_change_undo":
+                    session = restore_session(prepared["initial_state"])
+                    source = prepared["groups"][0]["steps"][0]["config_ref"]
+                    payload = config_payload(session, source, prepared.get("base_payload"))
+                else:
+                    session, payload = asyncio.run(apply_fields(prepared, claim["input"]["selected_group_ids"]))
+            payload["field_change_run_id"] = claim["input"]["field_preview_run_id"]
+            payload["undo_of"] = claim["input"].get("undo_artifact_id")
+            artifacts = [{"kind": "field_mapping", "payload": payload}]
+            if claim["task_type"] == "field_change_undo":
+                for kind, slot in (("enum_values", session.latest_enum_artifact), ("threat_mapping", session.latest_threat_artifact)):
+                    if slot is not None:
+                        artifacts.append({"kind": kind, "payload": slot.artifact.model_dump(mode="json"), "source_kinds": ["field_mapping"]})
+            artifacts.append({"kind": "business_state", "payload": freeze_session(session)})
+            return self.store.publish_business(self.worker_id, claim, artifacts,
+                "本次字段变更已撤销，已生成恢复版本。" if claim["task_type"] == "field_change_undo" else "字段变更已应用；未选组已记为用户未应用。")
+        except (ValueError, LookupError) as error:
+            return self.store.finish(self.worker_id, claim, str(error), "变更未发布，请重新检查来源与选择。")
+        except Exception:
+            return self.store.finish(self.worker_id, claim, "field_change_failed", "变更未发布，请重试。")
 
     def _run_enum_attachment(self, claim):
         """附件校验完整后才生效，不把枚举 Excel 切成主数据。"""
@@ -265,6 +296,8 @@ class Worker:
                 return self._run_business(claim)
             if claim["task_type"] == "file_ingest" and claim["input"].get("role") == "enum_mapping":
                 return self._run_enum_attachment(claim)
+            if claim["task_type"] in {"field_change_apply", "field_change_undo"}:
+                return self._run_field_change(claim)
             if claim["task_type"] == "mapping_draft_apply":
                 return self._run_mapping_draft_apply(claim)
             if claim["task_type"] == "field_mapping":
@@ -280,6 +313,9 @@ class Worker:
                     outcome = {"error": "fake_runs_disabled"}
             else:
                 outcome = {"error": self._validate(claim["input"])}
+            if "field_changes" in outcome:
+                from toolwithagent_v2.infrastructure.field_changes import FieldChanges
+                return FieldChanges(self.store).prepare(self.worker_id, claim, outcome["field_changes"])
             if "continuation" in outcome:
                 return self.store.wait_for_confirmation(self.worker_id, claim, outcome["continuation"],
                                                         payload=outcome.get("confirmation")) is not None

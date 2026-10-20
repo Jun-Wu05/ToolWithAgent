@@ -82,6 +82,7 @@ class Store:
                 file["mapping_eligible"] = bool(current_file and file["id"] == current_file["id"] and file["parse_status"] == "succeeded")
             runs = [self._run(r) for r in db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? ORDER BY r.queued_at,r.id", (conversation_id,))]
             result = {"id": row["id"], "title": row["title"], "created_at": row["created_at"], "updated_at": row["updated_at"], "messages": messages, "files": files, "runs": runs, "artifacts": self._artifacts(db, conversation_id), "drafts": [self._draft_response(db,draft,summary=True) for draft in db.execute("SELECT * FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') ORDER BY created_at,id", (conversation_id,owner_id))]}
+            result["field_changes"] = [dict(item) for item in db.execute("SELECT run_id,revision,status,apply_run_id,applied_artifact_id,undo_run_id,restored_artifact_id FROM field_change_previews WHERE conversation_id=? AND owner_id=? ORDER BY created_at,run_id", (conversation_id, owner_id))]
             result.update(self._conversation_facts(db, owner_id, conversation_id))
             return result
 
@@ -720,6 +721,8 @@ class Store:
                 if abandoned["task_type"] == "file_ingest":
                     db.execute("UPDATE files SET parse_status='failed',updated_at=? WHERE id=?", (timestamp, snapshot.get("file_id", "")))
                 self._release_mapping_draft(db,abandoned["id"])
+                from .field_changes import FieldChanges
+                FieldChanges.release(db, abandoned["id"])
                 self._run_event(db, abandoned["id"], "run_failed", "failed")
                 self._event(db, abandoned["conversation_id"], "run_failed", "run", abandoned["id"], {"run_id": abandoned["id"], "status": "failed", "error_code": "worker_lost"})
             if db.execute("SELECT 1 FROM runs WHERE status='running' LIMIT 1").fetchone():
@@ -791,6 +794,8 @@ class Store:
                 db.execute("UPDATE files SET parse_status=?,updated_at=? WHERE id=?", (status, timestamp, snapshot["file_id"]))
         if terminal and status != "succeeded":
             self._release_mapping_draft(db,row["id"])
+            from .field_changes import FieldChanges
+            FieldChanges.release(db, row["id"])
         self._run_event(db, row["id"], "run_" + status, status)
         self._event(db, row["conversation_id"], "run_" + status, "run", row["id"],
                     {"run_id": row["id"], "status": status, "error_code": error_code})
@@ -806,6 +811,8 @@ class Store:
                                      (owner_id, scope, idempotency_key)).fetchone()
                 if receipt:
                     return json.loads(receipt["result_json"])
+            if source["task_type"] in {"field_change_apply", "field_change_undo"} or db.execute("SELECT 1 FROM field_change_previews WHERE run_id=?", (run_id,)).fetchone():
+                raise ValueError("field_preview_resolution_required")
             frozen_input = json.loads(source["input_snapshot_json"])
             if frozen_input.get("file_id") and not db.execute("SELECT 1 FROM files WHERE id=? AND is_active=1", (frozen_input["file_id"],)).fetchone():
                 raise ValueError("business_input_stale")
@@ -962,6 +969,8 @@ class Store:
                 return receipt
             if row["current_run_id"] != run_id or row["status"] != "waiting_confirmation":
                 raise ValueError("run_not_waiting")
+            if db.execute("SELECT 1 FROM field_change_previews WHERE run_id=?", (run_id,)).fetchone():
+                raise ValueError("field_preview_resolution_required")
             frozen = json.loads(row["input_snapshot_json"])
             if frozen.get("business_inputs") and not self._business_current_db(db, {"conversation_id": row["conversation_id"], "input": frozen}):
                 raise ValueError("continuation_stale")
@@ -1192,6 +1201,8 @@ class Store:
 
     def _business_command_guard(self, db, owner_id, conversation_id):
         """未应用 Draft 或待确认方案必须先明确处理。"""
+        if db.execute("SELECT 1 FROM field_change_previews WHERE conversation_id=? AND status IN ('ready','applying')", (conversation_id,)).fetchone():
+            raise ValueError("field_preview_resolution_required")
         if db.execute("SELECT 1 FROM drafts WHERE conversation_id=? AND owner_id=? AND status IN ('active','applying') AND changed_count>0", (conversation_id, owner_id)).fetchone():
             raise ValueError("draft_resolution_required")
         if db.execute("SELECT 1 FROM runs r JOIN tasks t ON t.id=r.task_id WHERE t.conversation_id=? AND r.status='waiting_confirmation'", (conversation_id,)).fetchone():
@@ -1313,7 +1324,9 @@ class Store:
                 session.log_classification = classification
         from contracts.session_artifacts import EnumArtifactSlot, ThreatArtifactSlot
         for kind, key, model in (("enum_values", "latest_enum_artifact", EnumArtifactSlot), ("threat_mapping", "latest_threat_artifact", ThreatArtifactSlot)):
-            if kind in refs:
+            if kind not in refs:
+                setattr(session, key, None)
+            else:
                 artifact = json.loads(self._read_blob(refs[kind]))
                 slot = model.model_validate({"artifact": artifact, "source_field": artifact.get("field") if kind == "enum_values" else artifact.get("source_field")})
                 if kind == "enum_values":
@@ -1426,6 +1439,11 @@ class Store:
                     self._assistant_message(db, row["conversation_id"], "输入或配置版本已变化，请重新发起操作。")
                     db.commit(); return True
                 result_message_id = self._assistant_message(db, row["conversation_id"], message, row["id"]) if message else None
+                # Stale old versions and their descendants before inserting this transaction's outputs.
+                for replacing_kind in {item[0]["kind"] for item in staged} - {"business_state"}:
+                    previous = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind=? AND status='published'", (row["conversation_id"], replacing_kind)).fetchall()
+                    for old in previous:
+                        db.execute("WITH RECURSIVE descendants(id) AS (SELECT ? UNION SELECT e.derived_artifact_id FROM artifact_edges e JOIN descendants d ON e.source_artifact_id=d.id) UPDATE artifacts SET status='stale' WHERE id IN (SELECT id FROM descendants) AND status='published'", (old["id"],))
                 created = {}
                 for artifact, content, sha, key, stage in staged:
                     final = self.root / key; final.parent.mkdir(parents=True, exist_ok=True); os.replace(stage, final)
@@ -1441,7 +1459,7 @@ class Store:
                     if kind == "field_mapping":
                         from toolwithagent_v2.runtime.mapping_projection import mapping_summary
                         summary = mapping_summary(payload)
-                    metadata = {"summary": summary, "submission_eligible": bool(payload.get("submission_eligible")), "config_ref": payload.get("configuration_source", "session.mapped_sub_rules") if kind == "field_mapping" else None, "source_field": payload.get("field", payload.get("source_field")), "message_id": claim["input"].get("message_id"), "result_message_id": result_message_id}
+                    metadata = {"summary": summary, "submission_eligible": bool(payload.get("submission_eligible")), "config_ref": payload.get("configuration_source", "session.mapped_sub_rules") if kind == "field_mapping" else None, "field_change_run_id": payload.get("field_change_run_id"), "undo_of": payload.get("undo_of"), "source_field": payload.get("field", payload.get("source_field")), "message_id": claim["input"].get("message_id"), "result_message_id": result_message_id}
                     db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata, ensure_ascii=False), now(), len(content)))
                     for source in claim["input"].get("business_inputs", {}).get("refs", {}).values():
                         if kind == "config_export" and "field_mapping" in created and source["kind"] == "field_mapping":
@@ -1456,6 +1474,8 @@ class Store:
                     db.execute("INSERT OR IGNORE INTO artifact_edges(source_artifact_id,derived_artifact_id,relation) VALUES(?,?,?)", (created["field_mapping"], created["config_export"], "config_export"))
                 if self._valid_claim(db, worker_id, claim) is None:
                     return False
+                from .field_changes import FieldChanges
+                FieldChanges(self).published(db, claim, created)
                 self._record_state(db, row, "succeeded")
                 db.commit(); return True
         finally:

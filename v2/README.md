@@ -188,3 +188,11 @@ proposal 真实冻结完整类型化计划和输入版本，进入 `waiting_conf
 `v2/frontend/src/VisualPrimitives.tsx` 提供状态圆点与文字、运行/待确认/失败提示条、上下文抽屉、折叠工具调用块及耗时/Token 格式化。工作台通过 `PanelState = null | {type: 'execution' | 'artifact'; id: string}` 管理唯一上下文；默认关闭，关闭恢复工作区，窄屏使用覆盖布局。抽屉支持 Esc、标签页方向键和焦点返回，切换标签不丢失未提交输入。
 
 当前工作台复用本人 Run/Artifact 的受保护接口和既有异步响应隔离。工具调用块只承载调用方已获准展示的数据，默认折叠；Developer 调用数据接入由 #270 完成，不从普通用户摘要构造调用详情。快捷入口、Composer 及其余页面视觉应用由 #309 持续补齐，明暗视觉人工终验仍待 #310。
+
+### 字段变更（#268）
+
+字段调整复用 Application / FieldSkillAdapter，准备结果与生成正则保存在受保护 Blob；复杂变更先在对话摘要中选择“查看变更”，中间区域按子规则展示不可拆变更组。选择持久化并通过 revision 防止旧页面覆盖；删除只进行一次合并确认，令牌绑定 Run、checkpoint 和选择版本。明确单字段非删除操作直接排入新的确定性应用任务。
+
+应用与整次撤销均创建新的 Task/Run，并事务发布配置、业务状态、血缘、消息和组结算。未选组记录 `not_applied_by_user`；失败不发布部分产物，预览可重新检查或取消。撤销生成恢复版本，保留历史并递归标记下游过期。后续业务按最终选择范围重新规划。共享 Skill 调用边界支持 dict/list 配置根，保留上传根结构。
+
+API 包括 field-change-preview / selection / apply / cancel、任务 confirmations 及 artifacts undo；选择、应用、取消和撤销要求 Idempotency-Key，带 revision 的操作同时要求 If-Match。刷新、重启后可从同一会话恢复变更。人工明暗与双入口/平台导入验收仍分别由 #310 / #272 完成。
