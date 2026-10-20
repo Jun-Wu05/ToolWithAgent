@@ -68,8 +68,12 @@ export function ContextPanel({ panel, title, onClose, tabs, durationMs, tokens }
   useEffect(() => {
     if (!panelKey) return
     const previous = document.activeElement as HTMLElement | null
+    const element = closeButton.current?.closest('aside')
     closeButton.current?.focus()
-    return () => { if (previous?.isConnected) previous.focus() }
+    return () => {
+      const active = document.activeElement
+      if (previous?.isConnected && (active === document.body || element?.contains(active))) previous.focus()
+    }
   }, [panelKey])
   if (!panel) return null
   const label = panel.type === 'execution' ? '执行详情' : '产物详情'

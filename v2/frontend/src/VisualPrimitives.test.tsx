@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ContextPanel, StatusText, TaskHintBar, ToolCallBlock, fmtMs, fmtTokens } from './VisualPrimitives'
@@ -59,4 +60,19 @@ describe('approved visual primitives', () => {
   it.each([[null, '—'], [0, '0'], [999, '999'], [1000, '1k'], [8400, '8.4k']])('formats token count %s', (value, expected) => {
     expect(fmtTokens(value as number | null)).toBe(expected)
   })
+})
+
+
+it('returns focus to the latest trigger when one context replaces another', () => {
+  function SwitchingContext() {
+    const [selected, setSelected] = useState<string | null>(null)
+    return <><button onClick={() => setSelected('a')}>查看 A</button><button onClick={() => setSelected('b')}>查看 B</button>{selected && <ContextPanel key={selected} panel={{type: 'artifact', id: selected}} title={selected} onClose={() => setSelected(null)} tabs={[{id: 'preview', label: '内容预览', content: <p>{selected}</p>}]} />}</>
+  }
+  render(<SwitchingContext />)
+  const a = screen.getByRole('button', {name: '查看 A'}), b = screen.getByRole('button', {name: '查看 B'})
+  a.focus(); fireEvent.click(a)
+  expect(screen.getByRole('button', {name: '关闭产物详情'})).toHaveFocus()
+  b.focus(); fireEvent.click(b)
+  fireEvent.click(screen.getByRole('button', {name: '关闭产物详情'}))
+  expect(b).toHaveFocus()
 })

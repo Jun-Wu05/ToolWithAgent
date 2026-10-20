@@ -330,7 +330,7 @@ input{font:inherit}
 .task-hint-actions{display:flex;align-items:center;gap:4px;margin-left:auto}
 .task-hint-actions .button-text{padding:3px 6px;min-height:28px}
 .context-panel{position:relative;z-index:6;inset:auto;width:384px;min-width:380px;max-width:34vw;height:100vh;flex:none;display:flex;flex-direction:column;padding:0;overflow:hidden;background:var(--surface-modal);box-shadow:var(--shadow-modal);animation:context-open 180ms ease-out}
-.context-panel>header{height:56px;min-height:56px;padding:0 16px;align-items:center;gap:8px;border:0}
+.context-panel>header{display:flex;justify-content:space-between;height:56px;min-height:56px;padding:0 16px;align-items:center;gap:8px;border:0}
 .context-panel h2{font-size:14px;margin:0}
 .context-panel .icon-button{font-size:12px;flex:none}
 .context-tabs{display:flex;gap:4px;padding:0 12px;border-bottom:1px solid var(--border-subtle)}
