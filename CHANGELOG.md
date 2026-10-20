@@ -36,6 +36,9 @@
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- 批次十二结构收口:_do_classify_log_features(约 282 行路由器)拆显式字段/体键覆盖率/两段 Step 2a 四阶段函数,只搬移不合并、KV/JSON 版刻意差异保留;render_execution_report 拆产物元素收集与字段映射下载发送两函数,五路 artifact_type 分派表驱动、门控语义各自持有;新增 7 条路由分支钉桩(#387)
+- fix(planner): 威胁来源事实矛盾拒绝——模型声明 threat_source_not_found 但字段在 threat_source_fields 中时改写为 planner_source_fact_conflict 稳定拒绝,不替模型生成执行计划;planner.md 换链路来源契约重写(#385)
+- 批次十一结构收口:kv_extractor 复制阶梯收口与清洗常量内联、log_classifier 分隔符回退对称化、field_mapping._execute_field_mapping 拆 _MappingPreparation/_StagedOutputs 四阶段;「钉桩先行+边界切开」方法论首次系统使用(#383)
 - 会话类型化收官(三步走):SessionState dict 兼容层退役、生产垫片 _session_get/_session_set 删除(96 处调用点属性直读直写)、ExecutionContext.session 等约 20 处签名收窄 SessionState、file_input/request_runtime/threat_chain 三处 dict 兜底分支拆除、build_batch_llm_input 假会话参数直传 original_log_sample(#366 #368 #374 #376)
 - 全部测试迁移 make_session_state 工厂基座(执行链路 5 文件 + 其余 23 文件两批完成)(#370 #372)
 - 安全区死代码清理:logs_enum_tool 整模块、base64_tool(#161 挂起的独立审计执行完毕)、agent/core/agent.py 迁移残留、enum_extract_tool 四死函数、config 死数据(threat_nomal.txt/knowledge_base//对象.xlsx)删除;message_router 幻影延迟导入拆除;字段映射与导出的数据源守卫双份收口 require_rule_source_fields(#378)
