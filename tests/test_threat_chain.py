@@ -447,21 +447,32 @@ def test换源填充失败时回滚到替换前配置(monkeypatch):
     assert session.mapped_sub_rules == before
 
 
-def test换源威胁类型映射失败时保留替换前配置(monkeypatch):
-    """枚举提取成功但威胁类型映射无有效结果时，不触碰旧绑定。"""
+def test换源威胁类型映射空结果降级全其他(monkeypatch):
+    """枚举提取成功但映射空结果时降级：链路完成、映射行全「其他」（#394 调整）。"""
     _mock_retrieval(monkeypatch)
     _mock_enum_llm(monkeypatch)
     session = _chain_session()
     first = _run(_mapping_report(), session, _Team(_ThreatMember(_FULL_MAPPING)))
     assert first.results[-1].message.startswith("🔗")
-    before = copy.deepcopy(session.mapped_sub_rules)
     session.threat_source_field_override = "event_desc"
 
-    failed = _run(_mapping_report(), session, _Team(_ThreatMember("[]")))
+    degraded = _run(_mapping_report(), session, _Team(_ThreatMember("[]")))
 
-    assert failed.results[-1].message.startswith("⚠️")
-    assert "threat_mapping_empty" in failed.results[-1].message
-    assert session.mapped_sub_rules == before
+    summary = degraded.results[-1].message
+    assert summary.startswith("🔗")
+    assert "已降级为「其他」" in summary
+    threat_entries = [
+        entry
+        for rule in session.mapped_sub_rules
+        for entry in rule.get("normalize", [])
+        if entry.get("index") == "威胁类型"
+    ]
+    assert threat_entries
+    for entry in threat_entries:
+        assert entry.get("mappings")
+        assert all(
+            row.get("mappingValue") == "其他" for row in entry["mappings"]
+        )
 
 
 def test旧配置多绑定换源只清理威胁链产物(monkeypatch):

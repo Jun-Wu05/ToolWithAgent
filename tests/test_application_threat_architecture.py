@@ -225,8 +225,8 @@ def _run_threat_mapping(member, session, step) -> object:
     ))
 
 
-def test威胁映射来源外结果失败关闭不提交会话() -> None:
-    """结构合法但来源外的结果必须拒绝，且不写入 Session 双槽（#277）。"""
+def test威胁映射来源外结果降级全其他并提交() -> None:
+    """结构合法但来源外的结果降级：全部映射行落「其他」（#394 调整 #277）。"""
     from contracts.planner_models import StepStatus, ThreatMappingStep
     from contracts.session_artifacts import ThreatArtifactSlot
     from contracts.planner_models import ThreatMappingArtifact, ThreatMappingRow
@@ -253,15 +253,21 @@ def test威胁映射来源外结果失败关闭不提交会话() -> None:
 
     result = _run_threat_mapping(member, session, step)
 
-    assert result.status == StepStatus.FAILED
-    assert result.error_code == "threat_mapping_coverage_rejected"
+    assert result.status == StepStatus.SUCCESS
+    assert "已降级" in result.message
     assert len(member.calls) == 1
-    assert session.writes == []
-    assert session.latest_threat_artifact is previous
+    slot = session.latest_threat_artifact
+    assert slot is not previous
+    assert [
+        (row.original_value, row.mapped_value) for row in slot.artifact.mappings
+    ] == [("攻击", "其他")]
+    assert session.last_threat_data == [
+        {"mappingType": "EQUAL", "orgValue": "攻击", "mappingValue": "其他"}
+    ]
 
 
-def test威胁映射缺项结果失败关闭不提交会话() -> None:
-    """缺项结果不允许补「其他」兜底洗白为成功（#277）。"""
+def test威胁映射缺项结果降级全其他并提交() -> None:
+    """缺项结果降级：全部映射行落「其他」，不洗白为具体映射（#394 调整 #277）。"""
     from contracts.planner_models import StepStatus, ThreatMappingStep
 
     member = _CoverageMember(json.dumps({"items": [
@@ -275,9 +281,66 @@ def test威胁映射缺项结果失败关闭不提交会话() -> None:
 
     result = _run_threat_mapping(member, session, step)
 
-    assert result.status == StepStatus.FAILED
-    assert result.error_code == "threat_mapping_coverage_rejected"
-    assert session.writes == []
+    assert result.status == StepStatus.SUCCESS
+    assert "已降级" in result.message
+    assert [
+        (row.original_value, row.mapped_value)
+        for row in session.latest_threat_artifact.artifact.mappings
+    ] == [("攻击", "其他"), ("扫描", "其他")]
+
+
+def test威胁映射空结果降级全其他() -> None:
+    """模型空结果降级：有值可映射时全部落「其他」（#394）。"""
+    from contracts.planner_models import StepStatus, ThreatMappingStep
+
+    member = _CoverageMember("[]")
+    session = make_recording_session()
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="user.values", values=("攻击",),
+    )
+
+    result = _run_threat_mapping(member, session, step)
+
+    assert result.status == StepStatus.SUCCESS
+    assert "已降级" in result.message
+    assert [
+        (row.original_value, row.mapped_value)
+        for row in session.latest_threat_artifact.artifact.mappings
+    ] == [("攻击", "其他")]
+
+
+def test威胁映射模型调用异常降级全其他() -> None:
+    """模型调用异常降级：全部落「其他」，不再让步骤硬失败（#394）。"""
+
+    class _RaisingMember:
+        name = "ThreatAgent"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def run(self, model_input: str):
+            self.calls.append(model_input)
+            raise RuntimeError("模型不可用")
+
+    from contracts.planner_models import StepStatus, ThreatMappingStep
+
+    member = _RaisingMember()
+    session = make_recording_session()
+    step = ThreatMappingStep(
+        step_id="threat", type="threat_mapping",
+        source_ref="user.values", values=("攻击",),
+    )
+
+    result = _run_threat_mapping(member, session, step)
+
+    assert result.status == StepStatus.SUCCESS
+    assert "已降级" in result.message
+    assert len(member.calls) == 1
+    assert [
+        (row.original_value, row.mapped_value)
+        for row in session.latest_threat_artifact.artifact.mappings
+    ] == [("攻击", "其他")]
 
 
 def test威胁映射全数字代码输入needs_input且不调用模型() -> None:

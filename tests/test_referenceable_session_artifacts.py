@@ -250,8 +250,8 @@ def test上轮枚举产物可直接用于本轮威胁映射():
     assert session.latest_threat_artifact.source_field == "alarm_name"
 
 
-def test威胁映射失败保留上次成功产物():
-    """失败步骤没有新产物，不得覆盖可继续使用的成功结果。"""
+def test威胁映射空结果降级替换上次产物():
+    """空结果降级为新产物：全「其他」行替换旧产物并保持可引用（#394 调整）。"""
     previous = _threat_slot("old_field")
     session = make_session_state(
         latest_enum_artifact=_enum_slot(),
@@ -272,12 +272,17 @@ def test威胁映射失败保留上次成功产物():
         )
     )
 
-    assert result.status == StepStatus.FAILED
-    assert session.latest_threat_artifact == previous
+    assert result.status == StepStatus.SUCCESS
+    assert "已降级" in result.message
+    slot = session.latest_threat_artifact
+    assert slot is not previous
+    assert [
+        (row.original_value, row.mapped_value) for row in slot.artifact.mappings
+    ] == [("attack", "其他")]
 
 
-def test威胁映射覆盖校验失败保留上次成功产物():
-    """结构合法但来源外的映射结果必须拒绝，旧成功产物继续可引用（#277）。"""
+def test威胁映射覆盖校验失败降级替换产物():
+    """来源外映射结果降级：产物被全「其他」行替换并保持可引用（#394 调整 #277）。"""
     previous = _threat_slot("old_field")
     session = make_session_state(
         latest_enum_artifact=_enum_slot(),
@@ -307,10 +312,14 @@ def test威胁映射覆盖校验失败保留上次成功产物():
         )
     )
 
-    assert result.status == StepStatus.FAILED
-    assert result.error_code == "threat_mapping_coverage_rejected"
-    assert session.latest_threat_artifact == previous
-    assert session.last_threat_data is None
+    assert result.status == StepStatus.SUCCESS
+    assert "已降级" in result.message
+    slot = session.latest_threat_artifact
+    assert slot is not previous
+    assert [
+        (row.original_value, row.mapped_value) for row in slot.artifact.mappings
+    ] == [("attack", "其他")]
+    assert session.last_threat_data is not None
 
 
 def test全数字枚举产物触发needs_input不覆盖旧产物():
