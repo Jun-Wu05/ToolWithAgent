@@ -459,3 +459,89 @@ def test威胁填充base64解码文本保持中文根结构键顺序与默认空
     assert '"mappingType": "REGULAR"' in decoded
     assert '"mappingValue": "恶意活动"' in decoded
     assert result.artifact.download_kind == "threatmapping_config"
+
+
+def _run_threat_fill_with_rows(rows: list[dict]) -> dict:
+    """构造单条 威胁类型 条目的配置跑威胁填充，返回填充后的首个条目（#398）。"""
+    from application.adapters.threat_fill import ThreatFillAdapter
+    from application.execution import ExecutionContext
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import (
+        FillStep, StepResult, StepStatus, ThreatMappingArtifact, ThreatMappingRow,
+    )
+
+    config = [{
+        "name": "威胁子规则",
+        "normalize": [
+            {"index": "威胁类型", "field": "threat_type", "mappings": [], "value": ""}
+        ],
+    }]
+    session = make_session_state(decoded_data=config, decoded_fields=["威胁类型"])
+    artifact = ThreatMappingArtifact(
+        mappings=tuple(ThreatMappingRow.model_validate(row) for row in rows),
+        item_count=len(rows),
+        source_field="威胁名称",
+    )
+    dependency = StepResult(
+        step_id="threat", operation_type="threat_mapping",
+        status=StepStatus.SUCCESS, artifact=artifact,
+    )
+    step = FillStep(
+        step_id="fill", type="fill", fill_kind="threat",
+        target_fields=("威胁类型",), source_ref="step:threat",
+        config_ref="session.decoded_config", depends_on=("threat",),
+    )
+    result = asyncio.run(ThreatFillAdapter().execute(
+        step,
+        ExecutionContext(session=session, session_facts=build_session_facts(session)),
+        {"threat": dependency},
+    ))
+    assert result.status == StepStatus.SUCCESS
+    return session.decoded_data[0]["normalize"][0]
+
+
+def _row(org: str, mapped: str) -> dict:
+    return {"mappingType": "EQUAL", "orgValue": org, "mappingValue": mapped}
+
+
+def test威胁填充写value占位_单值取唯一映射值() -> None:
+    """#398：映射行 mappingValue 唯一时 value=该值。"""
+    entry = _run_threat_fill_with_rows([
+        _row("Botnet Activity", "恶意流量"),
+        _row("Malicious Flow", "恶意流量"),
+    ])
+    assert entry["value"] == "恶意流量"
+
+
+def test威胁填充写value占位_多值默认其他() -> None:
+    """#398：映射值不一致时 value 兜底「其他」。"""
+    entry = _run_threat_fill_with_rows([
+        _row("Botnet Activity", "恶意流量"),
+        _row("Port Scan", "端口扫描"),
+    ])
+    assert entry["value"] == "其他"
+
+
+def test威胁填充写value占位_降级全其他() -> None:
+    """#398：降级产物（全「其他」行）value=「其他」。"""
+    entry = _run_threat_fill_with_rows([
+        _row("Botnet Activity", "其他"),
+        _row("Port Scan", "其他"),
+    ])
+    assert entry["value"] == "其他"
+
+
+def testapply_fill_to_config不传占位参数保持value不变() -> None:
+    """#398：value_placeholder 缺省时保持只写 mappings 的旧行为。"""
+    from agent.shared.mapping_utils import apply_fill_to_config
+
+    config = [{
+        "normalize": [
+            {"index": "威胁类型", "field": "threat_type", "mappings": [], "value": ""}
+        ],
+    }]
+    out = apply_fill_to_config(
+        config, [_row("a", "X")], "威胁类型"
+    )
+    assert out[0]["normalize"][0]["mappings"] == [_row("a", "X")]
+    assert out[0]["normalize"][0]["value"] == ""
