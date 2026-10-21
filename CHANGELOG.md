@@ -36,6 +36,7 @@
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- fix(export): 事件名称/事件级别 normalize 条目补齐 mappings 与默认值——事件名称恒等 EQUAL 映射+value;事件级别按整型码表(信息0/提醒1/警告2/严重3/紧急4)写码值、mappings 记录显示值→码值;字段映射链按子规则既有 result 长度推导样本数复制 result;skill 链 metadata 拷贝键扩展 mappings/value(威胁类型路径不变);导出平台不再解析出空值(#392)
 - 仓库遗留数据清理:config 死数据 threat_type_config.json(ThreatAgent 时代加载入口已随死代码清理删除,现行威胁标准枚举单一事实源为 config/标准字段.txt)与 空规则.txt(rule_generator 模板出处样本)删除;evaluation/planner_eval 7 份历史 results_*.json 基线删除(cases.json 与 run_eval.py 保留);docs/plans 28 份已完结实施计划归档至 docs/plans/archive/(2026-09-21 V2 技术实施计划原地保留,V2 线在用);README 目录树与 rule_generator/templates.py 注释同步
 - 批次十二结构收口:_do_classify_log_features(约 282 行路由器)拆显式字段/体键覆盖率/两段 Step 2a 四阶段函数,只搬移不合并、KV/JSON 版刻意差异保留;render_execution_report 拆产物元素收集与字段映射下载发送两函数,五路 artifact_type 分派表驱动、门控语义各自持有;新增 7 条路由分支钉桩(#387)
 - fix(planner): 威胁来源事实矛盾拒绝——模型声明 threat_source_not_found 但字段在 threat_source_fields 中时改写为 planner_source_fact_conflict 稳定拒绝,不替模型生成执行计划;planner.md 换链路来源契约重写(#385)

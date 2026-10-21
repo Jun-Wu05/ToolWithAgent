@@ -66,6 +66,15 @@ EVENT_NAME_LEVEL_BINDING: dict[str, str] = {
 }
 """事件名称 → 事件级别 的确定性查表；绑定关系不由 LLM 决定。"""
 
+EVENT_LEVEL_CODE_BINDING: dict[str, str] = {
+    "信息": "0",
+    "提醒": "1",
+    "警告": "2",
+    "严重": "3",
+    "紧急": "4",
+}
+"""事件级别显示值 → 整型码值；标准目录声明 event_level 为整型（标准字段.txt）。"""
+
 EVENT_NAME_FIELD = "事件名称"
 EVENT_LEVEL_FIELD = "事件级别"
 # 威胁类型字段名单一来源在 contracts（application 核心层不得依赖 agent）；
@@ -264,38 +273,53 @@ async def _run_in_executor(func: Any, *args: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def make_event_name_normalize_entry(event_name: str) -> dict[str, Any]:
+def make_event_name_normalize_entry(
+    event_name: str, sample_count: int = 1
+) -> dict[str, Any]:
     """构建【事件名称】normalize 条目（仿 make_log_type_entry 形态）。
 
     对象归属「事件」（#177）：标准字段目录中 event_name/event_level 的对象
     均为「事件」；此前的「日志」是与目录冲突的过时决策，目标平台无法解析。
+    恒等 EQUAL 映射 + value 默认值（#392）：导出平台按 mappings/value 取值，
+    空值会让事件名称解析为空。result 每份日志一条。
     """
     return {
-        "mappings": [],
+        "mappings": [
+            {"mappingType": "EQUAL", "mappingValue": event_name, "orgValue": event_name}
+        ],
         "field": "event_name",
         "sim": True,
-        "result": [event_name],
+        "result": [event_name] * sample_count,
         "info": None,
         "entity": "事件",
         "required": False,
         "core": False,
-        "value": "",
+        "value": event_name,
         "index": EVENT_NAME_FIELD,
     }
 
 
-def make_event_level_normalize_entry(event_level: str) -> dict[str, Any]:
-    """构建【事件级别】normalize 条目（对象归属「事件」，#177）。"""
+def make_event_level_normalize_entry(
+    event_level: str, sample_count: int = 1
+) -> dict[str, Any]:
+    """构建【事件级别】normalize 条目（对象归属「事件」，#177）。
+
+    标准目录声明 event_level 为整型（#392）：value 写码值，mappings 记录
+    显示值→码值的 EQUAL 变换；addFields filter 与 result 保持显示值。
+    """
+    code = EVENT_LEVEL_CODE_BINDING[event_level]
     return {
-        "mappings": [],
+        "mappings": [
+            {"mappingType": "EQUAL", "mappingValue": code, "orgValue": event_level}
+        ],
         "field": "event_level",
         "sim": True,
-        "result": [event_level],
+        "result": [event_level] * sample_count,
         "info": None,
         "entity": "事件",
         "required": False,
         "core": False,
-        "value": "",
+        "value": code,
         "index": EVENT_LEVEL_FIELD,
     }
 
@@ -311,12 +335,33 @@ def apply_event_fields_to_sub_rules(
     - normalize 末尾追加事件名称、事件级别两条目。
     无判定（待人工确认）的子规则保持不变。
     """
+def _rule_sample_count(rule: dict[str, Any]) -> int:
+    """按子规则既有 normalize 条目的 result 长度推导样本数（无条目回退 1）。"""
+    for entry in rule.get("normalize") or []:
+        result = entry.get("result") if isinstance(entry, dict) else None
+        if isinstance(result, list) and result:
+            return len(result)
+    return 1
+
+
+def apply_event_fields_to_sub_rules(
+    sub_rules: list[dict[str, Any]],
+    judgments: dict[str, str],
+) -> list[dict[str, Any]]:
+    """把判定结果写入每条子规则（深拷贝，不修改原数据）。
+
+    对每条有合法判定的子规则：
+    - parser.filter 末尾追加 addFields：{"事件名称": <分类名>, "事件级别": <绑定级别>}；
+    - normalize 末尾追加事件名称、事件级别两条目，result 按该子规则样本数复制。
+    无判定（待人工确认）的子规则保持不变。
+    """
     updated = copy.deepcopy(sub_rules)
     for rule in updated:
         event_name = judgments.get(str(rule.get("name", "")))
         if event_name not in ALL_EVENT_NAMES:
             continue
         event_level = EVENT_NAME_LEVEL_BINDING[event_name]
+        sample_count = _rule_sample_count(rule)
 
         parser = rule.get("parser") or {}
         filters = parser.get("filter") or []
@@ -331,7 +376,7 @@ def apply_event_fields_to_sub_rules(
         rule["parser"] = parser
 
         normalize = rule.get("normalize") or []
-        normalize.append(make_event_name_normalize_entry(event_name))
-        normalize.append(make_event_level_normalize_entry(event_level))
+        normalize.append(make_event_name_normalize_entry(event_name, sample_count))
+        normalize.append(make_event_level_normalize_entry(event_level, sample_count))
         rule["normalize"] = normalize
     return updated

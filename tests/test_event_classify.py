@@ -18,6 +18,7 @@ import pytest
 from agent.shared import event_classify
 from agent.shared.event_classify import (
     ALL_EVENT_NAMES,
+    EVENT_LEVEL_CODE_BINDING,
     EVENT_NAME_LEVEL_BINDING,
     NON_THREAT_EVENT_NAMES,
     THREAT_EVENT_NAMES,
@@ -82,6 +83,18 @@ def test常量覆盖21个枚举值且绑定穷尽():
         assert EVENT_NAME_LEVEL_BINDING[name] == "提醒"
     for name in NON_THREAT_EVENT_NAMES:
         assert EVENT_NAME_LEVEL_BINDING[name] == "信息"
+
+
+def test级别码表覆盖五档且包含绑定表全部产出():
+    """#392：显示级→整型码值；绑定表产出的每个级别都必须有码。"""
+    assert EVENT_LEVEL_CODE_BINDING == {
+        "信息": "0",
+        "提醒": "1",
+        "警告": "2",
+        "严重": "3",
+        "紧急": "4",
+    }
+    assert set(EVENT_NAME_LEVEL_BINDING.values()) <= set(EVENT_LEVEL_CODE_BINDING)
 
 
 def test判定知识提示词文件存在且包含合法值清单():
@@ -242,7 +255,9 @@ def test写入filter与normalize结构并与日志类型同构():
     ]
     name_entry, level_entry = rule["normalize"][-2:]
     assert name_entry == {
-        "mappings": [],
+        "mappings": [
+            {"mappingType": "EQUAL", "mappingValue": "网络攻击", "orgValue": "网络攻击"}
+        ],
         "field": "event_name",
         "sim": True,
         "result": ["网络攻击"],
@@ -250,16 +265,48 @@ def test写入filter与normalize结构并与日志类型同构():
         "entity": "事件",
         "required": False,
         "core": False,
-        "value": "",
+        "value": "网络攻击",
         "index": "事件名称",
     }
     assert level_entry["field"] == "event_level"
     assert level_entry["index"] == "事件级别"
     assert level_entry["result"] == ["提醒"]
     assert level_entry["entity"] == "事件"  # 目录对象（#177，原「日志」非法）
+    # #392：事件级别整型码值——mappings 记录显示级→码值，value 写码值
+    assert level_entry["mappings"] == [
+        {"mappingType": "EQUAL", "mappingValue": "1", "orgValue": "提醒"}
+    ]
+    assert level_entry["value"] == "1"
     # 未判定的子规则不动
     assert out[1]["parser"]["filter"] == []
     assert [e["index"] for e in out[1]["normalize"]] == ["user", "日志类型"]
+
+
+def test样本数按既有条目result长度推导():
+    """#392：result 每份日志一条——既有条目 result 长度即样本数。"""
+    rules = [
+        {
+            "name": "双样本子规则",
+            "normalize": [{"index": "a", "result": ["1", "2"]}],
+            "parser": {"filter": []},
+            "sample": "x\ny",
+        },
+        {
+            "name": "无normalize子规则",
+            "normalize": [],
+            "parser": {"filter": []},
+            "sample": "z",
+        },
+    ]
+    out = apply_event_fields_to_sub_rules(
+        rules, {"双样本子规则": "网络攻击", "无normalize子规则": "登录事件"}
+    )
+    dual_name, dual_level = out[0]["normalize"][-2:]
+    assert dual_name["result"] == ["网络攻击", "网络攻击"]
+    assert dual_level["result"] == ["提醒", "提醒"]
+    fallback_name, fallback_level = out[1]["normalize"][-2:]
+    assert fallback_name["result"] == ["登录事件"]
+    assert fallback_level["result"] == ["信息"]
 
 
 def test写入不修改原数据():
