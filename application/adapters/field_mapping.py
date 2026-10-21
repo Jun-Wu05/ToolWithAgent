@@ -554,11 +554,14 @@ class FieldMappingAdapter:
         from agent.shared import event_classify
 
         judgments: dict[str, str] = {}
+        operations: dict[str, str] = {}
         uncertain: list[str] = []
         for attempt in range(2):
             try:
-                judgments, uncertain = await event_classify.classify_sub_rule_events(
-                    mapped_sub_rules, llm_client=self._event_classifier
+                judgments, operations, uncertain = (
+                    await event_classify.classify_sub_rule_events(
+                        mapped_sub_rules, llm_client=self._event_classifier
+                    )
                 )
                 break
             except Exception as error:  # noqa: BLE001 - 适配层统一判定可重试错误
@@ -573,7 +576,9 @@ class FieldMappingAdapter:
                 )
                 return _failed(step, "event_classify_failed", "事件名称判定失败，请重试")
 
-        annotated = event_classify.apply_event_fields_to_sub_rules(mapped_sub_rules, judgments)
+        annotated = event_classify.apply_event_fields_to_sub_rules(
+            mapped_sub_rules, judgments, operations
+        )
         if not judgments and not uncertain:
             return mapped_sub_rules, "", ()
         threat_count = sum(

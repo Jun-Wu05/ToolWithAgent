@@ -36,6 +36,7 @@
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- feat(event): 非威胁事件绑定操作类型字段(#395)——EVENT_NAME_OPERATION_ENUM_BINDING 固化提示词已定义枚举的 7 个非威胁类(登录/审计/会话/进程/用户操作/资源监控/邮件操作);判定输出契约新增 operation_type(类内白名单校验,非法/缺失降级「其他」,未定义枚举的类留空);apply 对绑定类写第三条 normalize 条目(恒等映射+value+按样本数复制 result)并同步 addFields;threat 分类的 classify_sub_rule_events 返回值扩为三元组;ENUM_AUTO_MAPPING_EXCLUSIONS 注释更新
 - feat(threat): 威胁映射终态失败降级写「其他」(#394,部分调整 #277)——模型调用异常/空结果/覆盖校验拒绝三个分支从安全失败改为降级成功:全部映射行落「其他」、步骤消息与 [THREAT_MAPPING] 日志留痕、链路摘要追加"N 步结果已降级为「其他」";纯数字代码来源与标准枚举不可用两类非模型失败保留失败;威胁事件导出恒有威胁类型映射行
 - fix(export): 事件名称/事件级别 normalize 条目补齐 mappings 与默认值——事件名称恒等 EQUAL 映射+value;事件级别按整型码表(信息0/提醒1/警告2/严重3/紧急4)写码值、mappings 记录显示值→码值;字段映射链按子规则既有 result 长度推导样本数复制 result;skill 链 metadata 拷贝键扩展 mappings/value(威胁类型路径不变);导出平台不再解析出空值(#392)
 - 仓库遗留数据清理:config 死数据 threat_type_config.json(ThreatAgent 时代加载入口已随死代码清理删除,现行威胁标准枚举单一事实源为 config/标准字段.txt)与 空规则.txt(rule_generator 模板出处样本)删除;evaluation/planner_eval 7 份历史 results_*.json 基线删除(cases.json 与 run_eval.py 保留);docs/plans 28 份已完结实施计划归档至 docs/plans/archive/(2026-09-21 V2 技术实施计划原地保留,V2 线在用);README 目录树与 rule_generator/templates.py 注释同步
