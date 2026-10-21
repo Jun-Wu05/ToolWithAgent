@@ -19,6 +19,7 @@ from agent.shared import event_classify
 from agent.shared.event_classify import (
     ALL_EVENT_NAMES,
     EVENT_LEVEL_CODE_BINDING,
+    EVENT_NAME_OPERATION_ENUM_BINDING,
     EVENT_NAME_LEVEL_BINDING,
     NON_THREAT_EVENT_NAMES,
     THREAT_EVENT_NAMES,
@@ -105,6 +106,32 @@ def test判定知识提示词文件存在且包含合法值清单():
     for name in ALL_EVENT_NAMES:
         assert name in content, name
     assert "dns查询" in content and "dns响应" in content
+    # #395：输出契约含 operation_type
+    assert '"operation_type"' in content
+
+
+def test操作类型绑定表钉桩七类枚举():
+    """#395：仅提示词定义了操作类型枚举的 7 个非威胁类参与绑定。"""
+    assert EVENT_NAME_OPERATION_ENUM_BINDING == {
+        "登录事件": ("登录", "登出", "其他", "未映射"),
+        "审计事件": (
+            "其他", "打印审计", "数据库审计", "登出", "登录",
+            "移动存储审计", "终端入网", "访客入网", "超时", "远程桌面",
+        ),
+        "会话操作": ("其他", "开始", "未映射", "终止"),
+        "进程操作": (
+            "API调用", "其他", "其他属性修改", "创建", "唤醒", "快照",
+            "挂起", "未映射", "权限提升", "注入", "篡改", "终止", "访问",
+        ),
+        "用户操作": (
+            "修改", "其他", "其他属性修改", "切换", "创建", "删除", "密码修改",
+            "所属组修改", "未映射", "权限修改", "枚举", "激活", "登出", "登录",
+            "禁用", "解锁", "重命名", "锁定",
+        ),
+        "资源监控": ("其他", "故障", "未映射", "正常", "警告"),
+        "邮件操作": ("其他", "删除", "发送", "接收", "未映射", "附件下载"),
+    }
+    assert set(EVENT_NAME_OPERATION_ENUM_BINDING) <= set(NON_THREAT_EVENT_NAMES)
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +158,9 @@ def test合法输出被接受并返回判定表():
             },
         ]
     )
-    judgments, uncertain = asyncio.run(classify_sub_rule_events(rules, llm_client=fake))
+    judgments, _operations, uncertain = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake)
+    )
     assert judgments == {
         "暴力破解_kv_子规则": "网络攻击",
         "用户登录_json_子规则": "登录事件",
@@ -160,7 +189,9 @@ def test非法值重试后进入待人工确认():
             ensure_ascii=False,
         )
 
-    judgments, uncertain = asyncio.run(classify_sub_rule_events(rules, llm_client=fake))
+    judgments, _operations, uncertain = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake)
+    )
     assert len(calls) == 2  # 重试一次
     assert "自创威胁类别" in calls[1]  # 重试带错误反馈
     assert judgments == {}
@@ -195,7 +226,9 @@ def test非法值重试后修正被接受():
             ensure_ascii=False,
         )
 
-    judgments, uncertain = asyncio.run(classify_sub_rule_events(rules, llm_client=fake))
+    judgments, _operations, uncertain = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake)
+    )
     assert judgments["暴力破解_kv_子规则"] == "网络攻击"
     assert uncertain == []
 
@@ -213,7 +246,9 @@ def test分组不一致被拒绝():
             }
         ]
     )
-    judgments, uncertain = asyncio.run(classify_sub_rule_events(rules, llm_client=fake))
+    judgments, _operations, uncertain = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake)
+    )
     assert judgments == {}
     assert "用户登录_json_子规则" in uncertain
 
@@ -231,7 +266,9 @@ def test未知规则名被拒绝():
             }
         ]
     )
-    judgments, uncertain = asyncio.run(classify_sub_rule_events(rules, llm_client=fake))
+    judgments, _operations, uncertain = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake)
+    )
     assert judgments == {}
     assert uncertain == ["暴力破解_kv_子规则", "用户登录_json_子规则"]
 
@@ -304,9 +341,151 @@ def test样本数按既有条目result长度推导():
     dual_name, dual_level = out[0]["normalize"][-2:]
     assert dual_name["result"] == ["网络攻击", "网络攻击"]
     assert dual_level["result"] == ["提醒", "提醒"]
-    fallback_name, fallback_level = out[1]["normalize"][-2:]
+    fallback_name, fallback_level, fallback_operation = out[1]["normalize"][-3:]
     assert fallback_name["result"] == ["登录事件"]
     assert fallback_level["result"] == ["信息"]
+    # 登录事件绑定了操作类型，operations 未传时按「其他」兜底（#395）
+    assert fallback_operation["result"] == ["其他"]
+
+
+def test操作类型判定校验与降级():
+    """#395：operation_type 类内白名单校验；非法/缺失降级「其他」；未绑定类不产出。"""
+    rules = _sub_rules()
+    fake = _llm_json(
+        [
+            {
+                "rule_name": "暴力破解_kv_子规则",
+                "event_name": "网络攻击",
+                "group": "threat",
+                "reason": "攻击行为",
+                "operation_type": "登录",  # 威胁组未绑定——忽略
+            },
+            {
+                "rule_name": "用户登录_json_子规则",
+                "event_name": "登录事件",
+                "group": "non_threat",
+                "reason": "登录认证行为",
+                "operation_type": "自创操作",  # 非法——降级「其他」
+            },
+        ]
+    )
+    judgments, operations, uncertain = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake)
+    )
+    assert judgments["用户登录_json_子规则"] == "登录事件"
+    assert operations == {"用户登录_json_子规则": "其他"}
+    assert uncertain == []
+
+    fake_missing = _llm_json(
+        [
+            {
+                "rule_name": "暴力破解_kv_子规则",
+                "event_name": "网络攻击",
+                "group": "threat",
+                "reason": "攻击行为",
+            },
+            {
+                "rule_name": "用户登录_json_子规则",
+                "event_name": "登录事件",
+                "group": "non_threat",
+                "reason": "登录认证行为",
+                "operation_type": "登出",
+            },
+        ]
+    )
+    _j, operations_valid, _u = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake_missing)
+    )
+    assert operations_valid == {"用户登录_json_子规则": "登出"}
+
+
+def test未绑定操作类型的类不写字段():
+    """网络连接未定义操作类型枚举——判定输出带 operation 也不写入（#395）。"""
+    rules = [
+        {
+            "name": "流量_kv_子规则",
+            "normalize": [{"index": "a", "result": ["1"]}],
+            "parser": {"filter": []},
+            "sample": "src=1.1.1.1 dst=2.2.2.2",
+        }
+    ]
+    fake = _llm_json(
+        [
+            {
+                "rule_name": "流量_kv_子规则",
+                "event_name": "网络连接",
+                "group": "non_threat",
+                "reason": "纯流量五元组",
+                "operation_type": "访问",
+            }
+        ]
+    )
+    judgments, operations, _u = asyncio.run(
+        classify_sub_rule_events(rules, llm_client=fake)
+    )
+    assert judgments == {"流量_kv_子规则": "网络连接"}
+    assert operations == {}
+    out = apply_event_fields_to_sub_rules(rules, judgments, operations)
+    rule = out[0]
+    assert [e["index"] for e in rule["normalize"][-2:]] == ["事件名称", "事件级别"]
+    assert set(rule["parser"]["filter"][-1]["fields"]) == {"事件名称", "事件级别"}
+
+
+def test写入操作类型条目与addFields():
+    """#395：绑定类写第三条目（恒等映射+value+样本数复制），addFields 同步。"""
+    rules = [
+        {
+            "name": "登录_kv_子规则",
+            "normalize": [{"index": "a", "result": ["1", "2"]}],
+            "parser": {"filter": []},
+            "sample": "user=u1 action=login\nuser=u2 action=login",
+        }
+    ]
+    out = apply_event_fields_to_sub_rules(
+        rules,
+        {"登录_kv_子规则": "登录事件"},
+        {"登录_kv_子规则": "登出"},
+    )
+    rule = out[0]
+    assert rule["parser"]["filter"][-1]["fields"] == {
+        "事件名称": "登录事件",
+        "事件级别": "信息",
+        "操作类型": "登出",
+    }
+    operation_entry = rule["normalize"][-1]
+    assert operation_entry == {
+        "mappings": [
+            {"mappingType": "EQUAL", "mappingValue": "登出", "orgValue": "登出"}
+        ],
+        "field": "event_operation_type",
+        "sim": True,
+        "result": ["登出", "登出"],
+        "info": None,
+        "entity": "事件",
+        "required": False,
+        "core": False,
+        "value": "登出",
+        "index": "操作类型",
+    }
+
+
+def test操作类型缺省降级其他():
+    """#395：judgments 有值但 operations 缺失时按「其他」兜底写入。"""
+    rules = [
+        {
+            "name": "登录_kv_子规则",
+            "normalize": [{"index": "a", "result": ["1"]}],
+            "parser": {"filter": []},
+            "sample": "user=u1 action=login",
+        }
+    ]
+    out = apply_event_fields_to_sub_rules(rules, {"登录_kv_子规则": "登录事件"})
+    operation_entry = out[0]["normalize"][-1]
+    assert operation_entry["value"] == "其他"
+    assert operation_entry["mappings"] == [
+        {"mappingType": "EQUAL", "mappingValue": "其他", "orgValue": "其他"}
+    ]
+    assert out[0]["parser"]["filter"][-1]["fields"]["操作类型"] == "其他"
 
 
 def test写入不修改原数据():

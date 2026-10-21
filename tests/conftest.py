@@ -36,6 +36,6 @@ def _fake_event_name_classifier(monkeypatch):
     async def _guarded_classify(sub_rules, *, llm_client=None):
         if llm_client is not None:
             return await real_classify(sub_rules, llm_client=llm_client)
-        return {}, []
+        return {}, {}, []
 
     monkeypatch.setattr(event_classify, "classify_sub_rule_events", _guarded_classify)

@@ -244,7 +244,7 @@ ENUM_AUTO_MAPPING_TARGETS: Mapping[str, str] = MappingProxyType({
 """
 
 ENUM_AUTO_MAPPING_EXCLUSIONS: tuple[str, ...] = ("操作类型", "威胁类型")
-"""显式排除的标准字段：操作类型待独立 issue，威胁类型走 #173 独立链路。"""
+"""显式排除的标准字段：操作类型由事件绑定链持有（#395），威胁类型走 #173 独立链路。"""
 
 ENUM_UNIQUE_VALUE_LIMIT = 10
 """单个值画像允许的唯一值上限：第 11 个出现即整体拒绝，不截断。"""
