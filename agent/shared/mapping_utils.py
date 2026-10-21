@@ -245,6 +245,7 @@ def apply_fill_to_config(
     config: Any,
     mapping_table: dict[str, list[dict]] | list[dict],
     target_field: str | None = None,
+    value_placeholder: str | None = None,
 ) -> Any:
     """在保持完整根结构的前提下递归填充所有 normalize 条目。
 
@@ -252,12 +253,15 @@ def apply_fill_to_config(
         config: 解码后的完整配置或子规则列表。
         mapping_table: 按字段分组的枚举映射，或单字段映射列表。
         target_field: 当映射来源是列表时必须提供的目标字段。
+        value_placeholder: 非 None 时命中条目在追加 mappings 后同步设置
+            ``value`` 占位（#398）；缺省保持只写 mappings 的旧行为。
 
     返回值：
         深拷贝后的完整配置；输入对象不会被修改。
 
     不变量：
-        只修改目标 normalize 条目的 mappings，其他配置结构必须原样保留。
+        只修改目标 normalize 条目的 mappings（及显式传入时的 value），
+        其他配置结构必须原样保留。
     """
     # 统一为按字段分组的结构，遍历阶段不再猜测映射来源类型。
     if isinstance(mapping_table, list):
@@ -281,6 +285,8 @@ def apply_fill_to_config(
         for field_name, mappings in field_mappings.items():
             if mappings and (index_value == field_name or field_value == field_name):
                 append_mappings_to_normalize(normalize_item, mappings)
+                if value_placeholder is not None:
+                    normalize_item["value"] = value_placeholder
     return updated_config
 
 

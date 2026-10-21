@@ -473,6 +473,7 @@ def test换源威胁类型映射空结果降级全其他(monkeypatch):
         assert all(
             row.get("mappingValue") == "其他" for row in entry["mappings"]
         )
+        assert entry.get("value") == "其他"  # #398：降级路径 value 占位
 
 
 def test旧配置多绑定换源只清理威胁链产物(monkeypatch):
