@@ -136,3 +136,72 @@ def test填充目标字段与配置零匹配时稳定失败不写配置():
     assert result.status == StepStatus.FAILED
     assert result.error_code == "enum_target_field_mismatch"
     assert session.decoded_data[0]["normalize"] == before
+
+
+def _config_with_prefilled_rows(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "name": "规则一",
+            "normalize": [
+                {"index": "威胁类型", "field": "threat_type", "mappings": list(rows)}
+            ],
+            "parser": {"filter": []},
+        }
+    ]
+
+
+def test混合字段部分零匹配稳定失败列出缺失字段():
+    """#402：一个字段命中一个不存在时整体失败并列出缺失字段，一行不写。"""
+    session = SessionState()
+    session.decoded_data = _config_with_target()
+    sheets = _enum_sheets("威胁类型")
+    sheets["不存在字段"] = [
+        {"mappingType": "EQUAL", "orgValue": "x", "mappingValue": "y"}
+    ]
+    commit_enum_mapping_attachment(session, "枚举.xlsx", sheets)
+
+    before = [dict(e) for e in session.decoded_data[0]["normalize"]]
+    result = _run_fill(session, target_fields=("威胁类型", "不存在字段"))
+
+    assert result.status == StepStatus.FAILED
+    assert result.error_code == "enum_target_field_mismatch"
+    assert "不存在字段" in result.message
+    assert session.decoded_data[0]["normalize"] == before
+
+
+def test全部已存在时幂等成功不再报错():
+    """#402：映射行全部已存在时返回成功并明示无新增，不再降级 no_effect。"""
+    session = SessionState()
+    session.decoded_data = _config_with_prefilled_rows([
+        {"mappingType": "EQUAL", "orgValue": f"org{i}", "mappingValue": f"map{i}"}
+        for i in range(3)
+    ])
+    _upload_enum(session)
+
+    result = _run_fill(session)
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.changed_count == 0
+    assert result.idempotent_no_change is True
+    assert "已全部存在" in result.message
+    entry = session.decoded_data[0]["normalize"][0]
+    assert len(entry["mappings"]) == 3
+
+
+def test部分重复时返回逐字段明细消息():
+    """#402：部分已存在部分新增时，消息逐字段给出新增与已存在计数。"""
+    session = SessionState()
+    session.decoded_data = _config_with_prefilled_rows([
+        {"mappingType": "EQUAL", "orgValue": "org0", "mappingValue": "map0"}
+    ])
+    _upload_enum(session)
+
+    result = _run_fill(session)
+
+    assert result.status == StepStatus.SUCCESS
+    assert result.changed_count == 2
+    assert "新增 2" in result.message
+    assert "已存在 1" in result.message
+    assert "威胁类型" in result.message
+    entry = session.decoded_data[0]["normalize"][0]
+    assert len(entry["mappings"]) == 3
