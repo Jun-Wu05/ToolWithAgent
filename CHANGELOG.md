@@ -36,6 +36,7 @@
 - 自平衡括号 JSON 提取器，替代脆弱的 `\{[^}]+\}` 正则
 
 ### Changed
+- fix(enum-fill): 目标字段逐字段严格校验+全部已存在幂等成功+生效 Sheet 清单(#402)——#400 守卫从"任一命中放行"收紧为逐字段校验,任一映射表目标字段在配置中无同名条目时稳定失败并列出缺失字段,不再部分静默丢弃;全部已存在时幂等成功(StepResult 新增 idempotent_no_change 标记,执行层 no_effect 降级豁免),不再误报失败;填充消息逐字段给出新增/已存在计数;枚举预览消息展示生效 Sheet 清单,累积残留可见
 - fix(upload): 解析规则上传不再清空枚举映射附件(#400,#101 语义收窄)——clear_decoded_data 保留 enum_* 附件状态(映射表/预览/填充账本),主数据本体与其余派生状态照旧全清;显式重置(清空数据/切换文件)经 clear_session_data 全清含附件;EnumFillAdapter 新增目标字段零匹配守卫(Sheet 名与配置字段不一致时稳定失败,不再静默写错条目或静默 no_effect);行为变化:换主数据后既有枚举映射表沿用生效,需重置走显式清空或重传同名 Sheet;同消息"解析规则+枚举表"任一顺序上传后可直接填充,不再触发 missing_enum_mapping_table 澄清循环
 - feat(threat): 威胁类型填充写 value 占位(#398)——apply_fill_to_config 新增可选 value_placeholder 参数(缺省保持只写 mappings 旧行为);threat_fill 按规则计算占位:映射值唯一→该值、多值→「其他」,单值/多值/降级三类路径恒有占位,与事件字段 value 形态(#393/#395)对齐
 - feat(event): 非威胁事件绑定操作类型字段(#395)——EVENT_NAME_OPERATION_ENUM_BINDING 固化提示词已定义枚举的 7 个非威胁类(登录/审计/会话/进程/用户操作/资源监控/邮件操作);判定输出契约新增 operation_type(类内白名单校验,非法/缺失降级「其他」,未定义枚举的类留空);apply 对绑定类写第三条 normalize 条目(恒等映射+value+按样本数复制 result)并同步 addFields;threat 分类的 classify_sub_rule_events 返回值扩为三元组;ENUM_AUTO_MAPPING_EXCLUSIONS 注释更新

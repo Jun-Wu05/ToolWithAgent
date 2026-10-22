@@ -515,10 +515,18 @@ class PlanExecutor:
         return None
 
     def _validate_result(self, step: ExecutableStep, result: StepResult) -> StepResult:
-        """验证适配器结果属于当前步骤，并阻止填充零变更被静默报告成功。"""
+        """验证适配器结果属于当前步骤，并阻止填充零变更被静默报告成功。
+
+        幂等零变更（#402，适配器显式标记"全部已存在"）是合法成功，不降级。
+        """
         if result.step_id != step.step_id or result.operation_type != step.type:
             return self._error_result(step, "invalid_step_result", "适配器返回了不匹配的步骤结果")
-        if isinstance(step, FillStep) and result.status == StepStatus.SUCCESS and result.changed_count == 0:
+        if (
+            isinstance(step, FillStep)
+            and result.status == StepStatus.SUCCESS
+            and result.changed_count == 0
+            and not result.idempotent_no_change
+        ):
             return self._error_result(step, "no_effect", "填充未改变任何目标字段")
         return result
 
