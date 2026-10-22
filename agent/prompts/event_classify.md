@@ -97,11 +97,12 @@
 只输出一个 JSON 对象，不输出 Markdown、解释或思考过程：
 
 ```json
-{"results": [{"rule_name": "子规则名", "event_name": "合法值之一", "group": "threat 或 non_threat", "reason": "一句话判定依据"}]}
+{"results": [{"rule_name": "子规则名", "event_name": "合法值之一", "operation_type": "该类操作类型枚举之一或空", "group": "threat 或 non_threat", "reason": "一句话判定依据"}]}
 ```
 
 硬性约束：
 - `event_name` 必须逐字等于 21 个合法值之一，不得自创名称或加前后缀。
+- `operation_type` 仅对上方注明「操作类型枚举」的事件名称类输出，必须逐字等于该类枚举之一；该类未定义枚举（威胁组全部、dns查询、dns响应、数据库操作、ssh连接、认证事件、telnet连接、网络连接、web访问）时必须留空，不得编造。
 - 每条输入子规则恰好输出一条结果，`rule_name` 与输入逐字一致。
 - `group` 必须与 `event_name` 所属组一致。
 - 无法判定时不得编造：威胁倾向选「其他告警」并说明；确实不属于任何类的按最接近类给出并在 reason 标注不确定。

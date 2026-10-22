@@ -270,9 +270,14 @@ def is_explicit_clear_command(user_text: str) -> bool:
 
 
 def clear_session_data(session: SessionState) -> None:
-    """清除业务会话状态，不承担界面提示或进度账本重置。"""
+    """清除业务会话状态，不承担界面提示或进度账本重置。
+
+    显式重置全清（#400）：枚举映射附件随显式命令一并清除，
+    主数据替换（上传新解析规则）则保留附件。
+    """
     session.clear_decoded_data()
     session.clear_mapping_results()
+    session.clear_enum_mapping_attachments()
 
 
 

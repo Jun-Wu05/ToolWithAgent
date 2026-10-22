@@ -58,8 +58,15 @@ logger = get_logger("execution_adapters")
 
 
 def _event_normalize_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
-    """提取通用 add_fields 支持的事件标准字段元数据。"""
-    return {key: entry[key] for key in ("field", "entity", "sim", "core")}
+    """提取通用 add_fields 支持的事件标准字段元数据。
+
+    mappings/value 一并携带（#392）：导出平台按 mappings/value 取值，事件
+    两字段需要恒等/码值映射与默认值；威胁类型路径不传这两个键，不受影响。
+    """
+    return {
+        key: entry[key]
+        for key in ("field", "entity", "sim", "core", "mappings", "value")
+    }
 
 # ---------------------------------------------------------------------------
 # 声明式注册表：步骤类型 → (skill 脚本相对路径, 函数名)

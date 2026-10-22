@@ -128,7 +128,7 @@ def test_attachment_hash_change_blocks_confirmation_without_replacing_old_config
 
 def test_failure_after_successful_staging_step_keeps_prior_artifact_id(tmp_path, monkeypatch):
     from contracts.planner_models import PlanDecision
-    from test_postprocessing import ThreatMember
+    from application.adapters.threat_mapping import ThreatMappingAdapter
     class MultiPlanner:
         async def plan(self, **kwargs):
             return PlanDecision.model_validate({"decision": "execute", "plan_id": "atomic", "steps": [
@@ -140,10 +140,14 @@ def test_failure_after_successful_staging_step_keeps_prior_artifact_id(tmp_path,
     operation(client, conversation, "enum_extract", target_field="alarm")
     assert worker.once()
     old = current(store, conversation, "enum_values")
-    async def fail(self, *args, **kwargs):
-        raise RuntimeError("PRIVATE-FAILURE")
-        yield
-    monkeypatch.setattr(ThreatMember, "arun", fail)
+    # A model exception now degrades successfully (#394). Inject a genuine
+    # failed StepResult to keep testing atomic staging rollback.
+    async def fail(self, step, context, dependencies):
+        assert dependencies["enum"].status == StepStatus.SUCCESS
+        return StepResult(step_id=step.step_id, operation_type=step.type,
+                          status=StepStatus.FAILED, error_code="test_staging_failure",
+                          message="PRIVATE-FAILURE")
+    monkeypatch.setattr(ThreatMappingAdapter, "execute", fail)
     run = client.post(f"/api/v2/conversations/{conversation}/messages", json={"content": "提取并映射"}).json()["run"]["id"]
     assert worker.once()
     assert store.get_run("dev-user", run)["status"] == "failed"

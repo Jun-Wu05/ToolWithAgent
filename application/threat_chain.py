@@ -363,6 +363,13 @@ def _chain_summary(
     parts = list(plan.summary_parts)
     if plan.skipped_add_reason:
         parts.append(plan.skipped_add_reason)
+    degraded = [
+        result
+        for result in chain_results
+        if result.status == StepStatus.SUCCESS and "已降级" in (result.message or "")
+    ]
+    if degraded:
+        parts.append(f"{len(degraded)} 步结果已降级为「其他」（#394）")
     if all_success:
         parts.append(f"耗时 {elapsed:.1f}s")
     else:

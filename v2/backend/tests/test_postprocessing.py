@@ -278,8 +278,16 @@ def test_logs_mapping_automatic_threat_chain_persists_and_reuses_after_restart(t
         response=client.post(f"/api/v2/conversations/{conversation}/field-mapping",json={"classification_artifact_id":parsed["id"],"product":"p","log_vendor":"v"})
         assert response.status_code==201,response.text; assert worker.once()
         assert store.get_run("dev-user",response.json()["run"]["id"])["status"]=="succeeded"
-    assert current(store,conversation,"enum_values")["id"]==old_enum["id"]
-    assert current(store,conversation,"threat_mapping")["id"]==old_threat["id"]
+    # master #394: model errors produce a successful degraded threat artifact.
+    degraded_enum = current(store,conversation,"enum_values")
+    degraded_threat = current(store,conversation,"threat_mapping")
+    assert degraded_enum["id"] != old_enum["id"]
+    assert degraded_threat["id"] != old_threat["id"]
+    assert degraded_enum["run_id"] == response.json()["run"]["id"]
+    assert degraded_threat["run_id"] == response.json()["run"]["id"]
+    content = client.get(f"/api/v2/artifacts/{degraded_threat['id']}/content").json()
+    assert content["mappings"] and all(row["mapped_value"] == "其他" for row in content["mappings"])
+    assert "SENSITIVE-FAILED-CHAIN" not in json.dumps(store.events("dev-user",conversation,0))
 
 
 

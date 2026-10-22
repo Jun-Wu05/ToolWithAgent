@@ -19,6 +19,7 @@ from application.execution import (
     ExecutionContext,
     threat_fill_source_precondition,
 )
+from application.threat_chain_policy import DEGRADED_THREAT_VALUE
 from contracts.planner_models import (
     FillStep,
     StepResult,
@@ -29,6 +30,12 @@ from contracts.planner_models import (
 
 
 logger = get_logger("execution_adapters")
+
+
+def _value_placeholder(rows: list[dict]) -> str:
+    """value 占位规则（#398）：映射值唯一→该值；多值→「其他」。"""
+    values = {str(row.get("mappingValue", "")) for row in rows}
+    return next(iter(values)) if len(values) == 1 else DEGRADED_THREAT_VALUE
 
 
 class ThreatFillAdapter:
@@ -76,8 +83,14 @@ class ThreatFillAdapter:
 
         before_count = count_field_mappings(current_config, step.target_fields)
         updated_config = current_config
+        placeholder = _value_placeholder(mapping_rows)
         for target_field in step.target_fields:
-            updated_config = apply_fill_to_config(updated_config, mapping_rows, target_field)
+            updated_config = apply_fill_to_config(
+                updated_config,
+                mapping_rows,
+                target_field,
+                value_placeholder=placeholder,
+            )
         after_count = count_field_mappings(updated_config, step.target_fields)
         _write_config(context.session, step.config_ref, updated_config)
         changed_count = max(0, after_count - before_count)

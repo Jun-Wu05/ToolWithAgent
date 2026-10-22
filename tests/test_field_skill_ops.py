@@ -435,10 +435,15 @@ def test适配器事件名称不支持引用型值():
 
 
 @pytest.mark.parametrize(
-    "event_name,expected_level",
-    [("网络攻击", "提醒"), ("其他告警", "提醒"), ("登录事件", "信息"), ("web访问", "信息")],
+    "event_name,expected_level,expected_level_code",
+    [
+        ("网络攻击", "提醒", "1"),
+        ("其他告警", "提醒", "1"),
+        ("登录事件", "信息", "0"),
+        ("web访问", "信息", "0"),
+    ],
 )
-def test适配器事件名称自动联动绑定级别(event_name, expected_level):
+def test适配器事件名称自动联动绑定级别(event_name, expected_level, expected_level_code):
     """合法事件名称添加后，事件级别按绑定表自动写入。"""
     session = make_session_state(decoded_data=_sample_entities())
     step = AddFieldsStep(
@@ -452,12 +457,35 @@ def test适配器事件名称自动联动绑定级别(event_name, expected_level
     assert result.status == StepStatus.SUCCESS
     assert expected_level in result.message
     fields_written = {}
+    name_entries = []
+    level_entries = []
     for entity in session.decoded_data:
         for filter_item in entity["parser"]["filter"]:
             if filter_item.get("name") == "addFields" and filter_item.get("id") == "":
                 fields_written.update(filter_item.get("fields", {}))
+        for item in entity["normalize"]:
+            if item.get("index") == "事件名称":
+                name_entries.append(item)
+            elif item.get("index") == "事件级别":
+                level_entries.append(item)
     assert fields_written["事件名称"] == event_name
     assert fields_written["事件级别"] == expected_level
+    # #392：事件两字段 normalize 带 EQUAL 映射与默认值；级别 value 为整型码
+    assert name_entries and level_entries
+    for entry in name_entries:
+        assert entry["mappings"] == [
+            {"mappingType": "EQUAL", "mappingValue": event_name, "orgValue": event_name}
+        ]
+        assert entry["value"] == event_name
+    for entry in level_entries:
+        assert entry["mappings"] == [
+            {
+                "mappingType": "EQUAL",
+                "mappingValue": expected_level_code,
+                "orgValue": expected_level,
+            }
+        ]
+        assert entry["value"] == expected_level_code
 
 
 def test适配器事件名称删除后重加保留标准元数据并撤销删除标记():

@@ -20,6 +20,7 @@ from application.execution import (
 )
 from application.parsing import parse_json_threat_result
 from application.threat_chain_policy import (
+    DEGRADED_THREAT_VALUE,
     is_code_only_value,
     validate_threat_mapping_coverage,
 )
@@ -100,12 +101,27 @@ class ThreatMappingAdapter:
             )
 
         model_input = json.dumps({"values": values}, ensure_ascii=False)
-        content = await run_member_stream(self._team, "ThreatAgent", model_input)
-        mapping_rows = parse_json_threat_result(content)
+        try:
+            content = await run_member_stream(self._team, "ThreatAgent", model_input)
+            mapping_rows = parse_json_threat_result(content)
+        except Exception as error:
+            logger.warning(
+                "[THREAT_MAPPING] 模型调用异常: error=%s", type(error).__name__
+            )
+            if not values:
+                return _failed(step, "threat_mapping_empty", "威胁映射未生成有效结果")
+            return self._degrade_and_submit(
+                step, context, values, source_field, f"模型调用异常 {type(error).__name__}"
+            )
         if not mapping_rows:
-            return _failed(step, "threat_mapping_empty", "威胁映射未生成有效结果")
+            if not values:
+                return _failed(step, "threat_mapping_empty", "威胁映射未生成有效结果")
+            return self._degrade_and_submit(
+                step, context, values, source_field, "空结果"
+            )
         # 统一来源覆盖校验（#277）：三种声明来源共用同一校验与错误语义；
-        # 来源外、缺项、重叠或枚举外结果整体拒绝，不再补「其他」兜底行洗白。
+        # #394 调整：来源外、缺项、重叠或枚举外结果不再整体失败，降级全部
+        # 映射行落「其他」并留痕——行级洗白仍禁止，字段级降级显式可见。
         violation = validate_threat_mapping_coverage(values, mapping_rows, valid_targets)
         if violation:
             logger.info(
@@ -114,10 +130,8 @@ class ThreatMappingAdapter:
                 len(values),
                 len(mapping_rows),
             )
-            return _failed(
-                step,
-                "threat_mapping_coverage_rejected",
-                f"威胁映射结果未通过统一覆盖校验（{violation}），已拒绝提交",
+            return self._degrade_and_submit(
+                step, context, values, source_field, f"覆盖校验拒绝 {violation}"
             )
 
         typed_mappings = tuple(ThreatMappingRow.model_validate(row) for row in mapping_rows)
@@ -131,3 +145,44 @@ class ThreatMappingAdapter:
             artifact=artifact, source_field=source_field
         )
         return _success(step, artifact)
+
+    def _degrade_and_submit(
+        self,
+        step: StepSpec,
+        context: ExecutionContext,
+        values: list[str],
+        source_field: str | None,
+        reason: str,
+    ) -> StepResult:
+        """模型终态失败降级：全部映射行落「其他」，步骤成功并留痕（#394）。"""
+        rows = [
+            {
+                "mappingType": "EQUAL",
+                "orgValue": value,
+                "mappingValue": DEGRADED_THREAT_VALUE,
+            }
+            for value in values
+        ]
+        typed_mappings = tuple(ThreatMappingRow.model_validate(row) for row in rows)
+        artifact = ThreatMappingArtifact(
+            mappings=typed_mappings,
+            item_count=len(typed_mappings),
+            source_field=source_field,
+        )
+        context.session.last_threat_data = rows
+        context.session.latest_threat_artifact = ThreatArtifactSlot(
+            artifact=artifact, source_field=source_field
+        )
+        logger.warning(
+            "[THREAT_MAPPING] 终态失败已降级: reason=%s value_count=%s 全部落「%s」",
+            reason,
+            len(values),
+            DEGRADED_THREAT_VALUE,
+        )
+        return _success(
+            step,
+            artifact,
+            message=(
+                f"威胁映射终态失败（{reason}），已降级全部映射值落「{DEGRADED_THREAT_VALUE}」"
+            ),
+        )

@@ -38,6 +38,8 @@ describe('mapping result view', () => {
       warnings: [{ code: 'threat_chain_warning', message: '⚠️ 本次威胁类型未生成，请检查来源。' }],
     }))))
     render(<MappingWorkspace {...props} />)
+    const disclosure = await screen.findByText('事件名称标注 · 2 条')
+    fireEvent.click(disclosure)
     const annotations = await screen.findByRole('table', { name: '事件名称标注' })
     expect(annotations).toHaveTextContent('网络攻击事件')
     expect(annotations).toHaveTextContent('nested.description')

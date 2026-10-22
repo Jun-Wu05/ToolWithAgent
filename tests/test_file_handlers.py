@@ -198,12 +198,10 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     assert session.last_threat_data is None
     assert session.excel_data is None
     assert session.excel_filename is None
-    assert session.enum_excel_path is None
-    assert session.enum_preview is None
-    assert session.enum_mapping_sheets == {}
-    assert session.enum_fill_contributions == {}
-    assert session.stale_enum_config_refs == set()
-    assert session.enum_pending_refills == {}
+    # #400：枚举映射附件独立于主数据生命周期，解析规则上传后保留
+    assert session.enum_excel_path == "old-enum.xlsx"
+    assert session.enum_preview
+    assert session.enum_mapping_sheets
     assert session.conversation_history == []
     assert session.team is not None
     assert session.current_provider == "deepseek"
@@ -248,7 +246,7 @@ def test真实base64上传贯通application解码原子提交与既有反馈(mon
     assert session.decoded_fields == ["src_ip", "original_log"]
     assert session.original_log == ["src_ip=1.1.1.1"]
     assert session.raw_base64 == encoded
-    assert session.enum_excel_path is None
+    assert session.enum_excel_path == "old.xlsx"  # #400：映射附件保留
     assert session.latest_enum_artifact is None
     assert session.latest_threat_artifact is None
     assert captured == [
@@ -307,12 +305,10 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
     assert session.raw_base64 is None
     assert session.mapped_sub_rules is None
     assert session.log_classification is None
-    assert session.enum_excel_path is None
-    assert session.enum_preview is None
-    assert session.enum_mapping_sheets == {}
-    assert session.enum_fill_contributions == {}
-    assert session.stale_enum_config_refs == set()
-    assert session.enum_pending_refills == {}
+    # #400：日志 Excel 同为主数据替换，枚举映射附件保留
+    assert session.enum_excel_path == "old-enum.xlsx"
+    assert session.enum_preview
+    assert session.enum_mapping_sheets
     assert session.conversation_history == []
 
 
@@ -444,6 +440,11 @@ def test不同Sheet分次上传后在当前主数据内累积(monkeypatch, tmp_p
     assert set(session.enum_mapping_sheets) == {"event_type3", "action"}
     assert {row["目标字段"] for row in session.enum_preview} == {"event_type3", "action"}
     assert session.stale_enum_config_refs == {"session.decoded_config"}
+    # #402：预览消息展示生效 Sheet 清单，累积残留可见
+    preview_texts = [
+        getattr(m, "content", m) for m in captured if "生效 Sheet" in str(getattr(m, "content", m))
+    ]
+    assert preview_texts and "生效 Sheet：event_type3, action" in preview_texts[-1]
 
     partial_result = asyncio.run(
         EnumFillAdapter().execute(
@@ -598,8 +599,11 @@ def test同名Sheet重填完整替换旧贡献并保留其他来源(monkeypatch,
             ExecutionContext(session=session, session_facts=build_session_facts(session)),
         )
     )
-    assert repeated_report.status == StepStatus.FAILED
-    assert repeated_report.results[0].error_code == "no_effect"
+    # #402：重填全部已存在时幂等成功，不再降级 no_effect
+    assert repeated_report.status == StepStatus.SUCCESS
+    assert repeated_report.results[0].changed_count == 0
+    assert repeated_report.results[0].idempotent_no_change is True
+    assert "已全部存在" in repeated_report.results[0].message
 
 
 def test多Sheet工作簿任一Sheet无有效规则时整份拒绝(monkeypatch, tmp_path):

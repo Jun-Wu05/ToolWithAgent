@@ -31,7 +31,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 const open = async (input = props()) => { render(<MappingWorkspace {...input} />); await waitFor(() => expect(screen.getByLabelText('src.ip 标准字段')).toBeEnabled()); return input }
-const choose = (target = '目的地址') => fireEvent.change(screen.getByLabelText('src.ip 标准字段'), { target: { value: target } })
+const choose = (target = '目的地址') => { fireEvent.click(screen.getByRole('combobox', { name: 'src.ip 标准字段' })); fireEvent.click(screen.getByRole('option', { name: new RegExp('^' + (target || '未映射')) })) }
 
 describe('persistent mapping editor', () => {
   it('autosaves only the current rule using server row key and revision, preserves row group and modified evidence', async () => {
@@ -68,7 +68,7 @@ describe('persistent mapping editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消替换' }))
     expect(api.confirmMapping).not.toHaveBeenCalled()
     expect(api.saveMapping).toHaveBeenCalledTimes(1)
-    expect(select).toHaveValue('')
+    expect(select).toHaveTextContent('未映射')
     expect(select).toHaveFocus()
   })
   it('confirms replacement and only explicitly selected eligible rules in one request', async () => {
@@ -101,7 +101,7 @@ describe('persistent mapping editor', () => {
     const input = props()
     vi.mocked(api.saveMapping).mockRejectedValueOnce(new Error('连接中断'))
     await open(input); choose(); await screen.findByText('连接中断')
-    expect(screen.getByLabelText('src.ip 标准字段')).toHaveValue('目的地址')
+    expect(screen.getByLabelText('src.ip 标准字段')).toHaveTextContent('目的地址')
     expect(input.onPendingChange).toHaveBeenLastCalledWith(true)
     fireEvent.click(screen.getByRole('button', { name: '重试保存' }))
     await screen.findByText('草稿已修改')
@@ -170,4 +170,50 @@ describe('persistent mapping editor', () => {
     await act(async () => complete({ draft: { ...stored, changed_count: 1 }, candidates: candidates() }))
     expect(input.onDraftChange).not.toHaveBeenCalled()
   })
+})
+
+
+it('retains an edited row when the real status-filter query excludes it, until refresh', async () => {
+  vi.mocked(api.mappingView).mockImplementation(async (_id, query) => {
+    const result = structuredClone(view)
+    result.items = result.items.filter(row => !query.status || row.status === query.status)
+    result.total = result.items.length
+    return result
+  })
+  await open()
+  fireEvent.change(screen.getByRole('combobox', { name: '状态筛选' }), { target: { value: 'unmatched' } })
+  await waitFor(() => expect(screen.queryByText('other.ip')).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'src.ip 标准字段' })).toBeEnabled())
+  choose()
+  await screen.findByText('草稿已修改')
+  expect(screen.getByText('src.ip').closest('tr')).toHaveTextContent('映射成功')
+  fireEvent.click(screen.getByRole('button', { name: '刷新筛选结果' }))
+  await waitFor(() => expect(screen.queryByText('src.ip')).not.toBeInTheDocument())
+})
+
+
+it('projects the latest overlapping operation for rows excluded by the server filter', async () => {
+  vi.mocked(api.mappingView).mockImplementation(async (_id, query) => {
+    const result = structuredClone(view)
+    result.items = result.items.filter(row => !query.status || row.status === query.status)
+    result.total = result.items.length
+    return result
+  })
+  const proposal = { sub_rule_id: '0', source_path: 'src.ip', standard_field: '目的地址', linked_sub_rule_ids: [] }
+  vi.mocked(api.saveMapping).mockImplementationOnce(async () => {
+    stored = { ...stored, revision: 2, changed_count: 1, operations: [
+      { operation_key: 'first', proposal, changes: [{ ...proposal, standard_field: null }] },
+      { operation_key: 'second', proposal, changes: [proposal] },
+    ] }
+    view.items[1] = { ...view.items[1], standard_field: '目的地址', status: 'matched', draft_modified: true }
+    return { draft: stored, candidates: { ...candidates(), items: [] } }
+  })
+  await open()
+  fireEvent.change(screen.getByRole('combobox', { name: '状态筛选' }), { target: { value: 'unmatched' } })
+  await waitFor(() => expect(screen.queryByText('other.ip')).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'src.ip 标准字段' })).toBeEnabled())
+  choose()
+  await screen.findByText('草稿已修改')
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'src.ip 标准字段' })).toHaveTextContent('目的地址'))
+  expect(screen.getByText('src.ip').closest('tr')).toHaveTextContent('映射成功')
 })
