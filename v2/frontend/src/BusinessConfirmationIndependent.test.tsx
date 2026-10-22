@@ -2,7 +2,7 @@ import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing
 import {afterEach, beforeEach, expect, it, vi} from 'vitest'
 import {App} from './App'
 import {api, saveDownload, type Conversation} from './api'
-vi.mock('./api', () => ({saveDownload: vi.fn(), api: Object.fromEntries(['me','identities','selectIdentity','conversations','conversation','eventsUrl','sendMessage','confirmationToken','confirmRun','run','artifactContent','mappingDownload'].map(name => [name, vi.fn()]))}))
+vi.mock('./api', () => ({saveDownload: vi.fn(), api: Object.fromEntries(['me','identities','selectIdentity','conversations','conversation','eventsUrl','sendMessage','confirmationToken','confirmRun','run','artifactContent','mappingDownload','mappingView','mappingDraft'].map(name => [name, vi.fn()]))}))
 class Events {
   onmessage: ((event: MessageEvent) => void) | null = null
   onerror = null
@@ -23,6 +23,8 @@ beforeEach(() => {
   vi.mocked(api.identities).mockResolvedValue({items:[owner,other]})
   vi.mocked(api.conversations).mockResolvedValue({items:[summary]})
   vi.mocked(api.conversation).mockResolvedValue(detail)
+  vi.mocked(api.mappingView).mockResolvedValue({artifact_id:'', sub_rules:[], sub_rule_id:'', items:[], total:0, page:1, page_size:50, sample_line_reference:'log_entry'})
+  vi.mocked(api.mappingDraft).mockResolvedValue({id:'', conversation_id:'', base_artifact_id:'', revision:0, status:'active', changed_count:0, operation_count:0, operations:[], base_current:true, apply_run_id:null, applied_artifact_id:null})
   vi.mocked(api.eventsUrl).mockReturnValue('/events')
   vi.mocked(api.confirmationToken).mockResolvedValue({token:'approval', checkpoint_revision:1, kind:'business_plan', payload:{question:'确认导出？', operations:['export']}})
   vi.mocked(api.confirmRun).mockResolvedValue({id:'r1',status:'queued'})
