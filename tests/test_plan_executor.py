@@ -533,6 +533,53 @@ def test填充声称成功但零变更时判定失败():
     assert report.results[0].error_code == "no_effect"
 
 
+def test幂等零变更填充不被降级为no_effect():
+    """#402：适配器显式标记幂等零变更（全部已存在）时保持成功，不再降级。"""
+    decision = PlanDecision.model_validate(
+        {
+            "decision": "execute",
+            "plan_id": "plan-idempotent",
+            "steps": [
+                {
+                    "step_id": "fill",
+                    "type": "fill",
+                    "fill_kind": "enum",
+                    "target_fields": ["event_type3"],
+                    "source_ref": "session.enum_mapping_table",
+                    "config_ref": "session.mapped_sub_rules",
+                }
+            ],
+        }
+    )
+    adapter = RecordingAdapter(
+        [
+            StepResult(
+                step_id="fill",
+                operation_type="fill",
+                status="success",
+                changed_count=0,
+                idempotent_no_change=True,
+                message="威胁类型：3 条映射已全部存在，无新增",
+            )
+        ]
+    )
+
+    report = _execute(
+        decision,
+        {"fill": adapter},
+        SessionFacts(
+            has_decoded_config=True,
+            has_mapped_sub_rules=True,
+            available_config_refs=("session.mapped_sub_rules",),
+            enum_mapping_target_fields=("event_type3",),
+        ),
+    )
+
+    assert report.results[0].status == StepStatus.SUCCESS
+    assert report.results[0].changed_count == 0
+    assert "已全部存在" in report.results[0].message
+
+
 def _rename_decision(field_value="僵尸网络入侵", value_type="fixed"):
     """构造 #148 复现形态的改名 delete+add 两步计划。"""
     return PlanDecision.model_validate(

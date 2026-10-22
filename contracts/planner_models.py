@@ -545,6 +545,9 @@ class StepResult(StrictContract):
     message: str | None = None
     choices: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
     recovered: bool = Field(default=False, exclude_if=lambda value: not value)
+    idempotent_no_change: bool = Field(
+        default=False, exclude_if=lambda value: not value
+    )
 
 
 class ExecutionReport(StrictContract):

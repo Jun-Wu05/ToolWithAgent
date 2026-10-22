@@ -98,6 +98,8 @@ async def _handle_excel_upload(element, file_name: str, user_session) -> None:
 
         # 获取目标字段列表
         target_fields = list(set(item["目标字段"] for item in enum_preview))
+        # 生效 Sheet 清单（#402）：累积语义下让历史 Sheet 残留可见
+        active_sheets = list((user_session.enum_mapping_sheets or {}).keys())
 
         # 展示预览，枚举填充交由 handle_user_message 的路由触发
         preview_count = len(enum_preview)
@@ -105,6 +107,7 @@ async def _handle_excel_upload(element, file_name: str, user_session) -> None:
             content=f"""📊 **枚举映射预览**
 
 📋 **映射统计：**
+- 生效 Sheet：{', '.join(active_sheets) if active_sheets else '（无）'}
 - 目标字段：{', '.join(target_fields)}
 - 映射规则：{preview_count} 条
 

@@ -138,7 +138,7 @@ def add_field(
             "value": None,
             "index": field_name,
         }
-        for metadata_key in ("field", "entity", "sim", "core"):
+        for metadata_key in ("field", "entity", "sim", "core", "mappings", "value"):
             if normalize_metadata is not None and metadata_key in normalize_metadata:
                 normalize_entry[metadata_key] = normalize_metadata[metadata_key]
         normalize.append(normalize_entry)

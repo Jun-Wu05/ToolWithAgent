@@ -66,6 +66,42 @@ EVENT_NAME_LEVEL_BINDING: dict[str, str] = {
 }
 """事件名称 → 事件级别 的确定性查表；绑定关系不由 LLM 决定。"""
 
+EVENT_LEVEL_CODE_BINDING: dict[str, str] = {
+    "信息": "0",
+    "提醒": "1",
+    "警告": "2",
+    "严重": "3",
+    "紧急": "4",
+}
+"""事件级别显示值 → 整型码值；标准目录声明 event_level 为整型（标准字段.txt）。"""
+
+OPERATION_TYPE_FIELD = "操作类型"
+OPERATION_TYPE_FALLBACK = "其他"
+EVENT_NAME_OPERATION_ENUM_BINDING: dict[str, tuple[str, ...]] = {
+    "登录事件": ("登录", "登出", "其他", "未映射"),
+    "审计事件": (
+        "其他", "打印审计", "数据库审计", "登出", "登录",
+        "移动存储审计", "终端入网", "访客入网", "超时", "远程桌面",
+    ),
+    "会话操作": ("其他", "开始", "未映射", "终止"),
+    "进程操作": (
+        "API调用", "其他", "其他属性修改", "创建", "唤醒", "快照",
+        "挂起", "未映射", "权限提升", "注入", "篡改", "终止", "访问",
+    ),
+    "用户操作": (
+        "修改", "其他", "其他属性修改", "切换", "创建", "删除", "密码修改",
+        "所属组修改", "未映射", "权限修改", "枚举", "激活", "登出", "登录",
+        "禁用", "解锁", "重命名", "锁定",
+    ),
+    "资源监控": ("其他", "故障", "未映射", "正常", "警告"),
+    "邮件操作": ("其他", "删除", "发送", "接收", "未映射", "附件下载"),
+}
+"""事件名称 → 操作类型合法枚举（#395）。
+
+仅 event_classify.md 定义了操作类型枚举的 7 个非威胁类参与绑定；
+威胁组与其余协议类不写操作类型。枚举值与提示词逐字一致。
+"""
+
 EVENT_NAME_FIELD = "事件名称"
 EVENT_LEVEL_FIELD = "事件级别"
 # 威胁类型字段名单一来源在 contracts（application 核心层不得依赖 agent）；
@@ -157,9 +193,14 @@ def _extract_results(raw_text: str) -> list[dict[str, Any]]:
 
 def _validate_results(
     results: list[dict[str, Any]], expected_names: set[str]
-) -> tuple[dict[str, str], list[str]]:
-    """校验白名单与组一致性，返回 (合法判定表, 非法项描述列表)。"""
+) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """校验白名单与组一致性，返回 (合法判定表, 操作类型表, 非法项描述列表)。
+
+    操作类型（#395）：仅绑定类校验类内枚举，非法/缺失降级「其他」，
+    不参与重试反馈；未绑定类（威胁组与协议类）不产出操作类型。
+    """
     accepted: dict[str, str] = {}
+    operations: dict[str, str] = {}
     invalid: list[str] = []
     for item in results:
         rule_name = str(item.get("rule_name", ""))
@@ -176,15 +217,21 @@ def _validate_results(
             invalid.append(f"{rule_name}: 分组 {group} 与 {event_name} 不一致")
             continue
         accepted[rule_name] = event_name
-    return accepted, invalid
+        legal_operations = EVENT_NAME_OPERATION_ENUM_BINDING.get(event_name)
+        if legal_operations:
+            operation = str(item.get("operation_type", "") or "")
+            if operation not in legal_operations:
+                operation = OPERATION_TYPE_FALLBACK
+            operations[rule_name] = operation
+    return accepted, operations, invalid
 
 
 async def classify_sub_rule_events(
     sub_rules: list[dict[str, Any]],
     *,
     llm_client: Any = None,
-) -> tuple[dict[str, str], list[str]]:
-    """LLM 批量判定每条子规则的事件名称。
+) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """LLM 批量判定每条子规则的事件名称与操作类型。
 
     Args:
         sub_rules: 子规则列表（读 name/sample/normalize，不修改）。
@@ -192,8 +239,9 @@ async def classify_sub_rule_events(
             测试传同步或异步假件均可。
 
     Returns:
-        (judgments, uncertain)：judgments 为 rule_name → 合法事件名称；
-        uncertain 为重试后仍无法判定的规则名列表（宁缺勿错，不写入）。
+        (judgments, operations, uncertain)：judgments 为 rule_name → 合法事件
+        名称；operations 为 rule_name → 类内合法操作类型（仅绑定类，非法/缺
+        失已降级「其他」）；uncertain 为重试后仍无法判定的规则名列表。
     """
 
     async def _call(prompt: str) -> str:
@@ -208,7 +256,7 @@ async def classify_sub_rule_events(
 
     signals = _build_rule_signals(sub_rules)
     if not signals:
-        return {}, []
+        return {}, {}, []
 
     expected_names = {signal["rule_name"] for signal in signals}
     template = load_event_classify_prompt()
@@ -219,6 +267,7 @@ async def classify_sub_rule_events(
 
     prompt = base_prompt
     accepted: dict[str, str] = {}
+    operations: dict[str, str] = {}
     for _attempt in range(2):
         raw = await _call(prompt)
         try:
@@ -226,12 +275,15 @@ async def classify_sub_rule_events(
         except (json.JSONDecodeError, ValueError) as parse_error:
             invalid = [f"输出不是合法 JSON: {parse_error}"]
             results = []
-        attempt_accepted, invalid = _validate_results(results, expected_names)
+        attempt_accepted, attempt_operations, invalid = _validate_results(
+            results, expected_names
+        )
         # 跨轮合并：重试只补缺口，不因第二轮遗漏而丢失首轮已判定条目
         accepted.update(attempt_accepted)
+        operations.update(attempt_operations)
         missing = sorted(expected_names - set(accepted))
         if not missing and not invalid:
-            return accepted, []
+            return accepted, operations, []
         # 带错误反馈重试一次
         prompt = (
             f"{base_prompt}\n上一次输出存在以下问题，必须修正：\n"
@@ -246,7 +298,7 @@ async def classify_sub_rule_events(
             "[EVENT_CLASSIFY] 以下子规则事件名称重试后仍无法判定，待人工确认: %s",
             uncertain,
         )
-    return accepted, uncertain
+    return accepted, operations, uncertain
 
 
 async def _run_in_executor(func: Any, *args: Any) -> Any:
@@ -264,38 +316,53 @@ async def _run_in_executor(func: Any, *args: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def make_event_name_normalize_entry(event_name: str) -> dict[str, Any]:
+def make_event_name_normalize_entry(
+    event_name: str, sample_count: int = 1
+) -> dict[str, Any]:
     """构建【事件名称】normalize 条目（仿 make_log_type_entry 形态）。
 
     对象归属「事件」（#177）：标准字段目录中 event_name/event_level 的对象
     均为「事件」；此前的「日志」是与目录冲突的过时决策，目标平台无法解析。
+    恒等 EQUAL 映射 + value 默认值（#392）：导出平台按 mappings/value 取值，
+    空值会让事件名称解析为空。result 每份日志一条。
     """
     return {
-        "mappings": [],
+        "mappings": [
+            {"mappingType": "EQUAL", "mappingValue": event_name, "orgValue": event_name}
+        ],
         "field": "event_name",
         "sim": True,
-        "result": [event_name],
+        "result": [event_name] * sample_count,
         "info": None,
         "entity": "事件",
         "required": False,
         "core": False,
-        "value": "",
+        "value": event_name,
         "index": EVENT_NAME_FIELD,
     }
 
 
-def make_event_level_normalize_entry(event_level: str) -> dict[str, Any]:
-    """构建【事件级别】normalize 条目（对象归属「事件」，#177）。"""
+def make_event_level_normalize_entry(
+    event_level: str, sample_count: int = 1
+) -> dict[str, Any]:
+    """构建【事件级别】normalize 条目（对象归属「事件」，#177）。
+
+    标准目录声明 event_level 为整型（#392）：value 写码值，mappings 记录
+    显示值→码值的 EQUAL 变换；addFields filter 与 result 保持显示值。
+    """
+    code = EVENT_LEVEL_CODE_BINDING[event_level]
     return {
-        "mappings": [],
+        "mappings": [
+            {"mappingType": "EQUAL", "mappingValue": code, "orgValue": event_level}
+        ],
         "field": "event_level",
         "sim": True,
-        "result": [event_level],
+        "result": [event_level] * sample_count,
         "info": None,
         "entity": "事件",
         "required": False,
         "core": False,
-        "value": "",
+        "value": code,
         "index": EVENT_LEVEL_FIELD,
     }
 
@@ -311,18 +378,72 @@ def apply_event_fields_to_sub_rules(
     - normalize 末尾追加事件名称、事件级别两条目。
     无判定（待人工确认）的子规则保持不变。
     """
+def make_operation_type_normalize_entry(
+    operation: str, sample_count: int = 1
+) -> dict[str, Any]:
+    """构建【操作类型】normalize 条目（#395，形态与事件名称/级别一致）。"""
+    return {
+        "mappings": [
+            {"mappingType": "EQUAL", "mappingValue": operation, "orgValue": operation}
+        ],
+        "field": "event_operation_type",
+        "sim": True,
+        "result": [operation] * sample_count,
+        "info": None,
+        "entity": "事件",
+        "required": False,
+        "core": False,
+        "value": operation,
+        "index": OPERATION_TYPE_FIELD,
+    }
+
+
+def _rule_sample_count(rule: dict[str, Any]) -> int:
+    """按子规则既有 normalize 条目的 result 长度推导样本数（无条目回退 1）。"""
+    for entry in rule.get("normalize") or []:
+        result = entry.get("result") if isinstance(entry, dict) else None
+        if isinstance(result, list) and result:
+            return len(result)
+    return 1
+
+
+def apply_event_fields_to_sub_rules(
+    sub_rules: list[dict[str, Any]],
+    judgments: dict[str, str],
+    operations: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """把判定结果写入每条子规则（深拷贝，不修改原数据）。
+
+    对每条有合法判定的子规则：
+    - parser.filter 末尾追加 addFields：{"事件名称": <分类名>, "事件级别": <绑定级别>}；
+    - normalize 末尾追加事件名称、事件级别两条目，result 按该子规则样本数复制；
+    - 事件名称在操作类型绑定表内时（#395），addFields 追加 "操作类型"，并
+      写第三条目（缺失/非法已由判定层降级，此处再兜底「其他」）。
+    无判定（待人工确认）的子规则保持不变。
+    """
+    operations = operations or {}
     updated = copy.deepcopy(sub_rules)
     for rule in updated:
         event_name = judgments.get(str(rule.get("name", "")))
         if event_name not in ALL_EVENT_NAMES:
             continue
         event_level = EVENT_NAME_LEVEL_BINDING[event_name]
+        sample_count = _rule_sample_count(rule)
+
+        add_fields: dict[str, Any] = {
+            EVENT_NAME_FIELD: event_name,
+            EVENT_LEVEL_FIELD: event_level,
+        }
+        if event_name in EVENT_NAME_OPERATION_ENUM_BINDING:
+            add_fields[OPERATION_TYPE_FIELD] = operations.get(
+                str(rule.get("name", "")), OPERATION_TYPE_FALLBACK
+            )
 
         parser = rule.get("parser") or {}
         filters = parser.get("filter") or []
         filters.append(
             {
-                "fields": {EVENT_NAME_FIELD: event_name, EVENT_LEVEL_FIELD: event_level},
+                "fields": add_fields,
                 "name": "addFields",
                 "id": "",
             }
@@ -331,7 +452,13 @@ def apply_event_fields_to_sub_rules(
         rule["parser"] = parser
 
         normalize = rule.get("normalize") or []
-        normalize.append(make_event_name_normalize_entry(event_name))
-        normalize.append(make_event_level_normalize_entry(event_level))
+        normalize.append(make_event_name_normalize_entry(event_name, sample_count))
+        normalize.append(make_event_level_normalize_entry(event_level, sample_count))
+        if OPERATION_TYPE_FIELD in add_fields:
+            normalize.append(
+                make_operation_type_normalize_entry(
+                    add_fields[OPERATION_TYPE_FIELD], sample_count
+                )
+            )
         rule["normalize"] = normalize
     return updated
