@@ -114,8 +114,9 @@ def testapplication文件输入原子替换主数据并保留模型配置() -> N
     commit_primary_dataset(session, snapshot)
 
     assert session.decoded_data == snapshot.decoded_data
-    assert session.enum_excel_path is None
-    assert session.enum_preview is None
+    # #400：枚举映射附件独立于主数据生命周期，主数据替换后保留
+    assert session.enum_excel_path == "old.xlsx"
+    assert session.enum_preview == [{"目标字段": "old"}]
     assert session.mapped_sub_rules is None
     assert session.latest_enum_artifact is None
     assert session.rule_source_fields is None

@@ -240,7 +240,13 @@ class SessionState:
         return self.decoded_data is not None or self.decoded_fields is not None
 
     def clear_decoded_data(self) -> None:
-        """清除当前主数据及其全部附件和派生结果。"""
+        """清除当前主数据及其派生结果；枚举映射附件独立保留（#400）。
+
+        #101 语义收窄：主数据本体与派生状态（映射/威胁/枚举提取/日志解析/
+        挂起计划）照旧全清；用户显式上传的枚举映射附件不再随主数据清除，
+        同消息"解析规则+枚举表"任一顺序上传后附件均可用。显式重置走
+        ``clear_enum_mapping_attachments``。
+        """
         self.decoded_data = None
         self.decoded_fields = None
         self.decoded_text = None
@@ -250,12 +256,6 @@ class SessionState:
         self.uploaded_file_name = None
         self.uploaded_file_time = None
         self.raw_base64 = None
-        self.enum_excel_path = None
-        self.enum_preview = None
-        self.enum_mapping_sheets = {}
-        self.enum_fill_contributions = {}
-        self.stale_enum_config_refs = set()
-        self.enum_pending_refills = {}
         self.last_mapping_data = None
         self.excel_data = None
         self.excel_filename = None
@@ -275,6 +275,15 @@ class SessionState:
         self.sub_rule_mapping_results = None
         # 主数据失效时 Planner 历史也必须失效，避免旧文件语义污染新请求。
         self.conversation_history = []
+
+    def clear_enum_mapping_attachments(self) -> None:
+        """清除枚举映射附件及其填充账本（#400：显式重置专用，主数据替换不调用）。"""
+        self.enum_excel_path = None
+        self.enum_preview = None
+        self.enum_mapping_sheets = {}
+        self.enum_fill_contributions = {}
+        self.stale_enum_config_refs = set()
+        self.enum_pending_refills = {}
 
     def replace_primary_dataset(self, snapshot: PrimaryDatasetSnapshot) -> None:
         """原子替换当前主数据；调用前必须完成全部解析和校验。"""
