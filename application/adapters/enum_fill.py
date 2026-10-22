@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from agent.shared.logger import get_logger
 from agent.shared.mapping_utils import (
     apply_enum_fill_with_contributions,
     count_field_mapping_changes,
     count_field_mappings,
+    iter_normalize_entries,
     remove_enum_fill_contributions,
 )
 from application.adapters.fill_shared import unbind_fixed_field_bindings
 from application.adapters.shared import (
     _build_config_artifact,
     _enum_mapping_table,
+    _failed,
     _needs_input,
     _read_config,
     _write_config,
@@ -24,6 +27,17 @@ from contracts.planner_models import FillStep, StepResult, StepSpec, StepStatus
 
 
 logger = get_logger("execution_adapters")
+
+
+def _config_has_any_target_field(config: Any, target_fields: tuple[str, ...]) -> bool:
+    """判断配置中是否存在 index/field 命中任一目标字段的条目（#400 零匹配守卫）。"""
+    targets = {str(name).strip() for name in target_fields}
+    for _path, _position, _owner, entry in iter_normalize_entries(config, require_index=False):
+        index_value = str(entry.get("index", "")).strip()
+        field_value = str(entry.get("field", "")).strip()
+        if index_value in targets or field_value in targets:
+            return True
+    return False
 
 
 class EnumFillAdapter:
@@ -47,6 +61,16 @@ class EnumFillAdapter:
         if not mapping_table:
             return _needs_input(
                 step, "enum_mapping_required", "当前枚举映射表没有可用于目标字段的规则"
+            )
+        # 零匹配守卫（#400）：映射表目标字段在配置中不存在同名字段时稳定失败，
+        # 不静默写错条目、不静默 no_effect（20261021 错位写入回归）。
+        if not _config_has_any_target_field(current_config, tuple(mapping_table)):
+            missing = "、".join(sorted(mapping_table))
+            return _failed(
+                step,
+                "enum_target_field_mismatch",
+                f"枚举映射表的目标字段（{missing}）在当前配置中不存在，"
+                "请检查 Sheet 名与要填充的字段名是否一致",
             )
         all_contributions = dict(context.session.enum_fill_contributions or {})
         config_contributions = dict(all_contributions.get(step.config_ref, {}) or {})

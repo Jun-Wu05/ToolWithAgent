@@ -198,12 +198,10 @@ def test有效配置上传原子替换旧日志数据集状态(monkeypatch):
     assert session.last_threat_data is None
     assert session.excel_data is None
     assert session.excel_filename is None
-    assert session.enum_excel_path is None
-    assert session.enum_preview is None
-    assert session.enum_mapping_sheets == {}
-    assert session.enum_fill_contributions == {}
-    assert session.stale_enum_config_refs == set()
-    assert session.enum_pending_refills == {}
+    # #400：枚举映射附件独立于主数据生命周期，解析规则上传后保留
+    assert session.enum_excel_path == "old-enum.xlsx"
+    assert session.enum_preview
+    assert session.enum_mapping_sheets
     assert session.conversation_history == []
     assert session.team is not None
     assert session.current_provider == "deepseek"
@@ -248,7 +246,7 @@ def test真实base64上传贯通application解码原子提交与既有反馈(mon
     assert session.decoded_fields == ["src_ip", "original_log"]
     assert session.original_log == ["src_ip=1.1.1.1"]
     assert session.raw_base64 == encoded
-    assert session.enum_excel_path is None
+    assert session.enum_excel_path == "old.xlsx"  # #400：映射附件保留
     assert session.latest_enum_artifact is None
     assert session.latest_threat_artifact is None
     assert captured == [
@@ -307,12 +305,10 @@ def test有效日志表原子替换旧配置数据集状态(monkeypatch):
     assert session.raw_base64 is None
     assert session.mapped_sub_rules is None
     assert session.log_classification is None
-    assert session.enum_excel_path is None
-    assert session.enum_preview is None
-    assert session.enum_mapping_sheets == {}
-    assert session.enum_fill_contributions == {}
-    assert session.stale_enum_config_refs == set()
-    assert session.enum_pending_refills == {}
+    # #400：日志 Excel 同为主数据替换，枚举映射附件保留
+    assert session.enum_excel_path == "old-enum.xlsx"
+    assert session.enum_preview
+    assert session.enum_mapping_sheets
     assert session.conversation_history == []
 
 
