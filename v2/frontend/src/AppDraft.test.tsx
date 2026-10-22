@@ -151,7 +151,7 @@ describe('Draft before sending a message', () => {
     current = { ...current, changed_count: 0 }; detail.drafts = [current]
     const save = deferred<never>(); vi.mocked(api.saveMapping).mockImplementationOnce(() => save.promise)
     await open(); fireEvent.click(screen.getByRole('button', { name: '查看结果' })); await waitFor(() => expect(screen.getByLabelText('src.ip 标准字段')).toBeEnabled())
-    fireEvent.change(screen.getByLabelText('src.ip 标准字段'), { target: { value: '目的地址' } })
+    fireEvent.click(screen.getByRole('combobox', { name: 'src.ip 标准字段' })); fireEvent.click(screen.getByRole('option', { name: /^目的地址/ }))
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
     fireEvent.keyDown(screen.getByRole('textbox', { name: '消息内容' }), { key: 'Enter' })
     expect(api.sendMessage).not.toHaveBeenCalled()
@@ -175,4 +175,24 @@ describe('Draft before sending a message', () => {
     fireEvent.change(screen.getByLabelText('开发身份切换'), { target: { value: 'u2' } }); await screen.findByRole('heading', { name: '另一会话' })
     await act(async () => creation.resolve(summary)); expect(api.sendMessage).not.toHaveBeenCalled(); expect(screen.getByRole('heading', { name: '另一会话' })).toBeInTheDocument()
   })
+})
+
+
+it('keeps failed selection when another result is opened from conversation', async () => {
+  detail.artifacts = [artifact, { ...artifact, id: 'map-old', current: false }]
+  vi.mocked(api.saveMapping).mockRejectedValueOnce(new Error('保存中断'))
+  await open()
+  fireEvent.click(screen.getAllByRole('button', { name: '查看结果' })[0])
+  await waitFor(() => expect(screen.getByLabelText('src.ip 标准字段')).toBeEnabled())
+  fireEvent.click(screen.getByRole('combobox', { name: 'src.ip 标准字段' }))
+  fireEvent.click(screen.getByRole('option', { name: /^目的地址/ }))
+  await screen.findByText('保存中断')
+  const editor = screen.getByRole('combobox', { name: 'src.ip 标准字段' })
+  fireEvent.click(screen.getByRole('tab', { name: '对话' }))
+  fireEvent.click(screen.getAllByRole('button', { name: '查看结果' })[1])
+  fireEvent.click(screen.getByRole('tab', { name: '结果与版本' }))
+  expect(screen.getByRole('combobox', { name: 'src.ip 标准字段' })).toBe(editor)
+  expect(editor).toHaveTextContent('目的地址')
+  expect(screen.getByText('保存中断')).toBeInTheDocument()
+  expect(api.mappingView).not.toHaveBeenCalledWith('map-old', expect.anything(), expect.anything())
 })

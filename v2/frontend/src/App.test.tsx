@@ -411,3 +411,33 @@ describe('mapping safe summary', () => {
     expect(screen.getByText('⚠️ 私人业务警告：威胁类型未生成。')).toBeInTheDocument()
   })
 })
+
+
+describe('Quiet Precision workspace', () => {
+  it('keeps unsent text across all four real workspace views', async () => {
+    render(<App />)
+    await screen.findByRole('heading', { name: '日志任务' })
+    const input = screen.getByRole('textbox', { name: '消息内容' })
+    fireEvent.change(input, { target: { value: '保留这条需求' } })
+    for (const tab of ['任务概览', '结果与版本', '执行轨迹', '对话']) fireEvent.click(screen.getByRole('tab', { name: tab }))
+    expect(screen.getByRole('textbox', { name: '消息内容' })).toBe(input)
+    expect(input).toHaveValue('保留这条需求')
+    expect(api.sendMessage).not.toHaveBeenCalled()
+  })
+  it('keeps the actual mapping editor and its filters mounted across tabs', async () => {
+    vi.mocked(api.conversation).mockResolvedValue(mappingDetail)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '查看结果' }))
+    const search = await screen.findByLabelText('搜索字段或样例')
+    fireEvent.change(search, { target: { value: 'src_ip' } })
+    fireEvent.click(screen.getByRole('tab', { name: '对话' }))
+    fireEvent.click(screen.getByRole('tab', { name: '结果与版本' }))
+    expect(screen.getByLabelText('搜索字段或样例')).toBe(search)
+    expect(search).toHaveValue('src_ip')
+    fireEvent.click(screen.getByRole('tab', { name: '日志分类' }))
+    fireEvent.click(screen.getByRole('tab', { name: '对话' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看结果' }))
+    await waitFor(() => expect(search).toBeVisible())
+    expect(search).toHaveValue('src_ip')
+  })
+})
