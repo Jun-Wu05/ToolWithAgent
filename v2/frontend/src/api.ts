@@ -48,6 +48,9 @@ export type AdminRun = { id: string; task_id: string; kind: string; message_id?:
 export type AdminRunPage = { items: AdminRun[]; total: number; page: number; page_size: number }
 export type AdminAuditEvent = { id: string; action: string; target_type: string; target_id: string; created_at: string; reason: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; actor_name: string }
 export type AdminAuditPage = { items: AdminAuditEvent[]; total: number; page: number; page_size: number }
+export type AdminKnowledgeItem = { application_id: number; status: 'pending' | 'approved' | 'rejected'; format_type: string; selection_mode: string; feature_field: string; extractor_type: string; submitter: string; created_at: string; reviewed_at: string | null; reviewer: string | null; review_reason: string | null; replaces_application_id: number | null; replaced_by_application_id: number | null }
+export type AdminKnowledgePage = { items: AdminKnowledgeItem[]; total: number; page: number; page_size: number; counts: { pending: number; approved: number; rejected: number } }
+export type AdminKnowledgeDetail = AdminKnowledgeItem & { recipe_version: number; structure_hash: string; structure_tokens: string[]; format_spec: Record<string, unknown>; extractor_spec: Record<string, unknown>; submission_note: string; sample_count: number; samples: string[] }
 export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; events?: RunEvent[] }
@@ -104,6 +107,12 @@ const messages: Record<string, string> = {
   mapping_sub_rule_not_found: '子规则不存在，请重新选择。',
   insufficient_capability: '当前身份不能执行这项操作。',
   run_not_queued: '该执行已不在排队中，请刷新列表后重试。',
+  log_knowledge_reason_required: '拒绝必须填写理由。',
+  log_knowledge_replacement_reason_required: '已存在同结构的已批准知识，替代它必须填写理由。',
+  log_knowledge_not_pending: '该申请已不在待审核状态，请刷新列表。',
+  log_knowledge_not_rejected: '只有已拒绝的申请可以删除。',
+  log_knowledge_review_failed: '审核操作失败，请刷新后重试。',
+  log_knowledge_not_found: '申请不存在或已被删除。',
   unauthenticated: '当前身份已失效，请重新选择身份。',
   idempotency_key_reused: '输入参数已变化，请重新开始映射。',
 }
@@ -187,6 +196,11 @@ export const api = {
   adminCancelRun: (id: string, reason?: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || null }) }),
   adminForceStop: (id: string, reason: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/force-stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
   adminAuditEvents: (page: number) => request<AdminAuditPage>('/admin/audit-events?page=' + page),
+  adminKnowledge: (status: string, page: number) => request<AdminKnowledgePage>('/admin/log-knowledge?' + new URLSearchParams({ ...(status ? { status } : {}), page: String(page) })),
+  adminKnowledgeDetail: (id: number) => request<AdminKnowledgeDetail>('/admin/log-knowledge/' + encodeURIComponent(id)),
+  adminKnowledgeApprove: (id: number, reason?: string) => request<{ application_id: number; status: string; replaces_application_id: number | null }>('/admin/log-knowledge/' + encodeURIComponent(id) + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || '' }) }),
+  adminKnowledgeReject: (id: number, reason: string) => request<{ application_id: number; status: string }>('/admin/log-knowledge/' + encodeURIComponent(id) + '/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
+  adminKnowledgeDelete: (id: number) => request<{ application_id: number; status: string }>('/admin/log-knowledge/' + encodeURIComponent(id), { method: 'DELETE' }),
   cancelToken: (id: string) => request<{ token: string }>('/runs/' + encodeURIComponent(id) + '/cancel-token', { method: 'POST' }),
   cancelRun: (id: string, token: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }),
   run: async (id: string): Promise<Run> => { const run = await request<Run>('/runs/' + encodeURIComponent(id)); return { ...run, error_message: messages[run.error_code || run.error_message || ''] || run.error_message } },

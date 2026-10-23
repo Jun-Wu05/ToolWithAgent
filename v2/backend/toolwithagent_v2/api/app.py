@@ -63,6 +63,10 @@ class AdminCancelInput(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class KnowledgeReviewInput(BaseModel):
+    reason: str = Field(default="", max_length=1000)
+
+
 class SessionInput(BaseModel):
     user_id: str
 
@@ -98,6 +102,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     store = Store(settings)
     app = FastAPI(title="ToolWithAgent V2", version="0.1.0")
     app.state.store = store
+    from agent.tools.log_pattern_store import LogKnowledgeError, LogKnowledgeRepository
+
+    knowledge_repository = LogKnowledgeRepository(store.path)
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Content-Type", "Idempotency-Key", "If-Match"])
 
     def principal(request: Request):
@@ -106,6 +113,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if user is None:
             raise HTTPException(401, "unauthenticated")
         return user
+
+    def admin_writer(request: Request):
+        user = principal(request)
+        if user["role"] != "admin":
+            raise HTTPException(403, "insufficient_capability")
+        return user
+
+    def translate_knowledge_error(exc: LogKnowledgeError):
+        message = str(exc)
+        if "not found" in message:
+            raise LookupError("log_knowledge_not_found")
+        if "replacement reason is required" in message:
+            raise ValueError("log_knowledge_replacement_reason_required")
+        if "only pending" in message:
+            raise ValueError("log_knowledge_not_pending")
+        if "only rejected" in message:
+            raise ValueError("log_knowledge_not_rejected")
+        raise ValueError("log_knowledge_review_failed")
 
     def user_writer(request: Request):
         user = principal(request)
@@ -137,6 +162,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "field_revision_conflict", "field_preview_not_editable", "field_undo_stale", "field_preview_resolution_required",
             "idempotency_key_reused", "run_not_retryable", "task_has_active_run",
             "run_not_cancellable", "run_not_stoppable", "run_not_queued", "run_not_waiting",
+            "log_knowledge_not_pending", "log_knowledge_not_rejected", "log_knowledge_review_failed",
+            "log_knowledge_replacement_reason_required",
             "invalid_confirmation_token", "confirmation_expired", "continuation_stale",
             "confirmation_resolution_required", "artifact_source_stale", "config_source_stale", "business_input_stale",
             "mapping_base_stale", "mapping_catalog_changed", "draft_revision_conflict", "draft_apply_in_progress", "draft_not_editable",
@@ -367,6 +394,73 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if user["role"] != "admin":
             raise HTTPException(403, "insufficient_capability")
         return store.admin_audit_events(user["id"], page=page)
+
+    @app.get("/api/v2/admin/log-knowledge")
+    def admin_log_knowledge(request: Request, status: str | None = None, page: int = 1):
+        admin_writer(request)
+        try:
+            return knowledge_repository.list_applications(status=status or None, page=page)
+        except ValueError:
+            raise HTTPException(422, "invalid_request")
+
+    @app.get("/api/v2/admin/log-knowledge/{application_id}")
+    def admin_log_knowledge_detail(request: Request, application_id: int):
+        admin_writer(request)
+        try:
+            detail = knowledge_repository.get_review_detail(application_id)
+        except LogKnowledgeError as exc:
+            translate_knowledge_error(exc)
+        samples = list(detail.samples)[:10]
+        application = detail.application
+        return {
+            "application_id": detail.application_id, "status": detail.status,
+            "recipe_version": application.recipe_version, "structure_hash": application.structure_hash,
+            "structure_tokens": list(application.structure_tokens), "format_type": application.format_type,
+            "selection_mode": application.selection_mode, "feature_field": application.feature_field,
+            "extractor_type": application.extractor_type, "extractor_spec": application.extractor_spec,
+            "submission_note": application.submission_note, "created_at": detail.created_at,
+            "reviewed_at": detail.reviewed_at, "reviewer": detail.reviewer, "review_reason": detail.review_reason,
+            "replaces_application_id": detail.replaces_application_id,
+            "replaced_by_application_id": detail.replaced_by_application_id,
+            "sample_count": len(detail.samples), "samples": samples,
+        }
+
+    @app.post("/api/v2/admin/log-knowledge/{application_id}/approve")
+    def admin_log_knowledge_approve(request: Request, application_id: int, payload: KnowledgeReviewInput):
+        user = admin_writer(request)
+        try:
+            knowledge_repository.approve(application_id, reviewer=user["id"], reason=payload.reason)
+        except LogKnowledgeError as exc:
+            translate_knowledge_error(exc)
+        detail = knowledge_repository.get_review_detail(application_id)
+        store.admin_audit(user["id"], "log_knowledge_approve", "log_knowledge", str(application_id),
+                          payload.reason, before={"status": "pending"}, after={"status": "approved",
+                          "replaces_application_id": detail.replaces_application_id})
+        return {"application_id": application_id, "status": "approved", "replaces_application_id": detail.replaces_application_id}
+
+    @app.post("/api/v2/admin/log-knowledge/{application_id}/reject")
+    def admin_log_knowledge_reject(request: Request, application_id: int, payload: KnowledgeReviewInput):
+        user = admin_writer(request)
+        if not payload.reason.strip():
+            raise ValueError("log_knowledge_reason_required")
+        try:
+            knowledge_repository.reject(application_id, reviewer=user["id"], reason=payload.reason.strip())
+        except LogKnowledgeError as exc:
+            translate_knowledge_error(exc)
+        store.admin_audit(user["id"], "log_knowledge_reject", "log_knowledge", str(application_id),
+                          payload.reason.strip(), before={"status": "pending"}, after={"status": "rejected"})
+        return {"application_id": application_id, "status": "rejected"}
+
+    @app.delete("/api/v2/admin/log-knowledge/{application_id}")
+    def admin_log_knowledge_delete(request: Request, application_id: int):
+        user = admin_writer(request)
+        try:
+            knowledge_repository.delete_rejected(application_id)
+        except LogKnowledgeError as exc:
+            translate_knowledge_error(exc)
+        store.admin_audit(user["id"], "log_knowledge_delete", "log_knowledge", str(application_id),
+                          before={"status": "rejected"}, after={"status": "deleted"})
+        return {"application_id": application_id, "status": "deleted"}
 
     @app.get("/api/v2/runs/{run_id}")
     def get_run(request: Request, run_id: str):

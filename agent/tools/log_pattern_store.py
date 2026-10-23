@@ -230,6 +230,70 @@ class LogKnowledgeRepository:
             ).fetchone()
         return int(row[0]) if row is not None else None
 
+    def list_applications(
+        self,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """Read-only admin listing: safe summaries only, never sample contents."""
+        statuses = ("pending", "approved", "rejected")
+        if status is not None and status not in statuses:
+            raise ValueError("invalid log knowledge status filter")
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 100))
+        where = "" if status is None else "WHERE status = ?"
+        parameters: list[Any] = [] if status is None else [status]
+        with self.connect() as connection:
+            total = connection.execute(
+                f"""
+                SELECT COUNT(*) FROM log_knowledge_applications {where}
+                """,
+                parameters,
+            ).fetchone()[0]
+            rows = connection.execute(
+                f"""
+                SELECT id, status, format_type, selection_mode, feature_field,
+                       extractor_type, submitter, created_at, reviewed_at,
+                       reviewer, review_reason, replaces_application_id,
+                       replaced_by_application_id
+                FROM log_knowledge_applications {where}
+                ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
+                """,
+                [*parameters, page_size, (page - 1) * page_size],
+            ).fetchall()
+            counts = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT status, COUNT(*) FROM log_knowledge_applications GROUP BY status"
+                ).fetchall()
+            }
+        items = [
+            {
+                "application_id": row[0],
+                "status": row[1],
+                "format_type": row[2],
+                "selection_mode": row[3],
+                "feature_field": row[4],
+                "extractor_type": row[5],
+                "submitter": row[6],
+                "created_at": row[7],
+                "reviewed_at": row[8],
+                "reviewer": row[9],
+                "review_reason": row[10],
+                "replaces_application_id": row[11],
+                "replaced_by_application_id": row[12],
+            }
+            for row in rows
+        ]
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "counts": {name: counts.get(name, 0) for name in statuses},
+        }
+
     def submit_application(
         self,
         application: LogKnowledgeApplicationInput,

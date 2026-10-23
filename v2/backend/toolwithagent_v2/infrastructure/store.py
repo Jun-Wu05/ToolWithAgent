@@ -908,6 +908,13 @@ class Store:
                     json.dumps(before, ensure_ascii=False, sort_keys=True) if before is not None else None,
                     json.dumps(after, ensure_ascii=False, sort_keys=True) if after is not None else None))
 
+    def admin_audit(self, admin_id, action, target_type, target_id, reason=None, before=None, after=None):
+        """独立事务记录一次管理写操作；审计失败不回滚已完成的业务写入。"""
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._admin_audit(db, admin_id, action, target_type, target_id, reason, before, after)
+            db.commit()
+
     def admin_overview(self, admin_id):
         with connect(self.path) as db:
             counts = {row["status"]: row["n"] for row in db.execute("SELECT status,COUNT(*) AS n FROM runs GROUP BY status")}
