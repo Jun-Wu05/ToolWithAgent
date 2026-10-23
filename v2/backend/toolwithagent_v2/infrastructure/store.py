@@ -897,10 +897,68 @@ class Store:
             if row["status"] != "queued":
                 self._record_state(db, row, "cancelling", "force_stopped")
             self._record_state(db, row, "cancelled", "force_stopped")
-            db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason) VALUES(?,?,?,?,?,?,?)",
-                       (uid(), admin_id, "force_stop", "run", run_id, now(), reason.strip()))
+            self._admin_audit(db, admin_id, "force_stop", "run", run_id, reason.strip(), before={"status": row["status"]}, after={"status": "cancelled", "error_code": "force_stopped"})
             db.commit()
             return {"id": run_id, "status": "cancelled", "error_code": "force_stopped"}
+
+    def _admin_audit(self, db, admin_id, action, target_type, target_id, reason=None, before=None, after=None):
+        """只写白名单字段；reason 与前后状态均为脱敏文本，不落服务器路径、输入快照或密钥。"""
+        db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason,before_json,after_json) VALUES(?,?,?,?,?,?,?,?,?)",
+                   (uid(), admin_id, action, target_type, target_id, now(), (reason or "").strip() or None,
+                    json.dumps(before, ensure_ascii=False, sort_keys=True) if before is not None else None,
+                    json.dumps(after, ensure_ascii=False, sort_keys=True) if after is not None else None))
+
+    def admin_overview(self, admin_id):
+        with connect(self.path) as db:
+            counts = {row["status"]: row["n"] for row in db.execute("SELECT status,COUNT(*) AS n FROM runs GROUP BY status")}
+            lease = db.execute("SELECT owner_id,lease_expires_at,epoch FROM worker_leases WHERE id='v2-primary'").fetchone()
+            return {
+                "runs": {status: counts.get(status, 0) for status in ("queued", "running", "waiting_confirmation", "cancelling", "succeeded", "failed", "cancelled")},
+                "users": db.execute("SELECT COUNT(*) AS n FROM users WHERE is_active=1").fetchone()["n"],
+                "conversations": db.execute("SELECT COUNT(*) AS n FROM conversations WHERE archived_at IS NULL").fetchone()["n"],
+                "worker": {"lease_owner": lease["owner_id"], "lease_expires_at": lease["lease_expires_at"], "epoch": lease["epoch"]},
+            }
+
+    def admin_runs(self, admin_id, status=None, page=1):
+        page = max(1, int(page))
+        size = 50
+        where, params = (" WHERE r.status=?", [status]) if status else ("", [])
+        with connect(self.path) as db:
+            total = db.execute("SELECT COUNT(*) AS n FROM runs r" + where, params).fetchone()["n"]
+            rows = db.execute(
+                "SELECT r.*,t.conversation_id,t.type AS task_type,t.owner_id,c.title AS conversation_title,u.display_name AS owner_name"
+                " FROM runs r JOIN tasks t ON t.id=r.task_id JOIN conversations c ON c.id=t.conversation_id JOIN users u ON u.id=t.owner_id"
+                + where + " ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?", [*params, size, (page - 1) * size]).fetchall()
+            return {"items": [{**self._run(row), "owner_id": row["owner_id"], "owner_name": row["owner_name"], "conversation_id": row["conversation_id"], "conversation_title": row["conversation_title"]} for row in rows], "total": total, "page": page, "page_size": size}
+
+    def admin_cancel_queued(self, admin_id, run_id, reason=None):
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (run_id,)).fetchone()
+            if row is None:
+                raise LookupError("run_not_found")
+            if row["status"] != "queued":
+                raise ValueError("run_not_queued")
+            self._record_state(db, row, "cancelled", "cancelled_by_admin")
+            self._admin_audit(db, admin_id, "cancel_queued", "run", run_id, reason, before={"status": "queued"}, after={"status": "cancelled", "error_code": "cancelled_by_admin"})
+            db.commit()
+            return {"id": run_id, "status": "cancelled", "error_code": "cancelled_by_admin"}
+
+    def admin_audit_events(self, admin_id, page=1):
+        page = max(1, int(page))
+        size = 50
+        with connect(self.path) as db:
+            total = db.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"]
+            rows = db.execute(
+                "SELECT a.id,a.action,a.target_type,a.target_id,a.created_at,a.reason,a.before_json,a.after_json,u.display_name AS actor_name"
+                " FROM audit_events a JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC,a.id DESC LIMIT ? OFFSET ?", (size, (page - 1) * size)).fetchall()
+            items = []
+            for row in rows:
+                item = dict(row)
+                item["before"] = json.loads(item.pop("before_json")) if item["before_json"] else None
+                item["after"] = json.loads(item.pop("after_json")) if item["after_json"] else None
+                items.append(item)
+            return {"items": items, "total": total, "page": page, "page_size": size}
 
     def _valid_claim(self, db, worker_id, claim):
         timestamp = now()

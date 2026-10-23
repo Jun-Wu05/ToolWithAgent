@@ -7,7 +7,7 @@ vi.mock('./api', () => ({
   saveDownload: vi.fn(),
   api: {
     me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(),
-    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn()
+    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn()
   }
 }))
 class FakeEventSource {
@@ -218,8 +218,8 @@ describe('field mapping workflow', () => {
     expect(screen.getByRole('textbox', { name: '产品' })).toHaveValue('测试产品')
     expect(api.fieldMapping).toHaveBeenCalledWith('conv-1', { file_id: 'f1', product: '测试产品', log_vendor: '测试厂商' }, expect.any(String))
   })
-  it.each(['developer', 'admin'])('hides mapping writes from %s and from ineligible inputs', async role => {
-    vi.mocked(api.me).mockResolvedValue({ id: 'observer', display_name: '只读身份', role })
+  it('hides mapping writes from developer and from ineligible inputs', async () => {
+    vi.mocked(api.me).mockResolvedValue({ id: 'observer', display_name: '只读身份', role: 'developer' })
     vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: 'input.log', mapping_eligible: true }] })
     render(<App />)
     await screen.findByRole('heading', { name: '日志任务' })
@@ -414,6 +414,16 @@ describe('mapping safe summary', () => {
 
 
 describe('Quiet Precision workspace', () => {
+  it('routes administrators into the admin console instead of the user workbench', async () => {
+    vi.mocked(api.me).mockResolvedValue({ id: 'dev-admin', display_name: '管理员', role: 'admin' })
+    vi.mocked(api.conversation).mockResolvedValue(detail)
+    vi.mocked(api.adminOverview).mockResolvedValue({ runs: { queued: 1, running: 0, waiting_confirmation: 0, cancelling: 0, succeeded: 0, failed: 0, cancelled: 0 }, users: 3, conversations: 1, worker: { lease_owner: null, lease_expires_at: null, epoch: 0 } })
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: '管理台' })).toBeInTheDocument()
+    expect(await screen.findByRole('navigation', { name: '管理导航' })).toBeInTheDocument()
+    expect(screen.queryByRole('tablist', { name: '工作区视图' })).not.toBeInTheDocument()
+    expect(api.adminOverview).toHaveBeenCalled()
+  })
   it('keeps unsent text across all four real workspace views', async () => {
     render(<App />)
     await screen.findByRole('heading', { name: '日志任务' })

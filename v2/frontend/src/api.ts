@@ -43,6 +43,11 @@ export type MappingView = {
 }
 export type MappingQuery = { sub_rule?: string; page: number; q: string; status: string; draft_id?: string }
 export type ArtifactDownload = { name: string; blob: Blob }
+export type AdminOverview = { runs: Record<string, number>; users: number; conversations: number; worker: { lease_owner: string | null; lease_expires_at: string | null; epoch: number } }
+export type AdminRun = { id: string; task_id: string; kind: string; message_id?: string | null; file_id?: string | null; status: string; attempt: number; queued_at: string; started_at: string | null; finished_at: string | null; error_code?: string | null; created_at: string; updated_at: string; owner_id: string; owner_name: string; conversation_id: string; conversation_title: string }
+export type AdminRunPage = { items: AdminRun[]; total: number; page: number; page_size: number }
+export type AdminAuditEvent = { id: string; action: string; target_type: string; target_id: string; created_at: string; reason: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; actor_name: string }
+export type AdminAuditPage = { items: AdminAuditEvent[]; total: number; page: number; page_size: number }
 export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; events?: RunEvent[] }
@@ -98,6 +103,7 @@ const messages: Record<string, string> = {
   invalid_mapping_query: '搜索或筛选条件无效，请修改后重试。',
   mapping_sub_rule_not_found: '子规则不存在，请重新选择。',
   insufficient_capability: '当前身份不能执行这项操作。',
+  run_not_queued: '该执行已不在排队中，请刷新列表后重试。',
   unauthenticated: '当前身份已失效，请重新选择身份。',
   idempotency_key_reused: '输入参数已变化，请重新开始映射。',
 }
@@ -176,6 +182,11 @@ export const api = {
   discardMappingDraft: (id: string, revision: number) => request<MappingDraft>('/mapping-drafts/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'If-Match': String(revision) } }),
   submitLogKnowledge: (artifactId: string) => request<{ task: { id: string; status: string }; run: Run }>('/artifacts/' + encodeURIComponent(artifactId) + '/submit-log-knowledge', { method: 'POST' }),
   retryRun: (id: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/retry', { method: 'POST' }),
+  adminOverview: () => request<AdminOverview>('/admin/overview'),
+  adminRuns: (status: string, page: number) => request<AdminRunPage>('/admin/runs?' + new URLSearchParams({ ...(status ? { status } : {}), page: String(page) })),
+  adminCancelRun: (id: string, reason?: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || null }) }),
+  adminForceStop: (id: string, reason: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/force-stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
+  adminAuditEvents: (page: number) => request<AdminAuditPage>('/admin/audit-events?page=' + page),
   cancelToken: (id: string) => request<{ token: string }>('/runs/' + encodeURIComponent(id) + '/cancel-token', { method: 'POST' }),
   cancelRun: (id: string, token: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }),
   run: async (id: string): Promise<Run> => { const run = await request<Run>('/runs/' + encodeURIComponent(id)); return { ...run, error_message: messages[run.error_code || run.error_message || ''] || run.error_message } },

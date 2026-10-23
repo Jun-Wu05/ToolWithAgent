@@ -59,6 +59,10 @@ class ForceStopInput(BaseModel):
     reason: str
 
 
+class AdminCancelInput(BaseModel):
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class SessionInput(BaseModel):
     user_id: str
 
@@ -132,7 +136,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status = 413 if code == "file_too_large" else (409 if code in {
             "field_revision_conflict", "field_preview_not_editable", "field_undo_stale", "field_preview_resolution_required",
             "idempotency_key_reused", "run_not_retryable", "task_has_active_run",
-            "run_not_cancellable", "run_not_stoppable", "run_not_waiting",
+            "run_not_cancellable", "run_not_stoppable", "run_not_queued", "run_not_waiting",
             "invalid_confirmation_token", "confirmation_expired", "continuation_stale",
             "confirmation_resolution_required", "artifact_source_stale", "config_source_stale", "business_input_stale",
             "mapping_base_stale", "mapping_catalog_changed", "draft_revision_conflict", "draft_apply_in_progress", "draft_not_editable",
@@ -335,6 +339,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if user["role"] != "admin":
             raise HTTPException(403, "insufficient_capability")
         return store.force_stop(user["id"], run_id, payload.reason)
+
+    @app.get("/api/v2/admin/overview")
+    def admin_overview(request: Request):
+        user = principal(request)
+        if user["role"] != "admin":
+            raise HTTPException(403, "insufficient_capability")
+        return store.admin_overview(user["id"])
+
+    @app.get("/api/v2/admin/runs")
+    def admin_runs(request: Request, status: str | None = None, page: int = 1):
+        user = principal(request)
+        if user["role"] != "admin":
+            raise HTTPException(403, "insufficient_capability")
+        return store.admin_runs(user["id"], status=status or None, page=page)
+
+    @app.post("/api/v2/admin/runs/{run_id}/cancel")
+    def admin_cancel_run(request: Request, run_id: str, payload: AdminCancelInput):
+        user = principal(request)
+        if user["role"] != "admin":
+            raise HTTPException(403, "insufficient_capability")
+        return store.admin_cancel_queued(user["id"], run_id, payload.reason)
+
+    @app.get("/api/v2/admin/audit-events")
+    def admin_audit_events(request: Request, page: int = 1):
+        user = principal(request)
+        if user["role"] != "admin":
+            raise HTTPException(403, "insufficient_capability")
+        return store.admin_audit_events(user["id"], page=page)
 
     @app.get("/api/v2/runs/{run_id}")
     def get_run(request: Request, run_id: str):
