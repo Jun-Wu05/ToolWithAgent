@@ -538,8 +538,10 @@ export function App() {
       <div className="recent-title">最近会话</div>
       <div className="recent-list">{conversations.length ? conversations.map(item => <button key={item.id} className={'recent-item ' + (item.id === activeId ? 'active' : '')} onClick={() => void selectConversation(item.id)}><span className="recent-name">{item.title || '未命名会话'}</span><span className="recent-time">{readableTime(item.updated_at)}</span></button>) : <p className="sidebar-empty">新建会话开始工作</p>}</div>
       <div className="identity">
-        <span className="avatar">{identity?.display_name?.slice(0, 1) || '用'}</span>
-        <span className="identity-name">{identity?.display_name || '加载中'}<small>{identity?.role || 'user'}</small></span>
+        <div className="identity-head">
+          <span className="avatar">{identity?.display_name?.slice(0, 1) || '用'}</span>
+          <span className="identity-name">{identity?.display_name || '加载中'}<small>{identity?.role || 'user'}</small></span>
+        </div>
         {identities.length > 0 && <select aria-label="开发身份切换" value={identity?.id || ''} onChange={event => void switchIdentity(event.target.value)} disabled={busy}>{identities.map(item => <option key={item.id} value={item.id}>{item.display_name} ({item.role})</option>)}</select>}
       </div>
     </aside>

@@ -76,8 +76,10 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
       <div className="brand"><span className="brand-mark">T</span><span>ToolWithAgent <small>管理台</small></span></div>
       <nav aria-label="管理导航">{sections.map(item => <button key={item.id} className={'nav-item ' + (section === item.id ? 'selected' : '')} onClick={() => { setSection(item.id); if (item.id === 'runs') setRunPage(1); if (item.id === 'audit') setAuditPage(1) }}>{item.label}</button>)}</nav>
       <div className="identity">
-        <span className="avatar">{identity.display_name?.slice(0, 1) || '管'}</span>
-        <span className="identity-name">{identity.display_name}<small>{identity.role}</small></span>
+        <div className="identity-head">
+          <span className="avatar">{identity.display_name?.slice(0, 1) || '管'}</span>
+          <span className="identity-name">{identity.display_name}<small>{identity.role}</small></span>
+        </div>
         {identities.length > 1 && <select aria-label="开发身份切换" value={identity.id} onChange={event => onSwitchIdentity(event.target.value)}><option value={identity.id}>{identity.display_name} ({identity.role})</option>{identities.filter(item => item.id !== identity.id).map(item => <option key={item.id} value={item.id}>{item.display_name} ({item.role})</option>)}</select>}
       </div>
     </aside>
