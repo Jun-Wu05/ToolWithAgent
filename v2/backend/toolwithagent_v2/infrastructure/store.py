@@ -29,6 +29,7 @@ class Store:
         self.settings = settings
         self.root = settings.data_dir
         self.path = self.root / "v2.sqlite3"
+        self._cached_master_key = None
         migrate(self.path)
         (self.root / "uploads").mkdir(parents=True, exist_ok=True)
         (self.root / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -966,6 +967,112 @@ class Store:
                 item["after"] = json.loads(item.pop("after_json")) if item["after_json"] else None
                 items.append(item)
             return {"items": items, "total": total, "page": page, "page_size": size}
+
+    def _master_key(self):
+        from toolwithagent_v2.infrastructure.providers import MasterKeyUnavailable, resolve_master_key
+        if self._cached_master_key is None:
+            key = resolve_master_key(self.root, development=self.settings.development)
+            if key is None:
+                raise MasterKeyUnavailable("master_key_missing")
+            self._cached_master_key = key
+        return self._cached_master_key
+
+    def admin_providers(self, admin_id):
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS, provider_label
+        with connect(self.path) as db:
+            current = {row["provider"]: dict(row) for row in db.execute(
+                "SELECT p.provider,p.current_revision,c.model,c.created_at FROM provider_configs p"
+                " LEFT JOIN provider_config_versions c ON c.provider=p.provider AND c.revision=p.current_revision")}
+            secrets = {row["provider"] for row in db.execute("SELECT DISTINCT provider FROM provider_config_versions WHERE secret_version_id IS NOT NULL")}
+        return {"items": [{"provider": name, "label": provider_label(name), "base_url": PROVIDER_BASE_URLS[name],
+                           "revision": (current.get(name) or {}).get("current_revision") or 0,
+                           "model": (current.get(name) or {}).get("model") if name in current else None,
+                           "updated_at": (current.get(name) or {}).get("created_at") if name in current else None,
+                           "has_secret": name in secrets} for name in PROVIDER_BASE_URLS]}
+
+    def admin_save_provider(self, admin_id, provider, model, api_key, params=None, reason=None):
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS, seal_secret
+        if provider not in PROVIDER_BASE_URLS:
+            raise LookupError("provider_not_found")
+        model = (model or "").strip()
+        if not model or len(model) > 160 or not api_key or len(api_key) > 4096:
+            raise ValueError("invalid_provider_input")
+        if params is not None and (not isinstance(params, dict) or len(json.dumps(params)) > 4000):
+            raise ValueError("invalid_provider_input")
+        params = params or {}
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT current_revision FROM provider_configs WHERE provider=?", (provider,)).fetchone()
+            previous = row["current_revision"] if row else 0
+            sealed = seal_secret(self._master_key(), api_key)
+            secret_id = uid()
+            db.execute("INSERT INTO provider_secrets(id,ciphertext,nonce,key_id,created_at) VALUES(?,?,?,?,?)",
+                       (secret_id, sealed["blob"], sealed["blob"][:16], sealed["key_id"], now()))
+            revision = previous + 1
+            db.execute("INSERT INTO provider_config_versions(id,provider,model,params_json,secret_version_id,revision,created_at) VALUES(?,?,?,?,?,?,?)",
+                       (uid(), provider, model, json.dumps(params, ensure_ascii=False, sort_keys=True), secret_id, revision, now()))
+            if row is None:
+                db.execute("INSERT INTO provider_configs(provider,current_revision,created_at) VALUES(?,?,?)", (provider, revision, now()))
+            else:
+                db.execute("UPDATE provider_configs SET current_revision=? WHERE provider=?", (revision, provider))
+            self._admin_audit(db, admin_id, "provider_update", "provider", provider, reason,
+                              before={"revision": previous}, after={"revision": revision, "model": model})
+            db.commit()
+            return {"provider": provider, "revision": revision, "model": model}
+
+    def admin_provider_history(self, admin_id, provider):
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS
+        if provider not in PROVIDER_BASE_URLS:
+            raise LookupError("provider_not_found")
+        with connect(self.path) as db:
+            rows = db.execute(
+                "SELECT revision,model,params_json,created_at,secret_version_id FROM provider_config_versions WHERE provider=? ORDER BY revision DESC",
+                (provider,)).fetchall()
+        return {"items": [{"revision": row["revision"], "model": row["model"],
+                           "params": json.loads(row["params_json"]), "created_at": row["created_at"],
+                           "has_secret": row["secret_version_id"] is not None} for row in rows]}
+
+    def resolve_provider_secret(self, provider, revision=None):
+        """Frozen-run read path: decrypt the exact stored version, never the latest by default."""
+        master = self._master_key()
+        with connect(self.path) as db:
+            if revision is None:
+                row = db.execute(
+                    "SELECT v.model,v.params_json,v.secret_version_id FROM provider_configs p"
+                    " JOIN provider_config_versions v ON v.provider=p.provider AND v.revision=p.current_revision WHERE p.provider=?",
+                    (provider,)).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT model,params_json,secret_version_id FROM provider_config_versions WHERE provider=? AND revision=?",
+                    (provider, revision)).fetchone()
+            if row is None or row["secret_version_id"] is None:
+                raise LookupError("provider_not_found")
+            sealed = db.execute("SELECT ciphertext FROM provider_secrets WHERE id=?", (row["secret_version_id"],)).fetchone()
+        from toolwithagent_v2.infrastructure.providers import open_secret
+        return {"model": row["model"], "params": json.loads(row["params_json"]),
+                "api_key": open_secret(master, sealed["ciphertext"])}
+
+    def admin_test_provider(self, admin_id, provider, model=None, api_key=None, params=None):
+        """Live connection probe; never creates a Task or Run, never logs the key."""
+        import httpx
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS
+        if provider not in PROVIDER_BASE_URLS:
+            raise LookupError("provider_not_found")
+        base_url = (params or {}).get("base_url") or PROVIDER_BASE_URLS[provider]
+        if not api_key:
+            saved = self.resolve_provider_secret(provider)
+            api_key = saved["api_key"]
+            model = model or saved["model"]
+        import httpx
+        started = time.monotonic()
+        try:
+            with httpx.Client(trust_env=False, timeout=8) as client:
+                response = client.get(base_url.rstrip("/") + "/models", headers={"Authorization": "Bearer " + api_key})
+            latency = int((time.monotonic() - started) * 1000)
+            return {"ok": response.status_code == 200, "status_code": response.status_code, "latency_ms": latency}
+        except httpx.HTTPError as exc:
+            latency = int((time.monotonic() - started) * 1000)
+            return {"ok": False, "status_code": None, "latency_ms": latency, "error": type(exc).__name__}
 
     def _valid_claim(self, db, worker_id, claim):
         timestamp = now()

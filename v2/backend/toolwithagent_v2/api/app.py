@@ -67,6 +67,19 @@ class KnowledgeReviewInput(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class ProviderSaveInput(BaseModel):
+    model: str = Field(max_length=160)
+    api_key: str = Field(max_length=4096)
+    params: dict | None = None
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class ProviderTestInput(BaseModel):
+    model: str | None = Field(default=None, max_length=160)
+    api_key: str | None = Field(default=None, max_length=4096)
+    params: dict | None = None
+
+
 class SessionInput(BaseModel):
     user_id: str
 
@@ -103,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="ToolWithAgent V2", version="0.1.0")
     app.state.store = store
     from agent.tools.log_pattern_store import LogKnowledgeError, LogKnowledgeRepository
+    from toolwithagent_v2.infrastructure.providers import MasterKeyUnavailable
 
     knowledge_repository = LogKnowledgeRepository(store.path)
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Content-Type", "Idempotency-Key", "If-Match"])
@@ -461,6 +475,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.admin_audit(user["id"], "log_knowledge_delete", "log_knowledge", str(application_id),
                           before={"status": "rejected"}, after={"status": "deleted"})
         return {"application_id": application_id, "status": "deleted"}
+
+    @app.exception_handler(MasterKeyUnavailable)
+    async def master_key_error(request: Request, exc: MasterKeyUnavailable):
+        return JSONResponse(status_code=503, content={"error": {"code": str(exc), "message": str(exc), "details": {}, "request_id": request.state.request_id}})
+
+    @app.get("/api/v2/admin/providers")
+    def admin_providers(request: Request):
+        admin_writer(request)
+        return store.admin_providers(principal(request)["id"])
+
+    @app.get("/api/v2/admin/providers/{provider}/history")
+    def admin_provider_history(request: Request, provider: str):
+        admin_writer(request)
+        try:
+            return store.admin_provider_history(principal(request)["id"], provider)
+        except LookupError:
+            raise HTTPException(404, "provider_not_found")
+
+    @app.put("/api/v2/admin/providers/{provider}")
+    def admin_save_provider(request: Request, provider: str, payload: ProviderSaveInput):
+        user = admin_writer(request)
+        try:
+            result = store.admin_save_provider(user["id"], provider, payload.model, payload.api_key, payload.params, payload.reason)
+        except LookupError:
+            raise HTTPException(404, "provider_not_found")
+        except ValueError:
+            raise HTTPException(400, "invalid_provider_input")
+        return result
+
+    @app.post("/api/v2/admin/providers/{provider}/test")
+    def admin_test_provider(request: Request, provider: str, payload: ProviderTestInput):
+        user = admin_writer(request)
+        try:
+            return store.admin_test_provider(user["id"], provider, payload.model, payload.api_key, payload.params)
+        except LookupError:
+            raise HTTPException(404, "provider_not_found")
 
     @app.get("/api/v2/runs/{run_id}")
     def get_run(request: Request, run_id: str):

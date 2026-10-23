@@ -51,6 +51,9 @@ export type AdminAuditPage = { items: AdminAuditEvent[]; total: number; page: nu
 export type AdminKnowledgeItem = { application_id: number; status: 'pending' | 'approved' | 'rejected'; format_type: string; selection_mode: string; feature_field: string; extractor_type: string; submitter: string; created_at: string; reviewed_at: string | null; reviewer: string | null; review_reason: string | null; replaces_application_id: number | null; replaced_by_application_id: number | null }
 export type AdminKnowledgePage = { items: AdminKnowledgeItem[]; total: number; page: number; page_size: number; counts: { pending: number; approved: number; rejected: number } }
 export type AdminKnowledgeDetail = AdminKnowledgeItem & { recipe_version: number; structure_hash: string; structure_tokens: string[]; format_spec: Record<string, unknown>; extractor_spec: Record<string, unknown>; submission_note: string; sample_count: number; samples: string[] }
+export type AdminProvider = { provider: string; label: string; base_url: string; revision: number; model: string | null; updated_at: string | null; has_secret: boolean }
+export type AdminProviderVersion = { revision: number; model: string; params: Record<string, unknown>; created_at: string; has_secret: boolean }
+export type AdminProviderTestResult = { ok: boolean; status_code: number | null; latency_ms: number; error?: string }
 export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; events?: RunEvent[] }
@@ -113,6 +116,11 @@ const messages: Record<string, string> = {
   log_knowledge_not_rejected: '只有已拒绝的申请可以删除。',
   log_knowledge_review_failed: '审核操作失败，请刷新后重试。',
   log_knowledge_not_found: '申请不存在或已被删除。',
+  provider_not_found: '提供方不存在或不受支持。',
+  invalid_provider_input: '模型名称和密钥不能为空，请检查后重试。',
+  master_key_missing: '主密钥未配置，无法读写提供方密钥；请设置 V2_MASTER_KEY 后重试。',
+  master_key_invalid: '主密钥校验失败，已保存的密钥无法解密；请检查主密钥配置。',
+  master_key_invalid_format: '主密钥格式无效；请提供 32 字节的 base64 或十六进制密钥。',
   unauthenticated: '当前身份已失效，请重新选择身份。',
   idempotency_key_reused: '输入参数已变化，请重新开始映射。',
 }
@@ -201,6 +209,10 @@ export const api = {
   adminKnowledgeApprove: (id: number, reason?: string) => request<{ application_id: number; status: string; replaces_application_id: number | null }>('/admin/log-knowledge/' + encodeURIComponent(id) + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || '' }) }),
   adminKnowledgeReject: (id: number, reason: string) => request<{ application_id: number; status: string }>('/admin/log-knowledge/' + encodeURIComponent(id) + '/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
   adminKnowledgeDelete: (id: number) => request<{ application_id: number; status: string }>('/admin/log-knowledge/' + encodeURIComponent(id), { method: 'DELETE' }),
+  adminProviders: () => request<{ items: AdminProvider[] }>('/admin/providers'),
+  adminProviderHistory: (provider: string) => request<{ items: AdminProviderVersion[] }>('/admin/providers/' + encodeURIComponent(provider) + '/history'),
+  adminSaveProvider: (provider: string, input: { model: string; api_key: string; params?: Record<string, unknown>; reason?: string }) => request<{ provider: string; revision: number; model: string }>('/admin/providers/' + encodeURIComponent(provider), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }),
+  adminTestProvider: (provider: string, input?: { model?: string; api_key?: string; params?: Record<string, unknown> }) => request<AdminProviderTestResult>('/admin/providers/' + encodeURIComponent(provider) + '/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input || {}) }),
   cancelToken: (id: string) => request<{ token: string }>('/runs/' + encodeURIComponent(id) + '/cancel-token', { method: 'POST' }),
   cancelRun: (id: string, token: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }),
   run: async (id: string): Promise<Run> => { const run = await request<Run>('/runs/' + encodeURIComponent(id)); return { ...run, error_message: messages[run.error_code || run.error_message || ''] || run.error_message } },

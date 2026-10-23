@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminConsole } from './AdminConsole'
-import { api, type AdminAuditPage, type AdminKnowledgeDetail, type AdminKnowledgePage, type AdminOverview, type AdminRunPage } from './api'
+import { api, type AdminAuditPage, type AdminKnowledgeDetail, type AdminKnowledgePage, type AdminOverview, type AdminProvider, type AdminRunPage } from './api'
 
 const identity = { id: 'dev-admin', display_name: '管理员', role: 'admin' }
 const overview: AdminOverview = { runs: { queued: 2, running: 1, waiting_confirmation: 0, cancelling: 0, succeeded: 3, failed: 0, cancelled: 1 }, users: 3, conversations: 2, worker: { lease_owner: 'worker-1', lease_expires_at: '2026-10-23T00:00:00Z', epoch: 4 } }
@@ -17,6 +17,10 @@ const knowledgePage: AdminKnowledgePage = { total: 2, page: 1, page_size: 20, co
   { application_id: 12, status: 'pending', format_type: 'kv', selection_mode: 'automatic', feature_field: '', extractor_type: 'regex', submitter: 'dev-other', created_at: '2026-10-23T00:00:00Z', reviewed_at: null, reviewer: null, review_reason: null, replaces_application_id: null, replaced_by_application_id: null },
 ] }
 const knowledgeDetail: AdminKnowledgeDetail = { ...knowledgePage.items[0], recipe_version: 1, structure_hash: 'abc123def456', structure_tokens: ['time', 'msg'], format_spec: { format_detail: 'json-lines' }, extractor_spec: { path: '$.log' }, submission_note: '来自冒烟验证', sample_count: 2, samples: ['2026-10-23 INFO hello', '2026-10-23 ERROR bad <tag>'] }
+const providersPage: AdminProvider[] = [
+  { provider: 'openai', label: 'OpenAI', base_url: 'https://api.openai.com/v1', revision: 2, model: 'gpt-4o', updated_at: '2026-10-23T00:00:00Z', has_secret: true },
+  { provider: 'deepseek', label: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', revision: 0, model: null, updated_at: null, has_secret: false },
+]
 const props = () => ({ identity, identities: [identity, { id: 'dev-user', display_name: '演示用户', role: 'user' }], onSwitchIdentity: vi.fn(), theme: 'light' as const, onToggleTheme: vi.fn() })
 beforeEach(() => {
   vi.spyOn(api, 'adminOverview').mockResolvedValue(overview)
@@ -29,6 +33,10 @@ beforeEach(() => {
   vi.spyOn(api, 'adminKnowledgeApprove').mockResolvedValue({ application_id: 11, status: 'approved', replaces_application_id: null })
   vi.spyOn(api, 'adminKnowledgeReject').mockResolvedValue({ application_id: 11, status: 'rejected' })
   vi.spyOn(api, 'adminKnowledgeDelete').mockResolvedValue({ application_id: 11, status: 'deleted' })
+  vi.spyOn(api, 'adminProviders').mockResolvedValue({ items: providersPage })
+  vi.spyOn(api, 'adminProviderHistory').mockResolvedValue({ items: [{ revision: 2, model: 'gpt-4o', params: {}, created_at: '2026-10-23T00:00:00Z', has_secret: true }, { revision: 1, model: 'gpt-4o-mini', params: {}, created_at: '2026-10-22T00:00:00Z', has_secret: true }] })
+  vi.spyOn(api, 'adminSaveProvider').mockResolvedValue({ provider: 'openai', revision: 3, model: 'gpt-4o' })
+  vi.spyOn(api, 'adminTestProvider').mockResolvedValue({ ok: true, status_code: 200, latency_ms: 231 })
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
@@ -80,12 +88,50 @@ describe('admin console', () => {
     expect(within(table).getByText(/\{"status":"running"\} → /)).toBeInTheDocument()
     expect(within(table).getByText('管理员')).toBeInTheDocument()
   })
-  it('keeps provider and user sections as explicit placeholders', async () => {
+  it('keeps the user section as an explicit placeholder', async () => {
+    render(<AdminConsole {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: '用户' }))
+    expect(await screen.findByText(/该区域由下一切片交付/)).toBeInTheDocument()
+  })
+  it('lists providers with version and secret presence, never echoing keys', async () => {
     render(<AdminConsole {...props()} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Provider' }))
-    expect(await screen.findByText(/该区域由后续切片交付/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '用户' }))
-    expect(await screen.findByText(/该区域由后续切片交付/)).toBeInTheDocument()
+    const table = await screen.findByRole('table', { name: 'Provider 列表' })
+    expect(within(table).getByText('gpt-4o')).toBeInTheDocument()
+    expect(within(table).getByText('已保存')).toBeInTheDocument()
+    expect(within(table).getAllByText('未保存').length).toBe(1)
+    expect(document.body.textContent).not.toContain('sk-')
+  })
+  it('saves a new provider version with a fresh key entry and reloads the list', async () => {
+    render(<AdminConsole {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Provider' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: '配置' }))[0])
+    const dialog = await screen.findByRole('dialog', { name: '配置 OpenAI' })
+    fireEvent.change(within(dialog).getByLabelText('模型名称'), { target: { value: 'gpt-4o-2026' } })
+    fireEvent.change(within(dialog).getByLabelText('API 密钥（必填，不回显已保存密钥）'), { target: { value: 'sk-rotated' } })
+    fireEvent.change(within(dialog).getByLabelText('变更原因（可选，写入审计）'), { target: { value: '轮换密钥' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存新版本' }))
+    await waitFor(() => expect(api.adminSaveProvider).toHaveBeenCalledWith('openai', { model: 'gpt-4o-2026', api_key: 'sk-rotated', reason: '轮换密钥' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(vi.mocked(api.adminProviders).mock.calls.length).toBeGreaterThan(1)
+  })
+  it('tests the saved connection without creating runs and shows latency', async () => {
+    render(<AdminConsole {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Provider' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: '测试连接' }))[0])
+    expect(await screen.findByText(/连接测试：成功/)).toBeInTheDocument()
+    expect(screen.getByText(/HTTP 200/)).toBeInTheDocument()
+    expect(api.adminTestProvider).toHaveBeenCalledWith('openai', {})
+    expect(api.adminRuns).not.toHaveBeenCalled()
+  })
+  it('shows immutable version history without secrets', async () => {
+    render(<AdminConsole {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Provider' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: '历史' }))[0])
+    const dialog = await screen.findByRole('dialog', { name: '版本历史 · openai' })
+    expect(await within(dialog).findByText('gpt-4o-mini')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('已加密保存')).toHaveLength(2)
+    expect(document.body.textContent).not.toContain('sk-')
   })
   it('lists knowledge applications with submitter and opens the bounded-sample detail', async () => {
     render(<AdminConsole {...props()} />)

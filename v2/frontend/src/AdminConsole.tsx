@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type AdminKnowledgeDetail, type Identity } from './api'
+import { api, type AdminKnowledgeDetail, type AdminProvider, type AdminProviderVersion, type AdminProviderTestResult, type Identity } from './api'
 import { StatusText } from './VisualPrimitives'
 import { MappingDialog } from './MappingDialog'
 
@@ -54,10 +54,18 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
   const [knowledgeDetailBusy, setKnowledgeDetailBusy] = useState(false)
   const [reviewReason, setReviewReason] = useState('')
   const [replacementRequired, setReplacementRequired] = useState(false)
+  const [providerTarget, setProviderTarget] = useState<AdminProvider | null>(null)
+  const [providerModel, setProviderModel] = useState('')
+  const [providerKey, setProviderKey] = useState('')
+  const [providerBaseUrl, setProviderBaseUrl] = useState('')
+  const [providerReason, setProviderReason] = useState('')
+  const [providerTest, setProviderTest] = useState<AdminProviderTestResult | null>(null)
+  const [providerHistory, setProviderHistory] = useState<{ provider: string; items: AdminProviderVersion[] } | null>(null)
   const overview = useAsync(() => api.adminOverview(), [section], section === 'system')
   const runs = useAsync(() => api.adminRuns(runStatus, runPage), [section, runStatus, runPage], section === 'runs')
   const audit = useAsync(() => api.adminAuditEvents(auditPage), [section, auditPage], section === 'audit')
   const knowledge = useAsync(() => api.adminKnowledge(knowledgeStatus, knowledgePage), [section, knowledgeStatus, knowledgePage], section === 'knowledge')
+  const providers = useAsync(() => api.adminProviders(), [section], section === 'providers')
   useEffect(() => { setActionError('') }, [section])
   const cancelQueued = useCallback(async (runId: string) => {
     setActionBusy(runId); setActionError('')
@@ -110,6 +118,34 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
       setActionError(caught instanceof Error ? caught.message : '审核操作失败，请重试。')
     } finally { setActionBusy(null) }
   }, [actionBusy, reviewReason, replacementRequired, knowledge])
+  const openProviderConfig = useCallback((provider: AdminProvider) => {
+    setProviderTarget(provider); setProviderModel(provider.model || ''); setProviderKey(''); setProviderBaseUrl(''); setProviderReason(''); setProviderTest(null); setActionError('')
+  }, [])
+  const saveProvider = useCallback(async () => {
+    if (!providerTarget || actionBusy) return
+    const model = providerModel.trim(), key = providerKey.trim()
+    if (!model || !key) return
+    setActionBusy('p' + providerTarget.provider); setActionError('')
+    try {
+      await api.adminSaveProvider(providerTarget.provider, { model, api_key: key, ...(providerBaseUrl.trim() ? { params: { base_url: providerBaseUrl.trim() } } : {}), ...(providerReason.trim() ? { reason: providerReason.trim() } : {}) })
+      setProviderTarget(null); setProviderKey(''); setProviderReason('')
+      providers.reload()
+    } catch (caught) { setActionError(caught instanceof Error ? caught.message : '配置保存失败，请重试。') }
+    finally { setActionBusy(null) }
+  }, [providerTarget, providerModel, providerKey, providerBaseUrl, providerReason, actionBusy, providers])
+  const testProvider = useCallback(async (provider: AdminProvider) => {
+    setActionBusy('t' + provider.provider); setActionError(''); setProviderTest(null)
+    try {
+      setProviderTest(await api.adminTestProvider(provider.provider, providerTarget?.provider === provider.provider && providerKey.trim() ? { ...(providerModel.trim() ? { model: providerModel.trim() } : {}), api_key: providerKey.trim(), ...(providerBaseUrl.trim() ? { params: { base_url: providerBaseUrl.trim() } } : {}) } : providerTarget?.provider === provider.provider && providerModel.trim() ? { model: providerModel.trim() } : {}))
+    } catch (caught) { setActionError(caught instanceof Error ? caught.message : '连接测试失败，请重试。') }
+    finally { setActionBusy(null) }
+  }, [providerTarget, providerKey, providerModel, providerBaseUrl])
+  const showProviderHistory = useCallback(async (provider: AdminProvider) => {
+    setActionBusy('h' + provider.provider); setActionError('')
+    try { setProviderHistory({ provider: provider.provider, items: (await api.adminProviderHistory(provider.provider)).items }) }
+    catch (caught) { setActionError(caught instanceof Error ? caught.message : '版本历史加载失败。') }
+    finally { setActionBusy(null) }
+  }, [])
   return <div className="app admin-app">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">T</span><span>ToolWithAgent <small>管理台</small></span></div>
@@ -197,7 +233,30 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
             </div>}
           </MappingDialog>}
         </section>}
-        {(section === 'providers' || section === 'users') && <section className="activity-section" aria-label={sections.find(item => item.id === section)!.label}><h2>{sections.find(item => item.id === section)!.label}</h2><div className="empty-state compact"><p>该区域由后续切片交付（{section === 'providers' ? 'Provider 与密钥版本' : '用户角色管理'}）。</p></div></section>}
+        {section === 'providers' && <section className="activity-section" aria-label="Provider 管理">
+          <h2>Provider 管理</h2>
+          <p className="mapping-hint">每次保存创建不可变配置与密钥版本，只影响新执行；密钥加密存储，任何读取都不回显。连接测试不创建执行任务。</p>
+          {providers.loading && <p role="status">正在读取 Provider 列表…</p>}
+          {providers.error && <div className="mapping-error" role="alert"><span>{providers.error}</span><button className="button-secondary" onClick={providers.reload}>重试加载</button></div>}
+          {providers.data && <div className="workbench-table-scroll"><table className="workbench-artifacts admin-providers-table"><caption className="sr-only">Provider 列表</caption><thead><tr><th scope="col">提供方</th><th scope="col">当前模型</th><th scope="col">版本</th><th scope="col">密钥</th><th scope="col">更新时间</th><th scope="col">操作</th></tr></thead><tbody>
+            {providers.data.items.map(provider => <tr key={provider.provider}><td>{provider.label}<small className="mono">{provider.provider}</small></td><td>{provider.model || <span className="mapping-hint">未配置</span>}</td><td>{provider.revision || '—'}</td><td>{provider.has_secret ? '已保存' : '未保存'}</td><td>{readableTime(provider.updated_at)}</td><td className="admin-run-actions"><button className="button-secondary" onClick={() => openProviderConfig(provider)} disabled={!!actionBusy}>配置</button><button className="button-secondary" onClick={() => void testProvider(provider)} disabled={!!actionBusy || !provider.has_secret && providerTarget?.provider !== provider.provider}>{actionBusy === 't' + provider.provider ? '测试中…' : '测试连接'}</button><button className="button-secondary" onClick={() => void showProviderHistory(provider)} disabled={!!actionBusy}>历史</button></td></tr>)}
+          </tbody></table></div>}
+          {providerTest && <p role="status" className={providerTest.ok ? 'mapping-hint' : 'mapping-warning'}>连接测试：{providerTest.ok ? '成功' : '失败'}{providerTest.status_code ? ` · HTTP ${providerTest.status_code}` : ''} · {providerTest.latency_ms}ms{providerTest.error ? ` · ${providerTest.error}` : ''}</p>}
+          {providerTarget && <MappingDialog title={'配置 ' + providerTarget.label} onClose={() => { setProviderTarget(null); setProviderKey(''); setProviderReason(''); setProviderTest(null) }}>
+            <dl><dt>接口地址</dt><dd className="mono">{providerTarget.base_url}</dd></dl>
+            <label className="admin-stop-reason">模型名称<input aria-label="模型名称" value={providerModel} onChange={event => setProviderModel(event.target.value)} maxLength={160} placeholder="例如 gpt-4o-mini" /></label>
+            <label className="admin-stop-reason">API 密钥（必填，不回显已保存密钥）<input aria-label="API 密钥" type="password" value={providerKey} onChange={event => setProviderKey(event.target.value)} maxLength={4096} placeholder="重新输入密钥以创建新版本" autoComplete="new-password" /></label>
+            <label className="admin-stop-reason">自定义接口地址（可选，留空使用默认）<input aria-label="自定义接口地址" value={providerBaseUrl} onChange={event => setProviderBaseUrl(event.target.value)} maxLength={300} placeholder="https://..." /></label>
+            <label className="admin-stop-reason">变更原因（可选，写入审计）<input aria-label="变更原因" value={providerReason} onChange={event => setProviderReason(event.target.value)} maxLength={1000} placeholder="例如 轮换密钥" /></label>
+            {actionError && <p className="mapping-error" role="alert">{actionError}</p>}
+            <div className="mapping-actions"><button className="button-text" data-dialog-cancel onClick={() => { setProviderTarget(null); setProviderKey(''); setProviderReason(''); setProviderTest(null) }} disabled={!!actionBusy}>取消</button><button className="button-text" onClick={() => void saveProvider()} disabled={!!actionBusy || !providerModel.trim() || !providerKey.trim()}>保存新版本</button></div>
+          </MappingDialog>}
+          {providerHistory && <MappingDialog title={'版本历史 · ' + providerHistory.provider} onClose={() => setProviderHistory(null)}>
+            {providerHistory.items.length ? <div className="workbench-table-scroll"><table className="workbench-artifacts"><caption className="sr-only">Provider 版本历史</caption><thead><tr><th scope="col">版本</th><th scope="col">模型</th><th scope="col">密钥</th><th scope="col">创建时间</th></tr></thead><tbody>{providerHistory.items.map(item => <tr key={item.revision}><td>v{item.revision}</td><td>{item.model}</td><td>{item.has_secret ? '已加密保存' : '无'}</td><td>{readableTime(item.created_at)}</td></tr>)}</tbody></table></div> : <p className="mapping-hint">还没有版本。</p>}
+            <div className="mapping-actions"><button className="button-text" data-dialog-cancel onClick={() => setProviderHistory(null)}>关闭</button></div>
+          </MappingDialog>}
+        </section>}
+        {section === 'users' && <section className="activity-section" aria-label="用户角色管理"><h2>用户角色管理</h2><div className="empty-state compact"><p>该区域由下一切片交付（用户角色管理）。</p></div></section>}
       </div></div>
       {stopTarget && <MappingDialog title="确认强停执行" onClose={() => { setStopTarget(null); setStopReason('') }}>
         <p>强停会立即取消该执行并阻止迟到结果发布，已完成结果保留。必须填写原因，原因会写入审计记录。</p>
