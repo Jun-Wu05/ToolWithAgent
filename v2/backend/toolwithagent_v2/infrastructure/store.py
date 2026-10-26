@@ -9,6 +9,7 @@ import secrets
 import time
 
 from .db import connect, migrate
+from toolwithagent_v2.runtime.progress import PROGRESS_FIELDS
 from toolwithagent_v2.settings import Settings
 
 
@@ -75,7 +76,8 @@ class Store:
             messages = [dict(r) for r in db.execute("SELECT id,actor,kind,content_json,created_at FROM messages WHERE conversation_id=? ORDER BY created_at,id", (conversation_id,))]
             for m in messages:
                 payload = json.loads(m.pop("content_json"))
-                m["content"] = payload["text"]
+                m["content"] = payload.get("text", "")
+                m["payload"] = {key: value for key, value in payload.items() if key not in ("text", "run_id")}
                 m["run_id"] = payload.get("run_id")
             files = [self._file(r) for r in db.execute("SELECT * FROM files WHERE conversation_id=? ORDER BY created_at,id", (conversation_id,))]
             current_file, _ = self._current_mapping_input(db, conversation_id)
@@ -174,15 +176,19 @@ class Store:
                         if receipt["request_sha256"] != request_hash:
                             raise ValueError("idempotency_key_reused")
                         return json.loads(receipt["result_json"])
+                usage = "枚举映射附件" if role == "enum_mapping" else "主数据"
+                message_id = self._input_record_message(db, conversation_id, "file",
+                    {"text": f"上传了{usage}「{original}」", "action": "file_upload", "file_id": file_id,
+                     "name": original, "media_type": media, "size": size, "role": role})
                 db.execute("INSERT INTO files(id,owner_id,conversation_id,original_name,media_type,size,sha256,storage_key,parse_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (file_id, owner_id, conversation_id, original, media, size, sha, key, "queued", timestamp, timestamp))
                 db.execute("UPDATE files SET role=? WHERE id=?", (role, file_id))
                 db.execute("INSERT INTO tasks(id,conversation_id,owner_id,type,status,current_run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (task_id, conversation_id, owner_id, "file_ingest", "queued", run_id, timestamp, timestamp))
-                db.execute("INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,queued_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (run_id, task_id, 1, "queued", json.dumps({"file_id": file_id, "sha256": sha, "storage_key": key, "media_type": media, "role": role, "original_name": original}, separators=(",", ":")), timestamp, timestamp, timestamp))
+                db.execute("INSERT INTO runs(id,task_id,attempt,status,input_snapshot_json,queued_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (run_id, task_id, 1, "queued", json.dumps({"file_id": file_id, "sha256": sha, "storage_key": key, "media_type": media, "role": role, "original_name": original, "message_id": message_id}, separators=(",", ":")), timestamp, timestamp, timestamp))
                 db.execute("UPDATE conversations SET updated_at=?,revision=revision+1 WHERE id=?", (timestamp, conversation_id))
                 self._run_event(db, run_id, "run_queued", "queued")
                 self._event(db, conversation_id, "file_uploaded", "file", file_id, {"file_id": file_id, "name": original})
                 self._event(db, conversation_id, "run_queued", "run", run_id, {"run_id": run_id, "status": "queued"})
-                result = {"file": {"id": file_id, "name": original, "media_type": media, "size": size, "sha256": sha, "parse_status": "queued", "role": role, "created_at": timestamp}, "task": {"id": task_id, "status": "queued"}, "run": {"id": run_id, "status": "queued"}}
+                result = {"file": {"id": file_id, "name": original, "media_type": media, "size": size, "sha256": sha, "parse_status": "queued", "role": role, "created_at": timestamp}, "task": {"id": task_id, "status": "queued"}, "run": {"id": run_id, "status": "queued"}, "message": {"id": message_id, "kind": "file"}}
                 if idempotency_key:
                     db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(), owner_id, "upload:" + conversation_id, idempotency_key, request_hash, "completed", json.dumps(result, ensure_ascii=False), timestamp))
                 db.commit()
@@ -216,9 +222,13 @@ class Store:
                 raise ValueError("file_not_validated")
             if file["media_type"] not in {"text/plain", "application/json", "application/x-ndjson", "text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}:
                 raise ValueError("unsupported_log_type")
+            message_id = self._input_record_message(db, conversation_id, "operation",
+                {"text": "提交日志类型提取", "action": "log_parse", "file_id": file_id,
+                 "name": file["original_name"], "feature_field": feature_field})
             snapshot = {key: file[key] for key in ("sha256", "storage_key", "media_type")}
-            snapshot.update({"file_id": file_id, "feature_field": feature_field})
+            snapshot.update({"file_id": file_id, "feature_field": feature_field, "message_id": message_id})
             result = self._enqueue_task(db, owner_id, conversation_id, "log_parse", snapshot)
+            result["message"] = {"id": message_id, "kind": "operation"}
             db.commit()
             return result
 
@@ -276,7 +286,13 @@ class Store:
                 snapshot.update({"source_artifact_id":source["id"], "source_sha256":source["sha256"], "source_storage_key":source["storage_key"],
                                  "feature_field":json.loads(source["input_snapshot_json"]).get("feature_field")})
             snapshot["business_inputs"] = self._freeze_business(db, conversation_id)["business_inputs"]
+            message_id = self._input_record_message(db, conversation_id, "operation",
+                {"text": f"提交标准字段映射：产品 {source_fields['product']} · 厂商 {source_fields['log_vendor']}",
+                 "action": "field_mapping", "file_id": file_id,
+                 "classification_artifact_id": classification_artifact_id, **source_fields})
+            snapshot["message_id"] = message_id
             result = self._enqueue_task(db, owner_id, conversation_id, "field_mapping", snapshot)
+            result["message"] = {"id": message_id, "kind": "operation"}
             if idempotency_key:
                 db.execute("INSERT INTO idempotency_receipts(id,principal_id,operation_scope,key,request_sha256,status,result_json,created_at) VALUES(?,?,?,?,?,?,?,?)", (uid(), owner_id, scope, idempotency_key, request_hash, "completed", json.dumps(result), now()))
             db.commit()
@@ -577,9 +593,12 @@ class Store:
                 ORDER BY created_at DESC LIMIT 1""", (artifact["conversation_id"], artifact_id)).fetchone()
             if latest and latest["status"] in ("queued", "running", "waiting_confirmation"):
                 raise ValueError("task_has_active_run")
+            message_id = self._input_record_message(db, artifact["conversation_id"], "operation",
+                {"text": "提交日志知识申请", "action": "log_knowledge_submit", "source_artifact_id": artifact_id})
             result = self._enqueue_task(db, owner_id, artifact["conversation_id"], "log_knowledge_submit",
                 {**source, "source_artifact_id": artifact_id, "source_sha256": artifact["sha256"],
-                 "source_storage_key": artifact["storage_key"]})
+                 "source_storage_key": artifact["storage_key"], "message_id": message_id})
+            result["message"] = {"id": message_id, "kind": "operation"}
             db.commit()
             return result
 
@@ -764,7 +783,7 @@ class Store:
                 db.rollback()
                 return False
             if message:
-                self._assistant_message(db, row["conversation_id"], message)
+                self._assistant_message(db, row["conversation_id"], message, row["id"])
             self._record_state(db, row, "failed" if error_code else "succeeded", error_code)
             db.commit()
             return True
@@ -774,6 +793,16 @@ class Store:
         db.execute("INSERT INTO messages(id,conversation_id,actor,kind,content_json,created_at) VALUES(?,?,?,?,?,?)",
                    (message_id, conversation_id, "assistant", "text", json.dumps({"text": message, "run_id": run_id}, ensure_ascii=False), now()))
         self._event(db, conversation_id, "message_created", "message", message_id, {"actor": "assistant"})
+        return message_id
+
+    OPERATION_LABELS = {"enum_extract": "枚举提取", "threat_mapping": "威胁类型映射", "fill": "填充值映射", "remove_mapping": "取消值映射", "export": "规则导出"}
+
+    def _input_record_message(self, db, conversation_id, kind, payload):
+        """按钮/上传的输入留痕：记录用户真实提交的业务动作与参数，不伪造用户文本。"""
+        message_id = uid()
+        db.execute("INSERT INTO messages(id,conversation_id,actor,kind,content_json,created_at) VALUES(?,?,?,?,?,?)",
+                   (message_id, conversation_id, "user", kind, json.dumps(payload, ensure_ascii=False), now()))
+        self._event(db, conversation_id, "message_created", "message", message_id, {"actor": "user", "kind": kind})
         return message_id
 
     def _owned_run(self, db, owner_id, run_id):
@@ -1242,7 +1271,7 @@ class Store:
                     valid = (self._draft_apply_current_db(db,claim) if applying else
                              self._mapping_is_current_db(db,claim) and claim["input"].get("mapping_edit_anchor") == self._mapping_edit_anchor(db,row["conversation_id"]))
                     if not valid:
-                        self._assistant_message(db,row["conversation_id"],"映射来源或草稿版本已变化，请重新查看结果")
+                        self._assistant_message(db,row["conversation_id"],"映射来源或草稿版本已变化，请重新查看结果",row["id"])
                         self._record_state(db,row,"failed","mapping_draft_apply_stale" if applying else "mapping_input_stale")
                         db.commit()
                         return True
@@ -1293,7 +1322,7 @@ class Store:
                     db.rollback()
                     return False
                 if not self._submission_is_current_db(db, claim):
-                    self._assistant_message(db, row["conversation_id"], "主数据或分类结果已变化，请重新提取")
+                    self._assistant_message(db, row["conversation_id"], "主数据或分类结果已变化，请重新提取", row["id"])
                     self._record_state(db, row, "failed", "log_knowledge_submission_stale")
                     db.commit()
                     return True
@@ -1304,7 +1333,7 @@ class Store:
                     db.execute("ROLLBACK TO knowledge_submission")
                     db.execute("RELEASE knowledge_submission")
                     code = "log_knowledge_submission_stale" if status == "stale" else "log_knowledge_submission_error"
-                    self._assistant_message(db, row["conversation_id"], "知识申请未提交，请检查结果后重试")
+                    self._assistant_message(db, row["conversation_id"], "知识申请未提交，请检查结果后重试", row["id"])
                     self._record_state(db, row, "failed", code)
                     db.commit()
                     return True
@@ -1332,7 +1361,7 @@ class Store:
                             json.dumps({"submission_status": status, "application_id": outcome.get("application_id")}), now(), len(content)))
                 self._event(db, row["conversation_id"], "artifact_published", "artifact", artifact_id,
                             {"artifact_id": artifact_id, "run_id": row["id"], "kind": "log_knowledge_submission", "version": version})
-                self._assistant_message(db, row["conversation_id"], "日志知识申请已处理")
+                self._assistant_message(db, row["conversation_id"], "日志知识申请已处理", row["id"])
                 self._record_state(db, row, "succeeded")
                 db.commit()
                 return True
@@ -1490,7 +1519,13 @@ class Store:
                 raise ValueError("config_source_stale")
             plan = DeterministicPlan(plan_id=uid(), steps=(step,))
             snapshot["plan"] = plan.model_dump(mode="json")
+            label = self.OPERATION_LABELS.get(step.type, "业务操作")
+            message_id = self._input_record_message(db, conversation_id, "operation",
+                {"text": f"提交{label}", "action": step.type, "step": step.model_dump(mode="json"),
+                 "source_artifact_id": source_artifact_id, "config_artifact_id": config_artifact_id})
+            snapshot["message_id"] = message_id
             result = self._enqueue_task(db, owner_id, conversation_id, "business_operation", snapshot)
+            result["message"] = {"id": message_id, "kind": "operation"}
             if idempotency_key:
                 self._save_draft_receipt(db, owner_id, scope, idempotency_key, digest, result)
             db.commit()
@@ -1653,7 +1688,7 @@ class Store:
                     return False
                 if claim["input"].get("business_inputs") and not self._business_current_db(db, claim):
                     self._record_state(db, row, "failed", "business_input_stale")
-                    self._assistant_message(db, row["conversation_id"], "输入或配置版本已变化，请重新发起操作。")
+                    self._assistant_message(db, row["conversation_id"], "输入或配置版本已变化，请重新发起操作。", row["id"])
                     db.commit(); return True
                 result_message_id = self._assistant_message(db, row["conversation_id"], message, row["id"]) if message else None
                 # Stale old versions and their descendants before inserting this transaction's outputs.
@@ -1719,7 +1754,7 @@ class Store:
 
     def record_progress(self, worker_id, claim, scope_id, summary):
         """在写锁内验证当前发布资格，只记录 V2 sink 的安全白名单。"""
-        safe = {key: summary[key] for key in ("phase", "progress_status", "operation", "dependency_scope_ids")}
+        safe = {key: summary[key] for key in PROGRESS_FIELDS if key in summary}
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._valid_claim(db, worker_id, claim)

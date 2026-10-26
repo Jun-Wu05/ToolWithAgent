@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { BusinessConfirmation, BusinessOperations, RunProgress } from './BusinessWorkspace'
+import { BusinessConfirmation, BusinessOperations, RunProgress, businessName, progressLabel } from './BusinessWorkspace'
 import { api, type Conversation } from './api'
 vi.mock('./api', () => ({saveDownload: vi.fn(), api: {me: vi.fn(), identities: vi.fn(), conversations: vi.fn(), conversation: vi.fn(), eventsUrl: vi.fn(), uploadFile: vi.fn(), sendMessage: vi.fn(), operation: vi.fn(), artifactContent: vi.fn(), confirmationToken: vi.fn(), confirmRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), selectIdentity: vi.fn(), fieldPreview: vi.fn(), mappingView: vi.fn(async () => ({artifact_id: '', sub_rules: [], sub_rule_id: '', items: [], total: 0, page: 1, page_size: 50, sample_line_reference: 'log_entry'})), mappingDraft: vi.fn(async () => ({id: '', conversation_id: '', base_artifact_id: '', revision: 0, status: 'active', changed_count: 0, operation_count: 0, operations: [], base_current: true, apply_run_id: null, applied_artifact_id: null}))}}))
 const summary = {id: 'c1', title: '后处理任务', created_at: '', updated_at: ''}
@@ -304,4 +304,25 @@ it('preserves unsent text and opens pending field changes before a new message',
  fireEvent.change(screen.getByLabelText('消息内容'),{target:{value:'继续导出'}});fireEvent.click(screen.getByRole('button',{name:'发送'}))
  expect(await screen.findByRole('region',{name:'字段变更预览'})).toBeInTheDocument()
  expect(api.sendMessage).not.toHaveBeenCalled();expect(screen.getByLabelText('消息内容')).toHaveValue('继续导出')
+})
+
+it('names field mapping by its business operation instead of internal jargon', () => {
+  expect(businessName('field_mapping')).toBe('标准字段映射')
+  expect(businessName('log_classification')).toBe('日志类型提取')
+  expect(businessName('unknown_kind')).toBe('业务处理')
+})
+
+it('appends real batch counts and elapsed time to progress labels only when present', () => {
+  expect(progressLabel({operation: 'threat_mapping', phase: 'validation', progress_status: 'running'})).toBe('威胁类型映射：校验结果 进行中')
+  expect(progressLabel({operation: 'field_mapping', phase: 'retrieval', progress_status: 'running', current_batch: 2, total_batches: 5})).toBe('标准字段映射：检索依据 进行中 第 2/5 批')
+  expect(progressLabel({operation: 'field_mapping', phase: 'model_call', progress_status: 'success', current_batch: 3, total_batches: 5, elapsed_seconds: 12.4})).toBe('标准字段映射：业务分析 已完成 第 3/5 批 · 已耗时 12 秒')
+  expect(progressLabel({phase: 'mystery_phase', progress_status: 'running', current_batch: 1, total_batches: 2})).toBe('')
+})
+
+it('renders batch progress inside the run step list without exposing raw codes', () => {
+  render(<RunProgress run={{id: 'r9', status: 'running', events: [
+    {sequence: 1, scope_type: 'step', scope_id: 'hash-a', event_type: 'run_progress', status: 'running', summary: {operation: 'field_mapping', phase: 'retrieval', progress_status: 'running', current_batch: 2, total_batches: 5, dependency_scope_ids: []}}
+  ]}} />)
+  expect(screen.getByText('标准字段映射：检索依据 进行中 第 2/5 批')).toBeInTheDocument()
+  expect(screen.queryByText(/field_candidates/)).not.toBeInTheDocument()
 })

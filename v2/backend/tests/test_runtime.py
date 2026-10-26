@@ -135,7 +135,8 @@ def test_upload_and_message_idempotency(tmp_path):
     with connect(store.path) as db:
         assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2
         assert first.json()["run"]["status"] == "queued"
-        assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+        # 一次上传加一条文本：上传留下 kind=file 输入记录，重放不重复。
+        assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 2
         assert db.execute("SELECT COUNT(*) FROM idempotency_receipts").fetchone()[0] == 2
 
 

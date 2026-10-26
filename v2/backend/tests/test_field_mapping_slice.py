@@ -42,7 +42,11 @@ def test_mapping_publish_safe_summary_view_download_and_restart(tmp_path):
     assert artifact['summary']['unmatched_count']==1
     assert artifact['current']
     safe=store.get_conversation('dev-user',conversation)
-    assert all(secret not in str(safe) for secret in ('SECRET','VALUE','PRODUCT-PRIVATE','VENDOR-PRIVATE'))
+    assert all(secret not in str(safe) for secret in ('SECRET','VALUE'))
+    # owner 亲填的表单参数只允许出现在自己的 operation 输入记录里，不进产物或事件。
+    records=[m for m in safe['messages'] if m.get('kind')=='operation']
+    assert all(secret not in json.dumps([m for m in safe['messages'] if m.get('kind')!='operation'],ensure_ascii=False) for secret in ('PRODUCT-PRIVATE','VENDOR-PRIVATE'))
+    assert any('PRODUCT-PRIVATE' in json.dumps(m,ensure_ascii=False) for m in records)
     view=client.get(f"/api/v2/artifacts/{artifact['id']}/mapping-view").json()
     assert view['items'][0]['samples']==['SECRET']
     assert view['page_size']==50
