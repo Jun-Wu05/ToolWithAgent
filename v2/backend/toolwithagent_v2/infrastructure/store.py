@@ -29,6 +29,7 @@ class Store:
         self.settings = settings
         self.root = settings.data_dir
         self.path = self.root / "v2.sqlite3"
+        self._cached_master_key = None
         migrate(self.path)
         (self.root / "uploads").mkdir(parents=True, exist_ok=True)
         (self.root / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -897,10 +898,226 @@ class Store:
             if row["status"] != "queued":
                 self._record_state(db, row, "cancelling", "force_stopped")
             self._record_state(db, row, "cancelled", "force_stopped")
-            db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason) VALUES(?,?,?,?,?,?,?)",
-                       (uid(), admin_id, "force_stop", "run", run_id, now(), reason.strip()))
+            self._admin_audit(db, admin_id, "force_stop", "run", run_id, reason.strip(), before={"status": row["status"]}, after={"status": "cancelled", "error_code": "force_stopped"})
             db.commit()
             return {"id": run_id, "status": "cancelled", "error_code": "force_stopped"}
+
+    def _admin_audit(self, db, admin_id, action, target_type, target_id, reason=None, before=None, after=None):
+        """只写白名单字段；reason 与前后状态均为脱敏文本，不落服务器路径、输入快照或密钥。"""
+        db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason,before_json,after_json) VALUES(?,?,?,?,?,?,?,?,?)",
+                   (uid(), admin_id, action, target_type, target_id, now(), (reason or "").strip() or None,
+                    json.dumps(before, ensure_ascii=False, sort_keys=True) if before is not None else None,
+                    json.dumps(after, ensure_ascii=False, sort_keys=True) if after is not None else None))
+
+    def admin_audit(self, admin_id, action, target_type, target_id, reason=None, before=None, after=None):
+        """独立事务记录一次管理写操作；审计失败不回滚已完成的业务写入。"""
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._admin_audit(db, admin_id, action, target_type, target_id, reason, before, after)
+            db.commit()
+
+    def admin_overview(self, admin_id):
+        with connect(self.path) as db:
+            counts = {row["status"]: row["n"] for row in db.execute("SELECT status,COUNT(*) AS n FROM runs GROUP BY status")}
+            lease = db.execute("SELECT owner_id,lease_expires_at,epoch FROM worker_leases WHERE id='v2-primary'").fetchone()
+            return {
+                "runs": {status: counts.get(status, 0) for status in ("queued", "running", "waiting_confirmation", "cancelling", "succeeded", "failed", "cancelled")},
+                "users": db.execute("SELECT COUNT(*) AS n FROM users WHERE is_active=1").fetchone()["n"],
+                "conversations": db.execute("SELECT COUNT(*) AS n FROM conversations WHERE archived_at IS NULL").fetchone()["n"],
+                "worker": {"lease_owner": lease["owner_id"], "lease_expires_at": lease["lease_expires_at"], "epoch": lease["epoch"]},
+            }
+
+    def admin_runs(self, admin_id, status=None, page=1):
+        page = max(1, int(page))
+        size = 50
+        where, params = (" WHERE r.status=?", [status]) if status else ("", [])
+        with connect(self.path) as db:
+            total = db.execute("SELECT COUNT(*) AS n FROM runs r" + where, params).fetchone()["n"]
+            rows = db.execute(
+                "SELECT r.*,t.conversation_id,t.type AS task_type,t.owner_id,c.title AS conversation_title,u.display_name AS owner_name"
+                " FROM runs r JOIN tasks t ON t.id=r.task_id JOIN conversations c ON c.id=t.conversation_id JOIN users u ON u.id=t.owner_id"
+                + where + " ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?", [*params, size, (page - 1) * size]).fetchall()
+            return {"items": [{**self._run(row), "owner_id": row["owner_id"], "owner_name": row["owner_name"], "conversation_id": row["conversation_id"], "conversation_title": row["conversation_title"]} for row in rows], "total": total, "page": page, "page_size": size}
+
+    def admin_cancel_queued(self, admin_id, run_id, reason=None):
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT r.*,t.conversation_id,t.type AS task_type FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.id=?", (run_id,)).fetchone()
+            if row is None:
+                raise LookupError("run_not_found")
+            if row["status"] != "queued":
+                raise ValueError("run_not_queued")
+            self._record_state(db, row, "cancelled", "cancelled_by_admin")
+            self._admin_audit(db, admin_id, "cancel_queued", "run", run_id, reason, before={"status": "queued"}, after={"status": "cancelled", "error_code": "cancelled_by_admin"})
+            db.commit()
+            return {"id": run_id, "status": "cancelled", "error_code": "cancelled_by_admin"}
+
+    def admin_audit_events(self, admin_id, page=1):
+        page = max(1, int(page))
+        size = 50
+        with connect(self.path) as db:
+            total = db.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"]
+            rows = db.execute(
+                "SELECT a.id,a.action,a.target_type,a.target_id,a.created_at,a.reason,a.before_json,a.after_json,u.display_name AS actor_name"
+                " FROM audit_events a JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC,a.id DESC LIMIT ? OFFSET ?", (size, (page - 1) * size)).fetchall()
+            items = []
+            for row in rows:
+                item = dict(row)
+                item["before"] = json.loads(item.pop("before_json")) if item["before_json"] else None
+                item["after"] = json.loads(item.pop("after_json")) if item["after_json"] else None
+                items.append(item)
+            return {"items": items, "total": total, "page": page, "page_size": size}
+
+    def _master_key(self):
+        from toolwithagent_v2.infrastructure.providers import MasterKeyUnavailable, resolve_master_key
+        if self._cached_master_key is None:
+            key = resolve_master_key(self.root, development=self.settings.development)
+            if key is None:
+                raise MasterKeyUnavailable("master_key_missing")
+            self._cached_master_key = key
+        return self._cached_master_key
+
+    def admin_providers(self, admin_id):
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS, provider_label
+        with connect(self.path) as db:
+            current = {row["provider"]: dict(row) for row in db.execute(
+                "SELECT p.provider,p.current_revision,c.model,c.created_at FROM provider_configs p"
+                " LEFT JOIN provider_config_versions c ON c.provider=p.provider AND c.revision=p.current_revision")}
+            secrets = {row["provider"] for row in db.execute("SELECT DISTINCT provider FROM provider_config_versions WHERE secret_version_id IS NOT NULL")}
+        return {"items": [{"provider": name, "label": provider_label(name), "base_url": PROVIDER_BASE_URLS[name],
+                           "revision": (current.get(name) or {}).get("current_revision") or 0,
+                           "model": (current.get(name) or {}).get("model") if name in current else None,
+                           "updated_at": (current.get(name) or {}).get("created_at") if name in current else None,
+                           "has_secret": name in secrets} for name in PROVIDER_BASE_URLS]}
+
+    def admin_save_provider(self, admin_id, provider, model, api_key, params=None, reason=None):
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS, seal_secret
+        if provider not in PROVIDER_BASE_URLS:
+            raise LookupError("provider_not_found")
+        model = (model or "").strip()
+        if not model or len(model) > 160 or not api_key or len(api_key) > 4096:
+            raise ValueError("invalid_provider_input")
+        if params is not None and (not isinstance(params, dict) or len(json.dumps(params)) > 4000):
+            raise ValueError("invalid_provider_input")
+        params = params or {}
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT current_revision FROM provider_configs WHERE provider=?", (provider,)).fetchone()
+            previous = row["current_revision"] if row else 0
+            sealed = seal_secret(self._master_key(), api_key)
+            secret_id = uid()
+            db.execute("INSERT INTO provider_secrets(id,ciphertext,nonce,key_id,created_at) VALUES(?,?,?,?,?)",
+                       (secret_id, sealed["blob"], sealed["blob"][:16], sealed["key_id"], now()))
+            revision = previous + 1
+            db.execute("INSERT INTO provider_config_versions(id,provider,model,params_json,secret_version_id,revision,created_at) VALUES(?,?,?,?,?,?,?)",
+                       (uid(), provider, model, json.dumps(params, ensure_ascii=False, sort_keys=True), secret_id, revision, now()))
+            if row is None:
+                db.execute("INSERT INTO provider_configs(provider,current_revision,created_at) VALUES(?,?,?)", (provider, revision, now()))
+            else:
+                db.execute("UPDATE provider_configs SET current_revision=? WHERE provider=?", (revision, provider))
+            self._admin_audit(db, admin_id, "provider_update", "provider", provider, reason,
+                              before={"revision": previous}, after={"revision": revision, "model": model})
+            db.commit()
+            return {"provider": provider, "revision": revision, "model": model}
+
+    def admin_provider_history(self, admin_id, provider):
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS
+        if provider not in PROVIDER_BASE_URLS:
+            raise LookupError("provider_not_found")
+        with connect(self.path) as db:
+            rows = db.execute(
+                "SELECT revision,model,params_json,created_at,secret_version_id FROM provider_config_versions WHERE provider=? ORDER BY revision DESC",
+                (provider,)).fetchall()
+        return {"items": [{"revision": row["revision"], "model": row["model"],
+                           "params": json.loads(row["params_json"]), "created_at": row["created_at"],
+                           "has_secret": row["secret_version_id"] is not None} for row in rows]}
+
+    def resolve_provider_secret(self, provider, revision=None):
+        """Frozen-run read path: decrypt the exact stored version, never the latest by default."""
+        master = self._master_key()
+        with connect(self.path) as db:
+            if revision is None:
+                row = db.execute(
+                    "SELECT v.model,v.params_json,v.secret_version_id FROM provider_configs p"
+                    " JOIN provider_config_versions v ON v.provider=p.provider AND v.revision=p.current_revision WHERE p.provider=?",
+                    (provider,)).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT model,params_json,secret_version_id FROM provider_config_versions WHERE provider=? AND revision=?",
+                    (provider, revision)).fetchone()
+            if row is None or row["secret_version_id"] is None:
+                raise LookupError("provider_not_found")
+            sealed = db.execute("SELECT ciphertext FROM provider_secrets WHERE id=?", (row["secret_version_id"],)).fetchone()
+        from toolwithagent_v2.infrastructure.providers import open_secret
+        return {"model": row["model"], "params": json.loads(row["params_json"]),
+                "api_key": open_secret(master, sealed["ciphertext"])}
+
+    def admin_test_provider(self, admin_id, provider, model=None, api_key=None, params=None):
+        """Live connection probe; never creates a Task or Run, never logs the key."""
+        import httpx
+        from toolwithagent_v2.infrastructure.providers import PROVIDER_BASE_URLS
+        if provider not in PROVIDER_BASE_URLS:
+            raise LookupError("provider_not_found")
+        base_url = (params or {}).get("base_url") or PROVIDER_BASE_URLS[provider]
+        if not api_key:
+            saved = self.resolve_provider_secret(provider)
+            api_key = saved["api_key"]
+            model = model or saved["model"]
+        started = time.monotonic()
+        try:
+            with httpx.Client(trust_env=False, timeout=8) as client:
+                response = client.get(base_url.rstrip("/") + "/models", headers={"Authorization": "Bearer " + api_key})
+            latency = int((time.monotonic() - started) * 1000)
+            return {"ok": response.status_code == 200, "status_code": response.status_code, "latency_ms": latency}
+        except httpx.HTTPError as exc:
+            latency = int((time.monotonic() - started) * 1000)
+            return {"ok": False, "status_code": None, "latency_ms": latency, "error": type(exc).__name__}
+
+    def admin_users(self, admin_id):
+        with connect(self.path) as db:
+            rows = db.execute(
+                "SELECT u.id,u.display_name,u.role,u.is_active,u.created_at,"
+                "(SELECT COUNT(*) FROM conversations c WHERE c.owner_id=u.id AND c.archived_at IS NULL) AS conversations"
+                " FROM users u ORDER BY u.id").fetchall()
+        return {"items": [{"id": row["id"], "display_name": row["display_name"], "role": row["role"],
+                           "active": bool(row["is_active"]), "created_at": row["created_at"],
+                           "conversations": row["conversations"]} for row in rows]}
+
+    def admin_set_role(self, admin_id, user_id, role, reason=None):
+        if role not in ("user", "developer", "admin"):
+            raise ValueError("invalid_role")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id,role FROM users WHERE id=? AND is_active=1", (user_id,)).fetchone()
+            if row is None:
+                raise LookupError("user_not_found")
+            if row["role"] == role:
+                raise ValueError("role_unchanged")
+            if user_id == admin_id:
+                raise ValueError("cannot_change_own_role")
+            db.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+            self._admin_audit(db, admin_id, "user_role_change", "user", user_id, reason,
+                              before={"role": row["role"]}, after={"role": role})
+            db.commit()
+            return {"id": user_id, "role": role}
+
+    def admin_set_active(self, admin_id, user_id, active, reason=None):
+        if not isinstance(active, bool):
+            raise ValueError("invalid_active")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id,is_active FROM users WHERE id=?", (user_id,)).fetchone()
+            if row is None:
+                raise LookupError("user_not_found")
+            if bool(row["is_active"]) == active:
+                raise ValueError("active_unchanged")
+            if user_id == admin_id and not active:
+                raise ValueError("cannot_deactivate_self")
+            db.execute("UPDATE users SET is_active=? WHERE id=?", (1 if active else 0, user_id))
+            self._admin_audit(db, admin_id, "user_active_change", "user", user_id, reason,
+                              before={"active": bool(row["is_active"])}, after={"active": active})
+            db.commit()
+            return {"id": user_id, "active": active}
 
     def _valid_claim(self, db, worker_id, claim):
         timestamp = now()

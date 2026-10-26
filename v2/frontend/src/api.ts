@@ -43,6 +43,18 @@ export type MappingView = {
 }
 export type MappingQuery = { sub_rule?: string; page: number; q: string; status: string; draft_id?: string }
 export type ArtifactDownload = { name: string; blob: Blob }
+export type AdminOverview = { runs: Record<string, number>; users: number; conversations: number; worker: { lease_owner: string | null; lease_expires_at: string | null; epoch: number } }
+export type AdminRun = { id: string; task_id: string; kind: string; message_id?: string | null; file_id?: string | null; status: string; attempt: number; queued_at: string; started_at: string | null; finished_at: string | null; error_code?: string | null; created_at: string; updated_at: string; owner_id: string; owner_name: string; conversation_id: string; conversation_title: string }
+export type AdminRunPage = { items: AdminRun[]; total: number; page: number; page_size: number }
+export type AdminAuditEvent = { id: string; action: string; target_type: string; target_id: string; created_at: string; reason: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; actor_name: string }
+export type AdminAuditPage = { items: AdminAuditEvent[]; total: number; page: number; page_size: number }
+export type AdminKnowledgeItem = { application_id: number; status: 'pending' | 'approved' | 'rejected'; format_type: string; selection_mode: string; feature_field: string; extractor_type: string; submitter: string; created_at: string; reviewed_at: string | null; reviewer: string | null; review_reason: string | null; replaces_application_id: number | null; replaced_by_application_id: number | null }
+export type AdminKnowledgePage = { items: AdminKnowledgeItem[]; total: number; page: number; page_size: number; counts: { pending: number; approved: number; rejected: number } }
+export type AdminKnowledgeDetail = AdminKnowledgeItem & { recipe_version: number; structure_hash: string; structure_tokens: string[]; format_spec: Record<string, unknown>; extractor_spec: Record<string, unknown>; submission_note: string; sample_count: number; samples: string[] }
+export type AdminProvider = { provider: string; label: string; base_url: string; revision: number; model: string | null; updated_at: string | null; has_secret: boolean }
+export type AdminProviderVersion = { revision: number; model: string; params: Record<string, unknown>; created_at: string; has_secret: boolean }
+export type AdminProviderTestResult = { ok: boolean; status_code: number | null; latency_ms: number; error?: string }
+export type AdminUser = { id: string; display_name: string; role: 'user' | 'developer' | 'admin'; active: boolean; created_at: string; conversations: number }
 export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; events?: RunEvent[] }
@@ -98,6 +110,25 @@ const messages: Record<string, string> = {
   invalid_mapping_query: '搜索或筛选条件无效，请修改后重试。',
   mapping_sub_rule_not_found: '子规则不存在，请重新选择。',
   insufficient_capability: '当前身份不能执行这项操作。',
+  run_not_queued: '该执行已不在排队中，请刷新列表后重试。',
+  log_knowledge_reason_required: '拒绝必须填写理由。',
+  log_knowledge_replacement_reason_required: '已存在同结构的已批准知识，替代它必须填写理由。',
+  log_knowledge_not_pending: '该申请已不在待审核状态，请刷新列表。',
+  log_knowledge_not_rejected: '只有已拒绝的申请可以删除。',
+  log_knowledge_review_failed: '审核操作失败，请刷新后重试。',
+  log_knowledge_not_found: '申请不存在或已被删除。',
+  provider_not_found: '提供方不存在或不受支持。',
+  invalid_provider_input: '模型名称和密钥不能为空，请检查后重试。',
+  master_key_missing: '主密钥未配置，无法读写提供方密钥；请设置 V2_MASTER_KEY 后重试。',
+  master_key_invalid: '主密钥校验失败，已保存的密钥无法解密；请检查主密钥配置。',
+  master_key_invalid_format: '主密钥格式无效；请提供 32 字节的 base64 或十六进制密钥。',
+  user_not_found: '用户不存在。',
+  invalid_role: '角色无效；只能是 user、developer 或 admin。',
+  role_unchanged: '该用户已经是这个角色，无需变更。',
+  cannot_change_own_role: '不能修改自己的角色，请由其他管理员操作。',
+  cannot_deactivate_self: '不能停用自己的账号。',
+  active_unchanged: '该账号已处于目标状态。',
+  user_inactive: '当前身份已停用，请重新选择身份。',
   unauthenticated: '当前身份已失效，请重新选择身份。',
   idempotency_key_reused: '输入参数已变化，请重新开始映射。',
 }
@@ -176,6 +207,23 @@ export const api = {
   discardMappingDraft: (id: string, revision: number) => request<MappingDraft>('/mapping-drafts/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'If-Match': String(revision) } }),
   submitLogKnowledge: (artifactId: string) => request<{ task: { id: string; status: string }; run: Run }>('/artifacts/' + encodeURIComponent(artifactId) + '/submit-log-knowledge', { method: 'POST' }),
   retryRun: (id: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/retry', { method: 'POST' }),
+  adminOverview: () => request<AdminOverview>('/admin/overview'),
+  adminRuns: (status: string, page: number) => request<AdminRunPage>('/admin/runs?' + new URLSearchParams({ ...(status ? { status } : {}), page: String(page) })),
+  adminCancelRun: (id: string, reason?: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || null }) }),
+  adminForceStop: (id: string, reason: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/force-stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
+  adminAuditEvents: (page: number) => request<AdminAuditPage>('/admin/audit-events?page=' + page),
+  adminKnowledge: (status: string, page: number) => request<AdminKnowledgePage>('/admin/log-knowledge?' + new URLSearchParams({ ...(status ? { status } : {}), page: String(page) })),
+  adminKnowledgeDetail: (id: number) => request<AdminKnowledgeDetail>('/admin/log-knowledge/' + encodeURIComponent(id)),
+  adminKnowledgeApprove: (id: number, reason?: string) => request<{ application_id: number; status: string; replaces_application_id: number | null }>('/admin/log-knowledge/' + encodeURIComponent(id) + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || '' }) }),
+  adminKnowledgeReject: (id: number, reason: string) => request<{ application_id: number; status: string }>('/admin/log-knowledge/' + encodeURIComponent(id) + '/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
+  adminKnowledgeDelete: (id: number) => request<{ application_id: number; status: string }>('/admin/log-knowledge/' + encodeURIComponent(id), { method: 'DELETE' }),
+  adminProviders: () => request<{ items: AdminProvider[] }>('/admin/providers'),
+  adminProviderHistory: (provider: string) => request<{ items: AdminProviderVersion[] }>('/admin/providers/' + encodeURIComponent(provider) + '/history'),
+  adminSaveProvider: (provider: string, input: { model: string; api_key: string; params?: Record<string, unknown>; reason?: string }) => request<{ provider: string; revision: number; model: string }>('/admin/providers/' + encodeURIComponent(provider), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }),
+  adminTestProvider: (provider: string, input?: { model?: string; api_key?: string; params?: Record<string, unknown> }) => request<AdminProviderTestResult>('/admin/providers/' + encodeURIComponent(provider) + '/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input || {}) }),
+  adminUsers: () => request<{ items: AdminUser[] }>('/admin/users'),
+  adminSetUserRole: (id: string, role: string, reason?: string) => request<{ id: string; role: string }>('/admin/users/' + encodeURIComponent(id) + '/role', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role, reason: reason || null }) }),
+  adminSetUserActive: (id: string, active: boolean, reason?: string) => request<{ id: string; active: boolean }>('/admin/users/' + encodeURIComponent(id) + '/active', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active, reason: reason || null }) }),
   cancelToken: (id: string) => request<{ token: string }>('/runs/' + encodeURIComponent(id) + '/cancel-token', { method: 'POST' }),
   cancelRun: (id: string, token: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }),
   run: async (id: string): Promise<Run> => { const run = await request<Run>('/runs/' + encodeURIComponent(id)); return { ...run, error_message: messages[run.error_code || run.error_message || ''] || run.error_message } },

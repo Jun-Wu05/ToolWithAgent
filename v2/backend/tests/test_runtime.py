@@ -35,7 +35,7 @@ def test_migration_and_restart(tmp_path):
     assert detail["files"][0]["sha256"] == hashlib.sha256(b"a,b\n1,2\n").hexdigest()
     assert detail["runs"][0]["status"] == "queued"
     with connect(store.path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0006_field_changes"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0007_admin_console"
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 

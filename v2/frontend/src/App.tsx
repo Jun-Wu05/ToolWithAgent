@@ -5,6 +5,7 @@ import { ContextPanel, StatusText, TaskHintBar, type PanelState } from './Visual
 import { FieldChangesWorkspace } from './FieldChangesWorkspace'
 import { MappingWorkspace } from './MappingWorkspace'
 import { MappingSummaryCard } from './ConversationMappingSummary'
+import { AdminConsole } from './AdminConsole'
 import { MappingDialog } from './MappingDialog'
 import { BusinessOperations, BusinessConfirmation, businessName, ArtifactValues, RunProgress, progressLabel } from './BusinessWorkspace'
 
@@ -527,6 +528,7 @@ export function App() {
     { id: 'timeline', label: '执行时间线', content: <>{runDetailError && <p className="mapping-error" role="alert">{runDetailError}</p>}<dl>{drawer.message_id && <><dt>原消息</dt><dd><button className="button-text" onClick={() => locate(drawer.message_id)}>定位消息</button></dd></>}<dt>状态</dt><dd><StatusText status={drawer.status} /></dd><dt>Run ID</dt><dd className="mono">{drawer.id}</dd>{drawer.task_id && <><dt>Task ID</dt><dd className="mono">{drawer.task_id}</dd></>}{drawer.error_code && <><dt>错误代码</dt><dd className="mono">{drawer.error_code}</dd></>}{drawer.error_message && <><dt>原因</dt><dd>{drawer.error_message}</dd></>}</dl><RunProgress run={drawer} />{identity?.role === 'user' && (drawer.status === 'failed' || drawer.status === 'cancelled') && <button className="button-secondary" onClick={() => void retryRun(drawer.id)} disabled={!!actionBusy}>重新执行</button>}<button className="button-secondary" onClick={async () => { try { if (activeId) {await refreshActive(activeId); await openRun(drawer.id)} } catch { setNotice('执行详情刷新失败。') } }}>刷新状态</button></> },
     { id: 'io', label: '输入与输出', content: <dl><dt>执行类型</dt><dd>{runName(drawer.kind)}</dd>{drawer.file_id && <><dt>输入文件 ID</dt><dd className="num">{drawer.file_id}</dd></>}<dt>结果</dt><dd><StatusText status={drawer.status} /></dd>{drawer.message_id && <><dt>原消息</dt><dd><button className="button-text" onClick={() => locate(drawer.message_id)}>定位输入消息</button></dd></>}{conversation?.artifacts?.filter(item => item.run_id === drawer.id).map(item => <div key={item.id} className="context-output"><dt>输出</dt><dd><button className="button-text" onClick={() => void openArtifact(item)}>{businessName(item.kind)}结果</button></dd></div>)}</dl> },
   ] : []
+  if (identity?.role === 'admin') return <AdminConsole identity={identity} identities={identities} onSwitchIdentity={id => void switchIdentity(id)} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
   return <div className="app">
     <button className="mobile-nav-toggle" onClick={() => setNavOpen(!navOpen)} aria-label="切换导航"><span aria-hidden="true">☰</span></button>
     <aside className={'sidebar ' + (navOpen ? 'sidebar-open' : '')}>
@@ -536,8 +538,10 @@ export function App() {
       <div className="recent-title">最近会话</div>
       <div className="recent-list">{conversations.length ? conversations.map(item => <button key={item.id} className={'recent-item ' + (item.id === activeId ? 'active' : '')} onClick={() => void selectConversation(item.id)}><span className="recent-name">{item.title || '未命名会话'}</span><span className="recent-time">{readableTime(item.updated_at)}</span></button>) : <p className="sidebar-empty">新建会话开始工作</p>}</div>
       <div className="identity">
-        <span className="avatar">{identity?.display_name?.slice(0, 1) || '用'}</span>
-        <span className="identity-name">{identity?.display_name || '加载中'}<small>{identity?.role || 'user'}</small></span>
+        <div className="identity-head">
+          <span className="avatar">{identity?.display_name?.slice(0, 1) || '用'}</span>
+          <span className="identity-name">{identity?.display_name || '加载中'}<small>{identity?.role || 'user'}</small></span>
+        </div>
         {identities.length > 0 && <select aria-label="开发身份切换" value={identity?.id || ''} onChange={event => void switchIdentity(event.target.value)} disabled={busy}>{identities.map(item => <option key={item.id} value={item.id}>{item.display_name} ({item.role})</option>)}</select>}
       </div>
     </aside>
