@@ -1,6 +1,6 @@
 export type Identity = { id: string; display_name: string; role: string }
 export type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string }
-export type Message = { id: string; actor: string; content: string; created_at?: string; run_id?: string | null }
+export type Message = { id: string; actor: string; kind?: string; content: string; created_at?: string; run_id?: string | null; payload?: Record<string, unknown> }
 export type FileRecord = { id: string; name: string; size?: number; role?: 'primary' | 'enum_mapping'; active?: boolean; parse_status?: string; mapping_eligible?: boolean; created_at?: string }
 export type ClassificationArtifact = {
   id: string
@@ -55,9 +55,9 @@ export type AdminProvider = { provider: string; label: string; base_url: string;
 export type AdminProviderVersion = { revision: number; model: string; params: Record<string, unknown>; created_at: string; has_secret: boolean }
 export type AdminProviderTestResult = { ok: boolean; status_code: number | null; latency_ms: number; error?: string }
 export type AdminUser = { id: string; display_name: string; role: 'user' | 'developer' | 'admin'; active: boolean; created_at: string; conversations: number }
-export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]}
+export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]; current_batch?: number; total_batches?: number; elapsed_seconds?: number}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
-export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; events?: RunEvent[] }
+export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; attempt?: number; queued_at?: string; started_at?: string | null; finished_at?: string | null; events?: RunEvent[] }
 export type FieldChangeSummary = { run_id: string; revision: number; status: string; apply_run_id: string | null; applied_artifact_id: string | null; undo_run_id: string | null; restored_artifact_id: string | null }
 export type FieldChangePreview = FieldChangeSummary & { task_id: string; current: boolean; selected_group_ids: string[]; groups: { id: string; fields: string[]; deletes: string[]; status: string; changes: { sub_rule_id: string; sub_rule_name: string; field: string; kind: 'add' | 'modify' | 'delete'; before: unknown; after: unknown }[] }[] }
 export type FieldDeleteConfirmation = { token: string; checkpoint_revision: number; payload: { deletes: string[]; downstream: { id: string; kind: string; version: number }[] } }
@@ -176,7 +176,7 @@ export const api = {
     const body = new FormData()
     body.append('file', file)
     body.append('role', role || 'primary')
-    return request<{ file: FileRecord; task: { id: string; status: string }; run: Run }>('/conversations/' + encodeURIComponent(id) + '/files', { method: 'POST', body })
+    return request<{ file: FileRecord; task: { id: string; status: string }; run: Run; message?: { id: string; kind: string } }>('/conversations/' + encodeURIComponent(id) + '/files', { method: 'POST', body })
   },
   logParse: (id: string, file_id: string, feature_field?: string) => request<{ task: { id: string; status: string }; run: Run }>('/conversations/' + encodeURIComponent(id) + '/log-parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_id, ...(feature_field ? { feature_field } : {}) }) }),
   fieldMapping: (id: string, input: MappingInput, key: string) => request<{ task: { id: string; status: string }; run: Run }>('/conversations/' + encodeURIComponent(id) + '/field-mapping', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key }, body: JSON.stringify(input) }),

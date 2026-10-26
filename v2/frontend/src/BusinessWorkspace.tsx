@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Artifact, type Confirmation, type Conversation, type OperationInput, type Run, type ProgressSummary } from './api'
 
-export const businessName = (kind: string) => ({log_classification: '日志类型提取', enum_extract: '枚举提取', fill: '填充值映射', remove_mapping: '取消值映射', export: '规则导出', enum_values: '枚举提取', threat_mapping: '威胁类型映射', field_mapping: '配置', config_export: '规则导出', business: '业务处理', business_operation: '业务处理'}[kind] || '业务处理')
+export const businessName = (kind: string) => ({log_classification: '日志类型提取', enum_extract: '枚举提取', fill: '填充值映射', remove_mapping: '取消值映射', export: '规则导出', enum_values: '枚举提取', threat_mapping: '威胁类型映射', field_mapping: '标准字段映射', config_export: '规则导出', business: '业务处理', business_operation: '业务处理'}[kind] || '业务处理')
 export function BusinessOperations({conversation, source, onDone}: {conversation: Conversation; source?: Artifact; onDone: () => Promise<void>}) {
   const facts = conversation.session_facts
   const [kind, setKind] = useState<OperationInput['step']['type']>(source?.kind === 'enum_values' ? 'threat_mapping' : source?.kind === 'threat_mapping' ? 'fill' : source?.kind === 'field_mapping' || source?.kind === 'log_classification' ? 'export' : 'enum_extract')
@@ -92,7 +92,13 @@ export function ArtifactValues({artifact, content}: {artifact: Artifact; content
 
 const phaseName: Record<string, string> = {planning: '规划任务', retrieval: '检索依据', model_call: '业务分析', validation: '校验结果', writeback: '写入结果', execution: '执行步骤', completed: '步骤完成'}
 const progressName: Record<string, string> = {running: '进行中', success: '已完成', failed: '失败'}
-export function progressLabel(summary?: ProgressSummary) {return summary && phaseName[summary.phase || ''] ? `${businessName(summary.operation || '')}：${phaseName[summary.phase || '']} ${progressName[summary.progress_status || ''] || ''}` : ''}
+export function progressLabel(summary?: ProgressSummary) {
+  if (!summary || !phaseName[summary.phase || '']) return ''
+  const base = `${businessName(summary.operation || '')}：${phaseName[summary.phase || '']} ${progressName[summary.progress_status || ''] || ''}`.trimEnd()
+  const batch = summary.current_batch && summary.total_batches ? ` 第 ${summary.current_batch}/${summary.total_batches} 批` : ''
+  const elapsed = summary.elapsed_seconds ? ` · 已耗时 ${Math.round(summary.elapsed_seconds)} 秒` : ''
+  return base + batch + elapsed
+}
 export function RunProgress({run}: {run: Run}) {
   const events = (run.events || []).filter(item => item.event_type === 'run_progress' && progressLabel(item.summary))
   const scopes = [...new Set(events.map(item => item.scope_id))]

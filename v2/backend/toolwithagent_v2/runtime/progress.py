@@ -2,6 +2,9 @@
 import hashlib
 
 OPERATIONS = frozenset({"log_parse", "field_mapping", "enum_extract", "threat_mapping", "fill", "remove_mapping", "export", "add_fields", "delete_fields", "merge_fields", "decode_fields", "regex_extract"})
+# 批次事件的操作归属由映射表显式声明，不靠前缀猜测。
+MESSAGE_OPERATIONS = {"field_candidates_retrieving": "field_mapping", "field_candidates_ready": "field_mapping", "field_candidates_failed": "field_mapping"}
+PROGRESS_FIELDS = ("phase", "progress_status", "operation", "dependency_scope_ids", "current_batch", "total_batches", "elapsed_seconds")
 
 
 class RunProgressSink:
@@ -14,8 +17,14 @@ class RunProgressSink:
         return "step-" + hashlib.sha256((self.claim["id"] + "\0" + plan_id + "\0" + step_id).encode()).hexdigest()[:24]
 
     async def publish(self, event):
-        """只保留安全枚举与匿名依赖，不存 message_code、问题或未审查 detail。"""
-        operation = next((item for item in OPERATIONS if event.message_code.startswith(item + "_")), None)
+        """只保留安全枚举、匿名依赖与真实批次计数，不存 message_code、问题或未审查 detail。"""
+        operation = MESSAGE_OPERATIONS.get(event.message_code) or next((item for item in OPERATIONS if event.message_code.startswith(item + "_")), None)
         summary = {"phase": event.phase.value, "progress_status": event.status.value, "operation": operation,
                    "dependency_scope_ids": [self.scope(event.plan_id, dependency) for dependency in event.dependency_step_ids]}
+        if event.current_batch is not None:
+            summary["current_batch"] = event.current_batch
+        if event.total_batches is not None:
+            summary["total_batches"] = event.total_batches
+        if event.elapsed_seconds:
+            summary["elapsed_seconds"] = event.elapsed_seconds
         self.store.record_progress(self.worker_id, self.claim, self.scope(event.plan_id, event.step_id), summary)
