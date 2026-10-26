@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminConsole } from './AdminConsole'
-import { api, type AdminAuditPage, type AdminKnowledgeDetail, type AdminKnowledgePage, type AdminOverview, type AdminProvider, type AdminRunPage } from './api'
+import { api, type AdminAuditPage, type AdminKnowledgeDetail, type AdminKnowledgePage, type AdminOverview, type AdminProvider, type AdminRunPage, type AdminUser } from './api'
 
 const identity = { id: 'dev-admin', display_name: '管理员', role: 'admin' }
 const overview: AdminOverview = { runs: { queued: 2, running: 1, waiting_confirmation: 0, cancelling: 0, succeeded: 3, failed: 0, cancelled: 1 }, users: 3, conversations: 2, worker: { lease_owner: 'worker-1', lease_expires_at: '2026-10-23T00:00:00Z', epoch: 4 } }
@@ -21,6 +21,11 @@ const providersPage: AdminProvider[] = [
   { provider: 'openai', label: 'OpenAI', base_url: 'https://api.openai.com/v1', revision: 2, model: 'gpt-4o', updated_at: '2026-10-23T00:00:00Z', has_secret: true },
   { provider: 'deepseek', label: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', revision: 0, model: null, updated_at: null, has_secret: false },
 ]
+const usersPage: AdminUser[] = [
+  { id: 'dev-admin', display_name: '管理员', role: 'admin', active: true, created_at: '2026-10-22T00:00:00Z', conversations: 0 },
+  { id: 'dev-user', display_name: '演示用户', role: 'user', active: true, created_at: '2026-10-22T00:00:00Z', conversations: 3 },
+  { id: 'dev-other', display_name: '开发者', role: 'developer', active: false, created_at: '2026-10-22T00:00:00Z', conversations: 1 },
+]
 const props = () => ({ identity, identities: [identity, { id: 'dev-user', display_name: '演示用户', role: 'user' }], onSwitchIdentity: vi.fn(), theme: 'light' as const, onToggleTheme: vi.fn() })
 beforeEach(() => {
   vi.spyOn(api, 'adminOverview').mockResolvedValue(overview)
@@ -37,6 +42,9 @@ beforeEach(() => {
   vi.spyOn(api, 'adminProviderHistory').mockResolvedValue({ items: [{ revision: 2, model: 'gpt-4o', params: {}, created_at: '2026-10-23T00:00:00Z', has_secret: true }, { revision: 1, model: 'gpt-4o-mini', params: {}, created_at: '2026-10-22T00:00:00Z', has_secret: true }] })
   vi.spyOn(api, 'adminSaveProvider').mockResolvedValue({ provider: 'openai', revision: 3, model: 'gpt-4o' })
   vi.spyOn(api, 'adminTestProvider').mockResolvedValue({ ok: true, status_code: 200, latency_ms: 231 })
+  vi.spyOn(api, 'adminUsers').mockResolvedValue({ items: usersPage })
+  vi.spyOn(api, 'adminSetUserRole').mockResolvedValue({ id: 'dev-user', role: 'developer' })
+  vi.spyOn(api, 'adminSetUserActive').mockResolvedValue({ id: 'dev-other', active: true })
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
@@ -88,10 +96,38 @@ describe('admin console', () => {
     expect(within(table).getByText(/\{"status":"running"\} → /)).toBeInTheDocument()
     expect(within(table).getByText('管理员')).toBeInTheDocument()
   })
-  it('keeps the user section as an explicit placeholder', async () => {
+  it('lists users with roles and hides self-management for the current admin', async () => {
     render(<AdminConsole {...props()} />)
     fireEvent.click(await screen.findByRole('button', { name: '用户' }))
-    expect(await screen.findByText(/该区域由下一切片交付/)).toBeInTheDocument()
+    const table = await screen.findByRole('table', { name: '用户列表' })
+    expect(within(table).getByText('演示用户')).toBeInTheDocument()
+    const ownRow = within(table).getByText('dev-admin', { selector: 'td small' }).closest('tr')!
+    expect(within(ownRow).getByText('当前登录')).toBeInTheDocument()
+    expect(within(ownRow).queryByRole('button', { name: '变更角色' })).not.toBeInTheDocument()
+    expect(within(table).getAllByRole('button', { name: '变更角色' })).toHaveLength(1)
+    expect(within(table).getAllByRole('button', { name: '重新启用' })).toHaveLength(1)
+  })
+  it('changes a user role with reason and refreshes the list', async () => {
+    render(<AdminConsole {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: '用户' }))
+    fireEvent.click(await screen.findByRole('button', { name: '变更角色' }))
+    const dialog = await screen.findByRole('dialog', { name: '变更角色 · 演示用户' })
+    fireEvent.change(within(dialog).getByLabelText('新角色'), { target: { value: 'developer' } })
+    fireEvent.change(within(dialog).getByLabelText('变更原因（可选，写入审计）'), { target: { value: '转岗开发' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认变更' }))
+    await waitFor(() => expect(api.adminSetUserRole).toHaveBeenCalledWith('dev-user', 'developer', '转岗开发'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(vi.mocked(api.adminUsers).mock.calls.length).toBeGreaterThan(1)
+  })
+  it('deactivates a user after confirmation', async () => {
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+    render(<AdminConsole {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: '用户' }))
+    fireEvent.click(await screen.findByRole('button', { name: '停用' }))
+    await waitFor(() => expect(api.adminSetUserActive).toHaveBeenCalledWith('dev-user', false, '停用账号'))
+    expect(confirm).toHaveBeenCalled()
+    vi.unstubAllGlobals()
   })
   it('lists providers with version and secret presence, never echoing keys', async () => {
     render(<AdminConsole {...props()} />)

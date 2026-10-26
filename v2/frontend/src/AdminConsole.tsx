@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type AdminKnowledgeDetail, type AdminProvider, type AdminProviderVersion, type AdminProviderTestResult, type Identity } from './api'
+import { api, type AdminKnowledgeDetail, type AdminProvider, type AdminProviderVersion, type AdminProviderTestResult, type AdminUser, type Identity } from './api'
 import { StatusText } from './VisualPrimitives'
 import { MappingDialog } from './MappingDialog'
 
@@ -61,11 +61,15 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
   const [providerReason, setProviderReason] = useState('')
   const [providerTest, setProviderTest] = useState<AdminProviderTestResult | null>(null)
   const [providerHistory, setProviderHistory] = useState<{ provider: string; items: AdminProviderVersion[] } | null>(null)
+  const [userTarget, setUserTarget] = useState<{ user: AdminUser; action: 'role' | 'deactivate' } | null>(null)
+  const [userRole, setUserRole] = useState('')
+  const [userReason, setUserReason] = useState('')
   const overview = useAsync(() => api.adminOverview(), [section], section === 'system')
   const runs = useAsync(() => api.adminRuns(runStatus, runPage), [section, runStatus, runPage], section === 'runs')
   const audit = useAsync(() => api.adminAuditEvents(auditPage), [section, auditPage], section === 'audit')
   const knowledge = useAsync(() => api.adminKnowledge(knowledgeStatus, knowledgePage), [section, knowledgeStatus, knowledgePage], section === 'knowledge')
   const providers = useAsync(() => api.adminProviders(), [section], section === 'providers')
+  const users = useAsync(() => api.adminUsers(), [section], section === 'users')
   useEffect(() => { setActionError('') }, [section])
   const cancelQueued = useCallback(async (runId: string) => {
     setActionBusy(runId); setActionError('')
@@ -146,6 +150,27 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
     catch (caught) { setActionError(caught instanceof Error ? caught.message : '版本历史加载失败。') }
     finally { setActionBusy(null) }
   }, [])
+  const submitUserAction = useCallback(async () => {
+    if (!userTarget || actionBusy) return
+    if (userTarget.action === 'role' && !userRole) return
+    setActionBusy('u' + userTarget.user.id); setActionError('')
+    try {
+      if (userTarget.action === 'role') await api.adminSetUserRole(userTarget.user.id, userRole, userReason.trim() || undefined)
+      else await api.adminSetUserActive(userTarget.user.id, false, userReason.trim() || undefined)
+      setUserTarget(null); setUserRole(''); setUserReason('')
+      users.reload()
+    } catch (caught) { setActionError(caught instanceof Error ? caught.message : '用户管理操作失败，请重试。') }
+    finally { setActionBusy(null) }
+  }, [userTarget, userRole, userReason, actionBusy, users])
+  const deactivateUser = useCallback(async (user: AdminUser) => {
+    if (actionBusy) return
+    setActionBusy('u' + user.id); setActionError('')
+    try {
+      await api.adminSetUserActive(user.id, false, '停用账号')
+      users.reload()
+    } catch (caught) { setActionError(caught instanceof Error ? caught.message : '用户管理操作失败，请重试。') }
+    finally { setActionBusy(null) }
+  }, [actionBusy, users])
   return <div className="app admin-app">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">T</span><span>ToolWithAgent <small>管理台</small></span></div>
@@ -256,7 +281,22 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
             <div className="mapping-actions"><button className="button-text" data-dialog-cancel onClick={() => setProviderHistory(null)}>关闭</button></div>
           </MappingDialog>}
         </section>}
-        {section === 'users' && <section className="activity-section" aria-label="用户角色管理"><h2>用户角色管理</h2><div className="empty-state compact"><p>该区域由下一切片交付（用户角色管理）。</p></div></section>}
+        {section === 'users' && <section className="activity-section" aria-label="用户角色管理">
+          <h2>用户角色管理</h2>
+          <p className="mapping-hint">角色与停用状态从下一请求起生效，不中断进行中的执行；全部变更写入审计。</p>
+          {users.loading && <p role="status">正在读取用户列表…</p>}
+          {users.error && <div className="mapping-error" role="alert"><span>{users.error}</span><button className="button-secondary" onClick={users.reload}>重试加载</button></div>}
+          {users.data && <div className="workbench-table-scroll"><table className="workbench-artifacts admin-users-table"><caption className="sr-only">用户列表</caption><thead><tr><th scope="col">用户</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">活跃会话</th><th scope="col">操作</th></tr></thead><tbody>
+            {users.data.items.map(user => <tr key={user.id}><td>{user.display_name}<small className="mono">{user.id}</small></td><td>{({ user: '用户', developer: '开发者', admin: '管理员' } as Record<string, string>)[user.role] || user.role}</td><td>{user.active ? '启用' : '已停用'}</td><td>{user.conversations}</td><td className="admin-run-actions">{identity.id !== user.id && user.active && <><button className="button-secondary" onClick={() => { setUserTarget({ user, action: 'role' }); setUserRole(user.role); setUserReason(''); setActionError('') }} disabled={!!actionBusy}>变更角色</button><button className="button-secondary" onClick={() => { if (window.confirm(`停用 ${user.display_name} 后其下一请求将被拒绝，进行中的执行不中断。确认停用？`)) void deactivateUser(user) }} disabled={!!actionBusy}>停用</button></>}{identity.id === user.id && <span className="mapping-hint">当前登录</span>}{!user.active && <button className="button-secondary" onClick={() => { void (async () => { setActionBusy('u' + user.id); setActionError(''); try { await api.adminSetUserActive(user.id, true); users.reload() } catch (caught) { setActionError(caught instanceof Error ? caught.message : '启用失败，请重试。') } finally { setActionBusy(null) } })() }} disabled={!!actionBusy}>重新启用</button>}</td></tr>)}
+          </tbody></table></div>}
+          {userTarget && <MappingDialog title={'变更角色 · ' + userTarget.user.display_name} onClose={() => { setUserTarget(null); setUserRole(''); setUserReason('') }}>
+            <p>角色从下一请求起生效，不会中断该用户进行中的执行。</p>
+            <label className="admin-stop-reason">新角色<select aria-label="新角色" value={userRole} onChange={event => setUserRole(event.target.value)}><option value="user">用户</option><option value="developer">开发者</option><option value="admin">管理员</option></select></label>
+            <label className="admin-stop-reason">变更原因（可选，写入审计）<input aria-label="变更原因" value={userReason} onChange={event => setUserReason(event.target.value)} maxLength={1000} placeholder="例如 转岗开发" /></label>
+            {actionError && <p className="mapping-error" role="alert">{actionError}</p>}
+            <div className="mapping-actions"><button className="button-text" data-dialog-cancel onClick={() => { setUserTarget(null); setUserRole(''); setUserReason('') }} disabled={!!actionBusy}>取消</button><button className="button-text" onClick={() => void submitUserAction()} disabled={!!actionBusy || !userRole || userRole === userTarget.user.role}>确认变更</button></div>
+          </MappingDialog>}
+        </section>}
       </div></div>
       {stopTarget && <MappingDialog title="确认强停执行" onClose={() => { setStopTarget(null); setStopReason('') }}>
         <p>强停会立即取消该执行并阻止迟到结果发布，已完成结果保留。必须填写原因，原因会写入审计记录。</p>

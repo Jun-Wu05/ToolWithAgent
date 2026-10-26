@@ -54,6 +54,7 @@ export type AdminKnowledgeDetail = AdminKnowledgeItem & { recipe_version: number
 export type AdminProvider = { provider: string; label: string; base_url: string; revision: number; model: string | null; updated_at: string | null; has_secret: boolean }
 export type AdminProviderVersion = { revision: number; model: string; params: Record<string, unknown>; created_at: string; has_secret: boolean }
 export type AdminProviderTestResult = { ok: boolean; status_code: number | null; latency_ms: number; error?: string }
+export type AdminUser = { id: string; display_name: string; role: 'user' | 'developer' | 'admin'; active: boolean; created_at: string; conversations: number }
 export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; events?: RunEvent[] }
@@ -121,6 +122,13 @@ const messages: Record<string, string> = {
   master_key_missing: '主密钥未配置，无法读写提供方密钥；请设置 V2_MASTER_KEY 后重试。',
   master_key_invalid: '主密钥校验失败，已保存的密钥无法解密；请检查主密钥配置。',
   master_key_invalid_format: '主密钥格式无效；请提供 32 字节的 base64 或十六进制密钥。',
+  user_not_found: '用户不存在。',
+  invalid_role: '角色无效；只能是 user、developer 或 admin。',
+  role_unchanged: '该用户已经是这个角色，无需变更。',
+  cannot_change_own_role: '不能修改自己的角色，请由其他管理员操作。',
+  cannot_deactivate_self: '不能停用自己的账号。',
+  active_unchanged: '该账号已处于目标状态。',
+  user_inactive: '当前身份已停用，请重新选择身份。',
   unauthenticated: '当前身份已失效，请重新选择身份。',
   idempotency_key_reused: '输入参数已变化，请重新开始映射。',
 }
@@ -213,6 +221,9 @@ export const api = {
   adminProviderHistory: (provider: string) => request<{ items: AdminProviderVersion[] }>('/admin/providers/' + encodeURIComponent(provider) + '/history'),
   adminSaveProvider: (provider: string, input: { model: string; api_key: string; params?: Record<string, unknown>; reason?: string }) => request<{ provider: string; revision: number; model: string }>('/admin/providers/' + encodeURIComponent(provider), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }),
   adminTestProvider: (provider: string, input?: { model?: string; api_key?: string; params?: Record<string, unknown> }) => request<AdminProviderTestResult>('/admin/providers/' + encodeURIComponent(provider) + '/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input || {}) }),
+  adminUsers: () => request<{ items: AdminUser[] }>('/admin/users'),
+  adminSetUserRole: (id: string, role: string, reason?: string) => request<{ id: string; role: string }>('/admin/users/' + encodeURIComponent(id) + '/role', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role, reason: reason || null }) }),
+  adminSetUserActive: (id: string, active: boolean, reason?: string) => request<{ id: string; active: boolean }>('/admin/users/' + encodeURIComponent(id) + '/active', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active, reason: reason || null }) }),
   cancelToken: (id: string) => request<{ token: string }>('/runs/' + encodeURIComponent(id) + '/cancel-token', { method: 'POST' }),
   cancelRun: (id: string, token: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }),
   run: async (id: string): Promise<Run> => { const run = await request<Run>('/runs/' + encodeURIComponent(id)); return { ...run, error_message: messages[run.error_code || run.error_message || ''] || run.error_message } },

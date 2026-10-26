@@ -1063,7 +1063,6 @@ class Store:
             saved = self.resolve_provider_secret(provider)
             api_key = saved["api_key"]
             model = model or saved["model"]
-        import httpx
         started = time.monotonic()
         try:
             with httpx.Client(trust_env=False, timeout=8) as client:
@@ -1073,6 +1072,52 @@ class Store:
         except httpx.HTTPError as exc:
             latency = int((time.monotonic() - started) * 1000)
             return {"ok": False, "status_code": None, "latency_ms": latency, "error": type(exc).__name__}
+
+    def admin_users(self, admin_id):
+        with connect(self.path) as db:
+            rows = db.execute(
+                "SELECT u.id,u.display_name,u.role,u.is_active,u.created_at,"
+                "(SELECT COUNT(*) FROM conversations c WHERE c.owner_id=u.id AND c.archived_at IS NULL) AS conversations"
+                " FROM users u ORDER BY u.id").fetchall()
+        return {"items": [{"id": row["id"], "display_name": row["display_name"], "role": row["role"],
+                           "active": bool(row["is_active"]), "created_at": row["created_at"],
+                           "conversations": row["conversations"]} for row in rows]}
+
+    def admin_set_role(self, admin_id, user_id, role, reason=None):
+        if role not in ("user", "developer", "admin"):
+            raise ValueError("invalid_role")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id,role FROM users WHERE id=? AND is_active=1", (user_id,)).fetchone()
+            if row is None:
+                raise LookupError("user_not_found")
+            if row["role"] == role:
+                raise ValueError("role_unchanged")
+            if user_id == admin_id:
+                raise ValueError("cannot_change_own_role")
+            db.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+            self._admin_audit(db, admin_id, "user_role_change", "user", user_id, reason,
+                              before={"role": row["role"]}, after={"role": role})
+            db.commit()
+            return {"id": user_id, "role": role}
+
+    def admin_set_active(self, admin_id, user_id, active, reason=None):
+        if not isinstance(active, bool):
+            raise ValueError("invalid_active")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id,is_active FROM users WHERE id=?", (user_id,)).fetchone()
+            if row is None:
+                raise LookupError("user_not_found")
+            if bool(row["is_active"]) == active:
+                raise ValueError("active_unchanged")
+            if user_id == admin_id and not active:
+                raise ValueError("cannot_deactivate_self")
+            db.execute("UPDATE users SET is_active=? WHERE id=?", (1 if active else 0, user_id))
+            self._admin_audit(db, admin_id, "user_active_change", "user", user_id, reason,
+                              before={"active": bool(row["is_active"])}, after={"active": active})
+            db.commit()
+            return {"id": user_id, "active": active}
 
     def _valid_claim(self, db, worker_id, claim):
         timestamp = now()

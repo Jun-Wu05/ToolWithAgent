@@ -80,6 +80,16 @@ class ProviderTestInput(BaseModel):
     params: dict | None = None
 
 
+class UserRoleInput(BaseModel):
+    role: str
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class UserActiveInput(BaseModel):
+    active: bool
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class SessionInput(BaseModel):
     user_id: str
 
@@ -178,6 +188,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "run_not_cancellable", "run_not_stoppable", "run_not_queued", "run_not_waiting",
             "log_knowledge_not_pending", "log_knowledge_not_rejected", "log_knowledge_review_failed",
             "log_knowledge_replacement_reason_required",
+            "invalid_role", "role_unchanged", "cannot_change_own_role", "active_unchanged", "cannot_deactivate_self",
             "invalid_confirmation_token", "confirmation_expired", "continuation_stale",
             "confirmation_resolution_required", "artifact_source_stale", "config_source_stale", "business_input_stale",
             "mapping_base_stale", "mapping_catalog_changed", "draft_revision_conflict", "draft_apply_in_progress", "draft_not_editable",
@@ -511,6 +522,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return store.admin_test_provider(user["id"], provider, payload.model, payload.api_key, payload.params)
         except LookupError:
             raise HTTPException(404, "provider_not_found")
+
+    @app.get("/api/v2/admin/users")
+    def admin_users(request: Request):
+        user = admin_writer(request)
+        return store.admin_users(user["id"])
+
+    @app.post("/api/v2/admin/users/{user_id}/role")
+    def admin_set_user_role(request: Request, user_id: str, payload: UserRoleInput):
+        user = admin_writer(request)
+        try:
+            return store.admin_set_role(user["id"], user_id, payload.role, payload.reason)
+        except LookupError:
+            raise HTTPException(404, "user_not_found")
+
+    @app.post("/api/v2/admin/users/{user_id}/active")
+    def admin_set_user_active(request: Request, user_id: str, payload: UserActiveInput):
+        user = admin_writer(request)
+        try:
+            return store.admin_set_active(user["id"], user_id, payload.active, payload.reason)
+        except LookupError:
+            raise HTTPException(404, "user_not_found")
 
     @app.get("/api/v2/runs/{run_id}")
     def get_run(request: Request, run_id: str):
