@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type Artifact, type Conversation, type MappingDraftSummary, type Run } from './api'
 import { ArtifactValues, businessName, RunProgress } from './BusinessWorkspace'
-import { StatusText } from './VisualPrimitives'
+import { CopyButton, StatusText } from './VisualPrimitives'
 
 export type WorkspaceTab = 'conversation' | 'overview' | 'results' | 'trace'
 const date = (value?: string) => value ? new Date(value).toLocaleString('zh-CN') : '时间未记录'
@@ -12,19 +12,37 @@ function ArtifactTable({ artifacts, onOpen, onDownload }: { artifacts: Artifact[
   return <div className="workbench-table-scroll"><table className="workbench-artifacts"><thead><tr><th>产物</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody>{artifacts.map(artifact => <tr key={artifact.id}><td><button className="button-text" onClick={() => onOpen(artifact)}>{businessName(artifact.kind)}结果</button></td><td><code>{artifact.id.slice(-8)}</code><small>{date(artifact.created_at)}</small></td><td>{artifact.status === 'corrupt' ? '不可用' : current(artifact) ? '当前产物' : '历史产物'}</td><td><button className="button-text" aria-label={'下载产物 ' + artifact.id} onClick={() => onDownload(artifact.id)}>下载</button></td></tr>)}</tbody></table>{!artifacts.length && <p className="workspace-empty">还没有可查看的产物。执行任务后会在这里显示。</p>}</div>
 }
 
-export function TaskOverview({ conversation, drafts, onResults, onOpen, onTrace, onDownload }: { conversation: Conversation; drafts: MappingDraftSummary[]; onResults: () => void; onOpen: (artifact: Artifact) => void; onTrace: () => void; onDownload: (id: string) => void }) {
+export function TaskFacts({ conversation, drafts }: { conversation: Conversation; drafts: MappingDraftSummary[] }) {
+  const artifacts = conversation.artifacts || []
+  const changes = drafts.reduce((sum, draft) => sum + draft.changed_count, 0)
+  return <><h3>任务信息</h3><dl><dt>会话</dt><dd>{conversation.title}</dd><dt>输入文件</dt><dd>{conversation.files.filter(file => file.active !== false).map(file => file.name).join('、') || '尚未上传'}</dd><dt>已发布产物</dt><dd>{artifacts.filter(current).length} 份</dd><dt>未应用草稿</dt><dd>{drafts.length ? `${drafts.length} 份 · ${changes} 处修改` : '无'}</dd><dt>最近更新</dt><dd>{date(conversation.updated_at)}</dd></dl><p className="mapping-hint">人工确认仅依据真实待确认事项显示，不从未匹配数量推断审核结论。</p></>
+}
+
+export function TaskOverview({ conversation, drafts, onOpen, onTrace, onDownload, onConversation, onRun, onDraft, contextOpen = false }: { conversation: Conversation; drafts: MappingDraftSummary[]; onOpen: (artifact: Artifact) => void; onTrace: () => void; onDownload: (id: string) => void; onConversation: () => void; onRun: (id: string) => void; onDraft: (draft: MappingDraftSummary) => void; contextOpen?: boolean }) {
   const artifacts = conversation.artifacts || []
   const latest = conversation.runs.at(-1)
   const mapping = [...artifacts].reverse().find(item => item.kind === 'field_mapping' && current(item))
   const waiting = conversation.runs.some(run => run.status === 'waiting_confirmation')
   const changes = drafts.reduce((sum, draft) => sum + draft.changed_count, 0)
-  return <section className="task-overview" aria-label="任务概览"><div className="task-overview-grid"><article>
+  const draft = drafts[0]
+  const next = waiting
+    ? { title: '处理待确认方案', description: '返回对话检查执行方案，确认后继续。', label: '处理待确认方案', action: onConversation }
+    : draft
+      ? { title: '检查并应用草稿', description: `${changes} 处已保存修改尚未应用。`, label: '查看结果与草稿', action: () => onDraft(draft) }
+      : latest?.status === 'failed'
+        ? { title: '查看失败原因', description: '检查本次执行详情后决定是否重试。', label: '查看失败原因', action: () => onRun(latest.id) }
+        : mapping
+          ? { title: '检查字段映射', description: mapping.kind === 'field_mapping' ? `${mapping.summary.unmatched_count} 个未匹配字段；映射状态不代表人工审查状态。` : '', label: '查看结果与草稿', action: () => onOpen(mapping) }
+          : latest
+            ? { title: '查看当前进展', description: '查看真实执行状态与关联产物。', label: '查看执行轨迹', action: onTrace }
+            : { title: '开始当前任务', description: '返回对话上传文件或描述要处理的内容。', label: '返回对话', action: onConversation }
+  return <section className={'task-overview' + (contextOpen ? ' task-context-open' : '')} aria-label="任务概览"><div className="task-overview-grid"><article>
     <header><h2>{waiting ? '执行需要你的确认' : latest?.status === 'failed' ? '查看失败原因，继续处理任务' : artifacts.length ? '检查产物，继续迭代' : '从对话开始当前任务'}</h2><p>任务执行、已发布产物和未应用的草稿分别保留，便于检查与继续处理。</p></header>
-    <section className="workspace-next-action"><div><strong>{waiting ? '下一步：处理待确认方案' : changes ? '下一步：检查并应用草稿' : mapping ? '下一步：检查字段映射' : '下一步：查看当前进展'}</strong><p>{changes ? `${changes} 处已保存修改尚未应用。` : mapping?.kind === 'field_mapping' ? `${mapping.summary.unmatched_count} 个未匹配字段；映射状态不代表人工审查状态。` : '可返回对话补充要求，或查看执行详情。'}</p></div><button className="button-secondary" onClick={mapping || changes ? onResults : onTrace}>{mapping || changes ? '查看结果与草稿' : '查看执行轨迹'}</button></section>
+    <section className="workspace-next-action"><div><strong>下一步：{next.title}</strong><p>{next.description}</p></div><button className="button-secondary" onClick={next.action}>{next.label}</button></section>
     <h3>本任务产物</h3><ArtifactTable artifacts={artifacts} onOpen={onOpen} onDownload={onDownload} />
     <div className="workspace-section-heading"><h3>处理记录</h3><button className="button-text" onClick={onTrace}>查看完整轨迹</button></div>
     {conversation.runs.slice(-5).reverse().map(run => <div className="overview-run" key={run.id}><time>{date(run.created_at)}</time><span>{businessName(run.kind || '')}</span><StatusText status={run.status} /></div>)}
-  </article><aside className="workspace-task-facts"><h3>任务信息</h3><dl><dt>会话</dt><dd>{conversation.title}</dd><dt>输入文件</dt><dd>{conversation.files.filter(file => file.active !== false).map(file => file.name).join('、') || '尚未上传'}</dd><dt>已发布产物</dt><dd>{artifacts.filter(current).length} 份</dd><dt>未应用草稿</dt><dd>{drafts.length ? `${drafts.length} 份 · ${changes} 处修改` : '无'}</dd><dt>最近更新</dt><dd>{date(conversation.updated_at)}</dd></dl><p className="mapping-hint">人工确认仅依据真实待确认事项显示，不从未匹配数量推断审核结论。</p></aside></div></section>
+  </article><aside className="workspace-task-facts"><TaskFacts conversation={conversation} drafts={drafts} /></aside></div></section>
 }
 
 type Flat = Map<string, string>
@@ -102,14 +120,15 @@ function TraceRun({ run, artifacts, onOpen, onDetails }: { run: Run; artifacts: 
   useEffect(() => {
     if (!expanded) return
     let live = true
-    setError('')
+    setError(''); setDetail(null)
     api.run(run.id).then(value => { if (live) setDetail(value) }).catch(caught => { if (live) setError(caught instanceof Error ? caught.message : '执行详情读取失败。') })
     return () => { live = false }
   }, [run.id, run.updated_at, expanded, retry])
-  const [copyNotice, setCopyNotice] = useState('')
   const value = detail || run
-  const copy = async () => { try { await navigator.clipboard.writeText(JSON.stringify(value, null, 2)); setCopyNotice('已复制执行记录') } catch { setCopyNotice('复制失败，请展开 JSON 手动复制。') } }
-  return <details className={'workspace-trace-run trace-' + run.status} open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}><summary><strong>{businessName(run.kind || run.type || '')}</strong><StatusText status={run.status} /><time>{date(run.created_at)}</time></summary><div className="workspace-trace-detail">{error && <p className="mapping-error" role="alert">{error}<button className="button-text" onClick={() => setRetry(retry + 1)}>重试读取详情</button></p>}<dl><dt>执行标识</dt><dd><code>{run.id}</code></dd><dt>任务标识</dt><dd><code>{value.task_id || '未记录'}</code></dd><dt>执行状态</dt><dd><StatusText status={value.status} /></dd>{value.error_code && <><dt>错误代码</dt><dd><code>{value.error_code}</code></dd></>}{value.error_message && <><dt>原因</dt><dd>{value.error_message}</dd></>}</dl><RunProgress run={value} /><details><summary>输入引用</summary><pre>{JSON.stringify({ message_id: value.message_id ?? null, file_id: value.file_id ?? null }, null, 2)}</pre></details><details><summary>执行记录 JSON</summary><pre>{JSON.stringify(value, null, 2)}</pre></details><div className="mapping-actions"><button className="button-text" onClick={() => void copy()}>复制执行记录</button><span role="status">{copyNotice}</span><button className="button-text" onClick={() => onDetails(run.id)}>查看完整执行详情</button>{artifacts.filter(item => item.run_id === run.id).map(item => <button className="button-text" key={item.id} onClick={() => onOpen(item)}>查看{businessName(item.kind)}产物</button>)}</div></div></details>
+  const inputs = JSON.stringify({ message_id: value.message_id ?? null, file_id: value.file_id ?? null }, null, 2)
+  const outputs = artifacts.filter(item => item.run_id === run.id)
+  const outputReferences = JSON.stringify(outputs.map(item => ({ id: item.id, kind: item.kind, status: item.status })), null, 2)
+  return <details className={'workspace-trace-run trace-' + run.status} open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}><summary><strong>{businessName(run.kind || run.type || '')}</strong><StatusText status={run.status} /><time>{date(run.created_at)}</time></summary><div className="workspace-trace-detail">{error && <p className="mapping-error" role="alert">{error}<button className="button-text" onClick={() => setRetry(retry + 1)}>重试读取详情</button></p>}<dl><dt>执行标识</dt><dd><code>{run.id}</code></dd><dt>任务标识</dt><dd><code>{value.task_id || '未记录'}</code></dd><dt>执行状态</dt><dd><StatusText status={value.status} /></dd>{value.error_code && <><dt>错误代码</dt><dd><code>{value.error_code}</code></dd></>}{value.error_message && <><dt>原因</dt><dd>{value.error_message}</dd></>}</dl><RunProgress run={value} /><details><summary>输入引用</summary><pre>{inputs}</pre><CopyButton text={inputs} label="复制输入引用" /></details><details><summary>输出产物</summary>{outputs.length ? outputs.map(item => <p key={item.id}><button className="button-text" onClick={() => onOpen(item)}>查看{businessName(item.kind)}产物</button></p>) : <p>本次执行没有已发布产物。</p>}<pre>{outputReferences}</pre><CopyButton text={outputReferences} label="复制输出引用" /></details><details><summary>执行记录 JSON</summary><pre>{JSON.stringify(value, null, 2)}</pre></details><div className="mapping-actions"><CopyButton text={JSON.stringify(value, null, 2)} label="复制执行记录" /><button className="button-text" onClick={() => onDetails(run.id)}>查看完整执行详情</button></div></div></details>
 }
 
 export function ExecutionTrace({ conversation, onOpen, onDetails }: { conversation: Conversation; onOpen: (artifact: Artifact) => void; onDetails: (id: string) => void }) {

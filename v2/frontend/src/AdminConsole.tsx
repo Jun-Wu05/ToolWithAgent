@@ -40,6 +40,7 @@ function useAsync<T>(loader: () => Promise<T>, deps: unknown[], enabled = true) 
 
 export function AdminConsole({ identity, identities, onSwitchIdentity, theme, onToggleTheme }: Props) {
   const [section, setSection] = useState<Section>('system')
+  const [navOpen, setNavOpen] = useState(false)
   const [runStatus, setRunStatus] = useState('')
   const [runPage, setRunPage] = useState(1)
   const [auditPage, setAuditPage] = useState(1)
@@ -172,9 +173,10 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
     finally { setActionBusy(null) }
   }, [actionBusy, users])
   return <div className="app admin-app">
-    <aside className="sidebar">
+    <button className="mobile-nav-toggle" onClick={() => setNavOpen(!navOpen)} aria-label="切换管理导航" aria-expanded={navOpen}><span aria-hidden="true">☰</span></button>
+    <aside className={'sidebar ' + (navOpen ? 'sidebar-open' : '')}>
       <div className="brand"><span className="brand-mark">T</span><span>ToolWithAgent <small>管理台</small></span></div>
-      <nav aria-label="管理导航">{sections.map(item => <button key={item.id} className={'nav-item ' + (section === item.id ? 'selected' : '')} onClick={() => { setSection(item.id); if (item.id === 'runs') setRunPage(1); if (item.id === 'audit') setAuditPage(1) }}>{item.label}</button>)}</nav>
+      <nav aria-label="管理导航">{sections.map(item => <button key={item.id} className={'nav-item ' + (section === item.id ? 'selected' : '')} onClick={() => { setSection(item.id); setNavOpen(false); if (item.id === 'runs') setRunPage(1); if (item.id === 'audit') setAuditPage(1) }}>{item.label}</button>)}</nav>
       <div className="identity">
         <div className="identity-head">
           <span className="avatar">{identity.display_name?.slice(0, 1) || '管'}</span>
