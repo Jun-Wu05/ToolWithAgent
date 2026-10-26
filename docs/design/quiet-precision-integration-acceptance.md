@@ -144,3 +144,12 @@ export default mergeConfig(base, { server: { host: '127.0.0.1', port: 5175, stri
 ```
 
 最终前端全量：13 个测试文件、192 项全部通过（含审查修复），机器可读结果保存在本工作树 `v2/frontend/tmp/issue-409-final-tests.json`。根目录最终结果为 `tmp/pytest-root-final.xml`（988 项，零失败/错误/跳过）。人工启动配置已通过 Vite loadConfigFromFile 只读解析，确认 host=127.0.0.1、5175 strictPort、API 代理 8112；未启动服务。交付前重新 fetch，确认 master ff6775d1 是本分支祖先，远端 V2 仍为 8bb3a66f；主工作树保持干净。
+
+### 人工验收阻塞修复：字段候选检索缺少 requests（2026-10-26）
+
+用户在本工作树实际运行字段映射，Run 6c1c9aa2-233a-4109-9b87-72ebb6402c26 于 10:48:47 以 field_retrieval_failed 失败。单字段、禁止联网的同环境复现定位到共享 agent/core/embedding_client.py 中 import requests 抛 ModuleNotFoundError；V2 独立环境与包声明均缺该依赖。本次在 V2 运行依赖补充 requests>=2.32，共享客户端和业务规则不变。
+
+新增 test_embedding_runtime.py：在 V2 环境导入真实 requests，仅替换 requests.post 的 HTTP 响应，经过真实共享客户端并断言 4096 维结果与调用模型。原环境红测为 ModuleNotFoundError，按修正声明重装 V2 包后转绿，pip check 通过；不会发出网络模型请求。两路只读审查均通过。
+
+当前本工作树 tmp/venv 已更新（requests 2.34.2）。运行中的 Worker 建议在原终端 Ctrl+C 后，按上文相同工作树和 V2_DATA_DIR 重启；在原会话对失败映射选择“重新执行”，不必重新上传或清空主数据。Agent 未重启服务、未自动调用真实模型。真实在线 Embedding/字段映射仍需用户重试确认，离线测试不声明在线任务已经成功。
+`requests` 修复最终验证：根目录 988 项、V2 后端 199 项全量通过，pip check 通过；两轴独立审查无发现。前端源码未改动，沿用本 PR 已通过的 192 项前端回归及构建结果。
