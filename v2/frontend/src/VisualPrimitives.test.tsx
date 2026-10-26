@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ContextPanel, StatusText, TaskHintBar, ToolCallBlock, fmtMs, fmtTokens } from './VisualPrimitives'
+import { CopyButton, ContextPanel, StatusText, TaskHintBar, ToolCallBlock, fmtMs, fmtTokens } from './VisualPrimitives'
 
 afterEach(cleanup)
 describe('approved visual primitives', () => {
@@ -75,4 +75,51 @@ it('returns focus to the latest trigger when one context replaces another', () =
   b.focus(); fireEvent.click(b)
   fireEvent.click(screen.getByRole('button', {name: '关闭产物详情'}))
   expect(b).toHaveFocus()
+})
+
+
+it('traps narrow context focus, closes via mask and returns focus to the trigger', () => {
+  const previous = window.matchMedia
+  Object.defineProperty(window, 'matchMedia', { configurable: true, value: vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })) })
+  try {
+    const close = vi.fn()
+    const trigger = document.createElement('button'); document.body.append(trigger); trigger.focus()
+    const view = render(<ContextPanel panel={{type: 'task', id: 'conv'}} title="任务上下文" onClose={close} tabs={[{id: 'facts', label: '任务信息', content: <button>最后一个动作</button>}]} />)
+    const panel = screen.getByRole('dialog', { name: '任务上下文' })
+    const first = screen.getByRole('button', {name: '关闭任务上下文'})
+    const last = screen.getByRole('button', {name: '最后一个动作'})
+    last.focus(); fireEvent.keyDown(panel, {key: 'Tab'}); expect(first).toHaveFocus()
+    fireEvent.keyDown(panel, {key: 'Tab', shiftKey: true}); expect(last).toHaveFocus()
+    view.rerender(<ContextPanel panel={{type: 'task', id: 'conv'}} title="任务上下文" onClose={close} tabs={[
+      {id: 'facts', label: '任务信息', content: <p>只有任务事实</p>},
+      {id: 'artifacts', label: '产物与草稿', content: <button>隐藏页动作</button>},
+    ]} />)
+    const activeTab = screen.getByRole('tab', {name: '任务信息'})
+    activeTab.focus(); fireEvent.keyDown(panel, {key: 'Tab'}); expect(first).toHaveFocus()
+    fireEvent.keyDown(panel, {key: 'Tab', shiftKey: true}); expect(activeTab).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', {name: '收起任务上下文'})); expect(close).toHaveBeenCalledOnce()
+    view.unmount(); expect(trigger).toHaveFocus(); trigger.remove()
+  } finally { Object.defineProperty(window, 'matchMedia', {configurable: true, value: previous}) }
+})
+
+it('reports copy failure and drops a delayed success after the source changes', async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  let finish!: () => void
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('denied')).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  try {
+    const view = render(<CopyButton text="old" label="复制记录" />)
+    fireEvent.click(screen.getByRole('button', {name: '复制记录'}))
+    await screen.findByText('复制失败，请展开内容手动复制。')
+    fireEvent.click(screen.getByRole('button', {name: '复制记录'}))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
+    view.rerender(<CopyButton text="new" label="复制记录" />)
+    await act(async () => finish())
+    expect(screen.queryByText('已复制')).not.toBeInTheDocument()
+    expect(screen.queryByText(/复制失败/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', {name: '复制记录'})).toBeEnabled()
+  } finally {
+    if (previous) Object.defineProperty(navigator, 'clipboard', previous)
+    else Reflect.deleteProperty(navigator, 'clipboard')
+  }
 })

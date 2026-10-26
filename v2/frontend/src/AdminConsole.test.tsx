@@ -222,3 +222,18 @@ describe('admin console', () => {
     vi.unstubAllGlobals()
   })
 })
+
+
+it('provides mobile admin navigation and preserves the independent identity switch', async () => {
+  const callbacks = props()
+  render(<AdminConsole {...callbacks} />)
+  const toggle = screen.getByRole('button', {name: '切换管理导航'})
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  fireEvent.click(toggle)
+  expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  fireEvent.click(screen.getByRole('button', {name: '运行'}))
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await screen.findByRole('table', {name: '全部用户的执行记录'})
+  fireEvent.change(screen.getByRole('combobox', {name: '开发身份切换'}), {target: {value: 'dev-user'}})
+  expect(callbacks.onSwitchIdentity).toHaveBeenCalledWith('dev-user')
+})
