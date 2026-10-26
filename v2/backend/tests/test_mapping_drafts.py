@@ -85,7 +85,10 @@ def test_catalog_restore_stable_groups_privacy_and_message_guard(tmp_path):
     assert restarted.post(f"/api/v2/conversations/{conversation}/messages",json={"content":"continue"}).json()["error"]["code"]=="draft_resolution_required"
     safe = restarted.get(f"/api/v2/conversations/{conversation}").json()
     assert "operations" not in safe["drafts"][0]
-    assert all(secret not in json.dumps(safe,ensure_ascii=False) for secret in ("SECRET-A","SECRET-B","nested.a","private-product"))
+    assert all(secret not in json.dumps(safe,ensure_ascii=False) for secret in ("SECRET-A","SECRET-B","nested.a"))
+    # owner 亲填的表单参数只允许出现在自己的 operation 输入记录里。
+    assert all("private-product" not in json.dumps(m,ensure_ascii=False) for m in safe["messages"] if m.get("kind")!="operation")
+    assert any("private-product" in json.dumps(m,ensure_ascii=False) for m in safe["messages"] if m.get("kind")=="operation")
     assert "SECRET-A" not in str(store.events("dev-user",conversation,0))
 
 

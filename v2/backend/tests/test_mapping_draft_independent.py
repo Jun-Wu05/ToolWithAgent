@@ -331,8 +331,13 @@ def test_independent_fixed_targets_are_readonly_and_owner_privacy_survives_apply
         db.execute("UPDATE users SET role='user' WHERE id='dev-user'")
     assert apply_draft(world, draft).status_code == 201 and world.worker.once()
     conversation = world.client.get(f"/api/v2/conversations/{world.conversation_id}").json()
-    safe = json.dumps([conversation, world.store.events("dev-user", world.conversation_id, 0)], ensure_ascii=False)
-    assert all(secret not in safe for secret in (PRIVATE_SAMPLE, PRIVATE_WARNING, "private-product", "private-vendor", "nested.alpha"))
+    events = world.store.events("dev-user", world.conversation_id, 0)
+    safe = json.dumps([conversation, events], ensure_ascii=False)
+    assert all(secret not in safe for secret in (PRIVATE_SAMPLE, PRIVATE_WARNING, "nested.alpha"))
+    # owner 亲填的表单参数只允许出现在自己的 operation 输入记录里，事件流与产物仍然禁止。
+    assert all(secret not in json.dumps(events, ensure_ascii=False) for secret in ("private-product", "private-vendor"))
+    assert all(secret not in json.dumps(m, ensure_ascii=False) for m in conversation["messages"] if m.get("kind") != "operation" for secret in ("private-product", "private-vendor"))
+    assert any("private-product" in json.dumps(m, ensure_ascii=False) for m in conversation["messages"] if m.get("kind") == "operation")
     assert PRIVATE_SAMPLE in json.dumps(draft_view(world), ensure_ascii=False)
 
 
