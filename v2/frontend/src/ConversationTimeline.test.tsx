@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
-import { buildTurns, ConversationTimeline, operationParamText } from './ConversationTimeline'
-import type { Conversation } from './api'
+import { buildTurns, ConversationTimeline, dedupeStepLines, operationParamText } from './ConversationTimeline'
+import type { Conversation, Run } from './api'
 
 const base = { id: 'c1', title: '会话', created_at: '', updated_at: '' }
 const noopActions = {
@@ -12,7 +12,7 @@ const renderers = {
   mappingSummary: (artifact: { id: string }) => <p key={artifact.id}>映射摘要卡 {artifact.id}</p>,
   businessCard: (artifact: { id: string }) => <p key={artifact.id}>业务结果卡 {artifact.id}</p>,
   classificationCard: (artifact: { id: string }) => <p key={artifact.id}>解析结果卡 {artifact.id}</p>,
-} as never
+}
 
 const linkedConversation: Conversation = {
   ...base,
@@ -65,4 +65,38 @@ it('summarizes submitted parameters across upload, mapping and operations', () =
   expect(operationParamText({ action: 'field_mapping', product: '防火墙', log_vendor: '华为' })).toBe('产品 防火墙 · 厂商 华为')
   expect(operationParamText({ action: 'fill', step: { target_fields: ['威胁类型'], fill_kind: 'threat' } })).toContain('目标字段 威胁类型')
   expect(operationParamText({ action: 'enum_extract' })).toBe('')
+})
+
+it('merges duplicate progress scopes and appends the real failure reason', () => {
+  const run = { id: 'run-1', status: 'failed', error_message: '请填写产品和厂商。' } as Run
+  const lines = dedupeStepLines([
+    { sequence: 1, scope_type: 'step', scope_id: 'plan-a', event_type: 'run_progress', status: 'running', summary: { operation: 'field_mapping', phase: 'planning', progress_status: 'running' } },
+    { sequence: 2, scope_type: 'step', scope_id: 'plan-a', event_type: 'run_progress', status: 'running', summary: { operation: 'field_mapping', phase: 'planning', progress_status: 'success' } },
+    { sequence: 3, scope_type: 'step', scope_id: 'step-b', event_type: 'run_progress', status: 'running', summary: { operation: 'field_mapping', phase: 'retrieval', progress_status: 'running', current_batch: 2, total_batches: 4, elapsed_seconds: 16.4 } },
+    { sequence: 4, scope_type: 'run', scope_id: 'run-1', event_type: 'state', status: 'running', summary: {} },
+  ], run)
+  expect(lines).toHaveLength(3)
+  expect(lines[0]).toEqual({ label: '标准字段映射', detail: '规划任务', failed: false })
+  expect(lines[1].detail).toContain('第 2/4 批')
+  expect(lines[1].detail).toContain('16 秒')
+  expect(lines[2]).toEqual({ label: '失败原因', detail: '请填写产品和厂商。', failed: true })
+})
+
+it('aligns agent replies with an avatar and exposes the parameter form slot on the failing turn', () => {
+  const conversation: Conversation = {
+    ...base,
+    messages: [
+      { id: 'm-reply', actor: 'assistant', kind: 'text', content: '请填写数据源产品和数据源厂商后继续；数据源可留空自动生成。', run_id: 'run-fail' },
+    ],
+    files: [{ id: 'f1', name: 'demo.log', parse_status: 'succeeded' }],
+    runs: [{ id: 'run-fail', status: 'failed', kind: 'user_request', message_id: 'm-ask', file_id: 'f1', error_code: 'data_source_fields_required', error_message: '请填写产品和厂商。' }],
+  }
+  const actions = { ...noopActions }
+  const withParams = { ...renderers, paramsForm: (message: { id: string }) => message.id === 'm-reply' ? <p>参数补充表单</p> : null }
+  const view = render(<ConversationTimeline conversation={conversation} actions={actions} renderers={withParams} />)
+  const replyTurn = view.container.querySelector('.chat-row')!
+  expect(replyTurn.id).toBe('message-m-reply')
+  expect(replyTurn.querySelector('.chat-avatar')).not.toBeNull()
+  expect(replyTurn.textContent).toContain('参数补充表单')
+  expect(view.container.querySelectorAll('.chat-row-user')).toHaveLength(0)
 })

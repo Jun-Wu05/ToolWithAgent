@@ -170,6 +170,7 @@ export const api = {
   selectIdentity: (user_id: string) => request<Identity>('/dev/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id }) }),
   conversations: () => request<{ items: ConversationSummary[] }>('/conversations'),
   createConversation: () => request<ConversationSummary>('/conversations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+  renameConversation: (id: string, title: string) => request<ConversationSummary>('/conversations/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }),
   conversation: (id: string) => request<Conversation>('/conversations/' + encodeURIComponent(id)),
   sendMessage: (id: string, content: string, key?: string) => request<Message & {task?: {id: string; status: string}; run?: Run}>('/conversations/' + encodeURIComponent(id) + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }), ...(key ? {headers: {'Content-Type': 'application/json', 'Idempotency-Key': key}} : {}) }),
   uploadFile: (id: string, file: File, role?: 'primary' | 'enum_mapping') => {

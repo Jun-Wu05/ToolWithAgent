@@ -90,7 +90,7 @@ export function ArtifactValues({artifact, content}: {artifact: Artifact; content
   return <pre className="artifact-content">{artifact.kind === 'config_export' && typeof content.content === 'string' ? content.content : JSON.stringify(content, null, 2)}</pre>
 }
 
-const phaseName: Record<string, string> = {planning: '规划任务', retrieval: '检索依据', model_call: '业务分析', validation: '校验结果', writeback: '写入结果', execution: '执行步骤', completed: '步骤完成'}
+export const phaseName: Record<string, string> = {planning: '规划任务', retrieval: '检索依据', model_call: '业务分析', validation: '校验结果', writeback: '写入结果', execution: '执行步骤', completed: '步骤完成'}
 const progressName: Record<string, string> = {running: '进行中', success: '已完成', failed: '失败'}
 export function progressLabel(summary?: ProgressSummary) {
   if (!summary || !phaseName[summary.phase || '']) return ''

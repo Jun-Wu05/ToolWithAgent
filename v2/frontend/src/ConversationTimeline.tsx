@@ -1,6 +1,6 @@
-import { type ReactNode } from 'react'
-import { type Artifact, type Conversation, type FieldChangeSummary, type FieldMappingArtifact, type FileRecord, type Message, type Run } from './api'
-import { businessName } from './BusinessWorkspace'
+import { useEffect, useState, type ReactNode } from 'react'
+import { api, type Artifact, type Conversation, type FieldChangeSummary, type FieldMappingArtifact, type FileRecord, type Message, type Run, type RunEvent } from './api'
+import { businessName, phaseName } from './BusinessWorkspace'
 import { StatusText } from './VisualPrimitives'
 
 const statusName: Record<string, string> = {
@@ -110,6 +110,52 @@ function FieldChangeCard({ change, actions }: { change: FieldChangeSummary; acti
   return <article className="result-card"><strong>字段变更</strong><p>{{ ready: '待选择与应用', applying: '正在应用', applied: '已应用，可查看或撤销本次变更', undone: '已撤销，历史版本保留', cancelled: '已取消' }[change.status] || change.status}</p><button className="button-secondary" onClick={() => actions.onOpenFieldChanges(change.run_id)}>查看变更</button></article>
 }
 
+export type StepLine = { label: string; detail: string; failed: boolean }
+
+/** 同一步骤的重复进度事件按 scope 合并取最新；末尾并入 Run 的真实失败原因，不逐条回放原始事件。 */
+export function dedupeStepLines(events: RunEvent[], run: Run): StepLine[] {
+  const latestByScope = new Map<string, RunEvent>()
+  for (const event of events) {
+    if (event.event_type === 'run_progress' && event.scope_id) latestByScope.set(event.scope_id, event)
+  }
+  const lines: StepLine[] = [...latestByScope.values()].map(event => {
+    const summary = event.summary || {}
+    const parts = [phaseName[summary.phase || ''] || '']
+    if (summary.current_batch && summary.total_batches) parts.push(`第 ${summary.current_batch}/${summary.total_batches} 批`)
+    if (summary.elapsed_seconds) parts.push(`${Math.round(summary.elapsed_seconds)} 秒`)
+    return {
+      label: businessName(summary.operation || ''),
+      detail: parts.filter(Boolean).join(' · '),
+      failed: summary.progress_status === 'failed',
+    }
+  })
+  if (run.status === 'failed' && run.error_message) {
+    lines.push({ label: '失败原因', detail: run.error_message, failed: true })
+  }
+  return lines
+}
+
+function RunDisclosure({ run }: { run: Run }) {
+  const [open, setOpen] = useState(false)
+  const [detail, setDetail] = useState<Run | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    api.run(run.id).then(value => { if (live) setDetail(value) }).catch(() => { if (live) setDetail(null) })
+    return () => { live = false }
+  }, [open, run.id])
+  const events = detail?.events || run.events || []
+  const lines = dedupeStepLines(events, detail || run)
+  if (!lines.length) return null
+  const seconds = run.started_at && (run.finished_at || run.updated_at)
+    ? Math.max(1, Math.round((new Date(run.finished_at || run.updated_at!).getTime() - new Date(run.started_at).getTime()) / 1000))
+    : null
+  return <div className="run-disclosure">
+    <button className="run-disclosure-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>执行了 {lines.length} 步{seconds ? ` · ${seconds} 秒` : ''} {open ? '▾' : '▸'}</button>
+    {open && <ol className="run-step-list">{lines.map((line, index) => <li key={index} className={'run-step' + (line.failed ? ' run-step-failed' : '')}><div><strong>{line.label}</strong>{line.detail && <span> · {line.detail}</span>}</div></li>)}</ol>}
+  </div>
+}
+
 /** 对话时间线：按轮次连续展示输入、回复与产物；历史无关联内容单独归组，不伪造用户需求。 */
 export function ConversationTimeline({ conversation, actions, renderers }: {
   conversation: Conversation
@@ -118,19 +164,25 @@ export function ConversationTimeline({ conversation, actions, renderers }: {
     mappingSummary: (artifact: FieldMappingArtifact) => ReactNode
     businessCard: (artifact: Artifact) => ReactNode
     classificationCard: (artifact: Extract<Artifact, { kind: 'log_classification' }>) => ReactNode
+    paramsForm?: (message: Message, run: Run | undefined) => ReactNode
   }
 }) {
   const { turns, unlinked } = buildTurns(conversation)
   const renderArtifact = (artifact: Artifact) => artifact.kind === 'field_mapping' ? renderers.mappingSummary(artifact) : artifact.kind === 'log_classification' ? renderers.classificationCard(artifact) : renderers.businessCard(artifact)
   return <div className="timeline">
     {conversation.messages.length === 0 && conversation.files.length === 0 && <div className="empty-state compact"><h2>这段会话还没有内容</h2><p>发送消息或上传文件，工作台会在这里显示进展。</p></div>}
-    {turns.map(({ message, artifacts, fieldChanges, runs }) => <div className="timeline-item" key={message.id} id={'message-' + message.id}>
-      {message.kind === 'file'
-        ? <FileMessageCard message={message} conversation={conversation} actions={actions} />
-        : message.kind === 'operation'
-          ? <OperationCard message={message} runs={runs} actions={actions} />
-          : <article className={'message ' + (message.actor === 'user' ? 'from-user' : '')}><div className="message-head"><strong>{message.actor === 'user' ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{message.run_id && <button className="button-text" onClick={() => actions.onOpenRun(message.run_id!)}>查看本次执行</button>}</article>}
-    </div>)}
+    {turns.map(({ message, artifacts, fieldChanges, runs }) => {
+      const turnRun = message.run_id ? runs.find(run => run.id === message.run_id) || conversation.runs.find(run => run.id === message.run_id) : undefined
+      const isUser = message.actor === 'user'
+      return <div className={'chat-row' + (isUser && message.kind === 'text' ? ' chat-row-user' : '')} key={message.id} id={'message-' + message.id}>
+        {!isUser && <span className="chat-avatar" aria-hidden="true">T</span>}
+        {message.kind === 'file'
+          ? <FileMessageCard message={message} conversation={conversation} actions={actions} />
+          : message.kind === 'operation'
+            ? <OperationCard message={message} runs={runs} actions={actions} />
+            : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
+      </div>
+    })}
     {(unlinked.files.length > 0 || unlinked.artifacts.length > 0 || unlinked.fieldChanges.length > 0 || unlinked.runs.length > 0) && <details className="activity-section unlinked-inputs" aria-label="历史独立操作"><summary>历史独立操作 · {unlinked.files.length + unlinked.artifacts.length + unlinked.fieldChanges.length + unlinked.runs.length} 项（早于输入留痕，未关联具体输入）</summary>{unlinked.files.length > 0 && <section><h2>输入文件</h2>{unlinked.files.map(file => <FileRow key={file.id} file={file} actions={actions} />)}</section>}{unlinked.artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{unlinked.fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{unlinked.runs.length > 0 && <section><h2>执行记录</h2>{unlinked.runs.map(run => <button className="run-row" key={run.id} onClick={() => actions.onOpenRun(run.id)}><span className="run-label">{businessName(run.kind || run.type || '')}</span><StatusText status={run.status} className="run-status" /><span className="run-detail">执行详情 ›</span></button>)}</section>}</details>}
   </div>
 }
