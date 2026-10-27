@@ -36,7 +36,7 @@ def summarize_report(report: ExecutionReport) -> ExecutionSummary:
             StepSummary(
                 step_id=result.step_id,
                 type=result.operation_type,
-                status=result.status,
+                status=result.summary_status or result.status,
                 error_code=result.error_code,
                 artifact_kinds=(result.artifact.artifact_type,) if result.artifact else (),
                 artifact_count=result.artifact.item_count if result.artifact else 0,

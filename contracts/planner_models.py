@@ -422,6 +422,10 @@ class StepStatus(str, Enum):
     FAILED = "failed"
 
 
+# 非阻断续跑可以失败或降级，而主业务操作仍保持成功。
+SummaryStatus = StepStatus | Literal["warning", "degraded"]
+
+
 class ArtifactContract(StrictContract):
     """定义所有步骤产物共享的数量元数据，禁止使用无约束 payload。"""
 
@@ -543,6 +547,7 @@ class StepResult(StrictContract):
     changed_count: int = Field(default=0, ge=0)
     error_code: str | None = None
     message: str | None = None
+    summary_status: SummaryStatus | None = Field(default=None, exclude_if=lambda value: value is None)
     choices: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
     recovered: bool = Field(default=False, exclude_if=lambda value: not value)
     idempotent_no_change: bool = Field(
