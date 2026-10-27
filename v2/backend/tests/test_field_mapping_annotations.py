@@ -97,7 +97,7 @@ def test_public_mapping_view_retains_annotations_warnings_but_summary_and_events
     artifact = mappings(store, conversation)[0]
     assert artifact['current']
     view = client.get(f"/api/v2/artifacts/{artifact['id']}/mapping-view").json()
-    assert view.get('event_annotations') == [annotation]
+    assert view.get('event_annotations') == [{**annotation, 'type_source': '', 'type_values': ['⚠️ 未生成']}]
     assert view.get('warnings') == [warning]
     assert artifact['summary'].get('uncertain_annotation_count') == 1
     assert artifact['summary'].get('warning_codes') == ['threat_chain_warning']

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MappingWorkspace } from './MappingWorkspace'
 import { api, saveDownload, type MappingView } from './api'
@@ -42,7 +42,7 @@ describe('mapping result view', () => {
     fireEvent.click(disclosure)
     const annotations = await screen.findByRole('table', { name: '事件名称标注' })
     expect(annotations).toHaveTextContent('网络攻击事件')
-    expect(annotations).toHaveTextContent('nested.description')
+    expect(annotations).toHaveTextContent('日志字段 nested.description')
     expect(annotations).toHaveTextContent('拒绝服务、漏洞利用')
     expect(annotations).toHaveTextContent('已判定')
     expect(annotations).toHaveTextContent('待人工确认')
@@ -165,4 +165,30 @@ describe('Draft API wire contract', () => {
     await api.discardMappingDraft('draft-1', 4)
     expect(fetch).toHaveBeenLastCalledWith('/api/v2/mapping-drafts/draft-1', expect.objectContaining({ method: 'DELETE', headers: { 'If-Match': '4' } }))
   })
+})
+
+
+it('shows six shared type columns and plain event names using actual projected values', async () => {
+  vi.mocked(fetch).mockImplementation(() => Promise.resolve(reply(view({
+    event_annotations: [
+      { rule_name: 'audit', event_name: '审计事件', event_level: '信息', status: 'judged', threat_source_field: '不适用', threat_types: ['不适用'], type_source: '—（固定值）', type_values: ['数据库审计'] },
+      { rule_name: 'login', event_name: '登录事件', event_level: '信息', status: 'judged', threat_source_field: '不适用', threat_types: ['不适用'], type_source: 'action', type_values: ['登录', '登出'] },
+      { rule_name: 'legacy-audit', event_name: '资源监控', event_level: '信息', status: 'judged', threat_source_field: '不适用', threat_types: ['不适用'] },
+      { rule_name: 'threat', event_name: '网络攻击', event_level: '提醒', status: 'judged', threat_source_field: 'attack_type', threat_types: ['暴力破解'] },
+      { rule_name: 'unknown', event_name: '', event_level: 'unknown', status: 'uncertain', threat_source_field: '', threat_types: [] },
+    ],
+  }))))
+  render(<MappingWorkspace {...props} />)
+  fireEvent.click(await screen.findByText('事件名称标注 · 5 条'))
+  const table = screen.getByRole('table', { name: '事件名称标注' })
+  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['子规则', '事件名称', '事件级别', '判定来源', '威胁/操作类型', '状态'])
+  const audit = within(table).getByText('audit').closest('tr')!
+  expect(within(audit).getAllByRole('cell')[1]).toHaveTextContent(/^审计事件$/)
+  expect(audit).toHaveTextContent('固定值数据库审计')
+  expect(audit).not.toHaveTextContent('不适用')
+  expect(within(table).getByText('login').closest('tr')).toHaveTextContent('日志字段 action登录、登出')
+  expect(within(table).getByText('legacy-audit').closest('tr')).toHaveTextContent('未采集')
+  expect(within(table).getByText('threat').closest('tr')).toHaveTextContent('日志字段 attack_type暴力破解')
+  expect(within(table).getByText('unknown').closest('tr')).toHaveTextContent('未确定未生成')
+  expect(within(table).queryByText('操作/审计事件')).not.toBeInTheDocument()
 })

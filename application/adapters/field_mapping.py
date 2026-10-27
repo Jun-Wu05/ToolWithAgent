@@ -609,7 +609,11 @@ class FieldMappingAdapter:
                 ))
             elif rule_name in uncertain_set:
                 annotation_rows.append(EventAnnotationRow(rule_name=rule_name, status="uncertain"))
-        return annotated, summary or None, tuple(annotation_rows)
+        from application.threat_report import build_threat_report_rows
+
+        return annotated, summary or None, build_threat_report_rows(
+            annotation_rows, annotated, chain_succeeded=False
+        )
 
 
 __all__ = ["FieldMappingAdapter", "FieldMappingBatchError", "FieldMappingExecutionPolicy"]
