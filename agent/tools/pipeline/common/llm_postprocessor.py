@@ -67,11 +67,11 @@ def sanitize_classification_details(
     extra_values = existing_logtypes - known_values
     if extra_values:
         logger.warning(f"[llm_postprocessor] Removing invented logtypes: {extra_values}")
-        parsed["classification_details"] = [
-            d
-            for d in parsed.get("classification_details", [])
-            if d.get("logtype") in known_values
-        ]
+    parsed["classification_details"] = [
+        d
+        for d in parsed.get("classification_details", [])
+        if d.get("logtype") in known_values
+    ]
 
     # 回填缺失项
     missing_values = known_values - existing_logtypes
@@ -84,6 +84,10 @@ def sanitize_classification_details(
             parsed["classification_details"].append(
                 {"logtype": val, "sample": sample}
             )
+
+    # 已返回项与回填项的计数均以确定性聚合为准。
+    for detail in parsed.get("classification_details", []):
+        detail["count"] = aggregation["values"][detail["logtype"]]["count"]
 
     parsed["feature_count"] = len(parsed.get("classification_details", []))
     return parsed

@@ -52,6 +52,7 @@ from contracts.planner_models import (
     PlanDecision,
     StepResult,
     StepStatus,
+    SummaryStatus,
     StepSpec,
     ThreatMappingArtifact,
     ThreatMappingStep,
@@ -203,12 +204,17 @@ def _stage_span(stage: str) -> Iterator[None]:
         yield
 
 
-def _summary_result(message: str) -> StepResult:
-    """构造链路汇总行（SUCCESS 状态承载 🔗/⚠️ 文案，不降级整体报告）。"""
+def _summary_result(
+    message: str, *, summary_status: SummaryStatus = StepStatus.SUCCESS,
+    error_code: str | None = None,
+) -> StepResult:
+    """保留主报告成功，同时携带链路真实摘要状态与安全错误码。"""
     return StepResult(
         step_id=SUMMARY_STEP_ID,
         operation_type="threat_chain",
         status=StepStatus.SUCCESS,
+        summary_status=summary_status if summary_status != StepStatus.SUCCESS else None,
+        error_code=error_code,
         message=message,
     )
 
@@ -442,7 +448,9 @@ async def _run_chain(
             (
                 _summary_result(
                     f"⚠️ 检测到 {len(trigger.uncertain_rule_names)} 条子规则的事件名称待人工确认，"
-                    "威胁类型链路未自动执行；确认标注后重新执行标准字段映射即可触发。"
+                    "威胁类型链路未自动执行；确认标注后重新执行标准字段映射即可触发。",
+                    summary_status="warning",
+                    error_code="event_annotation_confirmation_required",
                 ),
             ),
         )
@@ -459,7 +467,7 @@ async def _run_chain(
         )
         return _extended_report(
             refreshed,
-            (_summary_result("⚠️ 威胁类型链路未执行：威胁子规则状态异常（mapped_sub_rules 缺失）"),),
+            (_summary_result("⚠️ 威胁类型链路未执行：威胁子规则状态异常（mapped_sub_rules 缺失）", summary_status=StepStatus.FAILED, error_code="threat_chain_config_missing"),),
         )
 
     # S1 来源字段判定
@@ -515,7 +523,9 @@ async def _run_chain(
                 (
                     _summary_result(
                         f"⚠️ 威胁类型链路执行异常（{type(error).__name__}），"
-                        "字段映射结果不受影响；可用显式指令重试链路"
+                        "字段映射结果不受影响；可用显式指令重试链路",
+                        summary_status=StepStatus.FAILED,
+                        error_code="threat_chain_execution_failed",
                     ),
                 ),
             )
@@ -529,6 +539,7 @@ async def _run_chain(
     # 80% 落「其他」也应改选，再调；LLM 判断的升级路径见 ADR-0011。
     rederive_note = ""
     gate_blocked = False
+    still_degraded = False
     mapped_values = [
         row.mapped_value
         for result in chain_report.results
@@ -630,6 +641,7 @@ async def _run_chain(
                     )
                 else:
                     # 重跑执行失败：保留首次已提交结果，不再重试
+                    gate_blocked = True
                     rederive_note = (
                         f"已自动改选 {decision.source_field} → "
                         f"{next_decision.source_field} 重跑，未获得更好结果，保留首次结果"
@@ -659,4 +671,14 @@ async def _run_chain(
     successful = tuple(
         result for result in chain_report.results if result.status == StepStatus.SUCCESS
     )
-    return _extended_report(report, successful + (_summary_result(summary),))
+    failure = next((result for result in chain_report.results if result.status != StepStatus.SUCCESS), None)
+    summary_status: SummaryStatus = (
+        failure.status if failure else
+        "warning" if gate_blocked else
+        "degraded" if plan.degraded or still_degraded or any("已降级" in (result.message or "") for result in chain_report.results) else
+        StepStatus.SUCCESS
+    )
+    return _extended_report(report, successful + (_summary_result(
+        summary, summary_status=summary_status,
+        error_code=failure.error_code if failure else None,
+    ),))
