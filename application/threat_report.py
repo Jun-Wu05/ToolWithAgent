@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from agent.shared.event_classify import THREAT_EVENT_NAMES
+from agent.shared.event_classify import OPERATION_TYPE_FIELD, THREAT_EVENT_NAMES
 from application.threat_chain_policy import resolve_threat_mapping_value
 from contracts.planner_models import (
     EventAnnotationRow,
@@ -33,13 +33,13 @@ def _rule_by_name(config: Any, rule_name: str) -> Mapping[str, Any] | None:
     )
 
 
-def _threat_binding(rule: Mapping[str, Any]) -> str | None:
+def _field_binding(rule: Mapping[str, Any], field_name: str) -> str | None:
     parser = rule.get("parser")
     filters = parser.get("filter", []) if isinstance(parser, Mapping) else []
     for filter_item in filters if isinstance(filters, list) else []:
         fields = filter_item.get("fields") if isinstance(filter_item, Mapping) else None
-        if isinstance(fields, Mapping) and THREAT_TYPE_FIELD in fields:
-            return str(fields[THREAT_TYPE_FIELD])
+        if isinstance(fields, Mapping) and field_name in fields:
+            return str(fields[field_name]) if fields[field_name] is not None else None
     return None
 
 
@@ -113,41 +113,55 @@ def _reference_field(binding: str) -> str | None:
     return source_field or None
 
 
-def _enrich_threat_row(
-    row: EventAnnotationRow, rule: Mapping[str, Any]
-) -> EventAnnotationRow:
-    binding = _threat_binding(rule)
-    if binding is None:
-        return row.model_copy(update={"threat_types": (NOT_GENERATED_LABEL,)})
+def _resolve_type_binding(
+    rule: Mapping[str, Any], field_name: str
+) -> tuple[str, tuple[str, ...]]:
+    """按最终配置解析固定值或字段引用，不根据字段存在推断绑定。"""
+    binding = _field_binding(rule, field_name)
+    target = _normalize_entry(rule, field_name)
+    if binding is None and field_name == OPERATION_TYPE_FIELD and target is not None:
+        value = target.get("value")
+        if value is not None and str(value).strip():
+            binding = str(value)
+    if binding is None or (field_name == OPERATION_TYPE_FIELD and not binding.strip()):
+        return "", (NOT_GENERATED_LABEL,)
 
     source_field = _reference_field(binding)
     if source_field is None:
-        return row.model_copy(
-            update={
-                "threat_source_field": FIXED_SOURCE_LABEL,
-                "threat_types": (binding or "其他",),
-            }
-        )
+        return FIXED_SOURCE_LABEL, (binding or "其他",)
 
     samples = _sample_values(_normalize_entry(rule, source_field)) or _rule_sample_values(
         rule, source_field
     )
-    target = _normalize_entry(rule, THREAT_TYPE_FIELD)
     mappings = target.get("mappings", []) if target is not None else []
     mapping_rows = mappings if isinstance(mappings, list) else []
-    resolved = tuple(
-        dict.fromkeys(
-            mapped
-            for sample in samples
+    if field_name == OPERATION_TYPE_FIELD and not mapping_rows:
+        resolved = tuple(dict.fromkeys(samples))
+    else:
+        resolved = tuple(dict.fromkeys(
+            mapped for sample in samples
             if (mapped := resolve_threat_mapping_value(sample, mapping_rows))
-        )
-    )
-    return row.model_copy(
-        update={
-            "threat_source_field": source_field,
-            "threat_types": resolved or (UNRESOLVED_THREAT_LABEL,),
-        }
-    )
+        ))
+    return source_field, resolved or (UNRESOLVED_THREAT_LABEL,)
+
+
+def _enrich_threat_row(
+    row: EventAnnotationRow, rule: Mapping[str, Any]
+) -> EventAnnotationRow:
+    source, values = _resolve_type_binding(rule, THREAT_TYPE_FIELD)
+    return row.model_copy(update={"threat_source_field": source, "threat_types": values})
+
+
+def event_type_determination(
+    row: EventAnnotationRow, final_config: Any
+) -> tuple[str, tuple[str, ...]]:
+    """本人结果视图的共用类型来源/值；威胁结果保留实际链路结论。"""
+    if row.status == "uncertain" or row.event_name in THREAT_EVENT_NAMES:
+        return row.threat_source_field, row.threat_types or (NOT_GENERATED_LABEL,)
+    rule = _rule_by_name(final_config, row.rule_name)
+    if rule is None:
+        return "", (NOT_GENERATED_LABEL,)
+    return _resolve_type_binding(rule, OPERATION_TYPE_FIELD)
 
 
 def build_threat_report_rows(
@@ -206,5 +220,6 @@ __all__ = [
     "NOT_GENERATED_LABEL",
     "UNRESOLVED_THREAT_LABEL",
     "build_threat_report_rows",
+    "event_type_determination",
     "refresh_report_event_annotations",
 ]

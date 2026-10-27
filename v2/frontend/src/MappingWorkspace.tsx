@@ -168,14 +168,17 @@ export function MappingWorkspace({ artifact, onBack, onDownload, downloading, do
     {downloadError && <p className="mapping-error" role="alert">{downloadError}</p>}
     {data && <>
       {!!data.warnings?.length && <section className="mapping-business-warnings" aria-label="威胁类型处理提醒"><h3>威胁类型处理提醒</h3><ul>{data.warnings.map((warning, index) => <li key={warning.code + index}>{warning.message}</li>)}</ul></section>}
-      <details className="mapping-annotations" aria-label="事件名称标注明细"><summary>事件名称标注 · {data.event_annotations?.length || 0} 条</summary>{data.event_annotations?.length ? <div className="mapping-table-region annotation-table-region"><table className="annotation-table" aria-label="事件名称标注"><colgroup><col /><col /><col /><col /><col /><col /></colgroup><thead><tr><th scope="col">子规则</th><th scope="col">事件名称</th><th scope="col">事件级别</th><th scope="col">威胁判定来源（仅威胁事件）</th><th scope="col">威胁判定结果（仅威胁事件）</th><th scope="col">状态</th></tr></thead><tbody>{data.event_annotations.map((annotation, index) => {
+      <details className="mapping-annotations" aria-label="事件名称标注明细"><summary>事件名称标注 · {data.event_annotations?.length || 0} 条</summary>{data.event_annotations?.length ? <div className="mapping-table-region annotation-table-region"><table className="annotation-table" aria-label="事件名称标注"><colgroup><col /><col /><col /><col /><col /><col /></colgroup><thead><tr><th scope="col">子规则</th><th scope="col">事件名称</th><th scope="col">事件级别</th><th scope="col">判定来源</th><th scope="col">威胁/操作类型</th><th scope="col">状态</th></tr></thead><tbody>{data.event_annotations.map((annotation, index) => {
         const operational = annotation.status === 'judged' && (annotation.threat_source_field === '不适用' || annotation.event_level === '信息')
+        const source = annotation.type_source ?? (operational ? '' : annotation.threat_source_field)
+        const values = annotation.type_values ?? (operational ? [] : annotation.threat_types)
+        const sourceLabel = source === '—（固定值）' ? '固定值' : source ? `日志字段 ${source}` : operational ? '未采集' : '未确定'
         return <tr key={annotation.rule_name + index}>
           <td>{annotation.rule_name || '未命名子规则'}</td>
-          <td>{annotation.event_name || '未生成'}{operational && <small>操作/审计事件</small>}</td>
+          <td>{annotation.event_name || '未生成'}</td>
           <td>{!annotation.event_level || annotation.event_level === 'unknown' ? '未知' : annotation.event_level}</td>
-          <td className="mono">{operational ? '不适用' : annotation.threat_source_field || '未确定'}</td>
-          <td>{operational ? '不适用' : annotation.threat_types.length ? annotation.threat_types.join('、') : '未生成'}</td>
+          <td className="mono">{sourceLabel}</td>
+          <td>{values.length ? values.join('、') : operational ? '未采集' : '未生成'}</td>
           <td><span className={'mapping-badge ' + (annotation.status === 'judged' ? 'mapping-matched' : 'mapping-unmatched')}>{annotation.status === 'judged' ? '已判定' : '待人工确认'}</span></td>
         </tr>
       })}</tbody></table></div> : <p className="mapping-hint">未生成事件名称标注。</p>}</details>

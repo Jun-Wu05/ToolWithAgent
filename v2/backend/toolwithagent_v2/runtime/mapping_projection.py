@@ -1,6 +1,8 @@
 """Owner-only mapping table projection; no business decisions or editing."""
 import hashlib
 import json
+from application.threat_report import event_type_determination
+from contracts.planner_models import EventAnnotationRow
 from application.standard_enum_mapping import iter_rule_field_values
 from agent.tools.rule_generator.utils import value_to_str
 from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES, MAPPING_EXCLUDED_STANDARD_FIELDS
@@ -100,6 +102,12 @@ def mapping_view(payload, sub_rule=None, page=1, q='', status=None):
     query = q.casefold().strip()
     rows = [row for row in rule['rows'] if (not status or row['status']==status) and
         (not query or query in str([row['source_path'], row['standard_field'], row['expanded_samples']]).casefold())]
+    annotations = []
+    for annotation in payload.get('event_annotations', []):
+        source, values = event_type_determination(
+            EventAnnotationRow.model_validate({key: value for key, value in annotation.items() if key in EventAnnotationRow.model_fields}), payload['config']
+        )
+        annotations.append({**annotation, 'type_source': source, 'type_values': list(values)})
     return {'sub_rules': [{'id': rule['id'], 'name': rule['name'], 'field_count':len(rule['rows'])} for rule in rules],
         'sub_rule_id': selected, 'items': rows[(page-1)*50:page*50], 'total': len(rows), 'page': page, 'page_size': 50, 'sample_line_reference': 'log_entry',
-        'event_annotations': payload.get('event_annotations', []), 'warnings': payload.get('warnings', [])}
+        'event_annotations': annotations, 'warnings': payload.get('warnings', [])}
