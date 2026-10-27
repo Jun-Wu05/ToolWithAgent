@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from contracts.planner_models import ConfigRef, StepStatus
+from contracts.planner_models import ConfigRef, SummaryStatus
 from contracts.session_artifacts import ReferenceableArtifactFact
 
 
@@ -21,7 +21,7 @@ class StepSummary(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     step_id: str = Field(min_length=1)
     type: str = Field(min_length=1)
-    status: StepStatus
+    status: SummaryStatus
     error_code: str | None = None
     artifact_kinds: tuple[str, ...] = ()
     artifact_count: int = Field(default=0, ge=0)
