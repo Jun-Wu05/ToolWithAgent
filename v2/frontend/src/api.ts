@@ -17,7 +17,7 @@ export type ClassificationArtifact = {
 }
 export type EventAnnotation = {
   rule_name: string; event_name: string; event_level: string; threat_source_field: string
-  threat_types: string[]; status: 'judged' | 'uncertain'
+  threat_types: string[]; status: 'judged' | 'uncertain'; type_source?: string; type_values?: string[]
 }
 export type MappingWarning = { code: 'threat_chain_warning'; message: string }
 export type FieldMappingArtifact = {
