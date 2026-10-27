@@ -19,6 +19,10 @@ class ConversationInput(BaseModel):
     title: str | None = None
 
 
+class ConversationRenameInput(BaseModel):
+    title: str = Field(max_length=160)
+
+
 class MessageInput(BaseModel):
     content: str
 
@@ -275,6 +279,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v2/conversations/{conversation_id}")
     def get_conversation(request: Request, conversation_id: str):
         return store.get_conversation(principal(request)["id"], conversation_id)
+
+    @app.patch("/api/v2/conversations/{conversation_id}")
+    def rename_conversation(request: Request, conversation_id: str, payload: ConversationRenameInput):
+        return store.rename_conversation(principal(request)["id"], conversation_id, payload.title)
 
     @app.post("/api/v2/conversations/{conversation_id}/messages", status_code=201)
     def create_message(request: Request, conversation_id: str, payload: MessageInput, idempotency_key: str | None = Header(None)):
