@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type AdminKnowledgeDetail, type AdminProvider, type AdminProviderVersion, type AdminProviderTestResult, type AdminUser, type Identity } from './api'
 import { StatusText } from './VisualPrimitives'
 import { MappingDialog } from './MappingDialog'
+import { RunDiagnostics } from './RunDiagnostics'
 
 const runKindName: Record<string, string> = { file_validation: '文件校验', field_change_apply: '应用字段变更', field_change_undo: '撤销字段变更', business_clear: '清空业务数据', user_request: '业务任务', business_operation: '业务处理', mapping_draft_apply: '应用映射修改', field_mapping: '标准字段映射', log_parse: '日志类型提取', log_knowledge_submit: '日志知识申请' }
 const runKind = (kind: string) => runKindName[kind] || kind
@@ -10,9 +11,9 @@ const auditActionName: Record<string, string> = { force_stop: '强停执行', ca
 const auditAction = (action: string) => auditActionName[action] || action
 const stoppable = new Set(['queued', 'running', 'waiting_confirmation'])
 
-type Section = 'system' | 'runs' | 'providers' | 'users' | 'knowledge' | 'audit'
+type Section = 'system' | 'runs' | 'diagnostics' | 'providers' | 'users' | 'knowledge' | 'audit'
 const sections: { id: Section; label: string }[] = [
-  { id: 'system', label: '系统' }, { id: 'runs', label: '运行' }, { id: 'providers', label: 'Provider' },
+  { id: 'system', label: '系统' }, { id: 'runs', label: '运行' }, { id: 'diagnostics', label: 'Run 诊断' }, { id: 'providers', label: 'Provider' },
   { id: 'users', label: '用户' }, { id: 'knowledge', label: '日志知识' }, { id: 'audit', label: '审计' },
 ]
 
@@ -189,6 +190,7 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
       <header className="workspace-header"><div><h1>管理台</h1><p>系统健康、运行队列、知识审核与审计记录</p></div><div className="header-actions"><button className="icon-button" aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'} title={theme === 'light' ? '切换深色主题' : '切换浅色主题'} onClick={onToggleTheme}>{theme === 'light' ? '深色主题' : '浅色主题'}</button></div></header>
       {actionError && <div role="alert" className="feedback error"><span>{actionError}</span><button aria-label="关闭提示" onClick={() => setActionError('')}>关闭</button></div>}
       <div className="conversation-content"><div className="admin-sections">
+        {section === 'diagnostics' && <RunDiagnostics />}
         {section === 'system' && <section className="activity-section" aria-label="系统健康">
           <h2>系统健康</h2>
           {overview.loading && <p role="status">正在读取系统状态…</p>}

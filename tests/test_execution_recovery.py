@@ -13,6 +13,11 @@ def test瞬时异常原样重试一次并在报告与审计中标记恢复(caplo
     from application.execution_policy import create_plan_executor
     from contracts.planner_models import PlanDecision, StepResult, StepStatus
     from contracts.session_facts import SessionFacts
+    from contracts.model_call_diagnostics import bind_recorder, record_call, reset_recorder
+    import time
+    from datetime import datetime, timezone
+
+    diagnostic_events = []
 
     class FlakyAdapter:
         def __init__(self) -> None:
@@ -20,6 +25,9 @@ def test瞬时异常原样重试一次并在报告与审计中标记恢复(caplo
 
         async def execute(self, step, _context, _dependencies):
             self.calls += 1
+            for _ in range(2 if self.calls == 2 else 1):
+                record_call("test", "model", None, datetime.now(timezone.utc).isoformat(),
+                            time.monotonic(), "request", response="response")
             if self.calls == 1:
                 raise TimeoutError("temporary provider timeout")
             return StepResult(
@@ -38,20 +46,26 @@ def test瞬时异常原样重试一次并在报告与审计中标记恢复(caplo
         }
     )
 
-    with caplog.at_level(logging.INFO, logger="recovery"):
-        report = asyncio.run(
-            create_plan_executor({"log_parse": adapter}).execute(
-                plan,
-                ExecutionContext(
-                    session=make_session_state(raw_log_lines=["event=login"]),
-                    session_facts=SessionFacts(has_logs=True),
-                ),
+    token = bind_recorder(diagnostic_events.append)
+    try:
+        with caplog.at_level(logging.INFO, logger="recovery"):
+            report = asyncio.run(
+                create_plan_executor({"log_parse": adapter}).execute(
+                    plan,
+                    ExecutionContext(
+                        session=make_session_state(raw_log_lines=["event=login"]),
+                        session_facts=SessionFacts(has_logs=True),
+                    ),
+                )
             )
-        )
+    finally:
+        reset_recorder(token)
 
     assert report.status == StepStatus.SUCCESS
     assert report.results[0].recovered is True
     assert adapter.calls == 2
+    assert [event["attempt"] for event in diagnostic_events] == [1, 2, 2]
+    assert all(event["operation"] == "log_parse" for event in diagnostic_events)
     recovery_records = [
         record for record in caplog.records if record.name == "recovery"
     ]

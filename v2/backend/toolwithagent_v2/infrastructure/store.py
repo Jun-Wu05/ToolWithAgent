@@ -9,6 +9,7 @@ import secrets
 import time
 
 from .db import connect, migrate
+from contracts.model_call_diagnostics import redact_text
 from toolwithagent_v2.runtime.progress import PROGRESS_FIELDS
 from toolwithagent_v2.settings import Settings
 
@@ -720,6 +721,121 @@ class Store:
             for event in result["events"]:
                 event.pop("summary_json")
             return result
+
+    def diagnostic_run(self, run_id, include_content=False):
+        """Project one Run's linked evidence without reading unrelated conversations."""
+        with connect(self.path) as db:
+            row = db.execute(
+                "SELECT r.*,t.conversation_id,t.type AS task_type,t.owner_id,"
+                "c.title AS conversation_title,u.display_name AS owner_name "
+                "FROM runs r JOIN tasks t ON t.id=r.task_id "
+                "JOIN conversations c ON c.id=t.conversation_id "
+                "JOIN users u ON u.id=t.owner_id WHERE r.id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise LookupError("run_not_found")
+            run = {**self._run(row), "owner_id": row["owner_id"], "owner_name": row["owner_name"],
+                   "conversation_id": row["conversation_id"], "conversation_title": row["conversation_title"],
+                   "provider_config_revision": row["provider_config_revision"],
+                   "prompt_version": row["prompt_version"], "standard_field_version": row["standard_field_version"]}
+            timeline = []
+            logs = []
+            planned = []
+            observed_scopes = set()
+            for event in db.execute(
+                "SELECT sequence,scope_type,scope_id,event_type,status,summary_json,created_at "
+                "FROM run_events WHERE run_id=? ORDER BY sequence", (run_id,)
+            ):
+                try:
+                    summary = json.loads(event["summary_json"])
+                except (TypeError, ValueError):
+                    summary = {}
+                summary = {key: summary[key] for key in PROGRESS_FIELDS if key in summary} if isinstance(summary, dict) else {}
+                item = {"sequence": event["sequence"], "scope_type": event["scope_type"],
+                        "scope_id": event["scope_id"], "event_type": event["event_type"],
+                        "status": event["status"], "summary": summary, "created_at": event["created_at"]}
+                timeline.append(item)
+                if isinstance(summary.get("planned_steps"), list):
+                    planned.extend(summary["planned_steps"])
+                if event["scope_type"] == "step":
+                    observed_scopes.add(event["scope_id"])
+                logs.append({"id": f"event-{event['sequence']}", "level": "error" if event["status"] == "failed" or summary.get("progress_status") == "failed" else "info",
+                             "source": "run_event", "run_id": run_id, "task_id": run["task_id"],
+                             "scope_id": event["scope_id"], "event_type": event["event_type"],
+                             "error_code": None, "created_at": event["created_at"]})
+            calls = []
+            for call in db.execute(
+                "SELECT id,provider,model,error_code,summary_json,created_at "
+                "FROM model_calls WHERE run_id=? ORDER BY created_at,id", (run_id,)
+            ):
+                try:
+                    summary = json.loads(call["summary_json"])
+                except (TypeError, ValueError):
+                    summary = {}
+                if not isinstance(summary, dict):
+                    summary = {}
+                projected = {key: summary[key] for key in (
+                    "request_id", "scope_id", "attempt", "duration_ms", "status", "started_at",
+                    "finished_at", "http_status", "prompt_version", "standard_field_version",
+                    "provider_config_revision", "operation", "input_artifact_id", "input_artifact_version",
+                ) if key in summary and isinstance(summary[key], (str, int, float))}
+                params = summary.get("params")
+                if isinstance(params, dict):
+                    projected["params"] = {key: params[key] for key in ("temperature", "top_p", "max_tokens")
+                                           if key in params and isinstance(params[key], (int, float)) and not isinstance(params[key], bool)}
+                for key in ("request_truncated", "response_truncated"):
+                    if type(summary.get(key)) is bool:
+                        projected[key] = summary[key]
+                if include_content:
+                    for key in ("request", "response"):
+                        if key in summary:
+                            projected[key] = redact_text(summary[key])
+                entry = {"id": call["id"], "run_id": run_id, "task_id": run["task_id"],
+                         "provider": call["provider"], "model": call["model"],
+                         "error_code": call["error_code"], "created_at": call["created_at"], **projected}
+                calls.append(entry)
+                logs.append({"id": "call-" + call["id"], "level": "error" if call["error_code"] else "info",
+                             "source": "model_call", "run_id": run_id, "task_id": run["task_id"],
+                             "call_id": call["id"], "scope_id": entry.get("scope_id"),
+                             "request_id": entry.get("request_id"), "error_code": call["error_code"],
+                             "duration_ms": entry.get("duration_ms"), "created_at": call["created_at"]})
+            artifacts = []
+            for artifact in db.execute(
+                "SELECT id,kind,version,status,sha256,created_at FROM artifacts WHERE run_id=? ORDER BY created_at,id",
+                (run_id,),
+            ):
+                sources = [item[0] for item in db.execute(
+                    "SELECT source_artifact_id FROM artifact_edges WHERE derived_artifact_id=? ORDER BY source_artifact_id",
+                    (artifact["id"],),
+                )]
+                artifacts.append({**dict(artifact), "source_artifact_ids": sources})
+            failed_call = next((item for item in reversed(calls) if item["error_code"]), None)
+            last_call = calls[-1] if calls else None
+            possible_call = last_call if run["status"] == "failed" and last_call and last_call["error_code"] else None
+            conclusion = {"status": run["status"], "error_code": run["error_code"],
+                          "call_id": None, "scope_id": None,
+                          "evidence_call_id": failed_call["id"] if failed_call else None,
+                          "evidence_scope_id": failed_call.get("scope_id") if failed_call else None,
+                          "possible_cause": possible_call["error_code"] if possible_call else None,
+                          "category": (run["error_code"] or "未采集") if run["status"] == "failed" else run["status"]}
+            if run["status"] == "failed":
+                conclusion["reason"] = "具体原因未采集"
+            unexecuted = [{**step, "reason": (
+                "Run 失败前未启动；具体阻断原因未采集" if run["status"] == "failed"
+                else "Run 取消前未启动；具体原因未采集" if run["status"] == "cancelled"
+                else "步骤尚未启动；具体原因未采集")}
+                          for step in planned if isinstance(step, dict)
+                          and step.get("scope_id") not in observed_scopes]
+            return {"run": run, "conclusion": conclusion, "evidence_status": "已采集" if calls else "未采集",
+                    "timeline": timeline, "planned_steps": planned, "unexecuted_steps": unexecuted,
+                    "calls": calls, "logs": logs, "artifacts": artifacts}
+
+    def diagnostic_call(self, run_id, call_id):
+        detail = self.diagnostic_run(run_id, include_content=True)
+        for call in detail["calls"]:
+            if call["id"] == call_id:
+                return call
+        raise LookupError("model_call_not_found")
 
     def events(self, owner_id, conversation_id, after):
         with connect(self.path) as db:
@@ -1776,5 +1892,59 @@ class Store:
             sequence = db.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM run_events WHERE run_id=?", (claim["id"],)).fetchone()[0]
             db.execute("INSERT INTO run_events(id,run_id,sequence,scope_type,scope_id,event_type,status,summary_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (uid(), claim["id"], sequence, "step", scope_id, "run_progress", "running", json.dumps(safe, separators=(",", ":")), now()))
             self._event(db, row["conversation_id"], "run_progress", "run", claim["id"], {"run_id": claim["id"], "status": "running", "scope_id": scope_id, **safe})
+            db.commit()
+            return True
+
+    def record_model_call(self, worker_id, claim, event):
+        """Persist bounded evidence only while this Worker still owns the Run."""
+        allowed_errors = {"model_connection", "model_timeout", "model_authentication", "model_rate_limited",
+                          "provider_unavailable", "model_unavailable", "model_response_format",
+                          "provider_request_failed", "model_unclassified"}
+        error_code = event.get("error_code")
+        if error_code not in allowed_errors:
+            error_code = "model_unclassified" if error_code else None
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._valid_claim(db, worker_id, claim)
+            if row is None:
+                return False
+            attempt = event.get("attempt")
+            if not isinstance(attempt, int) or attempt < 1:
+                attempt = 1
+            summary = {key: event[key] for key in (
+                "request_id", "scope_id", "started_at", "finished_at", "duration_ms", "status", "http_status",
+            ) if key in event and isinstance(event[key], (str, int, float))}
+            summary["attempt"] = attempt
+            if event.get("operation") in {"log_parse", "field_mapping", "enum_extract", "threat_mapping", "fill", "remove_mapping", "export", "add_fields", "delete_fields", "merge_fields", "decode_fields", "regex_extract"}:
+                summary["operation"] = event["operation"]
+            source_kind = {"session.artifacts.enum_values": "enum_values", "session.artifacts.threat_mapping": "threat_mapping",
+                           "session.log_classification.entry_rules": "log_classification",
+                           "session.log_classification.sub_rules": "log_classification"}.get(event.get("source_ref"))
+            if source_kind:
+                frozen = json.loads(row["input_snapshot_json"])
+                reference = frozen.get("business_inputs", {}).get("refs", {}).get(source_kind)
+                if isinstance(reference, dict) and isinstance(reference.get("id"), str):
+                    version = db.execute("SELECT version FROM artifacts WHERE id=?", (reference["id"],)).fetchone()
+                    if version:
+                        summary["input_artifact_id"] = reference["id"]
+                        summary["input_artifact_version"] = version[0]
+            summary["prompt_version"] = row["prompt_version"]
+            summary["standard_field_version"] = row["standard_field_version"]
+            summary["provider_config_revision"] = row["provider_config_revision"]
+            for key in ("request", "response"):
+                if event.get(key) is not None:
+                    summary[key] = redact_text(event[key])
+            params = event.get("params")
+            if isinstance(params, dict):
+                summary["params"] = {key: params[key] for key in ("temperature", "top_p", "max_tokens")
+                                     if key in params and isinstance(params[key], (int, float)) and not isinstance(params[key], bool)}
+            for key in ("request_truncated", "response_truncated"):
+                if type(event.get(key)) is bool:
+                    summary[key] = event[key]
+            db.execute(
+                "INSERT INTO model_calls(id,run_id,provider,model,error_code,summary_json,created_at) VALUES(?,?,?,?,?,?,?)",
+                (uid(), claim["id"], str(event.get("provider") or "")[:80], str(event.get("model") or "")[:160],
+                 error_code, json.dumps(summary, ensure_ascii=False, separators=(",", ":")), now()),
+            )
             db.commit()
             return True

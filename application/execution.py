@@ -28,7 +28,9 @@ from application.progress import NullProgressSink
 from application.execution_continuation import ExecutionContinuation
 from application.session_state import SessionState
 from application.recovery import RecoveryBudget, RETRYABLE_STEP_TYPES, is_transient
+from contracts.model_call_diagnostics import reset_execution, set_execution
 from contracts.progress import (
+    PlannedStep,
     ProgressEvent,
     ProgressPhase,
     ProgressSink,
@@ -202,6 +204,8 @@ class PlanExecutor:
                 phase=ProgressPhase.EXECUTION,
                 status=ProgressStatus.RUNNING,
                 message_code="plan_execution_started",
+                planned_steps=tuple(PlannedStep(step_id=step.step_id, operation=step.type,
+                                                depends_on=step.depends_on) for step in plan.steps),
             )
         )
 
@@ -323,6 +327,8 @@ class PlanExecutor:
                 trigger_error_code: str | None = None
                 while True:
                     execution_error: Exception | None = None
+                    diagnostic_token = set_execution(step.type, step_recovery_counts.get(step.step_id, 0) + 1,
+                                                     getattr(step, "source_ref", None))
                     try:
                         result = await adapter.execute(step, context, dependencies)
                         result = self._validate_result(step, result)
@@ -338,6 +344,8 @@ class PlanExecutor:
                         result = self._error_result(
                             step, "adapter_failed", "执行适配器发生异常"
                         )
+                    finally:
+                        reset_execution(diagnostic_token)
                     step_recovery_count = step_recovery_counts.get(step.step_id, 0)
                     budget = context.recovery_budget
                     transient_failure = step.type in RETRYABLE_STEP_TYPES and is_transient(

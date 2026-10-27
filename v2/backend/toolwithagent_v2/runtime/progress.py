@@ -1,10 +1,11 @@
 """V2 只保存允许的进度字段，不透传任意专业工具或模型细节。"""
 import hashlib
+from contracts.model_call_diagnostics import set_scope
 
 OPERATIONS = frozenset({"log_parse", "field_mapping", "enum_extract", "threat_mapping", "fill", "remove_mapping", "export", "add_fields", "delete_fields", "merge_fields", "decode_fields", "regex_extract"})
 # 批次事件的操作归属由映射表显式声明，不靠前缀猜测。
 MESSAGE_OPERATIONS = {"field_candidates_retrieving": "field_mapping", "field_candidates_ready": "field_mapping", "field_candidates_failed": "field_mapping"}
-PROGRESS_FIELDS = ("phase", "progress_status", "operation", "dependency_scope_ids", "current_batch", "total_batches", "elapsed_seconds")
+PROGRESS_FIELDS = ("phase", "progress_status", "operation", "dependency_scope_ids", "planned_steps", "current_batch", "total_batches", "elapsed_seconds")
 
 
 class RunProgressSink:
@@ -21,10 +22,19 @@ class RunProgressSink:
         operation = MESSAGE_OPERATIONS.get(event.message_code) or next((item for item in OPERATIONS if event.message_code.startswith(item + "_")), None)
         summary = {"phase": event.phase.value, "progress_status": event.status.value, "operation": operation,
                    "dependency_scope_ids": [self.scope(event.plan_id, dependency) for dependency in event.dependency_step_ids]}
+        if event.planned_steps:
+            summary["planned_steps"] = [
+                {"scope_id": self.scope(event.plan_id, step.step_id),
+                 "operation": step.operation if step.operation in OPERATIONS else None,
+                 "dependency_scope_ids": [self.scope(event.plan_id, dependency) for dependency in step.depends_on]}
+                for step in event.planned_steps
+            ]
         if event.current_batch is not None:
             summary["current_batch"] = event.current_batch
         if event.total_batches is not None:
             summary["total_batches"] = event.total_batches
         if event.elapsed_seconds:
             summary["elapsed_seconds"] = event.elapsed_seconds
-        self.store.record_progress(self.worker_id, self.claim, self.scope(event.plan_id, event.step_id), summary)
+        scope_id = self.scope(event.plan_id, event.step_id)
+        set_scope(scope_id)
+        self.store.record_progress(self.worker_id, self.claim, scope_id, summary)

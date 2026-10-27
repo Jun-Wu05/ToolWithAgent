@@ -7,7 +7,7 @@ vi.mock('./api', () => ({
   saveDownload: vi.fn(),
   api: {
     me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(),
-    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn()
+    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn()
   }
 }))
 class FakeEventSource {
@@ -26,6 +26,7 @@ beforeEach(() => {
   vi.mocked(api.identities).mockResolvedValue({ items: [] })
   vi.mocked(api.conversations).mockResolvedValue({ items: [summary] })
   vi.mocked(api.conversation).mockResolvedValue(detail)
+  vi.mocked(api.diagnosticRuns).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
   vi.mocked(api.createConversation).mockResolvedValue(summary)
   vi.mocked(api.sendMessage).mockResolvedValue({ id: 'm1', content: '检查日志', actor: 'user' })
   vi.mocked(api.uploadFile).mockResolvedValue({ file: { id: 'f1', name: 'log.txt' }, task: { id: 't1', status: 'queued' }, run: { id: 'r1', status: 'queued' } })
@@ -121,6 +122,9 @@ describe('V2 workbench', () => {
     await screen.findByRole('heading', { name: '日志任务' })
     expect(screen.queryByRole('button', { name: '提取日志类型' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Run 诊断' }))
+    expect(await screen.findByRole('heading', { name: '开发台' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新会话' })).not.toBeInTheDocument()
   })
   it('offers retry for a cancelled knowledge submission and calls the retry endpoint', async () => {
     vi.mocked(api.conversation).mockResolvedValue({
