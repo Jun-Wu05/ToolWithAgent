@@ -638,7 +638,7 @@ export function App() {
       {clearError && <div role="alert" className="feedback error">{clearError}</div>}
       {notice && <div role="status" className="feedback notice"><span>{notice}</span><button aria-label="关闭提示" onClick={() => setNotice('')}>关闭</button></div>}
       <div className="conversation-content" ref={contentRef} onScroll={onConversationScroll}>
-        <div className="workbench-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>开始一项日志规则任务</h2><p>上传日志或规则文件，或者先描述要处理的内容。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button></div> : <>
+        <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>开始一项日志规则任务</h2><p>上传日志或规则文件，或者先描述要处理的内容。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button></div> : <>
           <ConversationTimeline conversation={conversation} actions={timelineActions} renderers={timelineRenderers} />
           {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，历史结果仍可查看。请重新加载或上传主数据。</p>}
           {identity?.role === 'user' && <details className="activity-section"><summary>枚举、威胁、填充与导出</summary><BusinessOperations key={identity.id + ':' + activeId} conversation={conversation} onDone={() => refreshActive(conversation.id)} /></details>}
