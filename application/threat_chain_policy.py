@@ -91,6 +91,8 @@ def evaluate_chain_trigger(results: Iterable[StepResult]) -> ChainTrigger | None
                     threat_rules.append(row.rule_name)
             elif row.status == "uncertain" and row.rule_name:
                 uncertain_rules.append(row.rule_name)
+        if not threat_rules and not uncertain_rules:
+            return None
         return ChainTrigger(
             threat_rule_names=tuple(dict.fromkeys(threat_rules)),
             uncertain_rule_names=tuple(dict.fromkeys(uncertain_rules)),

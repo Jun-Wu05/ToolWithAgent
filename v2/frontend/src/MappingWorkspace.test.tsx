@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MappingWorkspace } from './MappingWorkspace'
 import { api, saveDownload, type MappingView } from './api'
@@ -165,4 +165,30 @@ describe('Draft API wire contract', () => {
     await api.discardMappingDraft('draft-1', 4)
     expect(fetch).toHaveBeenLastCalledWith('/api/v2/mapping-drafts/draft-1', expect.objectContaining({ method: 'DELETE', headers: { 'If-Match': '4' } }))
   })
+})
+
+
+it('distinguishes operational audit events from threat and unknown determinations', async () => {
+  vi.mocked(fetch).mockImplementation(() => Promise.resolve(reply(view({
+    event_annotations: [
+      { rule_name: 'audit', event_name: '审计事件', event_level: '信息', status: 'judged', threat_source_field: '不适用', threat_types: ['不适用'] },
+      { rule_name: 'legacy-audit', event_name: '登录事件', event_level: '信息', status: 'judged', threat_source_field: '', threat_types: [] },
+      { rule_name: 'threat', event_name: '网络攻击', event_level: '提醒', status: 'judged', threat_source_field: 'attack_type', threat_types: ['暴力破解'] },
+      { rule_name: 'unknown', event_name: '', event_level: 'unknown', status: 'uncertain', threat_source_field: '', threat_types: [] },
+    ],
+  }))))
+  render(<MappingWorkspace {...props} />)
+  fireEvent.click(await screen.findByText('事件名称标注 · 4 条'))
+  const table = screen.getByRole('table', { name: '事件名称标注' })
+  expect(within(table).getByRole('columnheader', { name: '威胁判定来源（仅威胁事件）' })).toBeInTheDocument()
+  expect(within(table).getByRole('columnheader', { name: '威胁判定结果（仅威胁事件）' })).toBeInTheDocument()
+  for (const name of ['audit', 'legacy-audit']) {
+    const row = within(table).getByText(name).closest('tr')!
+    expect(within(row).getByText('操作/审计事件')).toBeInTheDocument()
+    expect(within(row).getAllByText('不适用')).toHaveLength(2)
+    expect(row).not.toHaveTextContent('未确定')
+    expect(row).not.toHaveTextContent('未生成')
+  }
+  expect(within(table).getByText('threat').closest('tr')).toHaveTextContent('attack_type暴力破解')
+  expect(within(table).getByText('unknown').closest('tr')).toHaveTextContent('未确定未生成')
 })

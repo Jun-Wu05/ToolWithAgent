@@ -82,7 +82,7 @@ def test固定值降级普通事件和未知状态使用约定占位():
     )
 
     assert (fixed.threat_source_field, fixed.threat_types) == ("—（固定值）", ("其他",))
-    assert (normal.threat_source_field, normal.threat_types) == ("", ())
+    assert (normal.threat_source_field, normal.threat_types) == ("不适用", ("不适用",))
     assert unknown.threat_types == ("⚠️ 未生成",)
 
 

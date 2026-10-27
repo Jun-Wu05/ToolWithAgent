@@ -156,7 +156,7 @@ def build_threat_report_rows(
     *,
     chain_succeeded: bool,
 ) -> tuple[EventAnnotationRow, ...]:
-    """用最终配置刷新标注行；普通事件不带威胁列，未知/失败显式标记。"""
+    """用最终配置刷新标注行；普通事件明确不适用威胁判定，未知/失败显式标记。"""
     rows: list[EventAnnotationRow] = []
     for row in annotations:
         if row.status == "uncertain":
@@ -164,7 +164,7 @@ def build_threat_report_rows(
             continue
         if row.event_name not in THREAT_EVENT_NAMES:
             rows.append(
-                row.model_copy(update={"threat_source_field": "", "threat_types": ()})
+                row.model_copy(update={"threat_source_field": "不适用", "threat_types": ("不适用",)})
             )
             continue
         rule = _rule_by_name(final_config, row.rule_name)
