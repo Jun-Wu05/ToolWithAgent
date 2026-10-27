@@ -4,7 +4,7 @@
 
 - 根仓全量 `pytest -q`：通过；生产 Python 源码快照已重新生成并通过一致性检查。
 - V2 后端全量 `pytest -q`：221 passed。
-- V2 前端单 worker 全量 Vitest：204 passed。
+- V2 前端单 worker 全量 Vitest：207 passed。
 - 前端 `npm run lint`：0 error，1 条既有 `FieldChangesWorkspace.tsx` ref 清理警告。
 - 前端 `npm run build`：通过。
 
