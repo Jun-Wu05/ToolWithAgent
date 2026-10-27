@@ -57,6 +57,8 @@ def test_json_credentials_and_large_content_are_redacted_and_bounded():
     assert '"note": "safe"' in projected
     assert "secret-four" not in redact_text("Cookie: session=secret-four; other=secret-five")
     assert "secret-five" not in redact_text("Cookie: session=secret-four; other=secret-five")
+    assert "dGVzdA==" not in redact_text("prefix Authorization: Basic dGVzdA== suffix")
+    assert "secret-seven" not in redact_text("prefix Cookie: session=secret-six; other=secret-seven")
     assert len(redact_text("a" * 5000)) == 4096
 
 

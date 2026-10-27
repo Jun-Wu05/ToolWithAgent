@@ -6,7 +6,7 @@ import { RunDiagnostics } from './RunDiagnostics'
 const list: AdminRunPage = { total: 1, page: 1, page_size: 50, items: [{ id: 'run-270', task_id: 'task-270', kind: 'field_mapping', status: 'failed', attempt: 1, queued_at: '2026-10-27T00:00:00Z', started_at: null, finished_at: null, error_code: 'field_mapping_failed', created_at: '2026-10-27T00:00:00Z', updated_at: '2026-10-27T00:00:00Z', owner_id: 'user-1', owner_name: '用户甲', conversation_id: 'conv-1', conversation_title: '映射任务' }] }
 const detail: DiagnosticRun = {
   run: { id: 'run-270', task_id: 'task-270', kind: 'field_mapping', status: 'failed', error_code: 'field_mapping_failed', owner_name: '用户甲', conversation_title: '映射任务', queued_at: '2026-10-27T00:00:00Z', started_at: null, finished_at: null, prompt_version: 'v1', standard_field_version: 's1', provider_config_revision: 2 },
-  conclusion: { status: 'failed', error_code: 'field_mapping_failed', call_id: 'call-1', scope_id: 'step-1', category: 'model_timeout' },
+  conclusion: { status: 'failed', error_code: 'field_mapping_failed', call_id: null, scope_id: null, evidence_call_id: 'call-1', evidence_scope_id: 'step-1', possible_cause: 'model_timeout', category: 'field_mapping_failed', reason: '具体原因未采集' },
   evidence_status: '已采集',
   timeline: [{ sequence: 1, scope_type: 'step', scope_id: 'step-1', event_type: 'run_progress', status: 'running', summary: { progress_status: 'failed' }, created_at: '2026-10-27T00:00:00Z' }],
   calls: [{ id: 'call-1', run_id: 'run-270', task_id: 'task-270', scope_id: 'step-1', request_id: 'request-1', provider: 'deepseek', model: 'model-a', error_code: 'model_timeout', attempt: 2, duration_ms: 30000 }],
@@ -40,8 +40,10 @@ describe('Run diagnostics', () => {
     render(<RunDiagnostics />)
     fireEvent.click(await screen.findByRole('button', { name: 'run-270' }))
     expect(await screen.findByRole('heading', { name: '故障结论' })).toBeInTheDocument()
+    expect(api.diagnosticCall).not.toHaveBeenCalled()
     expect(screen.getAllByRole('tab')).toHaveLength(5)
-    fireEvent.click(screen.getByRole('button', { name: '查看失败调用' }))
+    expect(screen.getByText(/可能原因：model_timeout/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看失败调用证据' }))
     expect(await screen.findByText('safe request')).toBeInTheDocument()
     expect(api.diagnosticCall).toHaveBeenCalledWith('run-270', 'call-1')
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
@@ -60,5 +62,20 @@ describe('Run diagnostics', () => {
     expect(await screen.findByText(/具体原因未采集/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '输入与输出' }))
     expect(screen.getAllByText('未采集').length).toBeGreaterThan(0)
+  })
+
+  it('shows a planned downstream step as grey with a bounded reason', async () => {
+    vi.spyOn(api, 'diagnosticRuns').mockResolvedValue(list)
+    vi.spyOn(api, 'diagnosticRun').mockResolvedValue({
+      ...detail,
+      planned_steps: [{ scope_id: 'step-1', operation: 'field_mapping', dependency_scope_ids: [] },
+                      { scope_id: 'step-2', operation: 'export', dependency_scope_ids: ['step-1'] }],
+      unexecuted_steps: [{ scope_id: 'step-2', operation: 'export', dependency_scope_ids: ['step-1'],
+                           reason: 'Run 失败前未启动；具体阻断原因未采集' }],
+    })
+    render(<RunDiagnostics />)
+    fireEvent.click(await screen.findByRole('button', { name: 'run-270' }))
+    fireEvent.click(await screen.findByRole('tab', { name: '执行时间线' }))
+    expect(screen.getByText(/未执行 · Run 失败前未启动/)).toHaveClass('diagnostic-unexecuted')
   })
 })

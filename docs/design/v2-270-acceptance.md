@@ -3,8 +3,8 @@
 ## 自动验证
 
 - 根仓全量 `pytest -q`：通过；生产 Python 源码快照已重新生成并通过一致性检查。
-- V2 后端全量 `pytest -q`：221 passed。
-- V2 前端单 worker 全量 Vitest：207 passed。
+- V2 后端全量 `pytest -q`：224 passed；末次未执行原因投影的诊断定向 7 passed。
+- V2 前端单 worker 全量 Vitest：207 passed；末次新增未执行原因展示后诊断定向 6 passed。
 - 前端 `npm run lint`：0 error，1 条既有 `FieldChangesWorkspace.tsx` ref 清理警告。
 - 前端 `npm run build`：通过。
 
@@ -32,6 +32,6 @@ Worker 终端：`./.venv/Scripts/python.exe -m toolwithagent_v2.runtime.worker`�
 
 ## 当前证据边界
 
-- 现有类型化进度事件有 Run、Task 与匿名 Step scope，但没有独立 Skill ID、Tool ID 或下游未执行节点清单；页面明确标“未采集”，不从时间邻近关系推断。
-- 现有模型调用入口无法稳定给出每次调用的输入产物版本；此字段显示“未采集”。
+- 新采集的计划开始事件含匿名 Step 清单与依赖；时间线据此标明未执行节点，旧 Run 仍显示“未采集”。执行操作类型可关联到 Step；独立 Skill ID、Tool ID 仍未采集。
+- 模型调用记录真实步骤恢复次数；同一次步骤尝试中的不同调用使用相同次数。对显式引用且能在 Run 冻结输入中定位的产物，显示该产物版本；其他输入产物版本显示“未采集”。
 - 诊断页对每次调用保存最多 4096 字符的请求、响应脱敏文本；诊断包不包含完整上传文件。浏览器人工验收仍待用户执行。

@@ -23,6 +23,28 @@ class _RecordingProgressSink:
         self.events.append(event)
 
 
+def test计划开始事件包含真实步骤与依赖供诊断投影():
+    from application.execution import ExecutionContext, PlanExecutor
+    from contracts.planner_models import PlanDecision
+
+    sink = _RecordingProgressSink()
+    plan = PlanDecision.model_validate({
+        "decision": "execute", "plan_id": "plan-diagnostic",
+        "steps": [
+            {"step_id": "extract", "type": "log_parse"},
+            {"step_id": "parse-again", "type": "log_parse", "depends_on": ["extract"]},
+        ],
+    })
+    asyncio.run(PlanExecutor({}).execute(plan, ExecutionContext(
+        session=make_session_state(raw_log_lines=["event=login"]),
+        session_facts=SessionFacts(has_logs=True), progress_sink=sink,
+    )))
+    outline = sink.events[0].planned_steps
+    assert [(step.step_id, step.operation, step.depends_on) for step in outline] == [
+        ("extract", "log_parse", ()), ("parse-again", "log_parse", ("extract",)),
+    ]
+
+
 def testChainlit同一用户会话复用同一进度账本(monkeypatch):
     """自然语言和按钮入口通过 Chainlit 会话取到同一账本。"""
     import web.chainlit_progress as progress_module

@@ -12,6 +12,9 @@ from toolwithagent_v2.settings import Settings
 from toolwithagent_v2.runtime.fake_application import FakeApplication
 from toolwithagent_v2.runtime.worker import Worker
 from contracts.model_call_diagnostics import record_call
+from contracts.progress import PlannedStep, ProgressEvent, ProgressPhase, ProgressStatus
+from toolwithagent_v2.runtime.progress import RunProgressSink
+import asyncio
 
 
 def setup(tmp_path):
@@ -122,6 +125,65 @@ def test_model_call_evidence_obeys_worker_fence_and_survives_restart(tmp_path):
     restarted = TestClient(create_app(Settings(data_dir=store.root)))
     switch(restarted, "dev-other")
     assert restarted.get(f"/api/v2/developer/runs/{run_id}").json()["calls"] == detail["calls"]
+
+
+def test_recovered_model_error_is_not_presented_as_run_root_cause(tmp_path):
+    client, store, run_id = setup(tmp_path)
+    claim = store.claim("worker-270")
+    assert claim["id"] == run_id
+    for index, error_code in enumerate(("model_timeout", None), 1):
+        assert store.record_model_call("worker-270", claim, {
+            "request_id": f"request-{index}", "provider": "deepseek", "model": "model-a",
+            "status": "failed" if error_code else "succeeded", "error_code": error_code,
+        })
+    assert store.finish("worker-270", claim, "field_mapping_failed")
+    switch(client, "dev-other")
+    conclusion = client.get(f"/api/v2/developer/runs/{run_id}").json()["conclusion"]
+    assert conclusion["category"] == "field_mapping_failed"
+    assert conclusion["call_id"] is None
+    assert conclusion.get("possible_cause") is None
+
+
+def test_same_error_code_after_recovery_is_still_only_historical_evidence(tmp_path):
+    client, store, run_id = setup(tmp_path)
+    claim = store.claim("worker-270")
+    for index, error_code in enumerate(("model_timeout", None), 1):
+        assert store.record_model_call("worker-270", claim, {
+            "request_id": f"request-{index}", "provider": "deepseek", "model": "model-a",
+            "error_code": error_code,
+        })
+    assert store.finish("worker-270", claim, "model_timeout")
+    switch(client, "dev-other")
+    conclusion = client.get(f"/api/v2/developer/runs/{run_id}").json()["conclusion"]
+    assert conclusion["call_id"] is None
+    assert conclusion["evidence_call_id"] is not None
+    assert conclusion["possible_cause"] is None
+
+
+def test_plan_outline_projects_only_real_unexecuted_nodes(tmp_path):
+    client, store, run_id = setup(tmp_path)
+    claim = store.claim("worker-270")
+    sink = RunProgressSink(store, "worker-270", claim)
+    asyncio.run(sink.publish(ProgressEvent(
+        plan_id="user-plan-secret", step_id="plan", phase=ProgressPhase.EXECUTION,
+        status=ProgressStatus.RUNNING, message_code="plan_execution_started",
+        planned_steps=(
+            PlannedStep(step_id="first-secret", operation="log_parse"),
+            PlannedStep(step_id="second-secret", operation="log_parse", depends_on=("first-secret",)),
+        ),
+    )))
+    asyncio.run(sink.publish(ProgressEvent(
+        plan_id="user-plan-secret", step_id="first-secret", phase=ProgressPhase.EXECUTION,
+        status=ProgressStatus.FAILED, message_code="log_parse_failed",
+    )))
+    assert store.finish("worker-270", claim, "log_parse_failed")
+    switch(client, "dev-other")
+    detail = client.get(f"/api/v2/developer/runs/{run_id}").json()
+    assert len(detail["planned_steps"]) == 2
+    assert detail["unexecuted_steps"][0]["scope_id"] == detail["planned_steps"][1]["scope_id"]
+    assert "Run 失败前未启动" in detail["unexecuted_steps"][0]["reason"]
+    assert detail["planned_steps"][1]["dependency_scope_ids"] == [detail["planned_steps"][0]["scope_id"]]
+    assert "secret" not in json.dumps(detail)
 
 
 def test_worker_binds_model_calls_to_exact_run(tmp_path):

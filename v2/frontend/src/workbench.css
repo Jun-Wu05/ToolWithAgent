@@ -67,6 +67,9 @@
 .diagnostic-list > button { text-align: left; border: 1px solid var(--border, #cbd5e1); border-radius: .5rem; background: transparent; color: inherit; padding: .7rem; cursor: pointer; }
 .diagnostic-list > button.selected { border-color: currentColor; font-weight: 700; }
 .diagnostic-list small { display: block; margin-top: .25rem; color: var(--text-muted, #64748b); }
+.diagnostic-step { display: flex; flex-direction: column; gap: .35rem; padding: .7rem; border: 1px solid var(--border, #cbd5e1); border-radius: .5rem; }
+.diagnostic-step > button { text-align: left; margin-left: 1rem; }
+.diagnostic-unexecuted { color: var(--text-muted, #64748b); opacity: .75; }
 .diagnostic-detail { min-width: 0; overflow-wrap: anywhere; }
 .diagnostic-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1rem; }
 .diagnostic-detail dt { color: var(--text-muted, #64748b); }

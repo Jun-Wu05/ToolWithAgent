@@ -281,15 +281,8 @@ class Worker:
         if claim is None:
             return False
         stop = threading.Event()
-        attempts = {}
-        attempt_lock = threading.Lock()
-
         def record_call(event):
-            scope = event.get("scope_id") or "run"
-            with attempt_lock:
-                attempts[scope] = attempts.get(scope, 0) + 1
-                attempt = attempts[scope]
-            self.store.record_model_call(self.worker_id, claim, {**event, "attempt": attempt})
+            self.store.record_model_call(self.worker_id, claim, event)
 
         diagnostic_token = bind_recorder(record_call)
         scope_token = set_scope(None)

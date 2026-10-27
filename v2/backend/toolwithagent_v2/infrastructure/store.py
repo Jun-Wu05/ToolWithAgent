@@ -740,6 +740,8 @@ class Store:
                    "prompt_version": row["prompt_version"], "standard_field_version": row["standard_field_version"]}
             timeline = []
             logs = []
+            planned = []
+            observed_scopes = set()
             for event in db.execute(
                 "SELECT sequence,scope_type,scope_id,event_type,status,summary_json,created_at "
                 "FROM run_events WHERE run_id=? ORDER BY sequence", (run_id,)
@@ -753,8 +755,13 @@ class Store:
                         "scope_id": event["scope_id"], "event_type": event["event_type"],
                         "status": event["status"], "summary": summary, "created_at": event["created_at"]}
                 timeline.append(item)
+                if isinstance(summary.get("planned_steps"), list):
+                    planned.extend(summary["planned_steps"])
+                if event["scope_type"] == "step":
+                    observed_scopes.add(event["scope_id"])
                 logs.append({"id": f"event-{event['sequence']}", "level": "error" if event["status"] == "failed" or summary.get("progress_status") == "failed" else "info",
-                             "source": "run_event", "scope_id": event["scope_id"], "event_type": event["event_type"],
+                             "source": "run_event", "run_id": run_id, "task_id": run["task_id"],
+                             "scope_id": event["scope_id"], "event_type": event["event_type"],
                              "error_code": None, "created_at": event["created_at"]})
             calls = []
             for call in db.execute(
@@ -770,7 +777,7 @@ class Store:
                 projected = {key: summary[key] for key in (
                     "request_id", "scope_id", "attempt", "duration_ms", "status", "started_at",
                     "finished_at", "http_status", "prompt_version", "standard_field_version",
-                    "provider_config_revision",
+                    "provider_config_revision", "operation", "input_artifact_id", "input_artifact_version",
                 ) if key in summary and isinstance(summary[key], (str, int, float))}
                 params = summary.get("params")
                 if isinstance(params, dict):
@@ -788,7 +795,8 @@ class Store:
                          "error_code": call["error_code"], "created_at": call["created_at"], **projected}
                 calls.append(entry)
                 logs.append({"id": "call-" + call["id"], "level": "error" if call["error_code"] else "info",
-                             "source": "model_call", "scope_id": entry.get("scope_id"),
+                             "source": "model_call", "run_id": run_id, "task_id": run["task_id"],
+                             "call_id": call["id"], "scope_id": entry.get("scope_id"),
                              "request_id": entry.get("request_id"), "error_code": call["error_code"],
                              "duration_ms": entry.get("duration_ms"), "created_at": call["created_at"]})
             artifacts = []
@@ -802,14 +810,25 @@ class Store:
                 )]
                 artifacts.append({**dict(artifact), "source_artifact_ids": sources})
             failed_call = next((item for item in reversed(calls) if item["error_code"]), None)
+            last_call = calls[-1] if calls else None
+            possible_call = last_call if run["status"] == "failed" and last_call and last_call["error_code"] else None
             conclusion = {"status": run["status"], "error_code": run["error_code"],
-                          "call_id": failed_call["id"] if failed_call else None,
-                          "scope_id": failed_call.get("scope_id") if failed_call else None,
-                          "category": (failed_call["error_code"] if failed_call else (run["error_code"] or "未采集")) if run["status"] == "failed" else run["status"]}
-            if run["status"] == "failed" and failed_call is None:
+                          "call_id": None, "scope_id": None,
+                          "evidence_call_id": failed_call["id"] if failed_call else None,
+                          "evidence_scope_id": failed_call.get("scope_id") if failed_call else None,
+                          "possible_cause": possible_call["error_code"] if possible_call else None,
+                          "category": (run["error_code"] or "未采集") if run["status"] == "failed" else run["status"]}
+            if run["status"] == "failed":
                 conclusion["reason"] = "具体原因未采集"
+            unexecuted = [{**step, "reason": (
+                "Run 失败前未启动；具体阻断原因未采集" if run["status"] == "failed"
+                else "Run 取消前未启动；具体原因未采集" if run["status"] == "cancelled"
+                else "步骤尚未启动；具体原因未采集")}
+                          for step in planned if isinstance(step, dict)
+                          and step.get("scope_id") not in observed_scopes]
             return {"run": run, "conclusion": conclusion, "evidence_status": "已采集" if calls else "未采集",
-                    "timeline": timeline, "calls": calls, "logs": logs, "artifacts": artifacts}
+                    "timeline": timeline, "planned_steps": planned, "unexecuted_steps": unexecuted,
+                    "calls": calls, "logs": logs, "artifacts": artifacts}
 
     def diagnostic_call(self, run_id, call_id):
         detail = self.diagnostic_run(run_id, include_content=True)
@@ -1891,11 +1910,24 @@ class Store:
                 return False
             attempt = event.get("attempt")
             if not isinstance(attempt, int) or attempt < 1:
-                attempt = db.execute("SELECT COUNT(*)+1 FROM model_calls WHERE run_id=?", (claim["id"],)).fetchone()[0]
+                attempt = 1
             summary = {key: event[key] for key in (
                 "request_id", "scope_id", "started_at", "finished_at", "duration_ms", "status", "http_status",
             ) if key in event and isinstance(event[key], (str, int, float))}
             summary["attempt"] = attempt
+            if event.get("operation") in {"log_parse", "field_mapping", "enum_extract", "threat_mapping", "fill", "remove_mapping", "export", "add_fields", "delete_fields", "merge_fields", "decode_fields", "regex_extract"}:
+                summary["operation"] = event["operation"]
+            source_kind = {"session.artifacts.enum_values": "enum_values", "session.artifacts.threat_mapping": "threat_mapping",
+                           "session.log_classification.entry_rules": "log_classification",
+                           "session.log_classification.sub_rules": "log_classification"}.get(event.get("source_ref"))
+            if source_kind:
+                frozen = json.loads(row["input_snapshot_json"])
+                reference = frozen.get("business_inputs", {}).get("refs", {}).get(source_kind)
+                if isinstance(reference, dict) and isinstance(reference.get("id"), str):
+                    version = db.execute("SELECT version FROM artifacts WHERE id=?", (reference["id"],)).fetchone()
+                    if version:
+                        summary["input_artifact_id"] = reference["id"]
+                        summary["input_artifact_version"] = version[0]
             summary["prompt_version"] = row["prompt_version"]
             summary["standard_field_version"] = row["standard_field_version"]
             summary["provider_config_revision"] = row["provider_config_revision"]

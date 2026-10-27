@@ -28,6 +28,15 @@ class ProgressStatus(str, Enum):
     FAILED = "failed"
 
 
+class PlannedStep(BaseModel):
+    """仅供诊断投影的计划步骤；V2 入口会哈希所有原始标识。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    step_id: str = Field(min_length=1)
+    operation: str = Field(min_length=1)
+    depends_on: tuple[str, ...] = ()
+
+
 class ProgressEvent(BaseModel):
     """保存可安全发送到日志和界面的类型化进度。"""
 
@@ -40,6 +49,7 @@ class ProgressEvent(BaseModel):
     message_code: str = Field(min_length=1)
     # 执行器声明的依赖只供入口转换为安全 scope，不传参数或业务值。
     dependency_step_ids: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
+    planned_steps: tuple[PlannedStep, ...] = ()
     current_batch: int | None = Field(default=None, ge=1)
     total_batches: int | None = Field(default=None, ge=1)
     elapsed_seconds: float = Field(default=0.0, ge=0.0)

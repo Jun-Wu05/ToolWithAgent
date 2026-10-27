@@ -17,9 +17,10 @@ from uuid import uuid4
 
 _recorder: ContextVar[Callable[[dict], None] | None] = ContextVar("model_call_recorder", default=None)
 _scope: ContextVar[str | None] = ContextVar("model_call_scope", default=None)
+_execution: ContextVar[dict | None] = ContextVar("model_call_execution", default=None)
 _secret = re.compile(r"(?i)([\"']?\b(?:authorization|cookie|api[_-]?key|password|secret|token)\b[\"']?\s*[:=]\s*[\"']?)(?:bearer\s+)?[^\s,;\"'}]+")
 _bearer = re.compile(r"(?i)\bbearer\s+[^\s,;\"']+")
-_credential_header = re.compile(r"(?im)^(\s*(?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]*")
+_credential_header = re.compile(r"(?i)(\b(?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]*")
 _quoted_secret = re.compile(r"(?i)([\"'](?:authorization|cookie|api[_-]?key|password|secret|token)[\"']\s*:\s*[\"'])[^\"']*([\"'])")
 
 
@@ -37,6 +38,14 @@ def set_scope(scope_id: str | None) -> Token:
 
 def reset_scope(token: Token) -> None:
     _scope.reset(token)
+
+
+def set_execution(operation: str, attempt: int, source_ref: str | None) -> Token:
+    return _execution.set({"operation": operation, "attempt": attempt, "source_ref": source_ref})
+
+
+def reset_execution(token: Token) -> None:
+    _execution.reset(token)
 
 
 def redact_text(value: object, api_key: str | None = None) -> str | None:
@@ -106,6 +115,7 @@ def record_call(provider, model_id, api_key, started_at, start, request, respons
                  "response": redact_text(response, api_key), "params": params or {},
                  "request_truncated": isinstance(request, str) and len(request) > 4096,
                  "response_truncated": isinstance(response, str) and len(response) > 4096}
+        event.update(_execution.get() or {})
         recorder(event)
     except Exception:
         # Diagnostics are observational; a storage outage cannot fail user work.

@@ -48,11 +48,13 @@ export type AdminRun = { id: string; task_id: string; kind: string; message_id?:
 export type AdminRunPage = { items: AdminRun[]; total: number; page: number; page_size: number }
 export type DiagnosticRun = {
   run: { id: string; task_id: string; kind: string; status: string; error_code: string | null; owner_name: string; conversation_title: string; queued_at: string | null; started_at: string | null; finished_at: string | null; prompt_version: string | null; standard_field_version: string | null; provider_config_revision: number | null }
-  conclusion: { status: string; error_code: string | null; call_id: string | null; scope_id: string | null; category: string; reason?: string }
+  conclusion: { status: string; error_code: string | null; call_id: string | null; scope_id: string | null; evidence_call_id?: string | null; evidence_scope_id?: string | null; possible_cause?: string | null; category: string; reason?: string }
   evidence_status: string
   timeline: { sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary: Record<string, unknown>; created_at: string }[]
-  calls: { id: string; run_id: string; task_id: string; scope_id?: string; request_id?: string; provider: string; model: string; error_code: string | null; attempt?: number; duration_ms?: number; started_at?: string; finished_at?: string; request?: string; response?: string; request_truncated?: boolean; response_truncated?: boolean; prompt_version?: string; standard_field_version?: string; provider_config_revision?: number; params?: Record<string, unknown> }[]
-  logs: { id: string; level: string; source: string; scope_id?: string; request_id?: string; event_type?: string; error_code?: string | null; duration_ms?: number; created_at: string }[]
+  planned_steps?: { scope_id: string; operation: string | null; dependency_scope_ids: string[] }[]
+  unexecuted_steps?: { scope_id: string; operation: string | null; dependency_scope_ids: string[]; reason: string }[]
+  calls: { id: string; run_id: string; task_id: string; scope_id?: string; request_id?: string; provider: string; model: string; operation?: string; input_artifact_id?: string; input_artifact_version?: number; error_code: string | null; attempt?: number; duration_ms?: number; started_at?: string; finished_at?: string; request?: string; response?: string; request_truncated?: boolean; response_truncated?: boolean; prompt_version?: string; standard_field_version?: string; provider_config_revision?: number; params?: Record<string, unknown> }[]
+  logs: { id: string; level: string; source: string; run_id?: string; task_id?: string; call_id?: string; scope_id?: string; request_id?: string; event_type?: string; error_code?: string | null; duration_ms?: number; created_at: string }[]
   artifacts: { id: string; kind: string; version: number; status: string; sha256: string; created_at: string; source_artifact_ids: string[] }[]
 }
 export type AdminAuditEvent = { id: string; action: string; target_type: string; target_id: string; created_at: string; reason: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; actor_name: string }
