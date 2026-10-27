@@ -880,6 +880,10 @@ def test改选重跑仍全落其他时保持降级不再重试(monkeypatch):
     assert len(member.inputs) == 2
 
 
+    from application.session_projection import summarize_report
+    assert summarize_report(extended).steps[-1].status == "degraded"
+
+
 def test改选预算为零时不改选且首跑结果即终态(monkeypatch):
     """max_rederive=0 → 不改选，首跑结果即终态（可配 0 回到现状）。"""
     _mock_retrieval(monkeypatch)
@@ -937,3 +941,46 @@ def test改选重跑被不可逆门禁拦截时升级警告(monkeypatch):
     assert len(member.inputs) == 1
     for rule in session.mapped_sub_rules:
         assert _threat_binding(rule) == "%{attack_type}"
+
+
+# #413: non-blocking chain failures must remain visible in safe snapshots.
+def test_chain_snapshot_retains_real_outcome_without_failing_mapping(monkeypatch):
+    from application.session_projection import summarize_report
+    import application.threat_chain as chain
+
+    _mock_retrieval(monkeypatch)
+    for outcome, expected in (("failed", "failed"), ("needs_input", "needs_input"),
+                              ("degraded", "degraded"), ("success", "success"),
+                              ("exception", "failed")):
+        class Executor:
+            async def execute(self, plan, context):
+                if outcome == "exception":
+                    raise RuntimeError("PRIVATE_RAW_VALUE")
+                return ExecutionReport(plan_id=plan.plan_id, results=(StepResult(
+                    step_id="threat-chain-map", operation_type="threat_mapping",
+                    status=StepStatus.NEEDS_INPUT if outcome == "needs_input" else
+                           StepStatus.FAILED if outcome == "failed" else StepStatus.SUCCESS,
+                    error_code="threat_mapping_source_context_required" if outcome in {"failed", "needs_input"} else None,
+                    message="已降级为其他 PRIVATE_RAW_VALUE" if outcome == "degraded" else "PRIVATE_RAW_VALUE",
+                ),))
+        monkeypatch.setattr(chain, "create_plan_executor", lambda *_: Executor())
+        report = _run(_mapping_report(), _chain_session(), None)
+        summary = summarize_report(report)
+        assert report.status == StepStatus.SUCCESS
+        assert report.results[0].artifact is not None
+        assert summary.steps[-1].status == expected, outcome
+        if outcome in {"failed", "needs_input"}:
+            assert summary.steps[-1].error_code == "threat_mapping_source_context_required"
+        assert "PRIVATE_RAW_VALUE" not in summary.model_dump_json()
+
+
+def test_chain_unconfirmed_annotations_snapshot_is_warning(monkeypatch):
+    from application.session_projection import summarize_report
+    report = _mapping_report()
+    artifact = report.results[0].artifact.model_copy(update={"event_annotations": (
+        EventAnnotationRow(rule_name="unknown", status="uncertain"),
+    )})
+    report = report.model_copy(update={"results": (report.results[0].model_copy(update={"artifact": artifact}),)})
+    result = _run(report, _chain_session(), None)
+    assert result.status == StepStatus.SUCCESS
+    assert summarize_report(result).steps[-1].status == "warning"
