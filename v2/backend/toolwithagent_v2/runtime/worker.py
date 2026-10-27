@@ -12,6 +12,7 @@ from uuid import uuid4
 from openpyxl import load_workbook
 from application.log_privacy import private_business_logging
 from openpyxl.utils.exceptions import InvalidFileException
+from contracts.model_call_diagnostics import bind_recorder, reset_recorder, set_scope, reset_scope
 
 from toolwithagent_v2.infrastructure.store import Store
 from toolwithagent_v2.runtime.fake_application import FakeApplication
@@ -280,6 +281,18 @@ class Worker:
         if claim is None:
             return False
         stop = threading.Event()
+        attempts = {}
+        attempt_lock = threading.Lock()
+
+        def record_call(event):
+            scope = event.get("scope_id") or "run"
+            with attempt_lock:
+                attempts[scope] = attempts.get(scope, 0) + 1
+                attempt = attempts[scope]
+            self.store.record_model_call(self.worker_id, claim, {**event, "attempt": attempt})
+
+        diagnostic_token = bind_recorder(record_call)
+        scope_token = set_scope(None)
 
         def heartbeat():
             while not stop.wait(min(5, self.lease_seconds / 3)):
@@ -323,6 +336,8 @@ class Worker:
                 return self.store.publish(self.worker_id, claim, outcome["artifact"])
             return self.store.finish(self.worker_id, claim, outcome.get("error"))
         finally:
+            reset_scope(scope_token)
+            reset_recorder(diagnostic_token)
             stop.set()
             keeper.join()
 

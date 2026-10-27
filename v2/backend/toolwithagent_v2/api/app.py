@@ -148,6 +148,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(403, "insufficient_capability")
         return user
 
+    def developer_reader(request: Request):
+        user = principal(request)
+        if user["role"] not in ("developer", "admin"):
+            raise HTTPException(403, "insufficient_capability")
+        return user
+
     def translate_knowledge_error(exc: LogKnowledgeError):
         message = str(exc)
         if "not found" in message:
@@ -555,6 +561,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v2/runs/{run_id}")
     def get_run(request: Request, run_id: str):
         return store.get_run(principal(request)["id"], run_id)
+
+    @app.get("/api/v2/developer/runs")
+    def developer_runs(request: Request, status: str | None = None, page: int = 1):
+        developer_reader(request)
+        return store.admin_runs("", status=status or None, page=page)
+
+    @app.get("/api/v2/developer/runs/{run_id}/bundle")
+    def developer_run_bundle(request: Request, run_id: str):
+        developer_reader(request)
+        detail = store.diagnostic_run(run_id, include_content=True)
+        return Response(content=json.dumps(detail, ensure_ascii=False), media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="run-{detail["run"]["id"]}.json"',
+                                 "Cache-Control": "no-store"})
+
+    @app.get("/api/v2/developer/runs/{run_id}")
+    def developer_run(request: Request, run_id: str):
+        developer_reader(request)
+        return store.diagnostic_run(run_id)
+
+    @app.get("/api/v2/developer/runs/{run_id}/calls/{call_id}")
+    def developer_run_call(request: Request, run_id: str, call_id: str):
+        developer_reader(request)
+        return store.diagnostic_call(run_id, call_id)
 
     @app.get("/api/v2/conversations/{conversation_id}/events")
     async def conversation_events(request: Request, conversation_id: str, after: int = 0):

@@ -22,6 +22,7 @@ from agno.models.siliconflow import Siliconflow
 
 # 自动加载.env文件
 from dotenv import load_dotenv
+from contracts.model_call_diagnostics import instrument_model
 
 load_dotenv()
 
@@ -326,7 +327,8 @@ class ModelConfig:
             model_options["extra_body"] = {"thinking": {"type": "disabled"}}
 
         logger.info(f"[MODEL] 使用 {spec.display_name}, model={model_id}")
-        return spec.build_model(model_id=model_id, api_key=key, **model_options)
+        model = spec.build_model(model_id=model_id, api_key=key, **model_options)
+        return instrument_model(model, spec.name, model_id, key)
 
     @staticmethod
     def get_main_model():

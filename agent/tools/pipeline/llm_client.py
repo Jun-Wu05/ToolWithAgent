@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -15,6 +16,7 @@ import httpx
 from agent.core import model_config
 from agent.core.model_config import THINKING_DISABLED_MODELS as _THINKING_DISABLED_MODELS
 from agent.core.model_config import ModelConfig
+from contracts.model_call_diagnostics import record_call
 from agent.shared.logger import get_logger
 
 logger = get_logger("log_parser_pipeline")
@@ -59,7 +61,8 @@ def _call_llm_direct(
     if model_id is None:
         model_id = ModelConfig.get_model_id()
 
-    start = time.time()
+    start = time.monotonic()
+    started_at = datetime.now(timezone.utc).isoformat()
     payload: dict[str, Any] = {
         "model": model_id,
         "messages": [{"role": "user", "content": prompt}],
@@ -80,25 +83,29 @@ def _call_llm_direct(
         payload["response_format"] = {"type": "json_object"}
         logger.debug(f"[_call_llm_direct] 使用 response_format 强制 JSON 输出")
 
-    logger.info(
-        f"[LLM_DIRECT] 调用 {api_url}, model={model_id}, prompt_len={len(prompt)}"
-    )
-    resp = httpx.post(
-        api_url,
-        json=payload,
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    content: str = data["choices"][0]["message"]["content"]
-    elapsed = time.time() - start
+    logger.info(f"[LLM_DIRECT] provider={spec.name}, model={model_id}, prompt_len={len(prompt)}")
+    try:
+        resp = httpx.post(
+            api_url,
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content: str = data["choices"][0]["message"]["content"]
+    except Exception as exc:
+        record_call(spec.name, model_id, api_key, started_at, start, prompt, exc=exc,
+                    params={"temperature": temperature, "max_tokens": max_tokens})
+        raise
+    record_call(spec.name, model_id, api_key, started_at, start, prompt, response=content,
+                params={"temperature": temperature, "max_tokens": max_tokens})
+    elapsed = time.monotonic() - start
     usage = data.get("usage", {})
     
-    # 🔧 新增：记录 LLM 原始响应内容
-    logger.info(f"[LLM_DIRECT] 原始响应内容（前500字符）: {content[:500]}")
+    logger.info(f"[LLM_DIRECT] 响应长度: {len(content) if content else 0}")
     if not content or not content.strip():
-        logger.error(f"[LLM_DIRECT] LLM 返回空内容！完整响应: {data}")
+        logger.error("[LLM_DIRECT] LLM 返回空内容")
     
     logger.info(
         f"[LLM_DIRECT] 完成, elapsed={elapsed:.2f}s, "
