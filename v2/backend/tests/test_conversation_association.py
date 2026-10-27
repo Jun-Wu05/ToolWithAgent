@@ -163,3 +163,17 @@ def test_retry_new_attempt_keeps_original_message_link(tmp_path):
     attempt = run_by_id(payload, retried.json()["id"])
     assert attempt["attempt"] == 2
     assert original["message_id"] == attempt["message_id"] == message_id
+
+
+def test_rename_conversation_updates_title_rejects_blank_and_outsiders(tmp_path):
+    client, store, conversation_id = setup(tmp_path)
+    response = client.patch(f"/api/v2/conversations/{conversation_id}", json={"title": "KvHead 验收"})
+    assert response.status_code == 200, response.text
+    assert response.json()["title"] == "KvHead 验收"
+    assert client.get(f"/api/v2/conversations/{conversation_id}").json()["title"] == "KvHead 验收"
+    assert client.patch(f"/api/v2/conversations/{conversation_id}", json={"title": "   "}).status_code == 400
+    outsider = TestClient(create_app(Settings(data_dir=store.root)))
+    outsider.cookies.set("v2_dev_user", "dev-other")
+    assert outsider.patch(f"/api/v2/conversations/{conversation_id}", json={"title": "别人的"}).status_code == 404
+    events = store.events("dev-user", conversation_id, 0)
+    assert [e["event_type"] for e in events if e["event_type"] == "conversation_renamed"] == ["conversation_renamed"]

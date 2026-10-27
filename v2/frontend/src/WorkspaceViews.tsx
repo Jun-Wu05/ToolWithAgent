@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type Artifact, type Conversation, type MappingDraftSummary, type Run } from './api'
 import { ArtifactValues, businessName, RunProgress } from './BusinessWorkspace'
 import { CopyButton, StatusText } from './VisualPrimitives'
@@ -112,23 +112,45 @@ export function ResultsWorkspace({ artifacts, active, mappingId, mapping, target
   </section>
 }
 
-function TraceRun({ run, artifacts, onOpen, onDetails }: { run: Run; artifacts: Artifact[]; onOpen: (artifact: Artifact) => void; onDetails: (id: string) => void }) {
-  const [expanded, setExpanded] = useState(false)
+const runTime = (value?: string) => value ? new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—'
+const traceDuration = (run: Run) => {
+  if (!run.started_at || !run.finished_at) return '—'
+  const seconds = (new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000
+  if (!Number.isFinite(seconds) || seconds < 0) return '—'
+  return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒` : `${Math.round(seconds)} 秒`
+}
+
+function TraceDetail({ run, artifacts, onOpen, onDetails }: { run: Run; artifacts: Artifact[]; onOpen: (artifact: Artifact) => void; onDetails: (id: string) => void }) {
   const [detail, setDetail] = useState<Run | null>(null)
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
   useEffect(() => {
-    if (!expanded) return
     let live = true
     setError(''); setDetail(null)
     api.run(run.id).then(value => { if (live) setDetail(value) }).catch(caught => { if (live) setError(caught instanceof Error ? caught.message : '执行详情读取失败。') })
     return () => { live = false }
-  }, [run.id, run.updated_at, expanded, retry])
+  }, [run.id, run.updated_at, retry])
   const value = detail || run
   const inputs = JSON.stringify({ message_id: value.message_id ?? null, file_id: value.file_id ?? null }, null, 2)
   const outputs = artifacts.filter(item => item.run_id === run.id)
   const outputReferences = JSON.stringify(outputs.map(item => ({ id: item.id, kind: item.kind, status: item.status })), null, 2)
-  return <details className={'workspace-trace-run trace-' + run.status} open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}><summary><strong>{businessName(run.kind || run.type || '')}</strong><StatusText status={run.status} /><time>{date(run.created_at)}</time></summary><div className="workspace-trace-detail">{error && <p className="mapping-error" role="alert">{error}<button className="button-text" onClick={() => setRetry(retry + 1)}>重试读取详情</button></p>}<dl><dt>执行标识</dt><dd><code>{run.id}</code></dd><dt>任务标识</dt><dd><code>{value.task_id || '未记录'}</code></dd><dt>执行状态</dt><dd><StatusText status={value.status} /></dd>{value.error_code && <><dt>错误代码</dt><dd><code>{value.error_code}</code></dd></>}{value.error_message && <><dt>原因</dt><dd>{value.error_message}</dd></>}</dl><RunProgress run={value} /><details><summary>输入引用</summary><pre>{inputs}</pre><CopyButton text={inputs} label="复制输入引用" /></details><details><summary>输出产物</summary>{outputs.length ? outputs.map(item => <p key={item.id}><button className="button-text" onClick={() => onOpen(item)}>查看{businessName(item.kind)}产物</button></p>) : <p>本次执行没有已发布产物。</p>}<pre>{outputReferences}</pre><CopyButton text={outputReferences} label="复制输出引用" /></details><details><summary>执行记录 JSON</summary><pre>{JSON.stringify(value, null, 2)}</pre></details><div className="mapping-actions"><CopyButton text={JSON.stringify(value, null, 2)} label="复制执行记录" /><button className="button-text" onClick={() => onDetails(run.id)}>查看完整执行详情</button></div></div></details>
+  return <div className="workspace-trace-detail">{error && <p className="mapping-error" role="alert">{error}<button className="button-text" onClick={() => setRetry(retry + 1)}>重试读取详情</button></p>}<dl><dt>执行标识</dt><dd><code>{run.id}</code></dd><dt>任务标识</dt><dd><code>{value.task_id || '未记录'}</code></dd><dt>执行状态</dt><dd><StatusText status={value.status} /></dd>{value.error_code && <><dt>错误代码</dt><dd><code>{value.error_code}</code></dd></>}{value.error_message && <><dt>原因</dt><dd>{value.error_message}</dd></>}</dl><RunProgress run={value} /><details><summary>输入引用</summary><pre>{inputs}</pre><CopyButton text={inputs} label="复制输入引用" /></details><details><summary>输出产物</summary>{outputs.length ? outputs.map(item => <p key={item.id}><button className="button-text" onClick={() => onOpen(item)}>查看{businessName(item.kind)}产物</button></p>) : <p>本次执行没有已发布产物。</p>}<pre>{outputReferences}</pre><CopyButton text={outputReferences} label="复制输出引用" /></details><details><summary>执行记录 JSON</summary><pre>{JSON.stringify(value, null, 2)}</pre></details><div className="mapping-actions"><CopyButton text={JSON.stringify(value, null, 2)} label="复制执行记录" /><button className="button-text" onClick={() => onDetails(run.id)}>查看完整执行详情</button></div></div>
+}
+
+function TraceRow({ run, messageText, artifacts, onOpen, onDetails }: { run: Run; messageText?: string; artifacts: Artifact[]; onOpen: (artifact: Artifact) => void; onDetails: (id: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const outputs = artifacts.filter(item => item.run_id === run.id)
+  const label = businessName(run.kind || run.type || '')
+  return <>
+    <tr className={'trace-row trace-' + run.status} aria-expanded={expanded}>
+      <td><button className="button-text trace-expand" onClick={() => setExpanded(!expanded)} aria-label={(expanded ? '收起 ' : '展开 ') + label}>{expanded ? '▾' : '▸'}</button>{label}</td>
+      <td><StatusText status={run.status} /></td>
+      <td><time>{runTime(run.started_at || run.queued_at || run.created_at)}</time></td>
+      <td className="num">{traceDuration(run)}</td>
+      <td>{outputs.map(item => <button key={item.id} className="button-text" onClick={() => onOpen(item)}>{businessName(item.kind)}结果</button>)}<button className="button-text" onClick={() => setExpanded(!expanded)}>执行详情</button></td>
+    </tr>
+    {expanded && <tr className="trace-detail-row"><td colSpan={5}>{messageText && <p className="trace-source">需求：{messageText}</p>}<TraceDetail run={run} artifacts={artifacts} onOpen={onOpen} onDetails={onDetails} /></td></tr>}
+  </>
 }
 
 export function ExecutionTrace({ conversation, onOpen, onDetails }: { conversation: Conversation; onOpen: (artifact: Artifact) => void; onDetails: (id: string) => void }) {
@@ -136,8 +158,16 @@ export function ExecutionTrace({ conversation, onOpen, onDetails }: { conversati
   const [status, setStatus] = useState('')
   const search = query.toLowerCase().trim()
   const runs = conversation.runs.filter(run => (!status || run.status === status) && `${businessName(run.kind || '')} ${run.id} ${run.error_message || ''}`.toLowerCase().includes(search))
-  const groups = new Map<string, Run[]>()
-  for (const run of runs) { const key = run.message_id || run.id; groups.set(key, [...(groups.get(key) || []), run]) }
+    .slice()
+    .sort((left, right) => (left.queued_at || left.created_at || '').localeCompare(right.queued_at || right.created_at || '') || left.id.localeCompare(right.id))
+  const messageText = new Map(conversation.messages.map(message => [message.id, message.content]))
+  const blocks: { key: string; header: string | null; runs: Run[] }[] = []
+  for (const run of runs) {
+    const last = blocks.at(-1)
+    if (run.message_id && last && last.key === run.message_id) { last.runs.push(run); continue }
+    if (run.message_id) blocks.push({ key: run.message_id, header: messageText.get(run.message_id) || '已关联的输入', runs: [run] })
+    else blocks.push({ key: run.id, header: null, runs: [run] })
+  }
   const heading = useRef<HTMLHeadingElement>(null)
-  return <section className="execution-workspace" aria-label="执行轨迹"><header className="workspace-section-heading"><div><h2 ref={heading}>执行轨迹</h2><p>{conversation.runs.length} 次真实执行 · 展开查看记录与关联产物</p></div><div className="mapping-actions"><input aria-label="搜索执行记录" placeholder="搜索执行或错误" value={query} onChange={event => setQuery(event.target.value)} /><select aria-label="筛选执行状态" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option><option value="failed">失败</option><option value="waiting_confirmation">待人工确认</option><option value="running">运行中</option><option value="succeeded">已完成</option><option value="cancelled">已取消</option></select></div></header>{[...groups].map(([id, items], index) => <section className="workspace-trace-group" key={id}><header><span>第 {index + 1} 组</span><p>{conversation.messages.find(message => message.id === id)?.content || '文件或业务执行'}</p></header>{items.map(run => <TraceRun key={run.id} run={run} artifacts={conversation.artifacts || []} onOpen={onOpen} onDetails={onDetails} />)}</section>)}{!runs.length && <p className="workspace-empty">没有符合条件的执行记录。</p>}</section>
+  return <section className="execution-workspace" aria-label="执行轨迹"><header className="workspace-section-heading"><div><h2 ref={heading}>执行轨迹</h2><p>{conversation.runs.length} 次真实执行 · 按需求分组，可展开耗时、原因与关联产物</p></div><div className="mapping-actions"><input aria-label="搜索执行记录" placeholder="搜索执行或错误" value={query} onChange={event => setQuery(event.target.value)} /><select aria-label="筛选执行状态" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option><option value="failed">失败</option><option value="waiting_confirmation">待人工确认</option><option value="running">运行中</option><option value="succeeded">已完成</option><option value="cancelled">已取消</option></select></div></header>{runs.length ? <div className="workbench-table-scroll"><table className="trace-table"><thead><tr><th>操作</th><th>状态</th><th>开始</th><th>耗时</th><th>结果 / 详情</th></tr></thead><tbody>{blocks.map(block => <Fragment key={block.key}>{block.header && <tr className="trace-group-header"><th colSpan={5} scope="colgroup">需求：{block.header}</th></tr>}{block.runs.map(run => <TraceRow key={run.id} run={run} messageText={block.header || undefined} artifacts={conversation.artifacts || []} onOpen={onOpen} onDetails={onDetails} />)}</Fragment>)}</tbody></table></div> : <p className="workspace-empty">没有符合条件的执行记录。</p>}</section>
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Artifact, type Confirmation, type Conversation, type OperationInput, type Run, type ProgressSummary } from './api'
 
-export const businessName = (kind: string) => ({log_classification: '日志类型提取', enum_extract: '枚举提取', fill: '填充值映射', remove_mapping: '取消值映射', export: '规则导出', enum_values: '枚举提取', threat_mapping: '威胁类型映射', field_mapping: '标准字段映射', config_export: '规则导出', business: '业务处理', business_operation: '业务处理'}[kind] || '业务处理')
+export const businessName = (kind: string) => ({log_classification: '日志类型提取', log_parse: '日志类型提取', file_ingest: '文件校验', file_upload: '上传文件', enum_extract: '枚举提取', fill: '填充值映射', remove_mapping: '取消值映射', export: '规则导出', enum_values: '枚举提取', threat_mapping: '威胁类型映射', field_mapping: '标准字段映射', config_export: '规则导出', business: '业务处理', business_operation: '业务处理', user_request: '业务任务', business_clear: '清空业务数据', mapping_draft_apply: '应用映射修改', field_change_apply: '应用字段变更', field_change_undo: '撤销字段变更', log_knowledge_submit: '日志知识申请'}[kind] || '业务处理')
 export function BusinessOperations({conversation, source, onDone}: {conversation: Conversation; source?: Artifact; onDone: () => Promise<void>}) {
   const facts = conversation.session_facts
   const [kind, setKind] = useState<OperationInput['step']['type']>(source?.kind === 'enum_values' ? 'threat_mapping' : source?.kind === 'threat_mapping' ? 'fill' : source?.kind === 'field_mapping' || source?.kind === 'log_classification' ? 'export' : 'enum_extract')
@@ -90,7 +90,7 @@ export function ArtifactValues({artifact, content}: {artifact: Artifact; content
   return <pre className="artifact-content">{artifact.kind === 'config_export' && typeof content.content === 'string' ? content.content : JSON.stringify(content, null, 2)}</pre>
 }
 
-const phaseName: Record<string, string> = {planning: '规划任务', retrieval: '检索依据', model_call: '业务分析', validation: '校验结果', writeback: '写入结果', execution: '执行步骤', completed: '步骤完成'}
+export const phaseName: Record<string, string> = {planning: '规划任务', retrieval: '检索依据', model_call: '业务分析', validation: '校验结果', writeback: '写入结果', execution: '执行步骤', completed: '步骤完成'}
 const progressName: Record<string, string> = {running: '进行中', success: '已完成', failed: '失败'}
 export function progressLabel(summary?: ProgressSummary) {
   if (!summary || !phaseName[summary.phase || '']) return ''

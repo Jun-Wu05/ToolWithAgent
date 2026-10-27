@@ -100,8 +100,7 @@ it('keeps trace references collapsed, loads only expanded runs and copies protec
   try {
     render(<ExecutionTrace conversation={conversation} onOpen={vi.fn()} onDetails={vi.fn()} />)
     expect(api.run).not.toHaveBeenCalled()
-    const run = document.querySelector<HTMLDetailsElement>('.workspace-trace-run')!
-    await act(async () => { run.open = true; fireEvent(run, new Event('toggle')) })
+    fireEvent.click(screen.getByRole('button', { name: '展开 业务处理' }))
     await waitFor(() => expect(api.run).toHaveBeenCalledWith('run-current-snapshot'))
     const output = screen.getByText('输出产物').closest('details')!
     expect(output.open).toBe(false)
@@ -114,4 +113,23 @@ it('keeps trace references collapsed, loads only expanded runs and copies protec
     if (previous) Object.defineProperty(navigator, 'clipboard', previous)
     else Reflect.deleteProperty(navigator, 'clipboard')
   }
+})
+
+it('groups runs only by their linked requirement and shows real duration, without wrapping unlinked runs', () => {
+  const conversation: Conversation = { id: 'conv', title: '任务', created_at: '', updated_at: '',
+    messages: [{ id: 'msg-1', actor: 'user', kind: 'text', content: '请提取日志类型并映射' }],
+    files: [], runs: [
+      { id: 'run-a', status: 'succeeded', kind: 'log_parse', message_id: 'msg-1', queued_at: '2026-10-26T07:00:00Z', started_at: '2026-10-26T07:00:05Z', finished_at: '2026-10-26T07:01:35Z' },
+      { id: 'run-b', status: 'succeeded', kind: 'field_mapping', message_id: 'msg-1', queued_at: '2026-10-26T07:02:00Z', started_at: '2026-10-26T07:02:00Z', finished_at: '2026-10-26T07:02:45Z' },
+      { id: 'run-legacy', status: 'failed', kind: 'file_ingest', queued_at: '2026-10-26T06:00:00Z', started_at: '2026-10-26T06:00:00Z', finished_at: '2026-10-26T06:00:20Z' },
+    ], artifacts: [] }
+  render(<ExecutionTrace conversation={conversation} onOpen={vi.fn()} onDetails={vi.fn()} />)
+  expect(screen.getByText('需求：请提取日志类型并映射')).toBeInTheDocument()
+  expect(screen.getByText('日志类型提取')).toBeInTheDocument()
+  expect(screen.getByText('标准字段映射')).toBeInTheDocument()
+  expect(screen.getByText('文件校验')).toBeInTheDocument()
+  expect(screen.queryByText(/第 \d+ 组/)).not.toBeInTheDocument()
+  expect(screen.getByText('1 分 30 秒')).toBeInTheDocument()
+  expect(screen.getByText('45 秒')).toBeInTheDocument()
+  expect(screen.getByText('20 秒')).toBeInTheDocument()
 })

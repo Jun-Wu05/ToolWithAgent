@@ -70,6 +70,19 @@ class Store:
             db.commit()
         return {"id": conversation_id, "title": title, "created_at": timestamp, "updated_at": timestamp}
 
+    def rename_conversation(self, owner_id, conversation_id, title):
+        title = (title or "").strip()[:160]
+        if not title:
+            raise ValueError("invalid_conversation_title")
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.owns(db, conversation_id, owner_id)
+            timestamp = now()
+            db.execute("UPDATE conversations SET title=?,updated_at=?,revision=revision+1 WHERE id=?", (title, timestamp, conversation_id))
+            self._event(db, conversation_id, "conversation_renamed", "conversation", conversation_id, {"title": title})
+            db.commit()
+        return {"id": conversation_id, "title": title, "updated_at": timestamp}
+
     def get_conversation(self, owner_id, conversation_id):
         with connect(self.path) as db:
             row = self.owns(db, conversation_id, owner_id)
