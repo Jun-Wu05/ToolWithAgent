@@ -7,6 +7,7 @@ import { FieldChangesWorkspace } from './FieldChangesWorkspace'
 import { MappingWorkspace } from './MappingWorkspace'
 import { MappingSummaryCard } from './ConversationMappingSummary'
 import { AdminConsole } from './AdminConsole'
+import { DeveloperConsole } from './DeveloperConsole'
 import { MappingDialog } from './MappingDialog'
 import { BusinessOperations, BusinessConfirmation, businessName, ArtifactValues, RunProgress, progressLabel } from './BusinessWorkspace'
 
@@ -38,6 +39,7 @@ function MappingForm({ source, submitting, onSubmit, onCancel }: { source: Mappi
 }
 
 export function App() {
+  const [developerDiagnostics, setDeveloperDiagnostics] = useState(false)
   const [visitedTabs, setVisitedTabs] = useState<WorkspaceTab[]>(['conversation'])
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('conversation')
   const [resultTarget, setResultTarget] = useState<{ id: string; token: number } | null>(null)
@@ -607,12 +609,13 @@ export function App() {
     { id: 'io', label: '输入与输出', content: <dl><dt>执行类型</dt><dd>{businessName(drawer.kind || '')}</dd>{drawer.file_id && <><dt>输入文件 ID</dt><dd className="num">{drawer.file_id}</dd></>}<dt>结果</dt><dd><StatusText status={drawer.status} /></dd>{drawer.message_id && <><dt>原消息</dt><dd><button className="button-text" onClick={() => locate(drawer.message_id)}>定位输入消息</button></dd></>}{conversation?.artifacts?.filter(item => item.run_id === drawer.id).map(item => <div key={item.id} className="context-output"><dt>输出</dt><dd><button className="button-text" onClick={() => void openArtifact(item)}>{businessName(item.kind)}结果</button></dd></div>)}</dl> },
   ] : []
   if (identity?.role === 'admin') return <AdminConsole identity={identity} identities={identities} onSwitchIdentity={id => void switchIdentity(id)} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
+  if (identity?.role === 'developer' && developerDiagnostics) return <DeveloperConsole identity={identity} identities={identities} onSwitchIdentity={id => void switchIdentity(id)} onBack={() => setDeveloperDiagnostics(false)} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
   return <div className="app">
     <button className="mobile-nav-toggle" onClick={() => setNavOpen(!navOpen)} aria-label="切换导航"><span aria-hidden="true">☰</span></button>
     <aside className={'sidebar ' + (navOpen ? 'sidebar-open' : '')}>
       <div className="brand"><span className="brand-mark">T</span><span>ToolWithAgent <small>V2 工作台</small></span></div>
       <button className="new-conversation" onClick={() => void createConversation()} disabled={busy}>＋ 新会话</button>
-      <nav aria-label="主导航"><button className={"nav-item " + (workspaceTab !== "trace" ? "selected" : "")} onClick={() => changeWorkspaceTab("conversation")}>对话工作台</button><button className={"nav-item " + (workspaceTab === "trace" ? "selected" : "")} onClick={() => changeWorkspaceTab("trace")}>执行轨迹</button></nav>
+      <nav aria-label="主导航"><button className={"nav-item " + (workspaceTab !== "trace" ? "selected" : "")} onClick={() => changeWorkspaceTab("conversation")}>对话工作台</button><button className={"nav-item " + (workspaceTab === "trace" ? "selected" : "")} onClick={() => changeWorkspaceTab("trace")}>执行轨迹</button>{identity?.role === 'developer' && <button className="nav-item" onClick={() => setDeveloperDiagnostics(true)}>Run 诊断</button>}</nav>
       <div className="recent-title">最近会话</div>
       <div className="recent-list">{conversations.length ? conversations.map(item => <button key={item.id} className={'recent-item ' + (item.id === activeId ? 'active' : '')} onClick={() => void selectConversation(item.id)}><span className="recent-name">{item.title || '未命名会话'}</span><span className="recent-time">{readableTime(item.updated_at)}</span></button>) : <p className="sidebar-empty">新建会话开始工作</p>}</div>
       <div className="identity">
