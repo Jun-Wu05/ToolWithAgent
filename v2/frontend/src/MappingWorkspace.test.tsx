@@ -23,6 +23,7 @@ describe('mapping result view', () => {
     await screen.findByText('src_ip')
     expect(screen.getByRole('table')).toHaveTextContent('源地址')
     expect(screen.getByRole('table')).toHaveTextContent('映射成功')
+    expect(screen.getByText('映射成功', { selector: '.status-text span' }).closest('.status-text')).toHaveClass('tone-success')
     fireEvent.click(screen.getByText('查看更多样例'))
     expect(screen.getByText('日志条目 12')).toBeInTheDocument()
     expect(screen.queryByText(/Excel 行/)).not.toBeInTheDocument()
