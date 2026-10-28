@@ -40,6 +40,7 @@ describe('persistent mapping editor', () => {
     expect(api.saveMapping).toHaveBeenCalledWith('draft-1', 0, 'row-src', { sub_rule_id: '0', source_path: 'src.ip', standard_field: '目的地址', linked_sub_rule_ids: [] })
     expect(api.mappingView).toHaveBeenLastCalledWith('map-1', expect.objectContaining({ draft_id: 'draft-1' }), expect.anything())
     const row = screen.getByText('src.ip').closest('tr')!
+    expect(row).toHaveClass('mapping-row-modified')
     expect(row.closest('tbody')).toHaveTextContent('未匹配')
     expect(row).toHaveTextContent('映射成功')
     expect(row).toHaveTextContent('用户选择')

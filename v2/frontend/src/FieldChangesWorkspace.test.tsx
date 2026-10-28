@@ -20,6 +20,8 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.resetAllMocks()})
 it('preserves atomic selection across rule tabs with keyboard navigation',async()=>{
  render(<FieldChangesWorkspace {...props}/>);await screen.findByRole('checkbox',{name:'地址'})
+ expect(screen.getByText('添加：地址').closest('.field-change')).toHaveClass('field-add')
+ expect(screen.getByText('已选择', {selector: '.status-text span'}).closest('.status-text')).toHaveClass('tone-info')
  const login=screen.getByRole('tab',{name:'登录'});fireEvent.keyDown(screen.getByRole('tab',{name:'网络'}),{key:'ArrowRight'})
  expect(login).toHaveFocus();expect(login).toHaveAttribute('aria-selected','true')
  fireEvent.click(screen.getByRole('checkbox',{name:'旧字段'}))

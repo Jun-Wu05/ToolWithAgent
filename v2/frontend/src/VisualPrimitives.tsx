@@ -8,6 +8,12 @@ const statuses: Record<string, { label: string; tone: Tone }> = {
   waiting_confirmation: { label: '等待确认', tone: 'warning' },
   succeeded: { label: '已完成', tone: 'success' }, completed: { label: '已完成', tone: 'success' },
   failed: { label: '失败', tone: 'danger' }, cancelled: { label: '已取消', tone: 'neutral' },
+  matched: { label: '已匹配', tone: 'success' }, unmatched: { label: '未匹配', tone: 'warning' },
+  parse_error: { label: '解析失败', tone: 'danger' },
+  ready: { label: '待应用', tone: 'warning' }, applying: { label: '应用中', tone: 'info' },
+  applied: { label: '已应用', tone: 'success' }, undone: { label: '已撤销', tone: 'neutral' },
+  selected: { label: '已选择', tone: 'info' }, not_selected: { label: '未选择', tone: 'neutral' },
+  not_applied_by_user: { label: '未应用', tone: 'neutral' },
 }
 const statusInfo = (status: string) => Object.hasOwn(statuses, status) ? statuses[status] : { label: '未知状态', tone: 'neutral' as const }
 
@@ -50,7 +56,7 @@ export function ToolCallBlock({ name, status, input, output, durationMs, tokens 
   return <section className="tool-call-block">
     <button type="button" className="tool-call-summary focus-ring" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
       <span aria-hidden="true">{open ? '▾' : '▸'}</span><StatusText status={status} /><code>{name}</code>
-      <span className="num tool-call-metrics">{fmtMs(durationMs)} · {fmtTokens(tokens)} Token</span>
+      <span className="num tool-call-metrics">{fmtMs(durationMs)}{tokens != null && <> · {fmtTokens(tokens)} Token</>}</span>
     </button>
     <div id={id} className="tool-call-content" hidden={!open}>{open && <><h4>输入</h4><pre>{input}</pre><h4>输出</h4><pre>{output}</pre></>}</div>
   </section>

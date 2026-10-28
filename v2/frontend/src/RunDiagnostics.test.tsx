@@ -17,6 +17,18 @@ const detail: DiagnosticRun = {
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('Run diagnostics', () => {
+  it('filters with status chips and renders a measured Run duration', async () => {
+    const runs = vi.spyOn(api, 'diagnosticRuns').mockResolvedValue({ ...list, items: [{
+      ...list.items[0], started_at: '2026-10-27T00:00:00Z', finished_at: '2026-10-27T00:00:02Z',
+    }] })
+    render(<RunDiagnostics />)
+    expect(await screen.findByText('2.0 秒')).toHaveClass('num')
+    expect(screen.getByText('失败', { selector: '.status-text span' }).closest('.status-text')).toHaveClass('tone-danger')
+    fireEvent.click(screen.getByRole('button', { name: '已完成' }))
+    await waitFor(() => expect(runs).toHaveBeenLastCalledWith('succeeded', 1))
+    expect(screen.getByRole('button', { name: '已完成' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it.each([
     ['succeeded', '无需处理。'],
     ['running', '执行尚未结束，请刷新查看最新证据。'],
@@ -44,6 +56,7 @@ describe('Run diagnostics', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(5)
     expect(screen.getByText(/可能原因：model_timeout/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看失败调用证据' }))
+    fireEvent.click(document.querySelector('.tool-call-summary')!)
     expect(await screen.findByText('safe request')).toBeInTheDocument()
     expect(api.diagnosticCall).toHaveBeenCalledWith('run-270', 'call-1')
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))

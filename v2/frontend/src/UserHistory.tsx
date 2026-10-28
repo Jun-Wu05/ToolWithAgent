@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api, type HistoryPage, type UserRun, type UserTask } from './api'
-import { StatusText } from './VisualPrimitives'
+import { fmtMs, StatusText } from './VisualPrimitives'
 import { businessName } from './BusinessWorkspace'
 
 type Kind = 'tasks' | 'runs'
 type HistoryItem = UserTask | UserRun
+const elapsed = (item: UserRun) => item.started_at && item.finished_at
+  ? fmtMs(new Date(item.finished_at).getTime() - new Date(item.started_at).getTime()) : '—'
 const filters = [
   ['', '全部'], ['queued', '排队中'], ['running', '运行中'],
   ['waiting_confirmation', '待确认'], ['succeeded', '已完成'],
@@ -29,17 +31,17 @@ export function UserHistory({ kind, onOpen }: { kind: Kind; onOpen: (conversatio
   return <section className="activity-section" aria-label={kind === 'tasks' ? '我的任务' : '我的执行'}>
     <h2>{kind === 'tasks' ? '我的任务' : '我的执行'}</h2>
     <p>跨会话查看历史，选择记录可返回原会话并打开执行详情。</p>
-    <label>状态 <select aria-label="历史状态" value={status} onChange={event => { setStatus(event.target.value); setPage(1) }}>
-      {filters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-    </select></label>
+    <div className="status-filters" role="group" aria-label="历史状态">{filters.map(([value, label]) =>
+      <button key={value} type="button" className="focus-ring" aria-pressed={status === value} onClick={() => { setStatus(value); setPage(1) }}>{label}</button>
+    )}</div>
     {error && <p role="alert" className="mapping-error">{error}</p>}
     {loading ? <p role="status">正在加载…</p> : result?.items.length ? <>
       <div className="history-list">{result.items.map(item => {
         const runId = kind === 'runs' ? item.id : (item as UserTask).current_run_id
-        return <article className="result-card" key={item.id}>
+        return <article className="result-card row-hover" key={item.id}>
           <strong>{item.conversation_title || '未命名会话'}</strong>
           <p>{businessName(kind === 'tasks' ? (item as UserTask).type : (item as UserRun).kind || '')} · <StatusText status={item.status} /></p>
-          <p>更新于 {new Date(item.updated_at || item.created_at || '').toLocaleString('zh-CN')}</p>
+          <p>更新于 {new Date(item.updated_at || item.created_at || '').toLocaleString('zh-CN')}{kind === 'runs' && <> · 耗时 <span className="num">{elapsed(item as UserRun)}</span></>}</p>
           <button className="button-secondary" onClick={() => onOpen(item.conversation_id, runId, item.message_id || null)}>回到原会话{runId ? '并查看执行' : ''}</button>
         </article>
       })}</div>

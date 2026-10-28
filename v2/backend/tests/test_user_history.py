@@ -7,6 +7,15 @@ from toolwithagent_v2.api.app import create_app
 from toolwithagent_v2.settings import Settings
 
 
+def test_conversation_summary_has_no_status_without_a_run(tmp_path):
+    app = create_app(Settings(data_dir=tmp_path / "data"))
+    with TestClient(app) as client:
+        empty = client.post("/api/v2/conversations", json={}).json()
+        assert client.get("/api/v2/conversations").json()["items"] == [{
+            **empty, "latest_run_status": None,
+        }]
+
+
 def test_task_and_run_history_is_owner_scoped_and_filterable(tmp_path):
     app = create_app(Settings(data_dir=tmp_path / "data"))
     with TestClient(app) as client:
@@ -14,6 +23,12 @@ def test_task_and_run_history_is_owner_scoped_and_filterable(tmp_path):
         first_run = client.post(f"/api/v2/conversations/{first['id']}/messages", json={"content": "第一项"}).json()
         second = client.post("/api/v2/conversations", json={"title": "乙会话"}).json()
         second_run = client.post(f"/api/v2/conversations/{second['id']}/messages", json={"content": "第二项"}).json()
+
+        summaries = client.get("/api/v2/conversations").json()["items"]
+        assert {item["id"]: item["latest_run_status"] for item in summaries} == {
+            first["id"]: "queued", second["id"]: "queued",
+        }
+        assert all("input_snapshot_json" not in item for item in summaries)
 
         tasks = client.get("/api/v2/tasks").json()
         runs = client.get("/api/v2/runs").json()
@@ -33,11 +48,14 @@ def test_task_and_run_history_is_owner_scoped_and_filterable(tmp_path):
         assert client.post("/api/v2/dev/session", json={"user_id": "history-other"}).status_code == 200
         assert client.get("/api/v2/tasks").json()["items"] == []
         assert client.get("/api/v2/runs").json()["items"] == []
+        assert client.get("/api/v2/conversations").json()["items"] == []
         other = client.post("/api/v2/conversations", json={"title": "私有"}).json()
         client.post(f"/api/v2/conversations/{other['id']}/messages", json={"content": "不可见"})
+        assert client.get("/api/v2/conversations").json()["items"][0]["latest_run_status"] == "queued"
         assert client.post("/api/v2/dev/session", json={"user_id": "dev-user"}).status_code == 200
         assert client.get("/api/v2/tasks").json()["total"] == 2
         assert client.get("/api/v2/runs").json()["total"] == 2
+        assert {item["id"] for item in client.get("/api/v2/conversations").json()["items"]} == {first["id"], second["id"]}
 
 
 def test_mapping_download_audits_once_and_denials_do_not_audit(tmp_path):

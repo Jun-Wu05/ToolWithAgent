@@ -1,5 +1,5 @@
 export type Identity = { id: string; display_name: string; role: string }
-export type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string }
+export type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string; latest_run_status?: string | null }
 export type Message = { id: string; actor: string; kind?: string; content: string; created_at?: string; run_id?: string | null; payload?: Record<string, unknown> }
 export type FileRecord = { id: string; name: string; size?: number; role?: 'primary' | 'enum_mapping'; active?: boolean; parse_status?: string; mapping_eligible?: boolean; created_at?: string }
 export type ClassificationArtifact = {

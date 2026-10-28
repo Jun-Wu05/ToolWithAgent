@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type FieldChangeSummary, type FieldChangePreview, type FieldDeleteConfirmation } from './api'
 import { MappingDialog } from './MappingDialog'
 import { businessName } from './BusinessWorkspace'
+import { StatusText } from './VisualPrimitives'
 
 const stateText: Record<string, string> = { ready: '待应用', applying: '应用中', applied: '已应用', undone: '已撤销', cancelled: '已取消' }
 const groupText: Record<string, string> = { applied: '已应用', not_applied_by_user: '用户未应用', selected: '已选择', not_selected: '未选择' }
@@ -90,7 +91,7 @@ export function FieldChangesWorkspace({ summary, editable, onBack, onRefresh, on
   const currentRule = rules.some(([id]) => id === rule) ? rule : rules[0]?.[0]
   const writable = editable && preview?.status === 'ready' && preview.current
   return <section className="field-workspace" aria-label="字段变更预览">
-    <header className="field-heading"><div><h2>字段变更</h2><p>{stateText[preview?.status || summary.status] || '正在加载'} · 同组操作一起应用</p></div><button className="button-secondary" onClick={onBack} disabled={busy}>返回对话</button></header>
+    <header className="field-heading"><div><h2>字段变更</h2><p><StatusText status={preview?.status || summary.status} label={stateText[preview?.status || summary.status] || '正在加载'} /> · 同组操作一起应用</p></div><button className="button-secondary" onClick={onBack} disabled={busy}>返回对话</button></header>
     {error && <p className="mapping-error" role="alert">{error}<button className="button-text" onClick={() => void load()} disabled={busy}>重新加载变更</button></p>}
     {!preview && !error && <p role="status">正在加载变更…</p>}
     {preview && <>
@@ -106,7 +107,7 @@ export function FieldChangesWorkspace({ summary, editable, onBack, onRefresh, on
       }}>{name}</button>)}</div>}
       <div id="field-rules" role="tabpanel" aria-labelledby={'field-tab-' + rules.findIndex(([id]) => id === currentRule)}>
         {preview.groups.filter(group => group.changes.some(item => item.sub_rule_id === currentRule) || !group.changes.length).map(group => <article className="field-group" key={group.id}>
-          <div className="field-group-heading"><label><input type="checkbox" checked={preview.selected_group_ids.includes(group.id)} disabled={!writable || busy} onChange={event => void select(group.id, event.target.checked)} />{group.fields.join('、')}</label><span>{groupText[group.status] || group.status}</span></div>
+          <div className="field-group-heading"><label><input type="checkbox" checked={preview.selected_group_ids.includes(group.id)} disabled={!writable || busy} onChange={event => void select(group.id, event.target.checked)} />{group.fields.join('、')}</label><StatusText status={group.status} label={groupText[group.status] || group.status} /></div>
           {group.changes.some(item => item.sub_rule_id !== currentRule) && <p className="mapping-hint">此组还影响其他子规则，选择将一起保存。</p>}
           {group.changes.filter(item => item.sub_rule_id === currentRule).map((item, index) => <div className={'field-change field-' + item.kind} key={index}><strong>{{add: '添加', modify: '修改', delete: '删除'}[item.kind]}：{item.field}</strong><details><summary>查看变更前后</summary><div className="field-values"><div><h3>变更前</h3><pre>{valueText(item.before)}</pre></div><div><h3>变更后</h3><pre>{valueText(item.after)}</pre></div></div></details></div>)}
           {!group.changes.length && <p>没有需要修改的字段。</p>}

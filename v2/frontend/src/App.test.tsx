@@ -46,6 +46,19 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
 describe('V2 workbench', () => {
+  it('shows only the supplied recent conversation Run statuses', async () => {
+    vi.mocked(api.conversations).mockResolvedValue({ items: [
+      { ...summary, latest_run_status: 'running' },
+      { ...summary, id: 'conv-empty', title: '空会话', latest_run_status: null },
+    ] })
+    render(<App />)
+    const running = (await screen.findByText('日志任务', { selector: '.recent-name' })).closest('button')!
+    expect(running.querySelector('.status-text')).toHaveTextContent('运行中')
+    expect(running.querySelector('.status-dot')).toHaveClass('tone-info')
+    const empty = screen.getByText('空会话', { selector: '.recent-name' }).closest('button')!
+    expect(empty.querySelector('.status-text')).toBeNull()
+  })
+
   it('opens a Run from another conversation through history and keeps unsent text', async () => {
     const second = { ...summary, id: 'conv-2', title: '历史会话' }
     vi.mocked(api.conversations).mockResolvedValue({ items: [summary, second] })
