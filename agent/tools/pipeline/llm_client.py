@@ -96,10 +96,12 @@ def _call_llm_direct(
         content: str = data["choices"][0]["message"]["content"]
     except Exception as exc:
         record_call(spec.name, model_id, api_key, started_at, start, prompt, exc=exc,
-                    params={"temperature": temperature, "max_tokens": max_tokens})
+                    params={"temperature": temperature, "max_tokens": max_tokens},
+                    tool_id="agent.tools.pipeline.llm_client._call_llm_direct")
         raise
     record_call(spec.name, model_id, api_key, started_at, start, prompt, response=content,
-                params={"temperature": temperature, "max_tokens": max_tokens})
+                params={"temperature": temperature, "max_tokens": max_tokens},
+                tool_id="agent.tools.pipeline.llm_client._call_llm_direct")
     elapsed = time.monotonic() - start
     usage = data.get("usage", {})
     

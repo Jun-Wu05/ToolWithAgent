@@ -5,7 +5,10 @@ from types import SimpleNamespace
 
 import httpx
 
-from contracts.model_call_diagnostics import bind_recorder, instrument_model, redact_text, reset_recorder
+from contracts.model_call_diagnostics import (
+    bind_recorder, instrument_model, record_call, redact_text, reset_recorder,
+    reset_skill, set_skill,
+)
 
 
 class FakeModel:
@@ -41,6 +44,7 @@ def test_agno_call_records_success_and_typed_connection_failure_without_secrets(
     assert events[1]["error_code"] == "model_connection"
     assert all(event["provider"] == "deepseek" and event["model"] == "model-a" for event in events)
     assert all(event["request_id"] and event["duration_ms"] >= 0 for event in events)
+    assert all(event["skill_id"] is None and event["tool_id"] is None for event in events)
     assert "top-secret" not in str(events)
 
 
@@ -88,4 +92,30 @@ def test_direct_log_model_call_records_sanitized_request_and_response(monkeypatc
     assert len(events) == 1
     assert events[0]["status"] == "succeeded"
     assert events[0]["provider"] == "deepseek"
+    assert events[0]["tool_id"] == "agent.tools.pipeline.llm_client._call_llm_direct"
     assert "test-key" not in str(events)
+
+
+def test_regex_skill_identity_reaches_direct_tool_call_in_worker_thread(monkeypatch):
+    from agent.shared.regex_extract import generate_extraction_pattern
+    from agent import tools
+    from datetime import datetime, timezone
+    import time
+
+    events = []
+    def fake_direct_call(_prompt):
+        record_call("deepseek", "model-a", None, datetime.now(timezone.utc).isoformat(),
+                    time.monotonic(), "safe", response='{"pattern":"abc"}',
+                    tool_id="agent.tools.pipeline.llm_client._call_llm_direct")
+        return '{"pattern":"abc"}'
+
+    monkeypatch.setattr(tools, "call_llm_direct", fake_direct_call)
+    recorder_token = bind_recorder(events.append)
+    skill_token = set_skill("skills/regex-extract-field")
+    try:
+        assert asyncio.run(generate_extraction_pattern("abc", "source", "abc")) == "abc"
+    finally:
+        reset_skill(skill_token)
+        reset_recorder(recorder_token)
+    assert events[0]["skill_id"] == "skills/regex-extract-field"
+    assert events[0]["tool_id"] == "agent.tools.pipeline.llm_client._call_llm_direct"
