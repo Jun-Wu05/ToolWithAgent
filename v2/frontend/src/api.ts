@@ -4,6 +4,8 @@ export type Message = { id: string; actor: string; kind?: string; content: strin
 export type FileRecord = { id: string; name: string; size?: number; role?: 'primary' | 'enum_mapping'; active?: boolean; parse_status?: string; mapping_eligible?: boolean; created_at?: string }
 export type ClassificationArtifact = {
   id: string
+  version?: number
+  source_artifact_ids?: string[]
   run_id: string
   file_id: string
   kind: 'log_classification'
@@ -22,6 +24,7 @@ export type EventAnnotation = {
 export type MappingWarning = { code: 'threat_chain_warning'; message: string }
 export type FieldMappingArtifact = {
   id: string; run_id: string; file_id: string; kind: 'field_mapping'; status: string; current: boolean
+  version?: number; source_artifact_ids?: string[]
   source_artifact_id?: string; created_at?: string; config_ref?: string; message_id?: string | null; result_message_id?: string | null
   summary: { rule_count: number; field_count: number; matched_count: number; unmatched_count: number; parse_error_count: number; uncertain_annotation_count?: number; warning_codes?: MappingWarning['code'][] }
 }
@@ -46,6 +49,9 @@ export type ArtifactDownload = { name: string; blob: Blob }
 export type AdminOverview = { runs: Record<string, number>; users: number; conversations: number; worker: { lease_owner: string | null; lease_expires_at: string | null; epoch: number } }
 export type AdminRun = { id: string; task_id: string; kind: string; message_id?: string | null; file_id?: string | null; status: string; attempt: number; queued_at: string; started_at: string | null; finished_at: string | null; error_code?: string | null; created_at: string; updated_at: string; owner_id: string; owner_name: string; conversation_id: string; conversation_title: string }
 export type AdminRunPage = { items: AdminRun[]; total: number; page: number; page_size: number }
+export type UserTask = { id: string; type: string; status: string; current_run_id: string | null; conversation_id: string; conversation_title: string; message_id: string | null; file_id: string | null; attempt: number | null; created_at: string; updated_at: string }
+export type UserRun = Run & { conversation_id: string; conversation_title: string }
+export type HistoryPage<T> = { items: T[]; total: number; page: number; page_size: number }
 export type DiagnosticRun = {
   run: { id: string; task_id: string; kind: string; status: string; error_code: string | null; owner_name: string; conversation_title: string; queued_at: string | null; started_at: string | null; finished_at: string | null; prompt_version: string | null; standard_field_version: string | null; provider_config_revision: number | null }
   conclusion: { status: string; error_code: string | null; call_id: string | null; scope_id: string | null; evidence_call_id?: string | null; evidence_scope_id?: string | null; possible_cause?: string | null; category: string; reason?: string }
@@ -73,7 +79,7 @@ export type FieldChangeSummary = { run_id: string; revision: number; status: str
 export type FieldChangePreview = FieldChangeSummary & { task_id: string; current: boolean; selected_group_ids: string[]; groups: { id: string; fields: string[]; deletes: string[]; status: string; changes: { sub_rule_id: string; sub_rule_name: string; field: string; kind: 'add' | 'modify' | 'delete'; before: unknown; after: unknown }[] }[] }
 export type FieldDeleteConfirmation = { token: string; checkpoint_revision: number; payload: { deletes: string[]; downstream: { id: string; kind: string; version: number }[] } }
 export type Conversation = ConversationSummary & { messages: Message[]; files: FileRecord[]; runs: Run[]; artifacts?: Artifact[]; drafts?: MappingDraftSummary[]; field_changes?: FieldChangeSummary[]; session_facts?: SessionFacts | null; session_facts_error?: string | null }
-export type BusinessArtifact = { id: string; run_id: string; kind: 'enum_values' | 'threat_mapping' | 'config_export'; status: string; current: boolean; item_count?: number; source_field?: string; summary?: Record<string, unknown>; message_id?: string | null; result_message_id?: string | null; created_at?: string }
+export type BusinessArtifact = { id: string; run_id: string; kind: 'enum_values' | 'threat_mapping' | 'config_export'; status: string; current: boolean; version?: number; source_artifact_ids?: string[]; item_count?: number; source_field?: string; summary?: Record<string, unknown>; message_id?: string | null; result_message_id?: string | null; created_at?: string }
 export type Artifact = ClassificationArtifact | FieldMappingArtifact | BusinessArtifact
 export type SessionFacts = { has_logs?: boolean; has_decoded_config?: boolean; has_log_classification?: boolean; available_config_refs: string[]; enum_mapping_target_fields: string[]; referenceable_artifacts: { source_ref: string; artifact_type: string; source_field: string | null; item_count: number; target_bindings: {config_ref: string; target_field: string}[] }[] }
 export type OperationInput = { step: { step_id: 'operation'; type: 'enum_extract' | 'threat_mapping' | 'fill' | 'remove_mapping' | 'export'; source_ref?: string; config_ref?: string; target_field?: string; target_fields?: string[]; fill_kind?: 'enum' | 'threat'; values?: string[] }; source_artifact_id?: string; config_artifact_id?: string }
@@ -180,6 +186,8 @@ export const api = {
   identities: () => request<{ items: Identity[] }>('/dev/identities'),
   selectIdentity: (user_id: string) => request<Identity>('/dev/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id }) }),
   conversations: () => request<{ items: ConversationSummary[] }>('/conversations'),
+  userTasks: (status: string, page: number) => request<HistoryPage<UserTask>>('/tasks?' + new URLSearchParams({ ...(status ? { status } : {}), page: String(page) })),
+  userRuns: (status: string, page: number) => request<HistoryPage<UserRun>>('/runs?' + new URLSearchParams({ ...(status ? { status } : {}), page: String(page) })),
   createConversation: () => request<ConversationSummary>('/conversations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   renameConversation: (id: string, title: string) => request<ConversationSummary>('/conversations/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }),
   conversation: (id: string) => request<Conversation>('/conversations/' + encodeURIComponent(id)),

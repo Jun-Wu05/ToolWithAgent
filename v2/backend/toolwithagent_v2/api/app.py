@@ -278,6 +278,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def list_conversations(request: Request):
         return {"items": store.list_conversations(principal(request)["id"])}
 
+    @app.get("/api/v2/tasks")
+    def user_tasks(request: Request, status: str | None = None, page: int = 1):
+        if page < 1 or (status and status not in {"queued", "running", "waiting_confirmation", "succeeded", "failed", "cancelling", "cancelled"}):
+            raise HTTPException(422, "invalid_history_filter")
+        return store.user_tasks(principal(request)["id"], status=status, page=page)
+
+    @app.get("/api/v2/runs")
+    def user_runs(request: Request, status: str | None = None, page: int = 1):
+        if page < 1 or (status and status not in {"queued", "running", "waiting_confirmation", "succeeded", "failed", "cancelling", "cancelled"}):
+            raise HTTPException(422, "invalid_history_filter")
+        return store.user_runs(principal(request)["id"], status=status, page=page)
+
     @app.post("/api/v2/conversations", status_code=201)
     def create_conversation(request: Request, payload: ConversationInput):
         return store.create_conversation(user_writer(request)["id"], payload.title)

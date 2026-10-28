@@ -579,8 +579,6 @@ class Store:
         row, payload = self._owned_mapping(owner_id, artifact_id)
         timestamp = datetime.fromisoformat(row["created_at"]).astimezone().strftime("%Y%m%d_%H%M")
         name = download_filename(payload["download_kind"], timestamp)
-        with connect(self.path) as db:
-            db.execute("INSERT INTO audit_events(id,actor_id,action,target_type,target_id,created_at,reason) VALUES(?,?,?,?,?,?,?)", (uid(),owner_id,"artifact_download","artifact",artifact_id,now(),""))
         return name, payload["download_content"].encode("utf-8")
 
     def enqueue_log_knowledge(self, owner_id, artifact_id):
@@ -703,6 +701,17 @@ class Store:
                 sources = db.execute("SELECT a.status,r.input_snapshot_json FROM artifact_edges e JOIN artifacts a ON a.id=e.source_artifact_id JOIN runs r ON r.id=a.run_id WHERE e.derived_artifact_id=? AND a.kind='field_mapping'", (row["id"],)).fetchall()
                 current = current and all(source["status"] == "published" and self._mapping_is_current_db(db, {"conversation_id": conversation_id, "input": json.loads(source["input_snapshot_json"])}) for source in sources)
             result.append({"id": row["id"], "run_id": row["run_id"], "file_id": snapshot.get("file_id"), "kind": row["kind"], "status": "published" if current else "stale", "current": current, "summary": metadata.get("summary", {}), "source_field": metadata.get("source_field"), "message_id": metadata.get("message_id"), "result_message_id": metadata.get("result_message_id"), "created_at": row["created_at"]})
+        versions = {row["id"]: row["version"] for row in db.execute(
+            "SELECT id,version FROM artifacts WHERE conversation_id=?", (conversation_id,))}
+        sources = {}
+        for edge in db.execute(
+            "SELECT e.source_artifact_id,e.derived_artifact_id FROM artifact_edges e"
+            " JOIN artifacts a ON a.id=e.derived_artifact_id WHERE a.conversation_id=?"
+            " ORDER BY e.derived_artifact_id,e.source_artifact_id", (conversation_id,)):
+            sources.setdefault(edge["derived_artifact_id"], []).append(edge["source_artifact_id"])
+        for item in result:
+            item["version"] = versions[item["id"]]
+            item["source_artifact_ids"] = sources.get(item["id"], [])
         return result
 
     def _file(self, row):
@@ -1084,6 +1093,43 @@ class Store:
                 "conversations": db.execute("SELECT COUNT(*) AS n FROM conversations WHERE archived_at IS NULL").fetchone()["n"],
                 "worker": {"lease_owner": lease["owner_id"], "lease_expires_at": lease["lease_expires_at"], "epoch": lease["epoch"]},
             }
+
+    def user_tasks(self, owner_id, status=None, page=1):
+        page, size = max(1, int(page)), 50
+        where = " WHERE t.owner_id=?" + (" AND t.status=?" if status else "")
+        params = [owner_id, *([status] if status else [])]
+        with connect(self.path) as db:
+            total = db.execute("SELECT COUNT(*) AS n FROM tasks t" + where, params).fetchone()["n"]
+            rows = db.execute(
+                "SELECT t.id,t.type,t.status,t.current_run_id,t.created_at,t.updated_at,"
+                " c.id AS conversation_id,c.title AS conversation_title,r.input_snapshot_json,r.attempt"
+                " FROM tasks t JOIN conversations c ON c.id=t.conversation_id"
+                " LEFT JOIN runs r ON r.id=t.current_run_id" + where
+                + " ORDER BY t.updated_at DESC,t.id DESC LIMIT ? OFFSET ?",
+                [*params, size, (page - 1) * size]).fetchall()
+            items = []
+            for row in rows:
+                item = dict(row)
+                snapshot = json.loads(item.pop("input_snapshot_json") or "{}")
+                item["message_id"] = snapshot.get("message_id")
+                item["file_id"] = snapshot.get("file_id")
+                items.append(item)
+            return {"items": items, "total": total, "page": page, "page_size": size}
+
+    def user_runs(self, owner_id, status=None, page=1):
+        page, size = max(1, int(page)), 50
+        where = " WHERE t.owner_id=?" + (" AND r.status=?" if status else "")
+        params = [owner_id, *([status] if status else [])]
+        join = " FROM runs r JOIN tasks t ON t.id=r.task_id JOIN conversations c ON c.id=t.conversation_id"
+        with connect(self.path) as db:
+            total = db.execute("SELECT COUNT(*) AS n" + join + where, params).fetchone()["n"]
+            rows = db.execute(
+                "SELECT r.*,t.conversation_id,t.type AS task_type,c.title AS conversation_title"
+                + join + where + " ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?",
+                [*params, size, (page - 1) * size]).fetchall()
+            return {"items": [{**self._run(row), "conversation_id": row["conversation_id"],
+                               "conversation_title": row["conversation_title"]} for row in rows],
+                    "total": total, "page": page, "page_size": size}
 
     def admin_runs(self, admin_id, status=None, page=1):
         page = max(1, int(page))
@@ -1738,11 +1784,11 @@ class Store:
         with connect(self.path) as db:
             row = db.execute("SELECT kind,created_at FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
         kind = row["kind"]
+        timestamp = datetime.fromisoformat(row["created_at"]).strftime("%Y%m%d_%H%M%S")
         if kind == "field_mapping":
             name, content = self.mapping_download(owner_id, artifact_id)
-            return name, content, "text/plain; charset=utf-8"
-        timestamp = datetime.fromisoformat(row["created_at"]).strftime("%Y%m%d_%H%M%S")
-        if kind == "config_export":
+            media = "text/plain; charset=utf-8"
+        elif kind == "config_export":
             name, content, media = download_filename(payload["download_kind"], timestamp), payload["content"].encode("utf-8"), "text/plain; charset=utf-8"
         elif kind == "threat_mapping":
             workbook = Workbook(); sheet = workbook.active; sheet.title = "threat_mapping"
