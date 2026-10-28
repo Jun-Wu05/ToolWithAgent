@@ -59,7 +59,14 @@ class Store:
 
     def list_conversations(self, owner_id):
         with connect(self.path) as db:
-            return [dict(r) for r in db.execute("SELECT id,title,created_at,updated_at FROM conversations WHERE owner_id=? AND archived_at IS NULL ORDER BY updated_at DESC,id DESC", (owner_id,))]
+            return [dict(r) for r in db.execute("""
+                SELECT c.id,c.title,c.created_at,c.updated_at,
+                  (SELECT r.status FROM tasks t JOIN runs r ON r.id=t.current_run_id
+                   WHERE t.conversation_id=c.id AND t.owner_id=c.owner_id
+                   ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS latest_run_status
+                FROM conversations c WHERE c.owner_id=? AND c.archived_at IS NULL
+                ORDER BY c.updated_at DESC,c.id DESC
+            """, (owner_id,))]
 
     def create_conversation(self, owner_id, title):
         conversation_id, timestamp = uid(), now()
