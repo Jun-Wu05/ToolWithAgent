@@ -38,6 +38,7 @@ Worker 终端：`./.venv/Scripts/python.exe -m toolwithagent_v2.runtime.worker`�
 
 ## 2026-10-28 身份采集续作
 
+- 本轮验收工作树：`D:\Agent\agent_design\toolswithagent\tmp\issue-270-identity-evidence`，分支 `codex/issue-270-identity-evidence`。上文的 `issue-270-run-diagnostics` 启动示例属于上一轮；本轮先核对工作树 HEAD 和端口，再从本目录按 `v2/README.md` 分终端启动 API、Worker 与前端，三者使用新的相同 `V2_DATA_DIR`。
 - 用户已确认上一轮 #270 浏览器联合验收通过。本次新增的 Skill/Tool 身份字段仍需用新 Run 复查；旧 Run 不回填。
 - 根仓全量 pytest 通过；V2 后端 227 passed；前端 Vitest 214 passed。lint 0 错误、1 条既有 React Hooks 警告；生产构建通过。
 - 建议复查正则提取自动生成模式的新 Run：该模型调用应同时显示 `skills/regex-extract-field` 与 `agent.tools.pipeline.llm_client._call_llm_direct`；一般 Agno 模型调用若未经过真实 Skill/Tool 接缝，应继续显示“未采集”。诊断包中的对应 ID 应与页面一致。
