@@ -6,7 +6,7 @@ import { api, saveDownload, type Conversation, type FieldMappingArtifact } from 
 vi.mock('./api', () => ({
   saveDownload: vi.fn(),
   api: {
-    me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(),
+    me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(), userTasks: vi.fn(), userRuns: vi.fn(),
     conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn()
   }
 }))
@@ -26,6 +26,8 @@ beforeEach(() => {
   vi.mocked(api.identities).mockResolvedValue({ items: [] })
   vi.mocked(api.conversations).mockResolvedValue({ items: [summary] })
   vi.mocked(api.conversation).mockResolvedValue(detail)
+  vi.mocked(api.userTasks).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
+  vi.mocked(api.userRuns).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
   vi.mocked(api.diagnosticRuns).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
   vi.mocked(api.createConversation).mockResolvedValue(summary)
   vi.mocked(api.sendMessage).mockResolvedValue({ id: 'm1', content: '检查日志', actor: 'user' })
@@ -44,6 +46,25 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
 describe('V2 workbench', () => {
+  it('opens a Run from another conversation through history and keeps unsent text', async () => {
+    const second = { ...summary, id: 'conv-2', title: '历史会话' }
+    vi.mocked(api.conversations).mockResolvedValue({ items: [summary, second] })
+    vi.mocked(api.conversation).mockImplementation(async id => id === second.id ? { ...detail, ...second, runs: [{ id: 'run-2', task_id: 'task-2', kind: 'user_request', status: 'failed', message_id: 'message-2' }] } : detail)
+    vi.mocked(api.userRuns).mockResolvedValue({ page: 1, page_size: 50, total: 1, items: [{
+      id: 'run-2', task_id: 'task-2', kind: 'user_request', status: 'failed', conversation_id: second.id,
+      conversation_title: second.title, message_id: 'message-2', created_at: '2026-10-28T00:00:00Z', updated_at: '2026-10-28T00:00:00Z',
+    }] })
+    vi.mocked(api.run).mockResolvedValue({ id: 'run-2', task_id: 'task-2', kind: 'user_request', status: 'failed', message_id: 'message-2' })
+    render(<App />)
+    await screen.findByRole('heading', { name: '日志任务' })
+    fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '未发送的草稿' } })
+    fireEvent.click(within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', { name: '我的执行' }))
+    fireEvent.click(await screen.findByRole('button', { name: '回到原会话并查看执行' }))
+    await waitFor(() => expect(api.conversation).toHaveBeenCalledWith('conv-2'))
+    await waitFor(() => expect(api.run).toHaveBeenCalledWith('run-2'))
+    expect(screen.getByRole('textbox', { name: '消息内容' })).toHaveValue('未发送的草稿')
+    expect(await screen.findByRole('button', { name: '定位消息' })).toBeInTheDocument()
+  })
   it('restores the selected conversation and persists the theme', async () => {
     render(<App />)
     expect(await screen.findByRole('heading', { name: '日志任务' })).toBeInTheDocument()

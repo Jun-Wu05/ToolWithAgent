@@ -76,3 +76,7 @@
 .diagnostic-detail dd { margin: 0; }
 .diagnostic-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; }
 @media (max-width: 700px) { .diagnostic-split { grid-template-columns: 1fr; } }
+.history-list{display:grid;margin:16px 0;border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden}
+.history-list .result-card{min-height:64px;border:0;border-bottom:1px solid var(--border-subtle);border-radius:0;padding:12px}
+.history-list .result-card:last-child{border-bottom:0}
+.history-list .result-card:hover{background:var(--surface-inset)}

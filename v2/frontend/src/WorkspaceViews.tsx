@@ -3,7 +3,7 @@ import { api, type Artifact, type Conversation, type MappingDraftSummary, type R
 import { ArtifactValues, businessName, RunProgress } from './BusinessWorkspace'
 import { CopyButton, StatusText } from './VisualPrimitives'
 
-export type WorkspaceTab = 'conversation' | 'overview' | 'results' | 'trace'
+export type WorkspaceTab = 'conversation' | 'overview' | 'results' | 'trace' | 'tasks' | 'runs'
 const date = (value?: string) => value ? new Date(value).toLocaleString('zh-CN') : '时间未记录'
 const current = (artifact: Artifact) => artifact.status === 'published' && (!('current' in artifact) || artifact.current)
 const versionName = (artifact: Artifact) => `${current(artifact) ? '当前' : '历史'} · ${date(artifact.created_at)} · ${artifact.id.slice(-8)}`
