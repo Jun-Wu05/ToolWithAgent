@@ -6,6 +6,7 @@ import copy
 import json
 import re
 from pathlib import Path
+from itertools import islice
 
 from openpyxl import load_workbook
 
@@ -51,7 +52,8 @@ def artifact_sources(report, plan, published):
                 sources["field_mapping"].add("threat_mapping")
     return {kind: sorted(values) for kind, values in sources.items() if values}
 
-def raw_log_lines(path: Path, media_type: str) -> list[str]:
+def raw_log_lines(path: Path, media_type: str, *, limit: int | None = None) -> list[str]:
+    """Read full execution input, or stop early for read-only presence summaries."""
     if media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
         with path.open("rb") as source:
             workbook = load_workbook(source, read_only=True, data_only=True)
@@ -62,21 +64,23 @@ def raw_log_lines(path: Path, media_type: str) -> list[str]:
                 index = next((i for i, value in enumerate(header) if "原始日志" in str(value)), None)
                 if index is None:
                     raise ValueError("raw_log_column_missing")
-                values = [str(row[index]) for row in rows if index < len(row) and row[index] is not None]
-                lines = [re.sub(r"[\r\n]+", " ", value) for value in values if value.strip()]
+                values = (str(row[index]) for row in rows if index < len(row) and row[index] is not None)
+                lines = list(islice((re.sub(r"[\r\n]+", " ", value) for value in values if value.strip()), limit))
             finally:
                 workbook.close()
     elif media_type == "text/csv":
         with path.open(encoding="utf-8-sig", newline="") as source:
             reader = csv.DictReader(source)
             column = next((name for name in (reader.fieldnames or []) if "原始日志" in name), None)
-            lines = [str(row[column]) if column else json.dumps(row, ensure_ascii=False)
-                     for row in reader if row]
+            values = (str(row[column]) if column else json.dumps(row, ensure_ascii=False) for row in reader if row)
+            lines = list(islice((value for value in values if value.strip()), limit))
+    elif media_type == "application/x-ndjson":
+        with path.open(encoding="utf-8-sig") as source:
+            values = (value for line in source for value in line.splitlines() if value.strip())
+            lines = list(islice(values, limit))
     else:
         text = path.read_text(encoding="utf-8-sig")
-        if media_type == "application/x-ndjson":
-            lines = [line for line in text.splitlines() if line.strip()]
-        elif media_type == "application/json":
+        if media_type == "application/json":
             payload = json.loads(text)
             if isinstance(payload, list):
                 lines = [json.dumps(item, ensure_ascii=False) for item in payload]
@@ -106,7 +110,7 @@ def raw_log_lines(path: Path, media_type: str) -> list[str]:
     lines = [line for line in lines if line.strip()]
     if not lines:
         raise ValueError("empty_log")
-    return lines
+    return lines if limit is None else lines[:limit]
 
 
 class BusinessApplication:

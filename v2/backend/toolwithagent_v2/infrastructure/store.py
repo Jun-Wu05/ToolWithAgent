@@ -1729,13 +1729,15 @@ class Store:
             raise ValueError("artifact_corrupt")
         return content
 
-    def read_business_session(self, claim):
+    def read_business_session(self, claim, *, summary_only=False):
         """从冻结 Blob 重建内存副本，真实值不进入 SessionFacts 或事件投影。"""
         from toolwithagent_v2.runtime.postprocessing import BusinessSession, primary_session, restore_session, attach_enum, configuration_root
         snapshot = claim["input"]
         refs = snapshot["business_inputs"]["refs"]
         state = json.loads(self._read_blob(refs["business_state"])) if "business_state" in refs else None
-        session = restore_session(state) if state else (primary_session(self.root / snapshot["storage_key"], snapshot) if snapshot["file_id"] else BusinessSession())
+        # Page controls need log presence; execution keeps the complete input.
+        log_limit = 1 if summary_only else None
+        session = restore_session(state, log_limit=log_limit) if state else (primary_session(self.root / snapshot["storage_key"], snapshot, log_limit=log_limit) if snapshot["file_id"] else BusinessSession())
         base = json.loads(self._read_blob(refs["field_mapping"])) if "field_mapping" in refs else None
         if base:
             source = base.get("configuration_source", "session.mapped_sub_rules")
@@ -1926,8 +1928,8 @@ class Store:
             if snapshot.get("file_id"):
                 self._read_blob(snapshot, "uploads")
             with private_business_logging():
-                session, _ = self.read_business_session({"owner_id": owner_id, "conversation_id": conversation_id, "input": snapshot})
-                full = build_session_facts(session).model_dump(mode="json")
+                session, _ = self.read_business_session({"owner_id": owner_id, "conversation_id": conversation_id, "input": snapshot}, summary_only=True)
+                full = build_session_facts(session, include_field_pools=False).model_dump(mode="json")
                 facts = {key: full[key] for key in ("has_logs", "has_log_classification", "has_decoded_config", "available_config_refs", "enum_mapping_target_fields", "enum_mapping_row_count", "mapped_sub_rule_count", "referenceable_artifacts")}
             return {"session_facts": facts, "session_facts_error": None}
         except (ValueError, LookupError, OSError, KeyError, TypeError):

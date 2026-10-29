@@ -56,9 +56,16 @@ def freeze_session(session: SessionState) -> dict:
     return {key: plain(value) for key in STATE_KEYS if (value := getattr(session, key, None)) is not None}
 
 
-def restore_session(state: dict) -> BusinessSession:
+def restore_session(state: dict, *, log_limit: int | None = None) -> BusinessSession:
     """旧保护 Blob 仍是 JSON；运行态始终重建为 typed 子类，不恢复 dict 垫片。"""
-    values = {key: copy.deepcopy(state[key]) for key in STATE_KEYS if key in state}
+    values = {}
+    for key in STATE_KEYS:
+        if key not in state:
+            continue
+        value = state[key]
+        if log_limit is not None and key in ("raw_log_lines", "original_log") and isinstance(value, list):
+            value = value[:log_limit]
+        values[key] = copy.deepcopy(value)
     for key, model in (("latest_enum_artifact", EnumArtifactSlot), ("latest_threat_artifact", ThreatArtifactSlot)):
         if values.get(key) is not None:
             values[key] = model.model_validate(values[key])
@@ -78,12 +85,12 @@ def state_digest(state):
     return hashlib.sha256(json.dumps(plain(state), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def primary_session(path, snapshot):
+def primary_session(path, snapshot, *, log_limit: int | None = None):
     """复用文件输入的原子主数据提交，日志与规则保留原始根结构。"""
     from toolwithagent_v2.runtime.business_application import raw_log_lines
     media = snapshot["media_type"]
     if media in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv", "application/x-ndjson"):
-        lines = raw_log_lines(path, media)
+        lines = raw_log_lines(path, media, limit=log_limit)
         result = {"decoded_json": None, "decoded_text": "\n".join(lines), "fields": [], "original_log": lines}
         text = None
     else:
@@ -91,7 +98,7 @@ def primary_session(path, snapshot):
         result = simple_decode(text)
         if result.get("status") != "success":
             raise ValueError("invalid_file_content")
-        lines = raw_log_lines(path, media)
+        lines = raw_log_lines(path, media, limit=log_limit)
     session = BusinessSession()
     commit_primary_dataset(session, PrimaryDatasetSnapshot(
         decoded_data=result.get("decoded_json") if result.get("fields") else None, decoded_fields=result.get("fields", []),
