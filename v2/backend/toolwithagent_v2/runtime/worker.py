@@ -50,6 +50,7 @@ class Worker:
                         workbook = load_workbook(source, read_only=True, data_only=True)
                         try:
                             for sheet in workbook.worksheets:
+                                sheet.reset_dimensions()
                                 for _ in sheet.iter_rows(values_only=True):
                                     pass
                         finally:
