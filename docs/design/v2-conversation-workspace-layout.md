@@ -1,6 +1,6 @@
-# V2 会话与右侧工作区布局决策（审查稿）
+# V2 会话与右侧工作区布局决策
 
-> 2026-10-30。记录用户根据 DeepSeek Harness 截图与源码提出的布局反馈，以及随后讨论的开合、伸缩和结果查看方式。本稿供用户审查；未据此宣称前端已实施或真实业务验收通过。
+> 2026-10-30 已确认。记录用户根据 DeepSeek Harness 截图与源码提出的布局反馈，以及随后讨论的开合、伸缩和结果查看方式。本决策不代表前端已实施或真实业务验收通过。
 > 产品目标与业务边界仍以 [前端体验重设计 PRD（Issue #427）](https://github.com/Jun-Wu05/ToolWithAgent/issues/427) 为准；已确认的静态视觉方向见[设计提交](https://github.com/Jun-Wu05/ToolWithAgent/blob/5055cf859fa04ee1082e243e5e579170434496a9/docs/design/v2-experience-static-direction.md)。精确色值尚未定稿。
 
 ## 布局
@@ -55,4 +55,4 @@
 
 布局关系参考 DeepSeek Harness 的[会话视图切换](https://github.com/deepseek-ai/deepseek-harness/blob/ce7073d51254c26cd63b22a60835b8f948deb447/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx)、[右侧资源页签](https://github.com/deepseek-ai/deepseek-harness/blob/ce7073d51254c26cd63b22a60835b8f948deb447/packages/client/ui-sidebar-right/README.md)和[可拖动三栏实现](https://github.com/deepseek-ai/deepseek-harness/blob/ce7073d51254c26cd63b22a60835b8f948deb447/packages/client/ui-layout/src/client/AppFrame.tsx)；本设计按 ToolWithAgent 的业务、权限与现有接口调整，不直接移植其视觉或代码。
 
-待定：映射区最小宽度的实测值、浅深主题精确 Token、关闭最后一个资源页签后的面板行为、现有轻量执行详情如何迁入轨迹内详情。定稿后同步 Issue #427 的 PRD、文档 PR #428 与视觉基线 PR #429，再进入正式前端实施。
+待定：映射区最小宽度的实测值、浅深主题精确 Token、关闭最后一个资源页签后的面板行为、现有轻量执行详情如何迁入轨迹内详情。已同步 Issue #427 的 PRD、文档 PR #428 与视觉基线 PR #429；正式前端实施仍需完成这些待定细节和真实业务验收。
