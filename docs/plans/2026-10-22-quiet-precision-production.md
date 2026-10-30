@@ -1,5 +1,7 @@
 # Quiet Precision 正式 V2 接入计划
 
+> 历史完成记录（2026-10-30 标注）：本文说明四 Tab 方案如何进入当时的真实 V2 前端，不再作为下一轮前端实施计划。新工作台采用 [前端体验重设计 PRD（Issue #427）](https://github.com/Jun-Wu05/ToolWithAgent/issues/427) 和 `docs/design/v2-visual-baseline.md` §0；下方任务与验证记录保持原貌，以便追溯已交付能力。
+
 **Goal:** 将用户已验收的四 Tab 工作台设计接入真实 V2 前端。
 
 **Architecture:** 以 codex/v2-development 同步 github/master 后的 7e4fd71e 为基线，在独立 codex/v2-quiet-precision 分支实施。保留已有 App 命令、SSE、身份隔离、草稿保存/冲突/应用流程，仅替换布局和呈现组件。新增视图从 Conversation、Artifact、Run 和既有内容查询 API 取数，不复制原型合成数据。
