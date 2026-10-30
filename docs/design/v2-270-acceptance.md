@@ -32,6 +32,13 @@ Worker 终端：`./.venv/Scripts/python.exe -m toolwithagent_v2.runtime.worker`�
 
 ## 当前证据边界
 
-- 新采集的计划开始事件含匿名 Step 清单与依赖；时间线据此标明未执行节点，旧 Run 仍显示“未采集”。执行操作类型可关联到 Step；独立 Skill ID、Tool ID 仍未采集。
+- 新采集的计划开始事件含匿名 Step 清单与依赖；时间线据此标明未执行节点，旧 Run 仍显示“未采集”。执行操作类型可关联到 Step。后续补充的身份采集只记录真实注册的字段 Skill（如 `skills/regex-extract-field`）和真实直连模型工具入口（`agent.tools.pipeline.llm_client._call_llm_direct`）；`model_calls.id` 是单次调用 ID。未经过 Skill/Tool 接缝的模型调用以及旧 Run 仍显示“未采集”，不把 Step 或操作名伪装成 Skill/Tool ID。
 - 模型调用记录真实步骤恢复次数；同一次步骤尝试中的不同调用使用相同次数。对显式引用且能在 Run 冻结输入中定位的产物，显示该产物版本；其他输入产物版本显示“未采集”。
-- 诊断页对每次调用保存最多 4096 字符的请求、响应脱敏文本；诊断包不包含完整上传文件。浏览器人工验收仍待用户执行。
+- 诊断页对每次调用保存最多 4096 字符的请求、响应脱敏文本；诊断包不包含完整上传文件。上一轮浏览器人工验收已由用户确认通过；本次新增字段另待复查。
+
+## 2026-10-28 身份采集续作
+
+- 本轮验收工作树：`D:\Agent\agent_design\toolswithagent\tmp\issue-270-identity-evidence`，分支 `codex/issue-270-identity-evidence`。上文的 `issue-270-run-diagnostics` 启动示例属于上一轮；本轮先核对工作树 HEAD 和端口，再从本目录按 `v2/README.md` 分终端启动 API、Worker 与前端，三者使用新的相同 `V2_DATA_DIR`。
+- 用户已确认上一轮 #270 浏览器联合验收通过。本次新增的 Skill/Tool 身份字段仍需用新 Run 复查；旧 Run 不回填。
+- 根仓全量 pytest 通过；V2 后端 227 passed；前端 Vitest 214 passed。lint 0 错误、1 条既有 React Hooks 警告；生产构建通过。
+- 建议复查正则提取自动生成模式的新 Run：该模型调用应同时显示 `skills/regex-extract-field` 与 `agent.tools.pipeline.llm_client._call_llm_direct`；一般 Agno 模型调用若未经过真实 Skill/Tool 接缝，应继续显示“未采集”。诊断包中的对应 ID 应与页面一致。
