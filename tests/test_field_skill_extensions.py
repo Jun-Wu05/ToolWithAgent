@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,7 @@ from application.adapters.field_skill import (
     FieldSkillAdapter,
     _load_skill_function,
 )
+from contracts.model_call_diagnostics import bind_recorder, record_call, reset_recorder
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -310,6 +313,32 @@ def test正则提取适配器注入假LLM生成():
     assert result.status == StepStatus.SUCCESS
     indexes = [e["index"] for e in session.decoded_data[0]["normalize"]]
     assert "Referer" in indexes  # Referer 不存在 → 原名
+
+
+def test正则技能身份只绑定实际适配器执行():
+    events = []
+    def model_call(_prompt):
+        response = json.dumps({"pattern": r"[\S\s]*Referer: (.*?)\r\n[\S\s]*"})
+        record_call("deepseek", "model-a", None, datetime.now(timezone.utc).isoformat(),
+                    time.monotonic(), "safe", response=response)
+        return response
+
+    step = RegexExtractStep(
+        step_id="r1", type="regex_extract", source_field="req_header",
+        description="请求头里的 Referer", config_ref="session.decoded_config",
+    )
+    token = bind_recorder(events.append)
+    try:
+        result = _run(FieldSkillAdapter(regex_llm=model_call), step,
+                      make_session_state(decoded_data=_config()))
+        record_call("deepseek", "model-a", None, datetime.now(timezone.utc).isoformat(),
+                    time.monotonic(), "outside")
+    finally:
+        reset_recorder(token)
+    assert result.status == StepStatus.SUCCESS
+    assert [event["skill_id"] for event in events] == [
+        "skills/regex-extract-field", None,
+    ]
 
 
 def test正则提取无样本且无正则时失败():

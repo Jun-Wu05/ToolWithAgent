@@ -23,6 +23,7 @@ from agent.shared.event_classify import (
     read_entity_event_name,
 )
 from agent.shared.logger import get_logger
+from contracts.model_call_diagnostics import reset_skill, set_skill
 
 from application.execution import ExecutionContext
 from contracts.planner_models import (
@@ -371,17 +372,25 @@ class FieldSkillAdapter:
         dependencies: Mapping[str, StepResult],
     ) -> StepResult:
         """执行一个字段调整步骤；各步骤类型共用本适配器，按类型取参。"""
-        if isinstance(step, AddFieldsStep):
-            return self._execute_add(step, context)
-        if isinstance(step, DeleteFieldsStep):
-            return self._execute_delete(step, context)
-        if isinstance(step, MergeFieldsStep):
-            return self._execute_merge(step, context)
-        if isinstance(step, DecodeFieldsStep):
-            return self._execute_decode(step, context)
-        if isinstance(step, RegexExtractStep):
-            return await self._execute_regex_extract(step, context)
-        raise TypeError("FieldSkillAdapter 只接受字段调整类步骤")
+        registered = FIELD_SKILL_REGISTRY.get(step.type)
+        if registered is None:
+            raise TypeError("FieldSkillAdapter 只接受字段调整类步骤")
+        skill_id = "/".join(registered[0].replace("\\", "/").split("/")[:2])
+        token = set_skill(skill_id)
+        try:
+            if isinstance(step, AddFieldsStep):
+                return self._execute_add(step, context)
+            if isinstance(step, DeleteFieldsStep):
+                return self._execute_delete(step, context)
+            if isinstance(step, MergeFieldsStep):
+                return self._execute_merge(step, context)
+            if isinstance(step, DecodeFieldsStep):
+                return self._execute_decode(step, context)
+            if isinstance(step, RegexExtractStep):
+                return await self._execute_regex_extract(step, context)
+            raise TypeError("FieldSkillAdapter 只接受字段调整类步骤")
+        finally:
+            reset_skill(token)
 
     # ---- 三类步骤的参数翻译与后处理 ----
 

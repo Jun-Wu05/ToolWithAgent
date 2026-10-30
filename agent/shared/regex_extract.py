@@ -85,7 +85,6 @@ async def generate_extraction_pattern(
         RegexGenerationError: 重试一次后仍非法或无法全匹配。
     """
     import asyncio
-    import functools
 
     sample = str(sample_text)[:_SAMPLE_MAX_CHARS]
     if not sample.strip():
@@ -99,9 +98,7 @@ async def generate_extraction_pattern(
             return str(response)
         from agent.tools import call_llm_direct
 
-        return await asyncio.get_running_loop().run_in_executor(
-            None, functools.partial(call_llm_direct, prompt)
-        )
+        return await asyncio.to_thread(call_llm_direct, prompt)
 
     base_prompt = _PROMPT_TEMPLATE.format(
         source_field=source_field, description=description, sample=sample

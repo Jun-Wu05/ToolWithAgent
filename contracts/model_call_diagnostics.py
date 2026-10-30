@@ -18,6 +18,7 @@ from uuid import uuid4
 _recorder: ContextVar[Callable[[dict], None] | None] = ContextVar("model_call_recorder", default=None)
 _scope: ContextVar[str | None] = ContextVar("model_call_scope", default=None)
 _execution: ContextVar[dict | None] = ContextVar("model_call_execution", default=None)
+_skill: ContextVar[str | None] = ContextVar("model_call_skill", default=None)
 _secret = re.compile(r"(?i)([\"']?\b(?:authorization|cookie|api[_-]?key|password|secret|token)\b[\"']?\s*[:=]\s*[\"']?)(?:bearer\s+)?[^\s,;\"'}]+")
 _bearer = re.compile(r"(?i)\bbearer\s+[^\s,;\"']+")
 _credential_header = re.compile(r"(?i)(\b(?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]*")
@@ -38,6 +39,15 @@ def set_scope(scope_id: str | None) -> Token:
 
 def reset_scope(token: Token) -> None:
     _scope.reset(token)
+
+
+def set_skill(skill_id: str) -> Token:
+    """Bind the registered skill actually executing in this context."""
+    return _skill.set(skill_id)
+
+
+def reset_skill(token: Token) -> None:
+    _skill.reset(token)
 
 
 def set_execution(operation: str, attempt: int, source_ref: str | None) -> Token:
@@ -100,13 +110,14 @@ def _message_text(messages: object) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-def record_call(provider, model_id, api_key, started_at, start, request, response=None, exc=None, params=None):
+def record_call(provider, model_id, api_key, started_at, start, request, response=None, exc=None, params=None, tool_id=None):
     recorder = _recorder.get()
     if recorder is None:
         return
     try:
         code, status = classify_error(exc) if exc is not None else (None, None)
-        event = {"request_id": str(uuid4()), "scope_id": _scope.get(), "provider": provider,
+        event = {"request_id": str(uuid4()), "scope_id": _scope.get(),
+                 "skill_id": _skill.get(), "tool_id": tool_id, "provider": provider,
                  "model": model_id, "started_at": started_at,
                  "finished_at": datetime.now(timezone.utc).isoformat(),
                  "duration_ms": max(0, round((time.monotonic() - start) * 1000)),
