@@ -1,5 +1,7 @@
 # Quiet Precision 正式接入验证
 
+> 历史验收证据（2026-10-30 标注）：本文记录四 Tab 方案当时的实现与测试，不代表新体验已完成视觉或真实业务验收。新工作台的目标与验收见 [前端体验重设计 PRD（Issue #427）](https://github.com/Jun-Wu05/ToolWithAgent/issues/427) 和 `docs/design/v2-visual-baseline.md` §0。
+
 ## 范围与数据边界
 
 分支 `codex/v2-quiet-precision`，基于 `codex/v2-development` 同步 master 后的 `7e4fd71ef54808422dda6f76dc97853c38c8fbba`。master 为 `5c6f017f13e013797c673c6b9b64aa1421712991`。本轮不修改后端业务实现、API、数据库或默认入口。
