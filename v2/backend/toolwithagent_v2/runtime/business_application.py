@@ -59,6 +59,8 @@ def raw_log_lines(path: Path, media_type: str, *, limit: int | None = None) -> l
             workbook = load_workbook(source, read_only=True, data_only=True)
             try:
                 sheet = workbook.active
+                # Some exports declare A1 even when the XML contains the full table.
+                sheet.reset_dimensions()
                 rows = sheet.iter_rows(values_only=True)
                 header = next(rows, ())
                 index = next((i for i, value in enumerate(header) if "原始日志" in str(value)), None)

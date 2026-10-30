@@ -5,6 +5,7 @@ from uuid import uuid4
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 
@@ -794,6 +795,7 @@ class Store:
                     "request_id", "scope_id", "attempt", "duration_ms", "status", "started_at",
                     "finished_at", "http_status", "prompt_version", "standard_field_version",
                     "provider_config_revision", "operation", "input_artifact_id", "input_artifact_version",
+                    "skill_id", "tool_id",
                 ) if key in summary and isinstance(summary[key], (str, int, float))}
                 params = summary.get("params")
                 if isinstance(params, dict):
@@ -1970,6 +1972,12 @@ class Store:
                 "request_id", "scope_id", "started_at", "finished_at", "duration_ms", "status", "http_status",
             ) if key in event and isinstance(event[key], (str, int, float))}
             summary["attempt"] = attempt
+            skill_id = event.get("skill_id")
+            if isinstance(skill_id, str) and re.fullmatch(r"skills/[a-z0-9-]{1,64}", skill_id):
+                summary["skill_id"] = skill_id
+            tool_id = event.get("tool_id")
+            if isinstance(tool_id, str) and re.fullmatch(r"[a-z][a-z0-9_.]{1,127}", tool_id):
+                summary["tool_id"] = tool_id
             if event.get("operation") in {"log_parse", "field_mapping", "enum_extract", "threat_mapping", "fill", "remove_mapping", "export", "add_fields", "delete_fields", "merge_fields", "decode_fields", "regex_extract"}:
                 summary["operation"] = event["operation"]
             source_kind = {"session.artifacts.enum_values": "enum_values", "session.artifacts.threat_mapping": "threat_mapping",

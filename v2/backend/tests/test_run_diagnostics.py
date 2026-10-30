@@ -112,7 +112,9 @@ def test_model_call_evidence_obeys_worker_fence_and_survives_restart(tmp_path):
     event = {"request_id": "local-request", "scope_id": "step-1", "attempt": 1,
              "provider": "deepseek", "model": "model-a", "status": "failed",
              "error_code": "model_timeout", "duration_ms": 1200,
-             "request": "Authorization: Bearer secret-270", "response": None}
+             "request": "Authorization: Bearer secret-270", "response": None,
+             "skill_id": "skills/regex-extract-field",
+             "tool_id": "agent.tools.pipeline.llm_client._call_llm_direct"}
     assert store.record_model_call("worker-270", claim, event)
     assert store.finish("worker-270", claim, "field_mapping_failed")
     assert not store.record_model_call("worker-270", claim, event)
@@ -121,6 +123,8 @@ def test_model_call_evidence_obeys_worker_fence_and_survives_restart(tmp_path):
     assert len(detail["calls"]) == 1
     assert detail["calls"][0]["error_code"] == "model_timeout"
     assert detail["calls"][0]["request_id"] == "local-request"
+    assert detail["calls"][0]["skill_id"] == "skills/regex-extract-field"
+    assert detail["calls"][0]["tool_id"] == "agent.tools.pipeline.llm_client._call_llm_direct"
     assert "secret-270" not in json.dumps(detail)
     restarted = TestClient(create_app(Settings(data_dir=store.root)))
     switch(restarted, "dev-other")

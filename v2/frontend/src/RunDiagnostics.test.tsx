@@ -47,7 +47,7 @@ describe('Run diagnostics', () => {
   it('navigates linked evidence and downloads a sanitized bundle', async () => {
     vi.spyOn(api, 'diagnosticRuns').mockResolvedValue(list)
     vi.spyOn(api, 'diagnosticRun').mockResolvedValue(detail)
-    vi.spyOn(api, 'diagnosticCall').mockResolvedValue({ ...detail.calls[0], request: 'safe request', response: '[REDACTED]' })
+    vi.spyOn(api, 'diagnosticCall').mockResolvedValue({ ...detail.calls[0], skill_id: 'skills/regex-extract-field', tool_id: 'agent.tools.pipeline.llm_client._call_llm_direct', request: 'safe request', response: '[REDACTED]' })
     vi.spyOn(api, 'diagnosticBundle').mockResolvedValue({ name: 'run-270-diagnostics.json', blob: new Blob(['{}']) })
     render(<RunDiagnostics />)
     fireEvent.click(await screen.findByRole('button', { name: 'run-270' }))
@@ -56,6 +56,7 @@ describe('Run diagnostics', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(5)
     expect(screen.getByText(/可能原因：model_timeout/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看失败调用证据' }))
+    expect(await screen.findByText(/skills\/regex-extract-field/)).toBeInTheDocument()
     fireEvent.click(document.querySelector('.tool-call-summary')!)
     expect(await screen.findByText('safe request')).toBeInTheDocument()
     expect(api.diagnosticCall).toHaveBeenCalledWith('run-270', 'call-1')

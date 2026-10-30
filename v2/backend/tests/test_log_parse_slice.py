@@ -106,6 +106,68 @@ def test_json_array_is_split_into_log_records(tmp_path):
     assert raw_log_lines(path, "application/json") == ['{"kind": "a"}', '{"kind": "b"}']
 
 
+def test_excel_understated_dimension_still_reads_raw_log_column(tmp_path):
+    from io import BytesIO
+    import re
+    from zipfile import ZipFile
+
+    from openpyxl import Workbook
+    from toolwithagent_v2.runtime.business_application import raw_log_lines
+
+    workbook = Workbook()
+    workbook.active.append(["类型", "原始日志"])
+    workbook.active.append(["a", "kind=attack"])
+    source = BytesIO()
+    workbook.save(source)
+    workbook.close()
+
+    path = tmp_path / "logs.xlsx"
+    with ZipFile(BytesIO(source.getvalue())) as original, ZipFile(path, "w") as broken:
+        for member in original.infolist():
+            content = original.read(member.filename)
+            if member.filename == "xl/worksheets/sheet1.xml":
+                content, replaced = re.subn(rb'<dimension\b[^>]*>', b'<dimension ref="A1"/>', content, count=1)
+                assert replaced == 1
+            broken.writestr(member, content)
+
+    assert raw_log_lines(path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") == ["kind=attack"]
+
+
+def test_excel_validation_checks_rows_beyond_understated_dimension(tmp_path):
+    from io import BytesIO
+    import re
+    from zipfile import ZipFile
+
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    workbook.active.append(["原始日志"])
+    workbook.active.append([123])
+    source = BytesIO()
+    workbook.save(source)
+    workbook.close()
+
+    broken = BytesIO()
+    with ZipFile(BytesIO(source.getvalue())) as original, ZipFile(broken, "w") as output:
+        for member in original.infolist():
+            content = original.read(member.filename)
+            if member.filename == "xl/worksheets/sheet1.xml":
+                content, replaced = re.subn(rb'<dimension\b[^>]*>', b'<dimension ref="A1"/>', content, count=1)
+                assert replaced == 1
+                assert b"<v>123</v>" in content
+                content = content.replace(b"<v>123</v>", b"<v>not-a-number</v>")
+            output.writestr(member, content)
+
+    client, store, conversation, worker = setup(tmp_path)
+    response = client.post(f"/api/v2/conversations/{conversation}/files",
+                           files={"file": ("bad.xlsx", broken.getvalue())})
+    assert response.status_code == 201
+    assert worker.once()
+    run = store.get_run("dev-user", response.json()["run"]["id"])
+    assert run["status"] == "failed"
+    assert run["error_code"] == "invalid_file_content"
+
+
 def test_business_bridge_uses_application_log_parse_step(tmp_path, monkeypatch):
     import asyncio
     import json
