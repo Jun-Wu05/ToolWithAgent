@@ -284,16 +284,17 @@ def _collect_threat_source_fields(
     return tuple(field for field in first if field in shared and field != THREAT_TYPE_FIELD)
 
 
-def build_session_facts(session: SessionState) -> SessionFacts:
-    """把会话状态投影为不可变安全快照；缺失状态按不可用处理。"""
+def build_session_facts(session: SessionState, *, include_field_pools: bool = True) -> SessionFacts:
+    """投影安全快照；只读页面可跳过不使用的 Planner 字段推导。"""
     enum_preview = session.enum_preview or []
     mapped_sub_rules = session.mapped_sub_rules or []
     decoded_data = session.decoded_data
     decoded_mapped_indices, decoded_mapped_count, decoded_unmapped_count = (
         _collect_decoded_field_mapping_state(decoded_data)
     )
-    available_fields, mappable_fields = _collect_field_pools(
-        session, decoded_mapped_indices
+    available_fields, mappable_fields = (
+        _collect_field_pools(session, decoded_mapped_indices)
+        if include_field_pools else ((), ())
     )
     event_annotations = _collect_event_annotations(mapped_sub_rules)
     config_refs: tuple[ConfigRef, ...] = tuple(
