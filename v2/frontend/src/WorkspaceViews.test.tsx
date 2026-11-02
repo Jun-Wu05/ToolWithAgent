@@ -115,6 +115,19 @@ it('keeps trace references collapsed, loads only expanded runs and copies protec
   }
 })
 
+it('opens the Run selected from a conversation message inside the trace', async () => {
+  const conversation: Conversation = { id: 'conv', title: '任务', created_at: '', updated_at: '', files: [], messages: [], runs: [
+    { id: 'first', status: 'succeeded' }, { id: 'second', status: 'failed' }
+  ] }
+  vi.mocked(api.run).mockImplementation(async id => conversation.runs.find(run => run.id === id)!)
+  const view = render(<ExecutionTrace conversation={conversation} onOpen={vi.fn()} onDetails={vi.fn()} targetId="second" targetToken={1} />)
+  await waitFor(() => expect(api.run).toHaveBeenCalledWith('second'))
+  expect(screen.getByText('second')).toBeVisible()
+  expect(api.run).not.toHaveBeenCalledWith('first')
+  view.rerender(<ExecutionTrace conversation={conversation} onOpen={vi.fn()} onDetails={vi.fn()} targetId="first" targetToken={2} />)
+  await waitFor(() => expect(api.run).toHaveBeenCalledWith('first'))
+})
+
 it('groups runs only by their linked requirement and shows real duration, without wrapping unlinked runs', () => {
   const conversation: Conversation = { id: 'conv', title: '任务', created_at: '', updated_at: '',
     messages: [{ id: 'msg-1', actor: 'user', kind: 'text', content: '请提取日志类型并映射' }],
