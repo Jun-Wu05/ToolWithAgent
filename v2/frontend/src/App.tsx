@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { api, saveDownload, type ClassificationArtifact, type Conversation, type ConversationSummary, type FieldMappingArtifact, type FileRecord, type Identity, type MappingInput, type MappingDraft, type MappingDraftSummary, type ApiError, type Artifact, type Message, type Run, type ProgressSummary } from './api'
+import { api, saveDownload, type ClassificationArtifact, type Conversation, type ConversationSummary, type FieldMappingArtifact, type FileRecord, type Identity, type MappingInput, type MappingDraft, type MappingDraftSummary, type ApiError, type Artifact, type Message, type Run, type ProgressSummary, type Suggestion } from './api'
 import { TaskFacts, ExecutionTrace, type WorkspaceTab } from './WorkspaceViews'
 import { ConversationTimeline, type TimelineActions } from './ConversationTimeline'
 import { StatusText, TaskHintBar } from './VisualPrimitives'
@@ -16,6 +16,15 @@ const statusName: Record<string, string> = {
   queued: '排队中', pending: '排队中', running: '运行中', succeeded: '已完成',
   waiting_confirmation: '待确认', completed: '已完成', failed: '失败', cancelled: '已取消'
 }
+// #435 空状态场景模板库：点击只填入话术（可改可拼），不直接触发命令。
+const SCENE_TEMPLATES: { title: string; hint: string; prompt: string }[] = [
+  { title: '提取字段枚举值', hint: '上传日志后一句话提取某字段的全部取值，单步出结果', prompt: '提取【字段名】的枚举值' },
+  { title: '日志类型提取 + 字段映射', hint: '识别日志结构，把原始字段映射到标准字段目录', prompt: '对上传的日志做日志类型提取，然后进行标准字段映射' },
+  { title: '修改映射', hint: '新增、删除、合并映射字段，一句话可带多个操作', prompt: '给当前映射增加【字段a】，删除【字段b】' },
+  { title: '威胁类型标注', hint: '为事件字段标注威胁类型，支持链路填充', prompt: '对事件名称字段做威胁类型标注' },
+  { title: '导出规则配置', hint: '把当前映射导出为可下载的配置文件', prompt: '导出当前的规则配置' },
+  { title: '你能做什么？', hint: '不清楚从哪开始时，直接问我', prompt: '你能做什么？' },
+]
 const runningStatus = new Set(['queued', 'pending', 'running'])
 const readTheme = () => localStorage.getItem('twa-v2-theme') === 'dark' ? 'dark' : 'light'
 const readableTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
@@ -571,6 +580,25 @@ export function App() {
     finally { if (request === artifactRequest.current && isCurrent(version, id || undefined)) setArtifactLoading(false) }
   }
   const locate = (messageId?: string | null) => { if (messageId) { changeWorkspaceTab('conversation'); requestAnimationFrame(() => document.getElementById('message-' + messageId)?.scrollIntoView?.({block: 'center'})) } }
+  const applySuggestion = (suggestion: Suggestion, message: Message) => {
+    if (suggestion.type === 'prompt') { setDraft(suggestion.text || ''); return }
+    if (suggestion.id === 'log_parse') {
+      const file = conversation?.files.find(item => item.id === suggestion.file_id)
+      if (file) void parseLog(file)
+    } else if (suggestion.id === 'field_mapping') {
+      if (suggestion.classification_artifact_id) setMappingSource({ id: suggestion.classification_artifact_id, kind: 'classification', label: '日志分类结果' })
+      else if (suggestion.file_id) setMappingSource({ id: suggestion.file_id, kind: 'file', label: conversation?.files.find(item => item.id === suggestion.file_id)?.name || '当前文件' })
+    } else if (suggestion.id === 'open_results' || suggestion.id === 'download') {
+      const artifact = conversation?.artifacts?.find(item => item.id === suggestion.artifact_id) || conversation?.artifacts?.[(conversation.artifacts?.length || 1) - 1]
+      if (!artifact) return
+      if (suggestion.id === 'open_results') void openArtifact(artifact)
+      else void downloadMapping(artifact.id)
+    } else if (suggestion.id === 'retry') {
+      if (message.run_id) void retryRun(message.run_id)
+    } else if (suggestion.id === 'open_trace') {
+      if (message.run_id) void openRun(message.run_id)
+    }
+  }
   const businessCard = (artifact: Artifact) => <article className="result-card" key={artifact.id}><strong>{businessName(artifact.kind)}结果</strong>{(artifact.kind === 'enum_values' || artifact.kind === 'threat_mapping' || artifact.kind === 'config_export') && <p>{artifact.item_count ?? (typeof artifact.summary?.item_count === 'number' ? artifact.summary.item_count : 0)} 项</p>}{'current' in artifact && !artifact.current && <p className="mapping-warning">历史结果，可查看和下载。</p>}<div className="mapping-actions"><button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>{artifact.kind === 'field_mapping' && <button className="button-secondary" onClick={() => {if (setMappingId(artifact.id)) setMappingDraftId(undefined); setSelectedResultId(null)}}>查看结果</button>}<button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button></div>{downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}</article>
   const mappingSummary = (artifact: FieldMappingArtifact) => { const draft = conversation?.drafts?.find(item => item.base_artifact_id === artifact.id && ['active', 'applying'].includes(item.status)); return <MappingSummaryCard key={identity?.id + ':' + activeId + ':' + artifact.id} artifact={artifact} editable={identity?.role === 'user'} draftId={draft?.id} draftSummary={draft} onDraftChange={draftChanged} onPendingChange={pendingChanged} onOpenFull={() => { if (setMappingId(artifact.id)) { setMappingDraftId(undefined); resourceTrigger.current = document.getElementById('mapping-' + artifact.id)?.querySelector('button') || null } }} onOpenDrawer={() => void openArtifact(artifact)} onDownload={() => void downloadMapping(artifact.id)} downloading={downloadId === artifact.id} downloadError={downloadError?.id === artifact.id ? downloadError.message : ''} /> }
   const liveDrafts = unresolvedDrafts(conversation?.drafts)
@@ -586,6 +614,7 @@ export function App() {
     onMappingSource: source => setMappingSource(source),
     mappingForm,
     onOpenFieldChanges: runId => { if (openResource('results')) setFieldChangesId(runId) },
+    onSuggestion: applySuggestion,
     canOperate: identity?.role === 'user',
   }
   const paramPrompt = (() => {
@@ -651,7 +680,7 @@ export function App() {
       <div className="conversation-main">
       <div className="conversation-content" ref={contentRef} onScroll={onConversationScroll}>
         {(workspaceTab === 'tasks' || workspaceTab === 'runs') && <div className="workbench-pane"><UserHistory key={identity?.id + ':' + workspaceTab} kind={workspaceTab} onOpen={(conversationId, runId, messageId) => { void openHistory(conversationId, runId, messageId) }} /></div>}
-        <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>开始一项日志规则任务</h2><p>上传日志或规则文件，或者先描述要处理的内容。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button></div> : <>
+        <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>从一句话或一个文件开始</h2><p>也可以从常见场景进入——点击填入话术，可自行修改或拼接多步。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button><div className="empty-templates">{SCENE_TEMPLATES.map(template => <button key={template.title} type="button" className="empty-template" onClick={() => setDraft(template.prompt)}><strong>{template.title}</strong><span>{template.hint}</span></button>)}</div></div> : <>
           <ConversationTimeline conversation={conversation} actions={timelineActions} renderers={timelineRenderers} />
           <details className="activity-section task-facts-inline"><summary>任务信息</summary><TaskFacts conversation={conversation} drafts={liveDrafts} /></details>
           {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，历史结果仍可查看。请重新加载或上传主数据。</p>}

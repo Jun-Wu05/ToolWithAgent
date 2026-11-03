@@ -61,6 +61,14 @@ describe('V2 workbench', () => {
     expect(empty.querySelector('.status-text')).toBeNull()
   })
 
+  it('fills the composer from empty-state scene templates (#435)', async () => {
+    vi.mocked(api.conversations).mockResolvedValue({ items: [] })
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: '从一句话或一个文件开始' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /提取字段枚举值/ }))
+    expect(screen.getByRole('textbox', { name: '消息内容' })).toHaveValue('提取【字段名】的枚举值')
+  })
+
   it('opens a Run from another conversation through history and keeps unsent text', async () => {
     const second = { ...summary, id: 'conv-2', title: '历史会话' }
     vi.mocked(api.conversations).mockResolvedValue({ items: [summary, second] })

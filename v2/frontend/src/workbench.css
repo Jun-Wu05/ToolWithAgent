@@ -111,3 +111,11 @@
 .mapping-table tbody tr.mapping-row-error{background:var(--tint-danger)}
 .mapping-row-error td:first-child{box-shadow:inset 3px 0 var(--danger)}
 .field-modify strong{color:var(--primary)}
+.suggestion-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.suggestion-chip{border:1px solid var(--border-subtle);border-radius:999px;background:var(--surface-card);color:var(--foreground);font-size:12px;padding:4px 12px;cursor:pointer}
+.suggestion-chip:hover{border-color:var(--primary);color:var(--primary)}
+.suggestion-chip:disabled{opacity:.55;cursor:default}
+.empty-templates{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:14px;text-align:left}
+.empty-template{display:flex;flex-direction:column;gap:4px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--surface-card);color:var(--foreground);padding:12px;cursor:pointer}
+.empty-template:hover{border-color:var(--primary)}
+.empty-template span{font-size:12px;color:var(--muted-foreground)}

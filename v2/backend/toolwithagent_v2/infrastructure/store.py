@@ -923,7 +923,7 @@ class Store:
             db.commit()
             return True
 
-    def finish(self, worker_id, claim, error_code=None, message=None):
+    def finish(self, worker_id, claim, error_code=None, message=None, suggestions=None):
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._valid_claim(db, worker_id, claim)
@@ -931,15 +931,18 @@ class Store:
                 db.rollback()
                 return False
             if message:
-                self._assistant_message(db, row["conversation_id"], message, row["id"])
+                self._assistant_message(db, row["conversation_id"], message, row["id"], suggestions)
             self._record_state(db, row, "failed" if error_code else "succeeded", error_code)
             db.commit()
             return True
 
-    def _assistant_message(self, db, conversation_id, message, run_id=None):
+    def _assistant_message(self, db, conversation_id, message, run_id=None, suggestions=None):
         message_id = uid()
+        payload = {"text": message, "run_id": run_id}
+        if suggestions:
+            payload["suggestions"] = suggestions
         db.execute("INSERT INTO messages(id,conversation_id,actor,kind,content_json,created_at) VALUES(?,?,?,?,?,?)",
-                   (message_id, conversation_id, "assistant", "text", json.dumps({"text": message, "run_id": run_id}, ensure_ascii=False), now()))
+                   (message_id, conversation_id, "assistant", "text", json.dumps(payload, ensure_ascii=False), now()))
         self._event(db, conversation_id, "message_created", "message", message_id, {"actor": "assistant"})
         return message_id
 
@@ -1428,7 +1431,7 @@ class Store:
             row = db.execute("SELECT continuation_json FROM execution_checkpoints WHERE run_id=? ORDER BY revision DESC LIMIT 1", (run_id,)).fetchone()
             return ExecutionContinuation.from_json(row["continuation_json"]) if row else None
 
-    def publish(self, worker_id, claim, content: bytes, kind="fake_result", metadata=None, message=None):
+    def publish(self, worker_id, claim, content: bytes, kind="fake_result", metadata=None, message=None, suggestions=None):
         if not isinstance(content, bytes):
             raise TypeError("artifact_content_must_be_bytes")
         sha = hashlib.sha256(content).hexdigest()
@@ -1479,7 +1482,11 @@ class Store:
                 artifact_id = uid()
                 metadata = dict(metadata or {})
                 if message:
-                    metadata["result_message_id"] = self._assistant_message(db, row["conversation_id"], message, row["id"])
+                    # 建议里的产物占位（artifact_id/classification_artifact_id 为 None）回填为本轮产物 ID。
+                    filled = [{**item, **{key: artifact_id for key in ("artifact_id", "classification_artifact_id")
+                                          if key in item and item[key] is None}}
+                              for item in (suggestions or [])] or None
+                    metadata["result_message_id"] = self._assistant_message(db, row["conversation_id"], message, row["id"], filled)
                 db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                            (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata or {}, ensure_ascii=False), now(), len(content)))
                 if kind == "field_mapping" and claim["input"].get("source_artifact_id"):
@@ -1855,7 +1862,7 @@ class Store:
             db.commit()
             return True
 
-    def publish_business(self, worker_id, claim, artifacts, message=None):
+    def publish_business(self, worker_id, claim, artifacts, message=None, suggestions=None):
         """同一事务发布本次全部产物、血缘、消息与 outbox，拒绝迟到写入。"""
         staged = []
         try:
@@ -1877,7 +1884,7 @@ class Store:
                     self._record_state(db, row, "failed", "business_input_stale")
                     self._assistant_message(db, row["conversation_id"], "输入或配置版本已变化，请重新发起操作。", row["id"])
                     db.commit(); return True
-                result_message_id = self._assistant_message(db, row["conversation_id"], message, row["id"]) if message else None
+                result_message_id = self._assistant_message(db, row["conversation_id"], message, row["id"], suggestions) if message else None
                 # Stale old versions and their descendants before inserting this transaction's outputs.
                 for replacing_kind in {item[0]["kind"] for item in staged} - {"business_state"}:
                     previous = db.execute("SELECT id FROM artifacts WHERE conversation_id=? AND kind=? AND status='published'", (row["conversation_id"], replacing_kind)).fetchall()

@@ -20,6 +20,7 @@ from toolwithagent_v2.runtime.fake_application import FakeApplication
 from toolwithagent_v2.runtime.business_application import BusinessApplication
 from toolwithagent_v2.settings import Settings
 from toolwithagent_v2.runtime.progress import RunProgressSink
+from toolwithagent_v2.runtime import suggestions as suggestion_catalog
 
 # 豁免脱敏的诊断通道：消息只允许由稳定错误码/ID/计数构造（#433）。
 _DIAGNOSTICS = get_logger("v2.diagnostics")
@@ -110,10 +111,12 @@ class Worker:
                 outcome = asyncio.run(self.business_application.parse(path, {**snapshot, "_progress_sink": RunProgressSink(self.store, self.worker_id, claim)}))
             if "classification" not in outcome:
                 return self.store.finish(self.worker_id, claim, outcome.get("error") or "log_parse_failed",
-                                         message="日志类型提取失败，请检查文件后重试")
+                                         message="日志类型提取失败，请检查文件后重试",
+                                         suggestions=suggestion_catalog.failed())
             if outcome["classification"].get("status") != "SUCCESS":
                 return self.store.finish(self.worker_id, claim, "log_parse_failed",
-                                         message="日志类型提取未完整成功")
+                                         message="日志类型提取未完整成功",
+                                         suggestions=suggestion_catalog.failed())
             summary = self._summary(outcome, outcome["total_lines"])
             content = json.dumps(outcome, ensure_ascii=False, sort_keys=True).encode("utf-8")
             type_text = "、".join(f"{item['name']} {item['count']}" for item in summary["log_types"]) or "无"
@@ -123,10 +126,11 @@ class Worker:
                        f"解析规则：{summary['rule_summary']}")
             return self.store.publish(self.worker_id, claim, content, kind="log_classification",
                                       metadata={"summary": summary, "submission_eligible": bool(outcome["submission_eligible"])},
-                                      message=message)
+                                      message=message, suggestions=suggestion_catalog.classification_done())
         except Exception:
             return self.store.finish(self.worker_id, claim, "log_parse_failed",
-                                     message="日志类型提取失败，请检查文件后重试")
+                                     message="日志类型提取失败，请检查文件后重试",
+                                     suggestions=suggestion_catalog.failed())
 
     def _run_log_knowledge_submit(self, claim):
         try:
@@ -174,7 +178,8 @@ class Worker:
                     self.store.root / claim["input"]["storage_key"], snapshot, classification))
             if outcome.get("error") or not outcome.get("config") or not outcome.get("download_content"):
                 return self.store.finish(self.worker_id, claim, outcome.get("error") or "field_mapping_failed",
-                                         message="字段映射失败，请检查输入后重试")
+                                         message="字段映射失败，请检查输入后重试",
+                                         suggestions=suggestion_catalog.failed())
             summary = mapping_summary(outcome)
             message = (f"字段映射完成：{summary['rule_count']} 条子规则，{summary['field_count']} 个字段；"
                        f"映射成功 {summary['matched_count']}，未匹配 {summary['unmatched_count']}，解析异常 {summary['parse_error_count']}")
@@ -193,12 +198,15 @@ class Worker:
                         artifacts.append({"kind": kind, "payload": model.model_validate(state[key]).artifact.model_dump(mode="json")})
                 for artifact in artifacts:
                     artifact["source_kinds"] = artifact_sources.get(artifact["kind"], [])
-                return self.store.publish_business(self.worker_id, claim, artifacts, message)
+                return self.store.publish_business(self.worker_id, claim, artifacts, message,
+                                                   suggestions=suggestion_catalog.mapping_done())
             return self.store.publish(self.worker_id, claim, json.dumps(outcome, ensure_ascii=False).encode("utf-8"),
-                kind="field_mapping", metadata={"summary":summary}, message=message)
+                kind="field_mapping", metadata={"summary":summary}, message=message,
+                suggestions=suggestion_catalog.mapping_done())
         except Exception:
             return self.store.finish(self.worker_id, claim, "field_mapping_failed",
-                                     message="字段映射失败，请检查输入后重试")
+                                     message="字段映射失败，请检查输入后重试",
+                                     suggestions=suggestion_catalog.failed())
 
     def _run_mapping_draft_apply(self, claim):
         from toolwithagent_v2.runtime.mapping_projection import mapping_summary
@@ -232,12 +240,16 @@ class Worker:
             if "continuation" in outcome:
                 return self.store.wait_for_confirmation(self.worker_id, claim, outcome["continuation"], kind="business_plan", payload=outcome["confirmation"]) is not None
             if "artifacts" in outcome:
-                return self.store.publish_business(self.worker_id, claim, outcome["artifacts"], outcome.get("message"))
-            return self.store.finish(self.worker_id, claim, outcome.get("error"), outcome.get("message"))
+                return self.store.publish_business(self.worker_id, claim, outcome["artifacts"], outcome.get("message"),
+                                                   suggestions=suggestion_catalog.business_done())
+            return self.store.finish(self.worker_id, claim, outcome.get("error"), outcome.get("message"),
+                                     suggestions=suggestion_catalog.failed() if outcome.get("error") else None)
         except (ValueError, LookupError):
-            return self.store.finish(self.worker_id, claim, "business_input_invalid", "业务来源已不可用，请检查输入后重试。")
+            return self.store.finish(self.worker_id, claim, "business_input_invalid", "业务来源已不可用，请检查输入后重试。",
+                                     suggestions=suggestion_catalog.failed())
         except Exception:
-            return self.store.finish(self.worker_id, claim, "business_operation_failed", "操作失败，请检查输入后重试。")
+            return self.store.finish(self.worker_id, claim, "business_operation_failed", "操作失败，请检查输入后重试。",
+                                     suggestions=suggestion_catalog.failed())
 
     def _run_field_change(self, claim):
         from toolwithagent_v2.infrastructure.field_changes import FieldChanges
@@ -321,6 +333,14 @@ class Worker:
                 return self._run_business(claim)
             if claim["task_type"] == "file_ingest" and claim["input"].get("role") == "enum_mapping":
                 return self._run_enum_attachment(claim)
+            if claim["task_type"] == "file_ingest":
+                error = self._validate(claim["input"])
+                if error:
+                    return self.store.finish(self.worker_id, claim, error)
+                # 主数据校验通过后的意图气泡（#435）：下一步由用户按目标选择或直接输入。
+                return self.store.finish(self.worker_id, claim, None,
+                                         message="文件校验完成。想做什么？可以直接输入一句话，或从下面的建议开始。",
+                                         suggestions=suggestion_catalog.upload_validated(claim["input"].get("file_id")))
             if claim["task_type"] in {"field_change_apply", "field_change_undo"}:
                 return self._run_field_change(claim)
             if claim["task_type"] == "mapping_draft_apply":
