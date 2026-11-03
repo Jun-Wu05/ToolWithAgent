@@ -340,6 +340,8 @@ class PlanExecutor:
                             plan.plan_id,
                             step.step_id,
                             step.type,
+                            extra={"error_category": "adapter_failed", "step_id": step.step_id,
+                                   "operation": step.type},
                         )
                         result = self._error_result(
                             step, "adapter_failed", "执行适配器发生异常"
@@ -375,6 +377,8 @@ class PlanExecutor:
                         result.status.value,
                         recovery_count,
                         budget.max_per_plan,
+                        extra={"error_category": "recovery_retry", "step_id": step.step_id,
+                               "error_code": trigger_error_code, "retry_count": recovery_count},
                     )
 
             ledger[step.step_id] = result

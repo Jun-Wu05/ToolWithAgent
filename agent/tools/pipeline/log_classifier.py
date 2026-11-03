@@ -235,10 +235,10 @@ def _classify_json_features(
             extractor_func=extractor.extract_value,
         )
     except httpx.HTTPStatusError as e:
-        logger.error(f"[_classify_json_features] API error: {e}")
+        logger.error(f"[_classify_json_features] API error: {e}", extra={"error_category": "model_api_failed"})
         return _build_failed_result(format_type, format_detail, feature_field, f"LLM API 调用失败: {e.response.status_code}")
     except Exception as e:
-        logger.error(f"[_classify_json_features] LLM error: {type(e).__name__}: {e}")
+        logger.error(f"[_classify_json_features] LLM error: {type(e).__name__}: {e}", extra={"error_category": "model_call_failed"})
         return _build_failed_result(format_type, format_detail, feature_field, str(e), total_valid_lines=total_lines)
 
     # 6. 填充元数据字段
@@ -452,10 +452,10 @@ def _classify_kv_features(
             extractor_func=extractor.extract_value,
         )
     except httpx.HTTPStatusError as e:
-        logger.error(f"[_classify_kv_features] API error: {e}")
+        logger.error(f"[_classify_kv_features] API error: {e}", extra={"error_category": "model_api_failed"})
         return _build_failed_result(format_type, format_detail, feature_field, f"LLM API 调用失败: {e.response.status_code}")
     except Exception as e:
-        logger.error(f"[_classify_kv_features] LLM error: {type(e).__name__}: {e}")
+        logger.error(f"[_classify_kv_features] LLM error: {type(e).__name__}: {e}", extra={"error_category": "model_call_failed"})
         return _build_failed_result(format_type, format_detail, feature_field, str(e), total_valid_lines=total_lines)
 
     # 6. 填充元数据字段
@@ -513,7 +513,8 @@ def _classify_kv_features(
             logger.error(
                 "[_classify_kv_features] feature_identifier 生成失败; "
                 f"source_lines={len(source_lines)}, "
-                f"matched_lines={len(matched_source_lines)}"
+                f"matched_lines={len(matched_source_lines)}",
+                extra={"error_category": "feature_regex_invalid"},
             )
             # 快速失败：标记为 PARTIAL，而不是继续使用空字符串
             result["status"] = "PARTIAL"
