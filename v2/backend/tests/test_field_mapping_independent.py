@@ -143,6 +143,54 @@ def test_real_business_adapter_success_or_failure_publish_boundary(tmp_path, out
         assert client.get(f"/api/v2/runs/{response.json()['run']['id']}").json()['status'] == 'failed'
 
 
+def test_field_mapping_skips_reparse_plan_when_classification_reused(tmp_path, monkeypatch):
+    """复用分类产物时只执行 v2-field-mapping 计划；无分类才允许重解析（#432）。"""
+    import toolwithagent_v2.runtime.business_application as bridge_module
+    from contracts.planner_models import StepStatus
+    plans = []
+    class Row:
+        def __init__(self, data): self._data = data
+        def model_dump(self, by_alias=False, **kwargs): return self._data
+    class MappedArtifact:
+        artifact_type = 'field_mapping'
+        download_kind = 'mapped_sub_rules'
+        def __init__(self):
+            self.mappings = [Row({'原始字段名': 'src', '系统属性名称': '源地址', '匹配状态': '匹配成功'})]
+            self.event_annotations = []
+    class Result:
+        def __init__(self, step_id, operation_type, artifact=None):
+            self.step_id = step_id
+            self.operation_type = operation_type
+            self.status = StepStatus.SUCCESS
+            self.artifact = artifact
+            self.message = None
+    class Report:
+        status = StepStatus.SUCCESS
+        def __init__(self, results): self.results = results
+    async def fake_plan(session, team, plan, progress_sink, adapters=None):
+        plans.append(plan.plan_id)
+        if plan.plan_id == 'v2-mapping-log-parse':
+            session.log_classification = {'status': 'SUCCESS', 'log_format': 'KV'}
+            return Report([Result('log-parse', 'log_parse')])
+        session.mapped_sub_rules = [{'name': 'rule', 'normalize': [{'index': 'src', 'field': '源地址', 'result': ['SECRET']}]}]
+        return Report([Result('field-mapping', 'field_mapping', MappedArtifact())])
+    monkeypatch.setattr(bridge_module, 'run_deterministic_plan', fake_plan)
+    business = bridge_module.BusinessApplication(tmp_path/'knowledge.db', team_factory=lambda: object(), adapters_factory=lambda team: {})
+    source = tmp_path/'logs.txt'
+    source.write_text('kind=a src=SECRET\n', encoding='utf-8')
+    snapshot = {'media_type': 'text/plain', 'source_fields': {'product': 'P', 'log_vendor': 'V', 'data_source': 'P(V)'}}
+    classification = {'classification': {'status': 'SUCCESS', 'log_format': 'KV', 'feature_field': 'kind',
+        'analysis': {'has_key_value_pairs': True, 'delimit': ' ', 'tab': '='},
+        'classification_details': [{'logtype': 'a', 'count': 1, 'real_samples': 'kind=a src=SECRET'}]}}
+    reused = asyncio.run(business.field_mapping(source, snapshot, classification))
+    assert plans == ['v2-field-mapping']
+    assert 'error' not in reused
+    plans.clear()
+    reparsed = asyncio.run(business.field_mapping(source, snapshot, None))
+    assert plans == ['v2-mapping-log-parse', 'v2-field-mapping']
+    assert 'error' not in reparsed
+
+
 def test_sample_reader_order_dedup_rule_membership_and_config_null_numbers():
     """样例有序去重且限制20，JSON不跨类型，配置样例行号明确为空。"""
     from toolwithagent_v2.runtime.mapping_projection import collect_samples

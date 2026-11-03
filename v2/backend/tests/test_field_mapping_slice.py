@@ -78,6 +78,32 @@ def test_late_mapping_cannot_publish_after_input_or_claim_change(tmp_path,change
     worker._run_field_mapping(claim)
     assert mappings(store,conversation)==[]
 
+def test_file_entry_mapping_reuses_current_classification_artifact(tmp_path):
+    """文件入口在已有当前分类产物时与其同源锚定，不再隐式重复解析（#432）。"""
+    client,store,conversation,worker,business,file_id=setup(tmp_path)
+    seen=[]
+    original=business.field_mapping
+    async def capture(path,snapshot,classification=None):
+        seen.append(classification is not None)
+        return await original(path,snapshot,classification)
+    business.field_mapping=capture
+    assert enqueue(client,conversation,file_id,key='no-classification').status_code==201
+    claim=store.claim('worker-a')
+    assert 'source_artifact_id' not in claim['input']
+    assert worker._run_field_mapping(claim)
+    assert seen==[False]
+    client.post(f'/api/v2/conversations/{conversation}/log-parse',json={'file_id':file_id})
+    assert worker.once()
+    classified=[a for a in store.get_conversation('dev-user',conversation)['artifacts'] if a['kind']=='log_classification'][0]
+    assert enqueue(client,conversation,file_id,key='with-classification').status_code==201
+    claim=store.claim('worker-a')
+    assert claim['input']['source_artifact_id']==classified['id']
+    assert 'source_sha256' in claim['input'] and 'source_storage_key' in claim['input']
+    assert claim['input']['classification_anchor']==classified['id']
+    assert worker._run_field_mapping(claim)
+    assert seen==[False,True]
+    assert len(mappings(store,conversation))==2
+
 def test_failure_keeps_old_result_and_invalid_upload_does_not_stale_it(tmp_path):
     client,store,conversation,worker,business,file_id=setup(tmp_path)
     assert enqueue(client,conversation,file_id).status_code==201
