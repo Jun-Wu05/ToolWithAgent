@@ -45,7 +45,7 @@ it('embeds results in their message and only loads owner content after a click',
   fireEvent.click(within(message).getByRole('button', {name: '查看产物'}))
   expect(await screen.findByText(/仅本人查看的真实值/)).toBeInTheDocument()
   expect(api.artifactContent).toHaveBeenCalledWith('enum-1')
-  expect(screen.getAllByRole('complementary').filter(item => item.getAttribute('aria-label') === '产物详情')).toHaveLength(1)
+  expect(screen.getAllByRole('complementary').filter(item => item.getAttribute('aria-label') === '资源工作区')).toHaveLength(1)
 })
 it('pins the exact enum card ID and safe source reference', async () => {
   render(<BusinessOperations conversation={detail} source={enumeration} onDone={vi.fn(async () => {})} />)
@@ -177,7 +177,7 @@ it('keeps historical inputs readable without parse or mapping actions', async ()
   expect(screen.queryByRole('button', {name: '标准字段映射'})).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', {name: '查看产物'}))
   expect(await screen.findByText('仅本人查看的真实值')).toBeInTheDocument()
-  expect(screen.getByRole('button', {name: '下载产物'})).toBeInTheDocument()
+  expect(within(screen.getByRole('complementary', {name: '资源工作区'})).getByRole('button', {name: '下载产物'})).toBeInTheDocument()
 })
 it('keeps unsent text and current inputs when clear fails', async () => {
   vi.stubGlobal('confirm', vi.fn(() => true)); vi.mocked(api.sendMessage).mockRejectedValue(new Error('清空请求失败'))
@@ -217,7 +217,7 @@ it('retains stale classification results for owner view and download after clear
   render(<App />); await screen.findByText('登录 · 2')
   fireEvent.click(screen.getByRole('button', {name: '查看产物'}))
   await waitFor(() => expect(api.artifactContent).toHaveBeenCalledWith('classification-old'))
-  expect(screen.getByRole('button', {name: '下载产物'})).toBeInTheDocument()
+  expect(within(screen.getByRole('complementary', {name: '资源工作区'})).getByRole('button', {name: '下载产物'})).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: '标准字段映射'})).not.toBeInTheDocument()
 })
 
@@ -233,23 +233,19 @@ it('reuses a clear receipt on retry and uses a fresh receipt for a later explici
   expect(vi.mocked(api.sendMessage).mock.calls[2][2]).not.toBe(vi.mocked(api.sendMessage).mock.calls[1][2])
 })
 
-it('switches the one context panel between artifacts and runs and closes with Escape', async () => {
+it('hides result resources in trace and restores them on return', async () => {
   vi.mocked(api.conversation).mockResolvedValue({...detail, runs: [{id: 'r1', status: 'succeeded'}]})
   vi.mocked(api.run).mockImplementation(async id => ({id, status: 'succeeded'}))
   render(<App />); await screen.findByText('已提取枚举')
   const message = screen.getByText('已提取枚举').closest('article')!
   fireEvent.click(within(message).getByRole('button', {name: '查看产物'}))
-  const artifactPanel = await screen.findByLabelText('产物详情')
+  const artifactPanel = await screen.findByRole('complementary', {name: '资源工作区'})
   await within(artifactPanel).findByText(/仅本人查看的真实值/)
-  fireEvent.click(within(artifactPanel).getByRole('tab', {name: '来源信息'}))
-  expect(within(artifactPanel).getByText('enum-1')).toBeVisible()
-  fireEvent.click(within(artifactPanel).getByRole('tab', {name: '内容预览'}))
-  fireEvent.click(within(artifactPanel).getByRole('button', {name: '查看执行详情'}))
-  const executionPanel = await screen.findByLabelText('执行详情')
-  expect(screen.queryByLabelText('产物详情')).not.toBeInTheDocument()
-  expect(screen.getAllByRole('complementary').filter(item => ['执行详情', '产物详情'].includes(item.getAttribute('aria-label') || ''))).toHaveLength(1)
-  fireEvent.keyDown(executionPanel, {key: 'Escape'})
-  expect(screen.queryByLabelText('执行详情')).not.toBeInTheDocument()
+  fireEvent.click(within(artifactPanel).getByRole('button', {name: 'r1'}))
+  expect(screen.getByRole('tab', {name: '轨迹'})).toHaveAttribute('aria-selected', 'true')
+  expect(screen.queryByRole('complementary', {name: '资源工作区'})).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('tab', {name: '对话'}))
+  expect(screen.getByRole('complementary', {name: '资源工作区'})).toBeVisible()
 })
 
 it('ignores a late artifact response after switching the context to a run', async () => {
@@ -260,12 +256,11 @@ it('ignores a late artifact response after switching the context to a run', asyn
   render(<App />); await screen.findByText('已提取枚举')
   const message = screen.getByText('已提取枚举').closest('article')!
   fireEvent.click(within(message).getByRole('button', {name: '查看产物'}))
-  expect(screen.getByLabelText('产物详情')).toBeInTheDocument()
+  expect(screen.getByRole('complementary', {name: '资源工作区'})).toBeInTheDocument()
   fireEvent.click(within(message).getByRole('button', {name: '查看本次执行'}))
-  await screen.findByLabelText('执行详情')
+  await screen.findByRole('region', {name: '执行轨迹'})
   await act(async () => complete({values: ['迟到的旧产物内容']}))
-  expect(screen.queryByText('迟到的旧产物内容')).not.toBeInTheDocument()
-  expect(screen.queryByLabelText('产物详情')).not.toBeInTheDocument()
+  expect(screen.queryByRole('complementary', {name: '资源工作区'})).not.toBeInTheDocument()
 })
 
 it('does not keep an old failure hint after a newer successful run', async () => {
@@ -279,9 +274,8 @@ it('does not describe a corrupt artifact as successfully published', async () =>
   vi.mocked(api.artifactContent).mockRejectedValue(new Error('结果文件不可用'))
   render(<App />); await screen.findByText('已提取枚举')
   fireEvent.click(screen.getByRole('button', {name: '查看产物'}))
-  const panel = await screen.findByLabelText('产物详情')
+  const panel = await screen.findByRole('complementary', {name: '资源工作区'})
   await within(panel).findByRole('alert')
-  fireEvent.click(within(panel).getByRole('tab', {name: '来源信息'}))
   expect(within(panel).getByText('产物不可用')).toBeVisible()
   expect(within(panel).queryByText('已发布')).not.toBeInTheDocument()
 })

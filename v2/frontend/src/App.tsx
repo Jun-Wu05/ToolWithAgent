@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, saveDownload, type ClassificationArtifact, type Conversation, type ConversationSummary, type FieldMappingArtifact, type FileRecord, type Identity, type MappingInput, type MappingDraft, type MappingDraftSummary, type ApiError, type Artifact, type Message, type Run, type ProgressSummary } from './api'
-import { TaskFacts, TaskOverview, ResultsWorkspace, ExecutionTrace, type WorkspaceTab } from './WorkspaceViews'
+import { TaskFacts, ExecutionTrace, type WorkspaceTab } from './WorkspaceViews'
 import { ConversationTimeline, type TimelineActions } from './ConversationTimeline'
-import { ContextPanel, StatusText, TaskHintBar, type PanelState } from './VisualPrimitives'
+import { StatusText, TaskHintBar } from './VisualPrimitives'
 import { FieldChangesWorkspace } from './FieldChangesWorkspace'
 import { MappingWorkspace } from './MappingWorkspace'
 import { MappingSummaryCard } from './ConversationMappingSummary'
@@ -10,7 +10,7 @@ import { AdminConsole } from './AdminConsole'
 import { DeveloperConsole } from './DeveloperConsole'
 import { UserHistory } from './UserHistory'
 import { MappingDialog } from './MappingDialog'
-import { BusinessOperations, BusinessConfirmation, businessName, ArtifactValues, RunProgress, progressLabel } from './BusinessWorkspace'
+import { BusinessOperations, BusinessConfirmation, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
 
 const statusName: Record<string, string> = {
   queued: '排队中', pending: '排队中', running: '运行中', succeeded: '已完成',
@@ -43,7 +43,43 @@ export function App() {
   const [developerDiagnostics, setDeveloperDiagnostics] = useState(false)
   const [visitedTabs, setVisitedTabs] = useState<WorkspaceTab[]>(['conversation'])
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('conversation')
-  const [resultTarget, setResultTarget] = useState<{ id: string; token: number } | null>(null)
+  const [traceTarget, setTraceTarget] = useState<{ id: string; token: number } | null>(null)
+  const [resourceTabs, setResourceTabs] = useState<('mapping' | 'results')[]>([])
+  const [activeResource, setActiveResource] = useState<'mapping' | 'results'>('mapping')
+  const [resourceOpen, setResourceOpen] = useState(false)
+  const [resourceWidth, setResourceWidth] = useState<number | null>(null)
+  const layoutRef = useRef<HTMLDivElement>(null)
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null)
+  const resourceTrigger = useRef<HTMLElement | null>(null)
+  const openResource = (tab: 'mapping' | 'results') => {
+    if (editingPendingRef.current && activeResource === 'mapping' && tab !== 'mapping') { setNotice('请先重试保存或取消当前字段修改。'); return false }
+    if (document.activeElement instanceof HTMLElement) resourceTrigger.current = document.activeElement
+    setResourceTabs(current => current.includes(tab) ? current : [...current, tab])
+    setActiveResource(tab)
+    setResourceOpen(true)
+    if (workspaceTab !== 'conversation') changeWorkspaceTab('conversation')
+    return true
+  }
+  const collapseResource = () => { setResourceOpen(false); if (resourceTrigger.current?.isConnected) resourceTrigger.current.focus() }
+  const closeResource = (tab: 'mapping' | 'results') => {
+    if (tab === 'mapping' && editingPendingRef.current) { setNotice('请先重试保存或取消当前字段修改。'); return }
+    const remaining = resourceTabs.filter(item => item !== tab)
+    setResourceTabs(remaining)
+    if (!remaining.length) collapseResource()
+    else if (activeResource === tab) setActiveResource(remaining.at(-1)!)
+  }
+  const selectResourceTab = (tab: 'mapping' | 'results') => {
+    if (editingPendingRef.current && activeResource === 'mapping' && tab !== 'mapping') { setNotice('请先重试保存或取消当前字段修改。'); return false }
+    setActiveResource(tab)
+    return true
+  }
+  const resourceTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, tab: 'mapping' | 'results') => {
+    const index = resourceTabs.indexOf(tab)
+    const next = event.key === 'ArrowRight' ? resourceTabs[(index + 1) % resourceTabs.length] : event.key === 'ArrowLeft' ? resourceTabs[(index - 1 + resourceTabs.length) % resourceTabs.length] : event.key === 'Home' ? resourceTabs[0] : event.key === 'End' ? resourceTabs.at(-1) : undefined
+    if (!next) return
+    event.preventDefault()
+    if (selectResourceTab(next)) event.currentTarget.closest('[role="tablist"]')?.querySelector<HTMLButtonElement>(`[data-resource-tab="${next}"]`)?.focus()
+  }
   const viewScroll = useRef<Record<string, number>>({})
   const currentTab = useRef<WorkspaceTab>('conversation')
   const contentRef = useRef<HTMLDivElement>(null)
@@ -54,17 +90,8 @@ export function App() {
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [draft, setDraft] = useState('')
   const [theme, setTheme] = useState<'light' | 'dark'>(readTheme)
-  const drawerActive = useRef<string | null>(null)
   const [latestProgress, setLatestProgress] = useState<{runId: string; summary: ProgressSummary} | null>(null)
-  const runRequest = useRef(0)
-  const [runDetail, setRunDetail] = useState<Run | null>(null)
-  const [runDetailError, setRunDetailError] = useState('')
   const artifactRequest = useRef(0)
-  const [panel, setPanel] = useState<PanelState>(null)
-  const artifactDrawer = panel?.type === 'artifact' ? panel.id : null
-  const drawerId = panel?.type === 'execution' ? panel.id : null
-  const setArtifactDrawer = (id: string | null) => setPanel(current => id ? { type: 'artifact', id } : current?.type === 'artifact' ? null : current)
-  const setDrawerId = (id: string | null) => setPanel(current => id ? { type: 'execution', id } : current?.type === 'execution' ? null : current)
   const [artifactContent, setArtifactContent] = useState<Record<string, unknown> | null>(null)
   const [artifactError, setArtifactError] = useState('')
   const [artifactLoading, setArtifactLoading] = useState(false)
@@ -89,7 +116,6 @@ export function App() {
   const [downloadId, setDownloadId] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<{ id: string; message: string } | null>(null)
   const mappingReceipt = useRef<{ payload: string; key: string } | null>(null)
-  const returnTarget = useRef<string | null>(null)
   const [featureFields, setFeatureFields] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -145,21 +171,12 @@ export function App() {
   }
   const changeWorkspaceTab = useCallback((next: WorkspaceTab) => {
     if (contentRef.current) viewScroll.current[currentTab.current] = contentRef.current.scrollTop
-    setVisitedTabs(current => current.includes(next) ? current : [...current, next]); setWorkspaceTab(next); setPanel(null)
+    setVisitedTabs(current => current.includes(next) ? current : [...current, next]); setWorkspaceTab(next)
   }, [])
-  const setMappingId = useCallback((id: string | null) => { if (editingPendingRef.current && id !== mappingId) { setNotice('请先重试保存或取消当前字段修改。'); return false } setMappingSelection(id); if (id) { setFieldChangesSelection(null); setResultTarget(previous => ({ id, token: (previous?.token || 0) + 1 })); changeWorkspaceTab('results') } return true }, [changeWorkspaceTab, mappingId])
-  const setFieldChangesId = (id: string | null) => { if (editingPendingRef.current && id) { setNotice('请先重试保存或取消当前字段修改。'); return } setFieldChangesSelection(id) }
+  const setMappingId = (id: string | null) => { if (editingPendingRef.current && id !== mappingId) { setNotice('请先重试保存或取消当前字段修改。'); return false } if (id && !openResource('mapping')) return false; setMappingSelection(id); if (id) setFieldChangesSelection(null); return true }
+  const setFieldChangesId = (id: string | null) => { if (editingPendingRef.current && id) { setNotice('请先重试保存或取消当前字段修改。'); return } if (id && !openResource('results')) return; setFieldChangesSelection(id) }
   useLayoutEffect(() => { if (contentRef.current) contentRef.current.scrollTop = viewScroll.current[workspaceTab] || 0; currentTab.current = workspaceTab }, [workspaceTab])
-  useEffect(() => { if (mappingId || fieldChangesId) changeWorkspaceTab('results') }, [mappingId, fieldChangesId, changeWorkspaceTab])
-  drawerActive.current = drawerId
-  useEffect(() => {
-    if (mappingId || !returnTarget.current) return
-    const card = document.getElementById('mapping-' + returnTarget.current)
-    card?.scrollIntoView?.({ block: 'center' })
-    card?.querySelector<HTMLButtonElement>('button')?.focus()
-    returnTarget.current = null
-  }, [mappingId])
-  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setResultTarget(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++runRequest.current; setRunDetail(null); setRunDetailError(''); ++artifactRequest.current; setArtifactDrawer(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingId(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); mappingReceipt.current = null; returnTarget.current = null }
+  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setTraceTarget(null); setResourceTabs([]); setResourceOpen(false); setResourceWidth(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++artifactRequest.current; setSelectedResultId(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingSelection(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); mappingReceipt.current = null; }
   const refreshList = useCallback(async () => {
     const version = viewToken.current
     const result = await api.conversations()
@@ -220,10 +237,6 @@ export function App() {
           if (live && version === viewToken.current && record.event_type === 'run_progress' && record.resource_id && record.payload) {
             setLatestProgress({runId: record.resource_id, summary: record.payload})
           }
-          if (live && version === viewToken.current && record.resource_id && drawerActive.current === record.resource_id) {
-              const request = ++runRequest.current; const runId = record.resource_id
-              void api.run(runId).then(result => {if (live && version === viewToken.current && request === runRequest.current && drawerActive.current === runId) setRunDetail(result)}).catch(() => {})
-          }
           eventSequence.current = Math.max(eventSequence.current, record.sequence || Number(event.lastEventId) || 0)
         } catch { /* A refresh still reconciles the server state. */ }
         if (live) void refreshActive(activeId).catch(() => { if (live && version === viewToken.current) setNotice('实时更新暂不可用，可刷新恢复。') })
@@ -246,7 +259,6 @@ export function App() {
     setConversation(null)
     setLoading(true)
     resetMapping(); setActionBusy(null); setBusy(false); setNotice('')
-    setDrawerId(null)
     setNavOpen(false)
     setError('')
     lastMessageIdRef.current = null
@@ -527,21 +539,19 @@ export function App() {
   const switchIdentity = async (userId: string) => {
     ++viewToken.current
     activeViewId.current = null
-    setActiveId(null); resetMapping(); setConversation(null); setDrawerId(null); setNotice(''); setActionBusy(null); setLoading(true)
+    setActiveId(null); resetMapping(); setConversation(null); setNotice(''); setActionBusy(null); setLoading(true)
     setBusy(true); setError('')
     try {
       await api.selectIdentity(userId)
       sessionStorage.removeItem('twa-v2-active')
-      setActiveId(null); setConversation(null); setDrawerId(null)
+      setActiveId(null); setConversation(null)
       await initialize()
     } catch (caught) { setError(caught instanceof Error ? caught.message : '切换身份失败。') }
     finally { setBusy(false) }
   }
   const openRun = async (runId: string) => {
-    const request = ++runRequest.current; const version = viewToken.current
-    setArtifactDrawer(null); ++artifactRequest.current; setDrawerId(runId); setRunDetail(null); setRunDetailError('')
-    try {const result = await api.run(runId); if (request === runRequest.current && isCurrent(version) && result) setRunDetail(result)}
-    catch (caught) {if (request === runRequest.current && isCurrent(version)) setRunDetailError(caught instanceof Error ? caught.message : '执行详情加载失败。')}
+    setTraceTarget(current => ({ id: runId, token: (current?.token || 0) + 1 }))
+    changeWorkspaceTab('trace')
   }
   const openHistory = async (conversationId: string, runId: string | null, messageId: string | null) => {
     await selectConversation(conversationId)
@@ -549,19 +559,20 @@ export function App() {
     else if (messageId) locate(messageId)
   }
   const activeRun = conversation?.runs.find(run => runningStatus.has(run.status))
-  const drawer = !artifactDrawer && (runDetail?.id === drawerId ? runDetail : conversation?.runs.find(run => run.id === drawerId)) || null
   const waitingRun = conversation?.runs.find(run => run.status === 'waiting_confirmation' && !conversation?.field_changes?.some(item => item.run_id === run.id))
-  const selectedArtifact = conversation?.artifacts?.find(item => item.id === artifactDrawer)
+  const selectedArtifact = conversation?.artifacts?.find(item => item.id === selectedResultId)
   const openArtifact = async (artifact: Artifact) => {
+    if (!openResource('results')) return
+    setFieldChangesSelection(null)
     const version = viewToken.current; const id = activeViewId.current; const request = ++artifactRequest.current
-    setDrawerId(null); setArtifactDrawer(artifact.id); setArtifactContent(null); setArtifactError(''); setArtifactLoading(true)
+    setSelectedResultId(artifact.id); setArtifactContent(null); setArtifactError(''); setArtifactLoading(true)
     try { const content = await api.artifactContent(artifact.id); if (request === artifactRequest.current && isCurrent(version, id || undefined)) setArtifactContent(content) }
     catch (caught) { if (request === artifactRequest.current && isCurrent(version, id || undefined)) setArtifactError(caught instanceof Error ? caught.message : '结果加载失败。') }
     finally { if (request === artifactRequest.current && isCurrent(version, id || undefined)) setArtifactLoading(false) }
   }
   const locate = (messageId?: string | null) => { if (messageId) { changeWorkspaceTab('conversation'); requestAnimationFrame(() => document.getElementById('message-' + messageId)?.scrollIntoView?.({block: 'center'})) } }
-  const businessCard = (artifact: Artifact) => <article className="result-card" key={artifact.id}><strong>{businessName(artifact.kind)}结果</strong>{(artifact.kind === 'enum_values' || artifact.kind === 'threat_mapping' || artifact.kind === 'config_export') && <p>{artifact.item_count ?? (typeof artifact.summary?.item_count === 'number' ? artifact.summary.item_count : 0)} 项</p>}{'current' in artifact && !artifact.current && <p className="mapping-warning">历史结果，可查看和下载。</p>}<div className="mapping-actions"><button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>{artifact.kind === 'field_mapping' && <button className="button-secondary" onClick={() => {if (setMappingId(artifact.id)) setMappingDraftId(undefined); setArtifactDrawer(null)}}>查看结果</button>}<button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button></div>{downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}</article>
-  const mappingSummary = (artifact: FieldMappingArtifact) => { const draft = conversation?.drafts?.find(item => item.base_artifact_id === artifact.id && ['active', 'applying'].includes(item.status)); return <MappingSummaryCard key={identity?.id + ':' + activeId + ':' + artifact.id} artifact={artifact} editable={identity?.role === 'user'} draftId={draft?.id} draftSummary={draft} onDraftChange={draftChanged} onPendingChange={pendingChanged} onOpenFull={() => { if (setMappingId(artifact.id)) setMappingDraftId(undefined) }} onOpenDrawer={() => void openArtifact(artifact)} onDownload={() => void downloadMapping(artifact.id)} downloading={downloadId === artifact.id} downloadError={downloadError?.id === artifact.id ? downloadError.message : ''} /> }
+  const businessCard = (artifact: Artifact) => <article className="result-card" key={artifact.id}><strong>{businessName(artifact.kind)}结果</strong>{(artifact.kind === 'enum_values' || artifact.kind === 'threat_mapping' || artifact.kind === 'config_export') && <p>{artifact.item_count ?? (typeof artifact.summary?.item_count === 'number' ? artifact.summary.item_count : 0)} 项</p>}{'current' in artifact && !artifact.current && <p className="mapping-warning">历史结果，可查看和下载。</p>}<div className="mapping-actions"><button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>{artifact.kind === 'field_mapping' && <button className="button-secondary" onClick={() => {if (setMappingId(artifact.id)) setMappingDraftId(undefined); setSelectedResultId(null)}}>查看结果</button>}<button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button></div>{downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}</article>
+  const mappingSummary = (artifact: FieldMappingArtifact) => { const draft = conversation?.drafts?.find(item => item.base_artifact_id === artifact.id && ['active', 'applying'].includes(item.status)); return <MappingSummaryCard key={identity?.id + ':' + activeId + ':' + artifact.id} artifact={artifact} editable={identity?.role === 'user'} draftId={draft?.id} draftSummary={draft} onDraftChange={draftChanged} onPendingChange={pendingChanged} onOpenFull={() => { if (setMappingId(artifact.id)) { setMappingDraftId(undefined); resourceTrigger.current = document.getElementById('mapping-' + artifact.id)?.querySelector('button') || null } }} onOpenDrawer={() => void openArtifact(artifact)} onDownload={() => void downloadMapping(artifact.id)} downloading={downloadId === artifact.id} downloadError={downloadError?.id === artifact.id ? downloadError.message : ''} /> }
   const liveDrafts = unresolvedDrafts(conversation?.drafts)
   const fieldChange = conversation?.field_changes?.find(item => item.run_id === fieldChangesId)
   const mappingArtifact = conversation?.artifacts?.find((artifact): artifact is FieldMappingArtifact => artifact.kind === 'field_mapping' && artifact.id === mappingId)
@@ -574,7 +585,7 @@ export function App() {
     actionBusy,
     onMappingSource: source => setMappingSource(source),
     mappingForm,
-    onOpenFieldChanges: runId => { setMappingId(null); setFieldChangesId(runId) },
+    onOpenFieldChanges: runId => { if (openResource('results')) setFieldChangesId(runId) },
     canOperate: identity?.role === 'user',
   }
   const paramPrompt = (() => {
@@ -602,18 +613,8 @@ export function App() {
   const hintedRun = waitingRun || activeRun || (latestRun?.status === 'failed' ? latestRun : undefined)
   const hintState = hintedRun?.status === 'waiting_confirmation' ? 'waiting_confirmation' : hintedRun?.status === 'failed' ? 'failed' : hintedRun ? 'running' : null
   const openResult = (artifact: Artifact) => {
-    if (artifact.kind !== 'field_mapping' && artifact.kind !== 'log_classification') { void openArtifact(artifact); return }
-    changeWorkspaceTab('results')
-    if (artifact.kind === 'field_mapping') { if (setMappingId(artifact.id)) setMappingDraftId(undefined) }
-    else setResultTarget(previous => ({ id: artifact.id, token: (previous?.token || 0) + 1 }))
+    void openArtifact(artifact)
   }
-  const panelTabs = selectedArtifact ? [
-    { id: 'preview', label: '内容预览', content: <><button className="button-text" onClick={() => locate('result_message_id' in selectedArtifact ? selectedArtifact.result_message_id : null)}>定位结果消息</button><button className="button-text" onClick={() => {void openRun(selectedArtifact.run_id)}}>查看执行详情</button>{artifactLoading && <p role="status">正在加载结果…</p>}{artifactError && <p className="mapping-error" role="alert">{artifactError}<button onClick={() => void openArtifact(selectedArtifact)}>重新加载结果</button></p>}{artifactContent && <ArtifactValues artifact={selectedArtifact} content={artifactContent} />}{identity?.role === 'user' && conversation && 'current' in selectedArtifact && selectedArtifact.current && selectedArtifact.kind !== 'config_export' && <BusinessOperations key={identity.id + ':' + activeId + ':' + selectedArtifact.id} conversation={conversation} source={selectedArtifact} onDone={() => refreshActive(conversation.id)} />}</> },
-    { id: 'source', label: '来源信息', content: <dl><dt>产物 ID</dt><dd className="num">{selectedArtifact.id}</dd><dt>版本</dt><dd>{selectedArtifact.version ?? '未记录'}</dd><dt>来源 Run</dt><dd className="num">{selectedArtifact.run_id}</dd><dt>上游产物</dt><dd className="num">{selectedArtifact.source_artifact_ids?.length ? selectedArtifact.source_artifact_ids.join('、') : '无'}</dd><dt>状态</dt><dd>{selectedArtifact.status === 'corrupt' ? '产物不可用' : selectedArtifact.status === 'stale' || ('current' in selectedArtifact && !selectedArtifact.current) ? '历史结果' : selectedArtifact.status === 'published' ? '已发布' : '状态不可用'}</dd><dt>下载</dt><dd><button className="button-secondary" onClick={() => void downloadMapping(selectedArtifact.id)} disabled={!!downloadId}>{downloadId === selectedArtifact.id ? '下载中…' : '下载产物'}</button>{downloadError?.id === selectedArtifact.id && <span role="alert">{downloadError.message}</span>}</dd></dl> },
-  ] : drawer ? [
-    { id: 'timeline', label: '执行时间线', content: <>{runDetailError && <p className="mapping-error" role="alert">{runDetailError}</p>}<dl>{drawer.message_id && <><dt>原消息</dt><dd><button className="button-text" onClick={() => locate(drawer.message_id)}>定位消息</button></dd></>}<dt>状态</dt><dd><StatusText status={drawer.status} /></dd><dt>Run ID</dt><dd className="mono">{drawer.id}</dd>{drawer.task_id && <><dt>Task ID</dt><dd className="mono">{drawer.task_id}</dd></>}{drawer.error_code && <><dt>错误代码</dt><dd className="mono">{drawer.error_code}</dd></>}{drawer.error_message && <><dt>原因</dt><dd>{drawer.error_message}</dd></>}</dl><RunProgress run={drawer} />{identity?.role === 'user' && (drawer.status === 'failed' || drawer.status === 'cancelled') && <button className="button-secondary" onClick={() => void retryRun(drawer.id)} disabled={!!actionBusy}>重新执行</button>}{identity?.role === 'user' && ['queued', 'running', 'waiting_confirmation'].includes(drawer.status) && <button className="button-secondary" onClick={() => void stopRun(drawer.id)} disabled={!!actionBusy}>停止执行</button>}<button className="button-secondary" onClick={async () => { try { if (activeId) {await refreshActive(activeId); await openRun(drawer.id)} } catch { setNotice('执行详情刷新失败。') } }}>刷新状态</button></> },
-    { id: 'io', label: '输入与输出', content: <dl><dt>执行类型</dt><dd>{businessName(drawer.kind || '')}</dd>{drawer.file_id && <><dt>输入文件 ID</dt><dd className="num">{drawer.file_id}</dd></>}<dt>结果</dt><dd><StatusText status={drawer.status} /></dd>{drawer.message_id && <><dt>原消息</dt><dd><button className="button-text" onClick={() => locate(drawer.message_id)}>定位输入消息</button></dd></>}{conversation?.artifacts?.filter(item => item.run_id === drawer.id).map(item => <div key={item.id} className="context-output"><dt>输出</dt><dd><button className="button-text" onClick={() => void openArtifact(item)}>{businessName(item.kind)}结果</button></dd></div>)}</dl> },
-  ] : []
   if (identity?.role === 'admin') return <AdminConsole identity={identity} identities={identities} onSwitchIdentity={id => void switchIdentity(id)} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
   if (identity?.role === 'developer' && developerDiagnostics) return <DeveloperConsole identity={identity} identities={identities} onSwitchIdentity={id => void switchIdentity(id)} onBack={() => setDeveloperDiagnostics(false)} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
   return <div className="app">
@@ -621,7 +622,7 @@ export function App() {
     <aside className={'sidebar ' + (navOpen ? 'sidebar-open' : '')}>
       <div className="brand"><span className="brand-mark">T</span><span>ToolWithAgent <small>V2 工作台</small></span></div>
       <button className="new-conversation" onClick={() => void createConversation()} disabled={busy}>＋ 新会话</button>
-      <nav aria-label="主导航"><button className={"nav-item " + (['conversation', 'overview', 'results'].includes(workspaceTab) ? "selected" : "")} onClick={() => changeWorkspaceTab("conversation")}>对话工作台</button><button className={"nav-item " + (workspaceTab === "tasks" ? "selected" : "")} onClick={() => changeWorkspaceTab("tasks")}>我的任务</button><button className={"nav-item " + (workspaceTab === "runs" ? "selected" : "")} onClick={() => changeWorkspaceTab("runs")}>我的执行</button><button className={"nav-item " + (workspaceTab === "trace" ? "selected" : "")} onClick={() => changeWorkspaceTab("trace")}>执行轨迹</button>{identity?.role === 'developer' && <button className="nav-item" onClick={() => setDeveloperDiagnostics(true)}>Run 诊断</button>}</nav>
+      <nav aria-label="会话导航"><button className={"nav-item " + (workspaceTab === 'conversation' || workspaceTab === 'trace' ? 'selected' : '')} onClick={() => changeWorkspaceTab('conversation')}>当前会话</button><details className="history-nav"><summary>历史记录</summary><button className="nav-item" onClick={() => changeWorkspaceTab('tasks')}>我的任务</button><button className="nav-item" onClick={() => changeWorkspaceTab('runs')}>我的执行</button></details>{identity?.role === 'developer' && <button className="nav-item" onClick={() => setDeveloperDiagnostics(true)}>Run 诊断</button>}</nav>
       <div className="recent-title">最近会话</div>
       <div className="recent-list">{conversations.length ? conversations.map(item => <button key={item.id} className={'recent-item ' + (item.id === activeId ? 'active' : '')} onClick={() => void selectConversation(item.id)}><span className="recent-name">{item.title || '未命名会话'}</span><span className="recent-meta"><span className="recent-time">{readableTime(item.updated_at)}</span>{item.latest_run_status && <StatusText status={item.latest_run_status} />}</span></button>) : <p className="sidebar-empty">新建会话开始工作</p>}</div>
       <div className="identity">
@@ -633,7 +634,7 @@ export function App() {
       </div>
     </aside>
     <main className="workspace">
-      <header className="workspace-header"><div className="workspace-title"><h1>{workspaceTab === 'tasks' ? '我的任务' : workspaceTab === 'runs' ? '我的执行' : conversation?.title || '工作台'}</h1>{conversation && !renaming && <button className="button-text rename-trigger" aria-label="重命名会话" onClick={() => { setTitleDraft(conversation.title); setRenaming(true) }}>✎ 重命名</button>}{renaming && conversation && <><input aria-label="会话名称" autoFocus className="rename-input" value={titleDraft} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void submitRename(); if (event.key === 'Escape') setRenaming(false) }} /><button className="button-text" onClick={() => void submitRename()}>保存</button><button className="button-text" onClick={() => setRenaming(false)}>取消</button></>}<p>{conversation ? '会话与执行状态' : '从一条消息或一个文件开始'}</p></div><div className="header-actions">{identity?.role === 'user' && activeId && <button className="button-text" onClick={() => void clearBusiness()} disabled={clearBusy || busy || loading}>{clearBusy ? '清空排队中…' : '清空业务数据（保留历史）'}</button>}{conversation && <button className="button-secondary" aria-expanded={panel?.type === 'task'} onClick={() => setPanel(current => current?.type === 'task' ? null : { type: 'task', id: conversation.id })}>任务上下文</button>}<button className="icon-button" aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'} title={theme === 'light' ? '切换深色主题' : '切换浅色主题'} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '深色主题' : '浅色主题'}</button></div></header>
+      <header className="workspace-header"><div className="workspace-title"><h1>{workspaceTab === 'tasks' ? '我的任务' : workspaceTab === 'runs' ? '我的执行' : conversation?.title || '工作台'}</h1>{conversation && !renaming && <button className="button-text rename-trigger" aria-label="重命名会话" onClick={() => { setTitleDraft(conversation.title); setRenaming(true) }}>✎ 重命名</button>}{renaming && conversation && <><input aria-label="会话名称" autoFocus className="rename-input" value={titleDraft} onChange={event => { setTitleDraft(event.target.value) }} onKeyDown={event => { if (event.key === 'Enter') void submitRename(); if (event.key === 'Escape') setRenaming(false) }} /><button className="button-text" onClick={() => void submitRename()}>保存</button><button className="button-text" onClick={() => setRenaming(false)}>取消</button></>}<p>{conversation ? '会话与执行状态' : '从一条消息或一个文件开始'}</p></div><div className="header-actions">{identity?.role === 'user' && activeId && <button className="button-text" onClick={() => void clearBusiness()} disabled={clearBusy || busy || loading}>{clearBusy ? '清空排队中…' : '清空业务数据（保留历史）'}</button>}{conversation && !resourceOpen && resourceTabs.length > 0 && <button className="button-secondary" onClick={() => { setResourceOpen(true); changeWorkspaceTab('conversation') }}>打开工作区</button>}<button className="icon-button" aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'} title={theme === 'light' ? '切换深色主题' : '切换浅色主题'} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '深色主题' : '浅色主题'}</button></div></header>
       <div className="workspace-tabs" role="tablist" aria-label="工作区视图" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role=tab]')]
@@ -642,22 +643,22 @@ export function App() {
         event.preventDefault()
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length
         tabs[next]?.click(); tabs[next]?.focus()
-      }}>{([['conversation', '对话'], ['overview', '任务概览'], ['results', '结果与版本'], ['trace', '执行轨迹'], ['tasks', '我的任务'], ['runs', '我的执行']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={workspaceTab === id} tabIndex={workspaceTab === id ? 0 : -1} onClick={() => changeWorkspaceTab(id)}>{label}</button>)}<span className="workspace-task-status">{(hintedRun || latestRun) && <StatusText status={(hintedRun || latestRun)!.status} />}{liveDrafts.length > 0 && <span>{liveDrafts.reduce((sum, item) => sum + item.changed_count, 0)} 处草稿修改</span>}</span></div>
+      }}>{([['conversation', '对话'], ['trace', '轨迹']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={workspaceTab === id} tabIndex={workspaceTab === id ? 0 : -1} onClick={() => changeWorkspaceTab(id)}>{label}</button>)}<span className="workspace-task-status">{(hintedRun || latestRun) && <StatusText status={(hintedRun || latestRun)!.status} />}{liveDrafts.length > 0 && <span>{liveDrafts.reduce((sum, item) => sum + item.changed_count, 0)} 处草稿修改</span>}</span></div>
       {error && <div role="alert" className="feedback error"><span>{error}</span><button onClick={() => { setError(''); void initialize() }}>重试</button></div>}
       {clearError && <div role="alert" className="feedback error">{clearError}</div>}
       {notice && <div role="status" className="feedback notice"><span>{notice}</span><button aria-label="关闭提示" onClick={() => setNotice('')}>关闭</button></div>}
+      <div className="conversation-layout" ref={layoutRef}>
+      <div className="conversation-main">
       <div className="conversation-content" ref={contentRef} onScroll={onConversationScroll}>
         {(workspaceTab === 'tasks' || workspaceTab === 'runs') && <div className="workbench-pane"><UserHistory key={identity?.id + ':' + workspaceTab} kind={workspaceTab} onOpen={(conversationId, runId, messageId) => { void openHistory(conversationId, runId, messageId) }} /></div>}
         <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>开始一项日志规则任务</h2><p>上传日志或规则文件，或者先描述要处理的内容。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button></div> : <>
           <ConversationTimeline conversation={conversation} actions={timelineActions} renderers={timelineRenderers} />
+          <details className="activity-section task-facts-inline"><summary>任务信息</summary><TaskFacts conversation={conversation} drafts={liveDrafts} /></details>
           {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，历史结果仍可查看。请重新加载或上传主数据。</p>}
           {identity?.role === 'user' && <details className="activity-section"><summary>枚举、威胁、填充与导出</summary><BusinessOperations key={identity.id + ':' + activeId} conversation={conversation} onDone={() => refreshActive(conversation.id)} /></details>}
           {identity?.role === 'user' && liveDrafts.length > 0 && <section className="activity-section"><h2>未应用的映射草稿</h2>{liveDrafts.map(item => <article className="result-card" key={item.id}><p>{item.changed_count} 处未应用修改{!item.base_current ? ' · 来源已过期' : ''}{item.status === 'applying' ? ' · 正在应用' : ''}</p><button className="button-secondary" onClick={() => { if (setMappingId(item.base_artifact_id)) setMappingDraftId(item.id) }}>恢复草稿</button></article>)}</section>}
         </>}</div>
-        {visitedTabs.includes('results') && <div className="workbench-pane" hidden={workspaceTab !== 'results'}>
-          {fieldChange && !loading ? <FieldChangesWorkspace key={identity?.id + ':' + activeId + ':' + fieldChange.run_id} summary={fieldChange} editable={identity?.role === 'user'} onBack={() => { setFieldChangesId(null); changeWorkspaceTab('conversation') }} onRefresh={() => refreshActive(activeId!)} onExecution={id => {void openRun(id)}} /> : <ResultsWorkspace key={identity?.id + ':' + activeId} artifacts={conversation?.artifacts || []} active={workspaceTab === 'results'} mappingId={mappingId} mapping={mappingArtifact && !loading ? <MappingWorkspace key={identity?.id + ':' + activeId + ':' + mappingArtifact.id} artifact={mappingArtifact} onBack={() => { returnTarget.current = mappingArtifact.id; setMappingId(null); changeWorkspaceTab('conversation') }} onDownload={() => void downloadMapping(mappingArtifact.id)} downloading={downloadId === mappingArtifact.id} downloadError={downloadError?.id === mappingArtifact.id ? downloadError.message : ''} editable={identity?.role === 'user'} draftId={mappingDraftId || conversation?.drafts?.find(item => item.base_artifact_id === mappingArtifact.id && ['active', 'applying'].includes(item.status))?.id} onDraftChange={draftChanged} onPendingChange={pendingChanged} onApply={current => applyAndWait(current, viewToken.current)} onDiscard={current => discardDraft(current, viewToken.current)} /> : null} targetId={resultTarget?.id || null} targetToken={resultTarget?.token || 0} blocked={editingPending} onMapping={setMappingId} onOpen={openResult} onDownload={id => void downloadMapping(id)} />}
-        </div>}
-        {conversation && <>{workspaceTab === 'overview' && <div className="workbench-pane" hidden={workspaceTab !== 'overview'}><TaskOverview conversation={conversation} drafts={liveDrafts} contextOpen={panel?.type === 'task'} onConversation={() => { changeWorkspaceTab('conversation'); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus()) }} onRun={id => void openRun(id)} onDraft={item => { if (setMappingId(item.base_artifact_id)) setMappingDraftId(item.id) }} onOpen={openResult} onTrace={() => changeWorkspaceTab('trace')} onDownload={id => void downloadMapping(id)} /></div>}{visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}><ExecutionTrace key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} onDetails={id => void openRun(id)} /></div>}</>}
+        {conversation && visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}><ExecutionTrace key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} targetId={traceTarget?.id} targetToken={traceTarget?.token} onRetry={id => void retryRun(id)} onStop={id => void stopRun(id)} canOperate={identity?.role === 'user'} busy={!!actionBusy} /></div>}
       </div>
       {newReplies && workspaceTab === 'conversation' && <div className="new-replies-bar"><button className="button-secondary" onClick={() => { setNewReplies(false); stickToBottom.current = true; requestAnimationFrame(() => scrollConversationToEnd('smooth')) }}>有新回复 · 点击查看</button></div>}
       <div className={"composer-region " + (workspaceTab !== "conversation" ? "is-compact" : "")}><TaskHintBar state={hintState} status={hintedRun?.status} title={hintedRun ? businessName(hintedRun.kind || '') : ''} description={latestProgress?.runId === hintedRun?.id ? progressLabel(latestProgress?.summary) : undefined}>
@@ -667,14 +668,19 @@ export function App() {
         {waitingRun && !pendingConfirmation && identity?.role === 'user' && <BusinessConfirmation key={identity.id + ':' + activeId + ':' + waitingRun.id} run={waitingRun} onBack={() => {void openRun(waitingRun.id)}} onResolved={() => refreshActive(activeId!)} />}
         {editingPending && <p className="mapping-hint composer-draft-hint" role="status">请先完成草稿保存或确认，再发送消息。</p>}<div className="composer"><textarea aria-label="消息内容" placeholder="描述要处理的日志、字段或规则…" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} rows={2} disabled={busy || clearBusy || loading || !!pendingSend || !!pendingConfirmation} /><div className="composer-toolbar"><div><label>上传用途<select aria-label="上传用途" value={uploadRole} onChange={event => setUploadRole(event.target.value as typeof uploadRole)} disabled={busy || clearBusy || loading}><option value="primary">日志或规则主数据</option><option value="enum_mapping">枚举映射附件</option></select></label><input accept={uploadRole === 'enum_mapping' ? '.xlsx' : undefined} ref={fileInput} type="file" hidden aria-label="选择文件" onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file) }} /><button className="attach-button" onClick={() => fileInput.current?.click()} disabled={busy || clearBusy || loading}>＋ 添加文件</button><span className="composer-hint">Enter 发送 · Shift+Enter 换行</span></div><button className="button-primary send-button" onClick={() => void send()} disabled={!draft.trim() || busy || clearBusy || loading || editingPending || !!pendingSend || !!pendingConfirmation}>{busy ? '处理中…' : '发送'}</button></div></div>
       </div>
+      </div>
+      {resourceTabs.length > 0 && <>
+        <div className="resource-divider" role="separator" aria-label="调整工作区宽度" aria-orientation="vertical" aria-valuemin={480} aria-valuemax={Math.max(480, (layoutRef.current?.clientWidth || 1200) - 360)} aria-valuenow={resourceWidth ?? Math.round((layoutRef.current?.clientWidth || 1200) * .55)} aria-valuetext={`工作区宽度 ${resourceWidth ?? Math.round((layoutRef.current?.clientWidth || 1200) * .55)} 像素`} tabIndex={resourceOpen && workspaceTab === 'conversation' ? 0 : -1} hidden={!resourceOpen || workspaceTab !== 'conversation'} onPointerDown={event => event.currentTarget.setPointerCapture?.(event.pointerId)} onPointerMove={event => { if (event.buttons !== 1 || !layoutRef.current) return; const width = layoutRef.current.getBoundingClientRect().right - event.clientX; setResourceWidth(Math.max(480, Math.min(width, layoutRef.current.clientWidth - 360))) }} onKeyDown={event => { if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return; event.preventDefault(); const width = resourceWidth ?? Math.round((layoutRef.current?.clientWidth || 1200) * .55); setResourceWidth(Math.max(480, Math.min(width + (event.key === 'ArrowLeft' ? 24 : -24), (layoutRef.current?.clientWidth || 1200) - 360))) }} />
+        <aside className="resource-workspace" aria-label="资源工作区" hidden={!resourceOpen || workspaceTab !== 'conversation'} style={{ width: resourceWidth == null ? '55%' : resourceWidth }}>
+          <header className="resource-header"><div role="tablist" aria-label="资源页签">{resourceTabs.map(tab => <div className="resource-tab" key={tab}><button role="tab" data-resource-tab={tab} aria-selected={activeResource === tab} tabIndex={activeResource === tab ? 0 : -1} onClick={() => selectResourceTab(tab)} onKeyDown={event => resourceTabKeyDown(event, tab)}>{tab === 'mapping' ? '字段映射' : '结果／产物'}</button><button aria-label={'关闭' + (tab === 'mapping' ? '字段映射' : '结果／产物') + '页签'} onClick={() => closeResource(tab)}>×</button></div>)}</div><button className="button-text" onClick={collapseResource}><span className="resource-desktop-label">收起工作区</span><span className="resource-mobile-label">返回对话</span></button></header>
+          <div className="resource-pane" hidden={activeResource !== 'mapping'}>{mappingArtifact && <MappingWorkspace key={identity?.id + ':' + activeId + ':' + mappingArtifact.id} artifact={mappingArtifact} onBack={collapseResource} onDownload={() => void downloadMapping(mappingArtifact.id)} downloading={downloadId === mappingArtifact.id} downloadError={downloadError?.id === mappingArtifact.id ? downloadError.message : ''} editable={identity?.role === 'user'} draftId={mappingDraftId || conversation?.drafts?.find(item => item.base_artifact_id === mappingArtifact.id && ['active', 'applying'].includes(item.status))?.id} onDraftChange={draftChanged} onPendingChange={pendingChanged} onApply={current => applyAndWait(current, viewToken.current)} onDiscard={current => discardDraft(current, viewToken.current)} />}</div>
+          <div className="resource-pane" hidden={activeResource !== 'results'}>{fieldChange && !loading ? <FieldChangesWorkspace key={identity?.id + ':' + activeId + ':' + fieldChange.run_id} summary={fieldChange} editable={identity?.role === 'user'} onBack={() => { setFieldChangesId(null); collapseResource() }} onRefresh={() => refreshActive(activeId!)} onExecution={id => { void openRun(id) }} /> : <section aria-label="结果与产物"><h2>结果与产物</h2><div className="resource-artifact-list">{conversation?.artifacts?.map(item => <button key={item.id} className={item.id === selectedResultId ? 'selected' : ''} onClick={() => void openArtifact(item)}>{businessName(item.kind)} · 版本 {item.version ?? '未记录'}{'current' in item && !item.current ? ' · 历史' : ''}</button>)}{!conversation?.artifacts?.length && <p>当前会话还没有已发布产物。</p>}</div>{selectedArtifact && <article className="resource-artifact-detail"><h3>{businessName(selectedArtifact.kind)} · 版本 {selectedArtifact.version ?? '未记录'}</h3><p>{selectedArtifact.status === 'corrupt' ? '产物不可用' : selectedArtifact.status === 'stale' || ('current' in selectedArtifact && !selectedArtifact.current) ? '历史结果' : selectedArtifact.status === 'published' ? '已发布' : '状态不可用'}</p><p>来源 Run：<button className="button-text" onClick={() => void openRun(selectedArtifact.run_id)}>{selectedArtifact.run_id}</button></p>{artifactLoading && <p role="status">正在加载结果…</p>}{artifactError && <p role="alert">{artifactError}<button className="button-text" onClick={() => void openArtifact(selectedArtifact)}>重试</button></p>}{artifactContent && <ArtifactValues artifact={selectedArtifact} content={artifactContent} />}<button className="button-secondary" onClick={() => void downloadMapping(selectedArtifact.id)} disabled={!!downloadId}>下载产物</button>{downloadError?.id === selectedArtifact.id && <p role="alert">{downloadError.message}</p>}</article>}</section>}</div>
+        </aside>
+      </>}
+      </div>
     </main>
     {pendingConfirmation && <MappingDialog title="发送前处理执行方案" onClose={() => setPendingConfirmation(null)}><BusinessConfirmation key={identity?.id + ':' + activeId + ':' + pendingConfirmation.run.id + ':send'} run={pendingConfirmation.run} beforeSend onBack={() => setPendingConfirmation(null)} onResolved={async () => {const pending = pendingConfirmation; if (!isCurrent(pending.version, pending.id)) return; await refreshActive(pending.id); if (isCurrent(pending.version, pending.id)) await sendContent(pending.id, pending.content, pending.version)}} /></MappingDialog>}
 
     {pendingSend && <MappingDialog title="发送前处理映射草稿" onClose={returnToEditing}><p>消息尚未发送。请处理{pendingSend.drafts.length > 1 ? '当前草稿，再逐个处理其余草稿' : '未应用的修改'}。</p>{pendingSend.drafts[0] && <p>{pendingSend.drafts[0].changed_count} 处修改{!pendingSend.drafts[0].base_current ? '，来源已过期，只能丢弃或返回查看' : ''}。</p>}{resolutionError && <p role="alert" className="mapping-error">{resolutionError}</p>}<div className="mapping-actions"><button className="button-text" data-dialog-cancel onClick={returnToEditing} disabled={busy}>返回编辑</button>{pendingSend.drafts.length ? <><button className="button-text" onClick={() => void resolveSend('apply')} disabled={busy || resolutionConflict || !pendingSend.drafts[0].base_current}>应用后发送</button><button className="button-text" onClick={() => void resolveSend('discard')} disabled={busy || resolutionConflict || pendingSend.drafts[0].status === 'applying'}>丢弃后发送</button></> : <button className="button-text" onClick={() => { const pending = pendingSend; setPendingSend(null); setBusy(true); void sendContent(pending.id, pending.content, pending.version).catch(caught => { if (isCurrent(pending.version, pending.id)) setError(caught instanceof Error ? caught.message : '消息发送失败。') }).finally(() => { if (isCurrent(pending.version, pending.id)) setBusy(false) }) }}>继续发送</button>}<button className="button-text" onClick={() => void reloadResolution()} disabled={busy}>重新加载草稿状态</button></div></MappingDialog>}
-    {panel?.type === 'task' && conversation && <ContextPanel key={'task:' + conversation.id} panel={panel} title="任务上下文" onClose={() => setPanel(null)} tabs={[
-      { id: 'facts', label: '任务信息', content: <TaskFacts conversation={conversation} drafts={liveDrafts} /> },
-      { id: 'artifacts', label: '产物与草稿', content: <>{conversation.artifacts?.length ? conversation.artifacts.map(item => <p key={item.id}><button className="button-text" onClick={() => openResult(item)}>{businessName(item.kind)} · {item.id.slice(-8)}{'current' in item && !item.current ? '（历史）' : ''}</button></p>) : <p>还没有可查看的产物。</p>}{liveDrafts.map(item => <p key={item.id}><button className="button-text" onClick={() => { if (setMappingId(item.base_artifact_id)) { setMappingDraftId(item.id); setPanel(null) } }}>恢复草稿 · {item.changed_count} 处修改</button></p>)}</> },
-    ]} />}
-    {panel && panel.type !== 'task' && panelTabs.length > 0 && <ContextPanel key={panel.type + ':' + panel.id} panel={panel} title={selectedArtifact ? businessName(selectedArtifact.kind) + '结果' : businessName(drawer?.kind || '')} onClose={() => setPanel(null)} tabs={panelTabs} />}
   </div>
 }
