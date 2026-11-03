@@ -106,11 +106,13 @@ class LogParseAdapter:
 
         if classification.get("status") != "SUCCESS":
             # 仅完整成功可发布；失败或部分结果保持上一次正式分类不变。
-            return _failed(
-                step,
-                "log_parse_failed",
-                f"日志类型提取失败：{classification.get('error') or '分类器未提供失败原因'}",
+            # 分类器失败原因在 fail_reason（#433 前误取 error，导致永远显示笼统文案）。
+            reason = (
+                classification.get("fail_reason")
+                or classification.get("error")
+                or "分类器未提供失败原因"
             )
+            return _failed(step, "log_parse_failed", f"日志类型提取失败：{reason}")
         classification = self._sample_filler(classification, logs_text)
         submission = build_submission_snapshot(
             classification,
