@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from openpyxl import load_workbook
 from application.log_privacy import private_business_logging
+from agent.shared.logger import get_logger
 from openpyxl.utils.exceptions import InvalidFileException
 from contracts.model_call_diagnostics import bind_recorder, reset_recorder, set_scope, reset_scope
 
@@ -19,6 +20,9 @@ from toolwithagent_v2.runtime.fake_application import FakeApplication
 from toolwithagent_v2.runtime.business_application import BusinessApplication
 from toolwithagent_v2.settings import Settings
 from toolwithagent_v2.runtime.progress import RunProgressSink
+
+# 豁免脱敏的诊断通道：消息只允许由稳定错误码/ID/计数构造（#433）。
+_DIAGNOSTICS = get_logger("v2.diagnostics")
 
 
 class Worker:
@@ -102,7 +106,7 @@ class Worker:
             return self.store.finish(self.worker_id, claim, error)
         try:
             path = self.store.root / snapshot["storage_key"]
-            with private_business_logging():
+            with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                 outcome = asyncio.run(self.business_application.parse(path, {**snapshot, "_progress_sink": RunProgressSink(self.store, self.worker_id, claim)}))
             if "classification" not in outcome:
                 return self.store.finish(self.worker_id, claim, outcome.get("error") or "log_parse_failed",
@@ -162,10 +166,10 @@ class Worker:
             classification = self.store.read_classification(claim) if claim["input"].get("source_artifact_id") else None
             initial_session = None
             if claim["input"].get("business_inputs"):
-                with private_business_logging():
+                with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                     initial_session, _ = self.store.read_business_session(claim)
             snapshot = {**claim["input"], "initial_session": initial_session, "_progress_sink": RunProgressSink(self.store, self.worker_id, claim)}
-            with private_business_logging():
+            with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                 outcome = asyncio.run(self.business_application.field_mapping(
                     self.store.root / claim["input"]["storage_key"], snapshot, classification))
             if outcome.get("error") or not outcome.get("config") or not outcome.get("download_content"):
@@ -219,7 +223,7 @@ class Worker:
                 error = self._validate(claim["input"])
                 if error:
                     return self.store.finish(self.worker_id, claim, error)
-            with private_business_logging():
+            with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                 session, base = self.store.read_business_session(claim)
                 outcome = asyncio.run(self.business_application.postprocess(session, claim["input"], base, self.store.continuation(claim["id"]), progress_sink=RunProgressSink(self.store, self.worker_id, claim)))
             if "field_changes" in outcome:
@@ -241,7 +245,7 @@ class Worker:
         from toolwithagent_v2.runtime.postprocessing import restore_session, freeze_session, config_payload
         try:
             prepared = FieldChanges(self.store).read_command(claim)
-            with private_business_logging():
+            with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                 if claim["task_type"] == "field_change_undo":
                     session = restore_session(prepared["initial_state"])
                     source = prepared["groups"][0]["steps"][0]["config_ref"]
@@ -270,12 +274,25 @@ class Worker:
         if error:
             return self.store.finish(self.worker_id, claim, error)
         try:
-            with private_business_logging():
+            with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                 from toolwithagent_v2.runtime.postprocessing import BusinessSession
                 attach_enum(BusinessSession(), self.store.root / claim["input"]["storage_key"], self.store.root / "staging")
             return self.store.finish(self.worker_id, claim)
         except Exception:
             return self.store.finish(self.worker_id, claim, "enum_attachment_invalid", "枚举映射附件未完整通过校验，请检查工作表。")
+
+    def _log_model_call_failure(self, claim, event):
+        """失败模型调用的稳定类别行：仅异常分类学/HTTP 状态/ID/计数（#433）。"""
+        if event.get("status") != "failed":
+            return
+        _DIAGNOSTICS.error(
+            "model_call_failed run_id=%s task=%s operation=%s attempt=%s error_code=%s "
+            "http_status=%s duration_ms=%s provider=%s model=%s",
+            claim["id"], claim["task_type"], event.get("operation") or "-",
+            event.get("attempt") or "-", event.get("error_code") or "model_unclassified",
+            event.get("http_status") or "-", event.get("duration_ms") or "-",
+            event.get("provider"), event.get("model"),
+        )
 
     def once(self) -> bool:
         claim = self.store.claim(self.worker_id, lease_seconds=self.lease_seconds)
@@ -284,6 +301,7 @@ class Worker:
         stop = threading.Event()
         def record_call(event):
             self.store.record_model_call(self.worker_id, claim, event)
+            self._log_model_call_failure(claim, event)
 
         diagnostic_token = bind_recorder(record_call)
         scope_token = set_scope(None)
@@ -297,7 +315,7 @@ class Worker:
         keeper.start()
         try:
             if claim["task_type"] == "business_clear":
-                with private_business_logging():
+                with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                     return self.store.clear_business(self.worker_id, claim)
             if claim["task_type"] in {"user_request", "business_operation"}:
                 return self._run_business(claim)

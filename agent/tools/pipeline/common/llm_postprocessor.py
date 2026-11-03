@@ -142,7 +142,8 @@ def match_real_samples(
                 f"regex={feature_identifier[:50]}..., body_group={feature_body_group}"
             )
         except _re.error as e:
-            logger.warning(f"[llm_postprocessor] feature_identifier 正则编译失败: {e}")
+            logger.warning(f"[llm_postprocessor] feature_identifier 正则编译失败: {e}",
+                           extra={"error_category": "feature_regex_invalid"})
 
     # 只收集本批 logtype 的首个命中行；分批后 details 仅含本批值（#190），
     # 若按"任意不同值"计数提前退出，频次序分批与文件序扫描错位会漏掉
@@ -303,7 +304,8 @@ def postprocess_llm_classification(
     parsed = parse_json_object(llm_response, repair_trailing_comma=True)
 
     if parsed is None:
-        logger.warning("[llm_postprocessor] LLM returned invalid JSON, using fallback")
+        logger.warning("[llm_postprocessor] LLM returned invalid JSON, using fallback",
+                       extra={"error_category": "model_output_invalid"})
         return {
             "status": "PARTIAL",
             "classification_details": build_fallback_details(aggregation),
