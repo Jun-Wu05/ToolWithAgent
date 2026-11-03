@@ -292,7 +292,8 @@ class Store:
                 if classification is None or classification["id"] != classification_artifact_id:
                     raise ValueError("mapping_input_stale")
             else:
-                source = None
+                # 文件入口与显式分类入口同源：锚定当前分类产物，映射执行期不再隐式重复解析（#432）。
+                source = classification
             file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=? AND is_active=1", (file_id, conversation_id, owner_id)).fetchone()
             if file is None:
                 raise LookupError("file_not_found")
