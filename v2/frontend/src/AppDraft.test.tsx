@@ -169,7 +169,7 @@ describe('Draft before sending a message', () => {
   })
   it('does not send after a delayed conversation creation changes view', async () => {
     vi.mocked(api.conversations).mockResolvedValue({ items: [] }); const creation = deferred<typeof summary>(); vi.mocked(api.createConversation).mockImplementationOnce(() => creation.promise)
-    render(<App />); await screen.findByRole('heading', { name: '开始一项日志规则任务' })
+    render(<App />); await screen.findByRole('heading', { name: '从一句话或一个文件开始' })
     fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '旧指令' } }); fireEvent.click(screen.getByRole('button', { name: '发送' }))
     vi.mocked(api.me).mockResolvedValue({ id: 'u2', display_name: '用户二', role: 'user' }); vi.mocked(api.conversations).mockResolvedValue({ items: [{ ...summary, id: 'conv-2', title: '另一会话' }] })
     fireEvent.change(screen.getByLabelText('开发身份切换'), { target: { value: 'u2' } }); await screen.findByRole('heading', { name: '另一会话' })

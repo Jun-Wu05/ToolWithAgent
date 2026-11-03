@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { api, type Artifact, type Conversation, type FieldChangeSummary, type FieldMappingArtifact, type FileRecord, type Message, type Run, type RunEvent } from './api'
+import { api, type Artifact, type Conversation, type FieldChangeSummary, type FieldMappingArtifact, type FileRecord, type Message, type Run, type RunEvent, type Suggestion } from './api'
 import { businessName, phaseName } from './BusinessWorkspace'
 import { StatusText } from './VisualPrimitives'
 
@@ -79,7 +79,22 @@ export type TimelineActions = {
   onMappingSource: (source: { id: string; kind: 'file' | 'classification'; label: string }) => void
   mappingForm: (source: { id: string; kind: 'file' | 'classification'; label: string }) => ReactNode
   onOpenFieldChanges: (runId: string) => void
+  onSuggestion?: (suggestion: Suggestion, message: Message) => void
   canOperate: boolean
+}
+
+/** 助手消息内的下一步建议芯片（#435）：动作接既有 API，prompt 只填输入框。 */
+export function SuggestionChips({ message, actions }: { message: Message; actions: TimelineActions }) {
+  const raw = message.payload?.suggestions
+  const suggestions = Array.isArray(raw) ? raw as Suggestion[] : []
+  if (!suggestions.length || !actions.onSuggestion) return null
+  return <div className="suggestion-chips" role="group" aria-label="下一步建议">
+    {suggestions.map((suggestion, index) => (
+      <button key={suggestion.id + ':' + index} className="suggestion-chip" type="button"
+        disabled={!!actions.actionBusy && suggestion.type === 'action'}
+        onClick={() => actions.onSuggestion?.(suggestion, message)}>{suggestion.label}</button>
+    ))}
+  </div>
 }
 
 export function FileRow({ file, actions }: { file: FileRecord; actions: TimelineActions }) {
@@ -180,7 +195,7 @@ export function ConversationTimeline({ conversation, actions, renderers }: {
           ? <FileMessageCard message={message} conversation={conversation} actions={actions} />
           : message.kind === 'operation'
             ? <OperationCard message={message} runs={runs} actions={actions} />
-            : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
+            : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{!isUser && <SuggestionChips message={message} actions={actions} />}{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
       </div>
     })}
     {(unlinked.files.length > 0 || unlinked.artifacts.length > 0 || unlinked.fieldChanges.length > 0 || unlinked.runs.length > 0) && <details className="activity-section unlinked-inputs" aria-label="历史独立操作"><summary>历史独立操作 · {unlinked.files.length + unlinked.artifacts.length + unlinked.fieldChanges.length + unlinked.runs.length} 项（早于输入留痕，未关联具体输入）</summary>{unlinked.files.length > 0 && <section><h2>输入文件</h2>{unlinked.files.map(file => <FileRow key={file.id} file={file} actions={actions} />)}</section>}{unlinked.artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{unlinked.fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{unlinked.runs.length > 0 && <section><h2>执行记录</h2>{unlinked.runs.map(run => <button className="run-row" key={run.id} onClick={() => actions.onOpenRun(run.id)}><span className="run-label">{businessName(run.kind || run.type || '')}</span><StatusText status={run.status} className="run-status" /><span className="run-detail">执行详情 ›</span></button>)}</section>}</details>}

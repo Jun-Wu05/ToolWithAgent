@@ -100,3 +100,36 @@ it('aligns agent replies with an avatar and exposes the parameter form slot on t
   expect(replyTurn.textContent).toContain('参数补充表单')
   expect(view.container.querySelectorAll('.chat-row-user')).toHaveLength(0)
 })
+
+it('renders suggestion chips on assistant messages and forwards clicks (#435)', () => {
+  const onSuggestion = vi.fn()
+  const conversation: Conversation = {
+    ...base,
+    messages: [
+      { id: 'm-guide', actor: 'assistant', kind: 'text', content: '文件校验完成。想做什么？', run_id: 'run-1',
+        payload: { suggestions: [
+          { type: 'prompt', id: 'enum_extract', label: '提取字段枚举值', text: '提取【字段名】的枚举值' },
+          { type: 'action', id: 'log_parse', label: '日志类型提取', file_id: 'f1' },
+        ] } },
+    ],
+    files: [], runs: [{ id: 'run-1', status: 'succeeded', kind: 'file_ingest' }], artifacts: [], field_changes: [],
+  }
+  render(<ConversationTimeline conversation={conversation} actions={{ ...noopActions, onSuggestion }} renderers={renderers} />)
+  const group = screen.getByLabelText('下一步建议')
+  expect(group).toHaveTextContent('提取字段枚举值')
+  expect(group).toHaveTextContent('日志类型提取')
+  fireEvent.click(screen.getByRole('button', { name: '日志类型提取' }))
+  expect(onSuggestion).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'log_parse', type: 'action', file_id: 'f1' }),
+    expect.objectContaining({ id: 'm-guide' }))
+})
+
+it('renders no chips without suggestions or without a handler', () => {
+  const conversation: Conversation = {
+    ...base,
+    messages: [{ id: 'm-plain', actor: 'assistant', kind: 'text', content: '普通回复' }],
+    files: [], runs: [], artifacts: [], field_changes: [],
+  }
+  const view = render(<ConversationTimeline conversation={conversation} actions={noopActions} renderers={renderers} />)
+  expect(view.container.querySelector('.suggestion-chips')).toBeNull()
+})
