@@ -83,6 +83,9 @@ def test_real_business_adapter_success_or_failure_publish_boundary(tmp_path, out
         assert upload.status_code == 201
         file_id = upload.json()['file']['id']
         assert worker.once()
+        # 分叉②（#435）：新文件映射需先有当前分类产物。
+        client.post(f'/api/v2/conversations/{conversation}/log-parse', json={'file_id': file_id})
+        assert worker.once()
     assert enqueue(client, conversation, file_id).status_code == 201
     assert worker.once()
     previous = mappings(store, conversation)[0]
@@ -186,9 +189,10 @@ def test_field_mapping_skips_reparse_plan_when_classification_reused(tmp_path, m
     assert plans == ['v2-field-mapping']
     assert 'error' not in reused
     plans.clear()
-    reparsed = asyncio.run(business.field_mapping(source, snapshot, None))
-    assert plans == ['v2-mapping-log-parse', 'v2-field-mapping']
-    assert 'error' not in reparsed
+    # 分叉②定稿（#435）：无分类产物直接拒绝并引导先提取，不再触发任何执行计划。
+    rejected = asyncio.run(business.field_mapping(source, snapshot, None))
+    assert rejected == {'error': 'classification_required'}
+    assert plans == []
 
 
 def test_sample_reader_order_dedup_rule_membership_and_config_null_numbers():

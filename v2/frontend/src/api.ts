@@ -120,6 +120,7 @@ const messages: Record<string, string> = {
   mapping_draft_apply_stale: '应用时草稿或来源已变化，修改未发布，请重新检查草稿。',
   mapping_input_stale: '主数据或分类结果已变化，请重新选择当前输入。',
   mapping_input_required: '请选择一份当前输入后开始映射。',
+  classification_required: '这份文件还没有日志类型提取结果，请先做日志类型提取。',
   data_source_fields_required: '请填写产品和厂商。',
   invalid_source_fields: '产品、厂商或数据源格式无效，请检查后重试。',
   file_not_validated: '文件尚未校验成功，请等待校验完成。',

@@ -9,12 +9,11 @@ MAX_SUGGESTIONS = 4
 
 
 def upload_validated(file_id):
-    """主数据校验通过：意图气泡，枚举可直提、其余引导先提取。"""
+    """主数据校验通过：意图气泡。枚举可直提；映射需先提取（分叉②定稿）。"""
     return [
         {"type": "prompt", "id": "enum_extract", "label": "提取字段枚举值",
          "text": "提取【字段名】的枚举值"},
         {"type": "action", "id": "log_parse", "label": "日志类型提取", "file_id": file_id},
-        {"type": "action", "id": "field_mapping", "label": "标准字段映射", "file_id": file_id},
     ]
 
 

@@ -23,6 +23,9 @@ def setup(tmp_path):
     worker = Worker(store,'worker-a',business_application=business)
     response=client.post(f'/api/v2/conversations/{conversation}/files',files={'file':('logs.txt',b'kind=a src=SECRET\n')})
     assert worker.once()
+    # 分叉②（#435）：映射统一要求当前分类产物，脚手架先完成一次日志类型提取。
+    client.post(f'/api/v2/conversations/{conversation}/log-parse',json={'file_id':response.json()['file']['id']})
+    assert worker.once()
     return client,store,conversation,worker,business,response.json()['file']['id']
 
 def enqueue(client, conversation, file_id, **extra):
@@ -79,30 +82,30 @@ def test_late_mapping_cannot_publish_after_input_or_claim_change(tmp_path,change
     assert mappings(store,conversation)==[]
 
 def test_file_entry_mapping_reuses_current_classification_artifact(tmp_path):
-    """文件入口在已有当前分类产物时与其同源锚定，不再隐式重复解析（#432）。"""
+    """文件入口映射：无分类产物被拒绝并引导先提取；有分类则与其同源锚定（#432/#435 分叉②）。"""
     client,store,conversation,worker,business,file_id=setup(tmp_path)
+    with __import__('toolwithagent_v2.infrastructure.db',fromlist=['connect']).connect(store.path) as db:
+        db.execute("UPDATE artifacts SET status='stale' WHERE kind='log_classification'")
     seen=[]
     original=business.field_mapping
     async def capture(path,snapshot,classification=None):
         seen.append(classification is not None)
         return await original(path,snapshot,classification)
     business.field_mapping=capture
-    assert enqueue(client,conversation,file_id,key='no-classification').status_code==201
-    claim=store.claim('worker-a')
-    assert 'source_artifact_id' not in claim['input']
-    assert worker._run_field_mapping(claim)
-    assert seen==[False]
+    rejected=enqueue(client,conversation,file_id,key='no-classification')
+    assert rejected.status_code==400
+    assert rejected.json()['error']['code']=='classification_required'
     client.post(f'/api/v2/conversations/{conversation}/log-parse',json={'file_id':file_id})
     assert worker.once()
-    classified=[a for a in store.get_conversation('dev-user',conversation)['artifacts'] if a['kind']=='log_classification'][0]
+    classified=[a for a in store.get_conversation('dev-user',conversation)['artifacts'] if a['kind']=='log_classification' and a['status']=='published'][0]
     assert enqueue(client,conversation,file_id,key='with-classification').status_code==201
     claim=store.claim('worker-a')
     assert claim['input']['source_artifact_id']==classified['id']
     assert 'source_sha256' in claim['input'] and 'source_storage_key' in claim['input']
     assert claim['input']['classification_anchor']==classified['id']
     assert worker._run_field_mapping(claim)
-    assert seen==[False,True]
-    assert len(mappings(store,conversation))==2
+    assert seen==[True]
+    assert len(mappings(store,conversation))==1
 
 def test_failure_keeps_old_result_and_invalid_upload_does_not_stale_it(tmp_path):
     client,store,conversation,worker,business,file_id=setup(tmp_path)
@@ -156,7 +159,7 @@ def test_classification_input_is_frozen_and_foreign_user_rejected(tmp_path):
     from toolwithagent_v2.infrastructure.db import connect
     client,store,conversation,worker,business,file_id=setup(tmp_path)
     client.post(f'/api/v2/conversations/{conversation}/log-parse',json={'file_id':file_id}); assert worker.once()
-    artifact=store.get_conversation('dev-user',conversation)['artifacts'][0]
+    artifact=[a for a in store.get_conversation('dev-user',conversation)['artifacts'] if a['kind']=='log_classification'][-1]
     assert artifact['mapping_eligible']
     response=client.post(f'/api/v2/conversations/{conversation}/field-mapping',json={'classification_artifact_id':artifact['id'],'product':'p','log_vendor':'v'})
     assert response.status_code==201,response.text; assert worker.once()

@@ -14,12 +14,22 @@ def test_upload_validated_message_offers_intent_suggestions(tmp_path):
     suggestions = next(m["payload"]["suggestions"] for m in _assistant_messages(client, conversation)
                        if m["payload"].get("suggestions"))
     ids = [item["id"] for item in suggestions]
-    assert "enum_extract" in ids and "log_parse" in ids and "field_mapping" in ids
+    # 分叉②定稿（#435）：上传后不提供映射入口（映射需先提取），枚举可直提。
+    assert "enum_extract" in ids and "log_parse" in ids and "field_mapping" not in ids
     log_parse = next(item for item in suggestions if item["id"] == "log_parse")
     assert log_parse["type"] == "action" and log_parse["file_id"] == file_id
     prompt = next(item for item in suggestions if item["id"] == "enum_extract")
     assert prompt["type"] == "prompt" and prompt["text"]
     assert len(suggestions) <= 4
+
+
+def test_mapping_without_classification_is_rejected_with_guidance(tmp_path):
+    client, store, conversation, worker = parse_setup(tmp_path)
+    file_id = upload(client, conversation, worker)
+    response = client.post(f"/api/v2/conversations/{conversation}/field-mapping",
+                           json={"file_id": file_id, "product": "p", "log_vendor": "v"})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "classification_required"
 
 
 def test_classification_done_suggestions_use_artifact_entry(tmp_path):
@@ -47,7 +57,7 @@ def test_mapping_done_and_failed_suggestions(tmp_path):
     artifact = mappings(store, conversation)[0]
     done = next(m["payload"]["suggestions"] for m in detail["messages"]
                 if m["actor"] == "assistant" and m["payload"].get("suggestions")
-                and any(s["id"] == "open_results" and s.get("artifact_id") for s in m["payload"]["suggestions"]))
+                and any(s["id"] == "mapping_edit" for s in m["payload"]["suggestions"]))
     open_results = next(item for item in done if item["id"] == "open_results")
     assert open_results["artifact_id"] == artifact["id"]
 

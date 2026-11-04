@@ -31,6 +31,10 @@ class IndependentBusiness:
     def __init__(self, readonly_link=False):
         self.readonly_link = readonly_link
 
+    async def parse(self, path, snapshot):
+        return {"classification": {"status": "SUCCESS", "classification_details": []},
+                "total_lines": 1, "submission_eligible": False}
+
     async def field_mapping(self, path, snapshot, classification=None):
         config = [
             {"name": "same-name", "parser": {"filter": [{"fields": {"威胁类型": "%{description}"}}]},
@@ -77,6 +81,10 @@ def world(tmp_path, request):
                          files={"file": ("independent.txt", f"type=x alpha={PRIVATE_SAMPLE}\n".encode())})
     assert upload.status_code == 201, upload.text
     file_id = upload.json()["file"]["id"]
+    assert worker.once()
+    # 分叉②（#435）：映射统一要求当前分类产物，脚手架先完成一次日志类型提取。
+    parsed = client.post(f"/api/v2/conversations/{conversation_id}/log-parse", json={"file_id": file_id})
+    assert parsed.status_code == 201, parsed.text
     assert worker.once()
     queued = client.post(f"/api/v2/conversations/{conversation_id}/field-mapping",
                          json={"file_id": file_id, "product": "private-product", "log_vendor": "private-vendor"},
@@ -294,7 +302,7 @@ def test_independent_multiple_stale_drafts_are_discardable_after_database_restar
                               json={"file_id": world.file_id, "product": "p", "log_vendor": "v"},
                               headers={"Idempotency-Key": "new-mapping"})
     assert queued.status_code == 201 and world.worker.once()
-    new_artifact = next(item for item in world.store.get_conversation("dev-user", world.conversation_id)["artifacts"] if item.get("current"))
+    new_artifact = next(item for item in world.store.get_conversation("dev-user", world.conversation_id)["artifacts"] if item.get("current") and item["kind"] == "field_mapping")
     newer = world.client.post(f"/api/v2/artifacts/{new_artifact['id']}/mapping-drafts").json()
     newer = saved(edit(world, newer, "delta", "源端口"))
     restarted = TestClient(create_app(world.settings))
@@ -347,7 +355,7 @@ def test_independent_applied_download_view_metadata_and_lineage_agree(world):
     draft = saved(edit(world, world.draft, "delta", "事件描述"))
     response = apply_draft(world, draft)
     assert response.status_code == 201 and world.worker.once()
-    new_artifact = next(item for item in world.store.get_conversation("dev-user", world.conversation_id)["artifacts"] if item.get("current"))
+    new_artifact = next(item for item in world.store.get_conversation("dev-user", world.conversation_id)["artifacts"] if item.get("current") and item["kind"] == "field_mapping")
     all_rows = []
     for rule in ("0", "1", "2"):
         view = world.client.get(f"/api/v2/artifacts/{new_artifact['id']}/mapping-view", params={"sub_rule": rule}).json()
