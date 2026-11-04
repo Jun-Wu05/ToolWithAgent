@@ -137,6 +137,8 @@ describe('V2 workbench', () => {
     render(<App />)
     await screen.findByText('登录事件 · 3')
     expect(screen.getByText('覆盖率：3 / 4')).toBeInTheDocument()
+    // #435 Phase 2：正式产物在时间线以紧凑台账行呈现。
+    expect(screen.getByText('日志类型提取完成').closest('article')).toHaveClass('ledger-row')
     expect(screen.queryByText('raw secret')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '申请加入知识库' }))
     await waitFor(() => expect(api.submitLogKnowledge).toHaveBeenCalledWith('a1'))

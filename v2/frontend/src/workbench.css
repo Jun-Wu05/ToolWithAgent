@@ -119,3 +119,10 @@
 .empty-template{display:flex;flex-direction:column;gap:4px;border:1px solid var(--border-subtle);border-radius:10px;background:var(--surface-card);color:var(--foreground);padding:12px;cursor:pointer}
 .empty-template:hover{border-color:var(--primary)}
 .empty-template span{font-size:12px;color:var(--muted-foreground)}
+/* #435 Phase 2 台账行：正式产物在时间线的紧凑登记形态（详情与操作集中在右侧工作区）。 */
+.ledger-row{padding:8px 12px;border-left:3px solid var(--border-subtle);background:var(--surface-card)}
+.ledger-row .result-heading{margin:0;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.ledger-row p{margin:2px 0;font-size:12px;color:var(--muted-foreground)}
+.ledger-row .result-types{font-size:12px}
+.ledger-row .rule-summary{font-size:12px}
+.ledger-row .mapping-actions{margin-top:6px}
