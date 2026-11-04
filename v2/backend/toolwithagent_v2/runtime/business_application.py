@@ -181,16 +181,11 @@ class BusinessApplication:
         before_slots = {"enum_values": session.latest_enum_artifact, "threat_mapping": session.latest_threat_artifact}
         team = (self.team_factory or create_data_mapping_team)()
         adapters = self.adapters_factory(team) if self.adapters_factory else create_default_adapters(team)
-        if classification is not None:
-            from application.session_state import commit_log_classification
-            commit_log_classification(session, classification["classification"])
-        else:
-            parse_plan = DeterministicPlan(plan_id="v2-mapping-log-parse", steps=(
-                LogParseStep(step_id="log-parse", type="log_parse", feature_field=snapshot.get("feature_field")),))
-            parsed = await run_deterministic_plan(session=session, team=team, plan=parse_plan,
-                progress_sink=snapshot.get("_progress_sink") or NullProgressSink(), adapters=adapters)
-            if parsed.status != StepStatus.SUCCESS or not session.log_classification:
-                return {"error": "log_parse_failed"}
+        # 分叉②定稿（#435）：映射只消费当前分类产物，不再隐式重解析（与 #432 的同源入口一致）。
+        if classification is None:
+            return {"error": "classification_required"}
+        from application.session_state import commit_log_classification
+        commit_log_classification(session, classification["classification"])
         session.rule_source_fields = RuleSourceFields.from_value(snapshot["source_fields"])
         plan = DeterministicPlan(plan_id="v2-field-mapping", steps=(
             FieldMappingStep(step_id="field-mapping", type="field_mapping", source_ref="session.fields"),))

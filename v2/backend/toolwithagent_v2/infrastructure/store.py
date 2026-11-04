@@ -292,8 +292,7 @@ class Store:
                 if classification is None or classification["id"] != classification_artifact_id:
                     raise ValueError("mapping_input_stale")
             else:
-                # 文件入口与显式分类入口同源：锚定当前分类产物，映射执行期不再隐式重复解析（#432）。
-                source = classification
+                source = None
             file = db.execute("SELECT * FROM files WHERE id=? AND conversation_id=? AND owner_id=? AND is_active=1", (file_id, conversation_id, owner_id)).fetchone()
             if file is None:
                 raise LookupError("file_not_found")
@@ -301,6 +300,11 @@ class Store:
                 raise ValueError("file_not_validated")
             if current is None or current["id"] != file_id:
                 raise ValueError("mapping_input_stale")
+            if source is None:
+                # 分叉②定稿（#435）：映射统一要求当前分类产物——无分类引导先提取，不再隐式解析。
+                if classification is None:
+                    raise ValueError("classification_required")
+                source = classification
             snapshot = {key: file[key] for key in ("sha256", "storage_key", "media_type")}
             snapshot.update({"file_id": file_id, "source_fields": source_fields,
                              "classification_anchor": classification["id"] if classification else None,

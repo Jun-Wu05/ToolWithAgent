@@ -89,6 +89,14 @@ def test_field_mapping_message_records_source_params(tmp_path):
     client, store, conversation_id = setup(tmp_path)
     uploaded = upload_log(client, conversation_id)
     assert Worker(store, "worker-a").once()
+    # 分叉②（#435）：文件入口映射要求当前分类产物；离线套件经 SQL 登记一条发布态分类产物。
+    from toolwithagent_v2.infrastructure.db import connect
+    with connect(store.path) as db:
+        run_id = store._enqueue_task(db, "dev-user", conversation_id, "log_parse",
+                                     {"file_id": uploaded["file"]["id"]})["run"]["id"]
+        db.execute("UPDATE runs SET status='cancelled' WHERE id=?", (run_id,))
+        db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES('classification',?,(SELECT task_id FROM runs WHERE id=?),?,'log_classification',1,'published','artifacts/x','x','{}','2999',0)",
+                   (conversation_id, run_id, run_id))
     body = {"file_id": uploaded["file"]["id"], "product": "防火墙", "log_vendor": "华为", "data_source": "日志"}
     response = client.post(
         f"/api/v2/conversations/{conversation_id}/field-mapping",

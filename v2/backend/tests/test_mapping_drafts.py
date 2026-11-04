@@ -15,6 +15,8 @@ class Business:
     apply_mapping_draft = BusinessApplication.apply_mapping_draft
     def __init__(self):
         self.fail = False
+    async def parse(self,path,snapshot):
+        return {"classification":{"status":"SUCCESS","classification_details":[]},"total_lines":1,"submission_eligible":False}
     async def field_mapping(self,path,snapshot,classification=None):
         if self.fail:
             return {"error":"field_mapping_failed"}
@@ -35,6 +37,9 @@ def setup(tmp_path):
     business = Business()
     worker = Worker(store,"worker",business_application=business)
     file_id = client.post(f"/api/v2/conversations/{conversation}/files",files={"file":("logs.txt",b"type=x a=SECRET-A\n")}).json()["file"]["id"]
+    assert worker.once()
+    # 分叉②（#435）：映射统一要求当前分类产物，脚手架先完成一次日志类型提取。
+    client.post(f"/api/v2/conversations/{conversation}/log-parse",json={"file_id":file_id})
     assert worker.once()
     assert client.post(f"/api/v2/conversations/{conversation}/field-mapping",json={"file_id":file_id,"product":"private-product","log_vendor":"private-vendor"},headers={"Idempotency-Key":"mapping"}).status_code == 201
     assert worker.once()
@@ -174,7 +179,7 @@ def test_apply_new_task_frozen_snapshot_lineage_and_old_result_immutable(tmp_pat
         assert frozen["base_artifact_id"]==artifact["id"] and frozen["draft_revision"]==draft["revision"]
         assert frozen["draft_operations"]==draft["operations"]
     assert worker.once()
-    current = [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current")][0]
+    current = [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current") and row["kind"]=="field_mapping"][0]
     assert current["id"]!=artifact["id"] and current["run_id"]==run_id
     with connect(store.path) as db:
         new = db.execute("SELECT * FROM artifacts WHERE id=?",(current["id"],)).fetchone()
@@ -255,10 +260,10 @@ def test_old_automatic_mapping_cannot_publish_over_successful_apply(tmp_path):
     with connect(store.path) as db:
         db.execute("UPDATE runs SET queued_at='2999' WHERE id=?",(automatic["run"]["id"],))
     assert worker.once()
-    applied = [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current")][0]
+    applied = [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current") and row["kind"]=="field_mapping"][0]
     assert worker.once()
     assert store.get_run("dev-user",automatic["run"]["id"])["error_code"]=="mapping_input_stale"
-    assert [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current")][0]["id"]==applied["id"]
+    assert [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current") and row["kind"]=="field_mapping"][0]["id"]==applied["id"]
 
 
 @pytest.mark.parametrize("identity",["dev-other","dev-admin","another-user"])
@@ -291,7 +296,7 @@ def test_unmapping_retains_source_and_exact_dotted_path_is_not_linked(tmp_path):
     assert draft["changed_count"]==1
     assert next(row for row in view(client,artifact,draft,sub_rule="0")["items"] if row["source_path"]=="a")["standard_field"]=="源地址"
     assert apply(client,draft).status_code==201 and worker.once()
-    current = [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current")][0]
+    current = [row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current") and row["kind"]=="field_mapping"][0]
     _row,payload = store._owned_mapping("dev-user",current["id"])
     assert any(entry["index"]=="nested.a" and entry["field"] is None for entry in payload["config"][1]["normalize"])
 
@@ -342,7 +347,7 @@ def test_catalog_revision_change_after_freeze_fails_without_artifact(tmp_path,mo
     assert store.get_run("dev-user",queued["run"]["id"])["error_code"]=="mapping_draft_apply_stale"
     restored=client.get(f"/api/v2/mapping-drafts/{draft['id']}").json()
     assert restored["status"]=="active" and restored["changed_count"]==1
-    assert [row["id"] for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current")]==[artifact["id"]]
+    assert [row["id"] for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current") and row["kind"]=="field_mapping"] == [artifact["id"]]
 
 
 def test_current_scope_no_implicit_link_and_automatic_mapping_queue_unchanged(tmp_path):
@@ -364,7 +369,7 @@ def test_multiple_live_drafts_are_individually_resolvable(tmp_path):
     old=save(client,draft,"a","源端口").json()["draft"]
     store.enqueue_field_mapping("dev-user",conversation,file_id=file_id,product="p",log_vendor="v")
     assert worker.once()
-    current=[row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current")][0]
+    current=[row for row in store.get_conversation("dev-user",conversation)["artifacts"] if row.get("current") and row["kind"]=="field_mapping"][0]
     newer=client.post(f"/api/v2/artifacts/{current['id']}/mapping-drafts").json()
     newer=save(client,newer,"a","目的端口").json()["draft"]
     summaries=client.get(f"/api/v2/conversations/{conversation}").json()["drafts"]
@@ -380,7 +385,8 @@ def test_apply_marks_existing_descendants_stale_and_copies_ancestors(tmp_path):
     with connect(store.path) as db:
         row=db.execute("SELECT * FROM artifacts WHERE id=?",(artifact["id"],)).fetchone()
         for identifier,kind in (("ancestor","log_classification"),("dependent","other")):
-            db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,1,'published',?,?,?,'2000',?)",(identifier,conversation,row["task_id"],row["run_id"],kind,row["storage_key"],row["sha256"],"{}",row["size"]))
+            # ancestor 需晚于 setup 产生的真实分类（ISO 时间戳比较），才能成为“当前分类”。
+            db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,1,'published',?,?,?,'2999',?)",(identifier,conversation,row["task_id"],row["run_id"],kind,row["storage_key"],row["sha256"],"{}",row["size"]))
         db.execute("INSERT INTO artifact_edges VALUES('ancestor',?,'upstream')",(artifact["id"],))
         db.execute("INSERT INTO artifact_edges VALUES(?,'dependent','derived')",(artifact["id"],))
         # Currency compares the classification anchor, as it would for a real parent.
