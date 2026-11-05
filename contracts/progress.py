@@ -28,6 +28,26 @@ class ProgressStatus(str, Enum):
     FAILED = "failed"
 
 
+class PipelineStage(str, Enum):
+    """可公开的日志解析阶段；不包含输入值或模型内容。"""
+
+    FORMAT_IDENTIFICATION = "format_identification"
+    FEATURE_LOCATION = "feature_location"
+    KV_FEATURE_IDENTIFIER = "kv_feature_identifier"
+    CLASSIFICATION = "classification"
+    SAMPLE_FILL = "sample_fill"
+
+
+class PipelineErrorCode(str, Enum):
+    """阶段失败的稳定分类，具体原文留在授权诊断日志中。"""
+
+    FORMAT_INVALID = "format_invalid"
+    FEATURE_LOCATION_FAILED = "feature_location_failed"
+    KV_FEATURE_IDENTIFIER_FAILED = "kv_feature_identifier_failed"
+    CLASSIFICATION_FAILED = "classification_failed"
+    SAMPLE_FILL_FAILED = "sample_fill_failed"
+
+
 class ProgressEvent(BaseModel):
     """保存可安全发送到日志和界面的类型化进度。"""
 
@@ -38,6 +58,8 @@ class ProgressEvent(BaseModel):
     phase: ProgressPhase
     status: ProgressStatus
     message_code: str = Field(min_length=1)
+    pipeline_stage: PipelineStage | None = None
+    error_code: PipelineErrorCode | None = None
     current_batch: int | None = Field(default=None, ge=1)
     total_batches: int | None = Field(default=None, ge=1)
     elapsed_seconds: float = Field(default=0.0, ge=0.0)
