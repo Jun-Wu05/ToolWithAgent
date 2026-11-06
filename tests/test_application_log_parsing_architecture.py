@@ -125,9 +125,56 @@ def test_log_parse_adapter_preserves_call_order_session_and_progress() -> None:
     assert [event.message_code for event in sink.events] == [
         "plan_execution_started",
         "log_parse_started",
+        "log_parse_sample_fill_running",
+        "log_parse_sample_fill_success",
         "log_parse_completed",
         "plan_success",
     ]
+
+
+def test_log_parse_default_facade_publishes_pipeline_failure_from_thread(monkeypatch) -> None:
+    """Agent pipeline observer crosses to the execution loop without changing failure result."""
+    import agent.tools as tools
+    from application.adapters.log_parse import LogParseAdapter
+    from application.execution import ExecutionContext
+    from application.session_projection import build_session_facts
+    from contracts.planner_models import LogParseStep, StepStatus
+    from contracts.progress import PipelineErrorCode, PipelineStage, ProgressStatus
+
+    observed = []
+
+    class Sink:
+        async def publish(self, event):
+            observed.append(event)
+
+    def identify(_logs, progress):
+        progress(PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.RUNNING)
+        progress(PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.SUCCESS)
+        return json.dumps({"format": "KV", "feature_field": "kind"})
+
+    def classify(*_args, progress, **_kwargs):
+        progress(PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.RUNNING)
+        progress(PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.FAILED,
+                 PipelineErrorCode.KV_FEATURE_IDENTIFIER_FAILED)
+        return json.dumps({"status": "FAILED", "fail_reason": "KV 正则两次校验失败"})
+
+    monkeypatch.setattr(tools, "identify_log_format_headless", identify)
+    monkeypatch.setattr(tools, "classify_log_features_headless", classify)
+    session = make_session_state(raw_log_lines=["kind=attack src=1"])
+    result = asyncio.run(LogParseAdapter().execute(
+        LogParseStep(step_id="parse-1", type="log_parse"),
+        ExecutionContext(session=session, session_facts=build_session_facts(session),
+                         plan_id="plan-1", progress_sink=Sink()),
+        {},
+    ))
+    assert result.status == StepStatus.FAILED
+    assert [(event.pipeline_stage, event.status) for event in observed] == [
+        (PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.RUNNING),
+        (PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.SUCCESS),
+        (PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.RUNNING),
+        (PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.FAILED),
+    ]
+    assert observed[-1].error_code == PipelineErrorCode.KV_FEATURE_IDENTIFIER_FAILED
 
 
 def test日志解析只生成提交资格快照且不会写知识库() -> None:

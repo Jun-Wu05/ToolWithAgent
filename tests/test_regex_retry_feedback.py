@@ -12,6 +12,8 @@ import httpx
 import pytest
 
 from agent.tools.pipeline import log_header_processor as lhp
+from agent.tools.pipeline.progress_events import observe_pipeline
+from contracts.progress import PipelineErrorCode, PipelineStage, ProgressStatus
 
 LOGS = [
     "<134>Aug 24 10:00:00 host app: type=attack src=1.1.1.1",
@@ -65,8 +67,15 @@ def test_kv正则生成_全部调用失败抛ValueError而非崩溃(monkeypatch)
 
     monkeypatch.setattr(lhp, "_call_llm_direct", _dead_llm)
 
-    with pytest.raises(ValueError, match="kv_body_regex_generation_failed"):
-        lhp._generate_kv_feature_identifier("\n".join(LOGS), kv_delimit="=")
+    events = []
+    with observe_pipeline(lambda stage, status, error: events.append((stage, status, error))):
+        with pytest.raises(ValueError, match="kv_body_regex_generation_failed"):
+            lhp._generate_kv_feature_identifier("\n".join(LOGS), kv_delimit="=")
+    assert events == [
+        (PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.RUNNING, None),
+        (PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.FAILED,
+         PipelineErrorCode.KV_FEATURE_IDENTIFIER_FAILED),
+    ]
 
 
 def test_failing_sample_block_无捕获组pattern返回空():

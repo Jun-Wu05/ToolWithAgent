@@ -33,6 +33,8 @@ from agent.tools.pipeline.classification_policy import (
     decide_body_key_route,
 )
 from agent.tools.pipeline.common.format_context import FormatContext
+from agent.tools.pipeline.progress_events import emit_pipeline, observe_pipeline
+from contracts.progress import PipelineErrorCode, PipelineStage, ProgressStatus
 
 logger = get_logger("log_parser_pipeline")
 
@@ -510,7 +512,7 @@ def _classify_kv_features(
             )
         except ValueError:
             # 符合规范 7：错误处理原则（立即报错，不兜底）
-            logger.error(
+            logger.exception(
                 "[_classify_kv_features] feature_identifier 生成失败; "
                 f"source_lines={len(source_lines)}, "
                 f"matched_lines={len(matched_source_lines)}",
@@ -759,13 +761,19 @@ def _classify_header_kv_step2a(
     )
 
     logger.info("[_do_classify_log_features] 日志头+KV → Step 2a 特征定位")
-    locate_result = locate_feature(
-        logs_str=logs_str,
-        feature_field=feature_field,
-        format_type=format_type,
-        format_detail=format_detail,
-        fmt=step2a_ctx,
-    )
+    emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.RUNNING)
+    try:
+        locate_result = locate_feature(
+            logs_str=logs_str,
+            feature_field=feature_field,
+            format_type=format_type,
+            format_detail=format_detail,
+            fmt=step2a_ctx,
+        )
+    except Exception:
+        emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.FAILED,
+                      PipelineErrorCode.FEATURE_LOCATION_FAILED)
+        raise
     located = locate_result.get("feature_location", "body")
     located_field = locate_result.get("feature_field", "")
     reason = locate_result.get("reason", "")
@@ -780,6 +788,8 @@ def _classify_header_kv_step2a(
         # body 路径必须有 feature_field
         if not located_field:
             logger.error("[_do_classify_log_features] feature_location=body 但 feature_field 为空")
+            emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.FAILED,
+                          PipelineErrorCode.FEATURE_LOCATION_FAILED)
             return _build_failed_result(
                 format_type, format_detail, feature_field,
                 "Step 2a 判断错误：body 路径必须有 feature_field"
@@ -788,6 +798,8 @@ def _classify_header_kv_step2a(
         # header 路径必须有正确的 feature_field
         if located_field != "__header__":
             logger.error(f"[_do_classify_log_features] feature_location=header 但 feature_field={located_field}")
+            emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.FAILED,
+                          PipelineErrorCode.FEATURE_LOCATION_FAILED)
             return _build_failed_result(
                 format_type, format_detail, feature_field,
                 f"Step 2a 判断错误：header 路径 feature_field 必须为 __header__（实际为 {located_field}）"
@@ -798,13 +810,16 @@ def _classify_header_kv_step2a(
                 f"[_do_classify_log_features] feature_location=header 但 body 有 {body_candidates} 个候选（可能误判），"
                 f"LLM 理由: {reason}，已信任 LLM 判断继续处理"
             )
-    elif located == "unknown":
+    elif located not in ("body", "header"):
         logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
+        emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.FAILED,
+                      PipelineErrorCode.FEATURE_LOCATION_FAILED)
         return _build_failed_result(
             format_type, format_detail, feature_field,
             f"特征定位失败: {reason}"
         )
 
+    emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.SUCCESS)
     if located == "header":
         # Path A: 特征在日志头中
         logger.info("[_do_classify_log_features] → Path A (header)")
@@ -853,12 +868,18 @@ def _classify_header_json_step2a(
     from agent.tools.pipeline.log_feature_locator import locate_feature
 
     logger.info("[_do_classify_log_features] 日志头+JSON → Step 2a 特征定位")
-    locate_result = locate_feature(
-        logs_str=logs_str,
-        feature_field=feature_field,
-        format_type=format_type,
-        format_detail=format_detail,
-    )
+    emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.RUNNING)
+    try:
+        locate_result = locate_feature(
+            logs_str=logs_str,
+            feature_field=feature_field,
+            format_type=format_type,
+            format_detail=format_detail,
+        )
+    except Exception:
+        emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.FAILED,
+                      PipelineErrorCode.FEATURE_LOCATION_FAILED)
+        raise
     located = locate_result.get("feature_location", "body")
     located_field = locate_result.get("feature_field", feature_field)
     reason = locate_result.get("reason", "")
@@ -868,6 +889,7 @@ def _classify_header_json_step2a(
     )
 
     if located == "header":
+        emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.SUCCESS)
         # Path A: 特征在日志头中
         logger.info("[_do_classify_log_features] → Path A (header)")
         from agent.tools.pipeline.log_header_processor import classify_header_features
@@ -880,6 +902,7 @@ def _classify_header_json_step2a(
         )
 
     if located == "body":
+        emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.SUCCESS)
         # Path Main: 特征在 body 中，可能修正了 feature_field
         logger.info("[_do_classify_log_features] → Path Main (body, via Step 2a)")
         return _classify_json_features(
@@ -892,6 +915,8 @@ def _classify_header_json_step2a(
 
     # unknown → FAILED
     logger.warning(f"[_do_classify_log_features] Step 2a 返回 unknown: {reason}")
+    emit_pipeline(PipelineStage.FEATURE_LOCATION, ProgressStatus.FAILED,
+                  PipelineErrorCode.FEATURE_LOCATION_FAILED)
     return _build_failed_result(
         format_type, format_detail, feature_field,
         f"特征定位失败: {reason}",
@@ -1019,6 +1044,25 @@ def _do_classify_log_features(
 # ---------------------------------------------------------------------------
 # 工具入口（agno @tool 装饰器包装）
 # ---------------------------------------------------------------------------
+
+
+def classify_log_features_with_progress(*args, progress=None, **kwargs) -> str:
+    """Headless classifier with allowlisted lifecycle events."""
+    with observe_pipeline(progress):
+        emit_pipeline(PipelineStage.CLASSIFICATION, ProgressStatus.RUNNING)
+        try:
+            result = _do_classify_log_features(*args, **kwargs)
+            parsed = json.loads(result)
+        except Exception:
+            emit_pipeline(PipelineStage.CLASSIFICATION, ProgressStatus.FAILED,
+                          PipelineErrorCode.CLASSIFICATION_FAILED)
+            raise
+        if not isinstance(parsed, dict) or parsed.get("status") != "SUCCESS":
+            emit_pipeline(PipelineStage.CLASSIFICATION, ProgressStatus.FAILED,
+                          PipelineErrorCode.CLASSIFICATION_FAILED)
+        else:
+            emit_pipeline(PipelineStage.CLASSIFICATION, ProgressStatus.SUCCESS)
+        return result
 
 
 @tool(

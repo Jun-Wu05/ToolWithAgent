@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable, Mapping
 
 from application.adapters.shared import _failed, _success
@@ -17,6 +18,9 @@ from contracts.planner_models import (
     StepResult,
     StepSpec,
 )
+from contracts.progress import (
+    PipelineErrorCode, PipelineStage, ProgressEvent, ProgressPhase, ProgressStatus,
+)
 
 
 FormatIdentifier = Callable[[str], str]
@@ -24,11 +28,11 @@ Classifier = Callable[..., str]
 SampleFiller = Callable[[dict, str], dict]
 
 
-def _identify_log_format(logs_text: str) -> str:
+def _identify_log_format(logs_text: str, progress=None) -> str:
     """延迟进入 Agent 门面，避免 Application 导入时加载具体模型实现。"""
     from agent.tools import identify_log_format_headless
 
-    return identify_log_format_headless(logs_text)
+    return identify_log_format_headless(logs_text, progress=progress)
 
 
 def _classify_log_features(*args, **kwargs) -> str:
@@ -72,7 +76,44 @@ class LogParseAdapter:
 
         log_lines = context.session.raw_log_lines or context.session.original_log
         logs_text = "\n".join(str(line) for line in log_lines)
-        format_text = await asyncio.to_thread(self._format_identifier, logs_text)
+        loop = asyncio.get_running_loop()
+        started: dict[PipelineStage, float] = {}
+
+        def progress(stage: PipelineStage, status: ProgressStatus,
+                     error_code: PipelineErrorCode | None = None) -> None:
+            now = time.perf_counter()
+            if status == ProgressStatus.RUNNING:
+                started[stage] = now
+            event = ProgressEvent(
+                plan_id=context.plan_id, step_id=step.step_id,
+                phase=ProgressPhase.EXECUTION, status=status,
+                message_code=f"log_parse_{stage.value}_{status.value}",
+                pipeline_stage=stage, error_code=error_code,
+                elapsed_seconds=max(0, now - started.get(stage, now)),
+            )
+            try:
+                asyncio.run_coroutine_threadsafe(context.progress_sink.publish(event), loop).result()
+            except Exception:
+                pass  # 诊断事件不可改变业务结果
+
+        async def publish_sample(status: ProgressStatus, elapsed: float = 0.0) -> None:
+            try:
+                await context.progress_sink.publish(ProgressEvent(
+                    plan_id=context.plan_id, step_id=step.step_id,
+                    phase=ProgressPhase.EXECUTION, status=status,
+                    message_code=f"log_parse_sample_fill_{status.value}",
+                    pipeline_stage=PipelineStage.SAMPLE_FILL,
+                    error_code=(PipelineErrorCode.SAMPLE_FILL_FAILED
+                                if status == ProgressStatus.FAILED else None),
+                    elapsed_seconds=elapsed,
+                ))
+            except Exception:
+                pass  # 诊断事件不可改变业务结果
+
+        format_text = await asyncio.to_thread(
+            self._format_identifier, logs_text,
+            **({"progress": progress} if self._format_identifier is _identify_log_format else {}),
+        )
         format_info = parse_json_safe(format_text)
         if not isinstance(format_info, dict):
             return _failed(step, "log_format_invalid", "日志格式识别结果不合法")
@@ -86,6 +127,7 @@ class LogParseAdapter:
             json.dumps(format_info, ensure_ascii=False),
             format_info.get("header_end_marker", ""),
             feature_field_explicit=step.feature_field is not None,
+            **({"progress": progress} if self._classifier is _classify_log_features else {}),
         )
         classification = parse_json_safe(classification_text)
         if not isinstance(classification, dict) or not classification:
@@ -113,7 +155,14 @@ class LogParseAdapter:
                 or "分类器未提供失败原因"
             )
             return _failed(step, "log_parse_failed", f"日志类型提取失败：{reason}")
-        classification = self._sample_filler(classification, logs_text)
+        sample_started = time.perf_counter()
+        await publish_sample(ProgressStatus.RUNNING)
+        try:
+            classification = self._sample_filler(classification, logs_text)
+        except Exception:
+            await publish_sample(ProgressStatus.FAILED, time.perf_counter() - sample_started)
+            raise
+        await publish_sample(ProgressStatus.SUCCESS, time.perf_counter() - sample_started)
         submission = build_submission_snapshot(
             classification,
             log_lines,
