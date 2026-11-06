@@ -41,7 +41,7 @@ class LoggingFailingParse:
         return {"error": "log_parse_failed"}
 
 
-def test_worker_masks_content_but_keeps_run_context_and_category(tmp_path):
+def test_worker_keeps_readable_content_run_context_and_category(tmp_path):
     client, store, conversation, worker = setup(tmp_path)
     worker.business_application = LoggingFailingParse()
     file_id = upload(client, conversation, worker)
@@ -54,7 +54,7 @@ def test_worker_masks_content_but_keeps_run_context_and_category(tmp_path):
         text = capture.text()
         assert f"run_id={run_id}" in text and "step=log_parse" in text
         assert "error_category=model_rate_limited" in text
-        assert "SECRET" not in text
+        assert "SECRET-PIPELINE-DETAIL SECRET-ARG" in text
     assert client.get(f"/api/v2/runs/{run_id}").json()["status"] == "failed"
 
 

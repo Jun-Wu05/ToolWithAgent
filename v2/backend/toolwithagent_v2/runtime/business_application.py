@@ -173,8 +173,14 @@ class BusinessApplication:
         from contracts.rule_source import RuleSourceFields
         from toolwithagent_v2.runtime.mapping_projection import collect_samples
         from agent.tools.rule_generator import rules_to_base64_text
+        from agent.shared.logger import get_logger
+        from time import perf_counter
+
+        logger = get_logger("v2.field_mapping")
+        started = perf_counter()
 
         lines = raw_log_lines(path, snapshot["media_type"])
+        logger.info("映射阶段 文件读取完成 duration_ms=%d rows=%d", round((perf_counter() - started) * 1000), len(lines))
         session = copy.copy(snapshot.get("initial_session") or BusinessSession())
         session.raw_log_lines = lines
         session.original_log = lines
@@ -189,8 +195,10 @@ class BusinessApplication:
         session.rule_source_fields = RuleSourceFields.from_value(snapshot["source_fields"])
         plan = DeterministicPlan(plan_id="v2-field-mapping", steps=(
             FieldMappingStep(step_id="field-mapping", type="field_mapping", source_ref="session.fields"),))
+        started = perf_counter()
         report = await run_deterministic_plan(session=session, team=team, plan=plan,
             progress_sink=snapshot.get("_progress_sink") or NullProgressSink(), adapters=adapters)
+        logger.info("映射阶段 业务步骤完成 duration_ms=%d rows=%d", round((perf_counter() - started) * 1000), len(lines))
         mapped = next((result.artifact for result in report.results
             if result.operation_type == "field_mapping" and result.status == StepStatus.SUCCESS
             and result.artifact is not None), None)
@@ -204,14 +212,20 @@ class BusinessApplication:
         new_types = [kind for slot, kind in ((session.latest_enum_artifact, "enum_values"), (session.latest_threat_artifact, "threat_mapping")) if slot is not None and slot is not before_slots[kind]]
         published = {kind: slot.artifact.model_dump(mode="json") for slot, kind in ((session.latest_enum_artifact, "enum_values"), (session.latest_threat_artifact, "threat_mapping")) if kind in new_types}
         published["field_mapping"] = {}
+        started = perf_counter()
+        samples = collect_samples(config, lines, session.log_classification)
+        logger.info("映射阶段 结果样例收集完成 duration_ms=%d rows=%d fields=%d", round((perf_counter() - started) * 1000), len(lines), sum(map(len, samples.values())))
+        started = perf_counter()
+        frozen = freeze_session(session)
+        logger.info("映射阶段 会话冻结完成 duration_ms=%d rows=%d", round((perf_counter() - started) * 1000), len(lines))
         return {"artifact_sources": artifact_sources(report, plan, published),
             "config": config, "mapping_rows": [row.model_dump(by_alias=True) for row in mapped.mappings],
             "event_annotations": [row.model_dump() for row in mapped.event_annotations],
             "warnings": warnings,
-            "samples": collect_samples(config, lines, session.log_classification),
+            "samples": samples,
             "download_kind": mapped.download_kind or "mapped_sub_rules",
             "download_content": rules_to_base64_text(config),
-            "business_state": freeze_session(session),
+            "business_state": frozen,
             "new_typed_artifact_types": new_types}
 
 

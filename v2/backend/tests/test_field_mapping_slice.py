@@ -233,6 +233,39 @@ def test_sample_reader_twenty_values_does_not_change_enum_rejection():
     assert len(profile.values)==11
 
 
+def test_fifty_thousand_rows_parse_once_per_subrule_for_many_fields(monkeypatch):
+    from agent.tools.rule_generator import utils
+    from application.standard_enum_mapping import build_value_profiles_from_logs
+    from toolwithagent_v2.runtime.mapping_projection import collect_samples
+
+    original = utils.extract_kv_pairs
+    parse_calls = 0
+
+    def count_parse(*args, **kwargs):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(utils, 'extract_kv_pairs', count_parse)
+    fields = [f'f{i}' for i in range(31)]
+    rule = {'name': 'kv', 'parser': {'name': 'delimitWithKeyMap', 'tab': '=', 'delimit': ' '}}
+    config = [{**rule, 'normalize': [{'index': field, 'result': []} for field in group]}
+              for group in (fields[:16], fields[16:])]
+    lines = [' '.join(f'{field}={number % 30}' for field in fields) for number in range(50_000)]
+
+    profiles = build_value_profiles_from_logs(config, lines, {})
+    assert len(profiles) == 31
+    assert all(profile.scanned_lines == 50_000 and profile.status == 'rejected'
+               for profile in profiles.values())
+    assert parse_calls == 100_000
+
+    samples = collect_samples(config, lines, {})
+    assert all([item['value'] for item in samples[str(rule_id)][field]] ==
+               [str(value) for value in range(20)]
+               for rule_id, group in enumerate((fields[:16], fields[16:])) for field in group)
+    assert parse_calls <= 100_040
+
+
 def test_frozen_old_claim_cannot_publish_after_retry(tmp_path):
     client,store,conversation,worker,business,file_id=setup(tmp_path)
     response=enqueue(client,conversation,file_id); assert response.status_code==201

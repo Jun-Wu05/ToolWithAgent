@@ -54,7 +54,7 @@ def test_no_v2_scope_does_not_capture_model_content():
     assert result.content == "api_key=top-secret finished"
 
 
-def test_json_credentials_and_large_content_are_redacted_and_bounded():
+def test_json_credentials_are_redacted_and_large_content_is_complete():
     value = '{"api_key":"secret-one", "cookie": "session=secret-two; other=secret-three", "note": "safe"}'
     projected = redact_text(value)
     assert all(secret not in projected for secret in ("secret-one", "secret-two", "secret-three"))
@@ -63,7 +63,7 @@ def test_json_credentials_and_large_content_are_redacted_and_bounded():
     assert "secret-five" not in redact_text("Cookie: session=secret-four; other=secret-five")
     assert "dGVzdA==" not in redact_text("prefix Authorization: Basic dGVzdA== suffix")
     assert "secret-seven" not in redact_text("prefix Cookie: session=secret-six; other=secret-seven")
-    assert len(redact_text("a" * 5000)) == 4096
+    assert len(redact_text("a" * 5000)) == 5000
 
 
 def test_direct_log_model_call_records_sanitized_request_and_response(monkeypatch):

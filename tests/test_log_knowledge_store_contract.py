@@ -186,7 +186,7 @@ def test_kv_feature_identifier_failure_log_excludes_raw_logs(
     )
 
     assert output["status"] == "PARTIAL"
-    assert secret not in caplog.text
+    assert secret in caplog.text  # 授权诊断日志保留失败原文；run_events 另走白名单
     assert "source_lines=2" in caplog.text
     assert "matched_lines=2" in caplog.text
 

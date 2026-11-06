@@ -32,6 +32,8 @@ Worker 终端：`./.venv/Scripts/python.exe -m toolwithagent_v2.runtime.worker`�
 
 ## 当前证据边界
 
+> 2026-11-05 更新：下列 4096 字符截断和仅 Developer/Admin 查看原文的旧验收口径由新版 PRD 取代。新验收须验证 User 可读本人 Run、Developer/Admin 可读授权 Run 的完整业务日志和完整模型请求/响应；终端同样可读。仅 API Key、Authorization、Cookie、密码等秘密值遮盖。日志按时间顺序分页，旧 Run 缺失证据显示「未采集」。
+
 - 新采集的计划开始事件含匿名 Step 清单与依赖；时间线据此标明未执行节点，旧 Run 仍显示“未采集”。执行操作类型可关联到 Step。后续补充的身份采集只记录真实注册的字段 Skill（如 `skills/regex-extract-field`）和真实直连模型工具入口（`agent.tools.pipeline.llm_client._call_llm_direct`）；`model_calls.id` 是单次调用 ID。未经过 Skill/Tool 接缝的模型调用以及旧 Run 仍显示“未采集”，不把 Step 或操作名伪装成 Skill/Tool ID。
 - 模型调用记录真实步骤恢复次数；同一次步骤尝试中的不同调用使用相同次数。对显式引用且能在 Run 冻结输入中定位的产物，显示该产物版本；其他输入产物版本显示“未采集”。
 - 诊断页对每次调用保存最多 4096 字符的请求、响应脱敏文本；诊断包不包含完整上传文件。上一轮浏览器人工验收已由用户确认通过；本次新增字段另待复查。

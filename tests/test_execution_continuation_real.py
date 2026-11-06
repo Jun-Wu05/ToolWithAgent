@@ -63,12 +63,15 @@ def test_private_logs_sanitize_args_exception_extra_to_thread_and_restore():
     handler=logging.StreamHandler(output); handler.setFormatter(AllFields()); logger.addHandler(handler)
     def emit():
         try: raise ValueError("SECRET-EXCEPTION")
-        except ValueError: logger.exception("SECRET-MESSAGE %s","SECRET-ARGS",extra={"payload":"SECRET-EXTRA"})
+        except ValueError: logger.exception("SECRET-MESSAGE %s api_key=top-secret","SECRET-ARGS",extra={"payload":"SECRET-EXTRA", "authorization":"Bearer top-secret-2"})
     async def scoped():
         with private_business_logging():
             emit(); await asyncio.to_thread(emit)
     asyncio.run(scoped())
-    assert "SECRET" not in output.getvalue()
+    assert "SECRET-MESSAGE SECRET-ARGS" in output.getvalue()
+    assert "SECRET-EXCEPTION" in output.getvalue()
+    assert "SECRET-EXTRA" in output.getvalue()
+    assert "top-secret" not in output.getvalue()
     logger.info("CHAINLIT-UNCHANGED %s","VISIBLE",extra={"payload":"VISIBLE-EXTRA"})
     assert "CHAINLIT-UNCHANGED" in output.getvalue() and "VISIBLE-EXTRA" in output.getvalue()
     logger.removeHandler(handler)
@@ -84,7 +87,7 @@ def test_private_scope_isolated_between_async_requests():
         await asyncio.sleep(0); logger.info("PUBLIC-CHAINLIT")
     async def together(): await asyncio.gather(private(),public())
     asyncio.run(together())
-    assert "SECRET" not in output.getvalue() and "PUBLIC-CHAINLIT" in output.getvalue()
+    assert "SECRET-PRIVATE" in output.getvalue() and "PUBLIC-CHAINLIT" in output.getvalue()
     logger.removeHandler(handler)
 
 

@@ -574,6 +574,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_run(request: Request, run_id: str):
         return store.get_run(principal(request)["id"], run_id)
 
+    def own_run(request: Request, run_id: str):
+        store.get_run(principal(request)["id"], run_id)
+
+    @app.get("/api/v2/runs/{run_id}/diagnostics")
+    def user_run_diagnostics(request: Request, run_id: str):
+        own_run(request, run_id)
+        return store.diagnostic_run(run_id)
+
+    @app.get("/api/v2/runs/{run_id}/logs")
+    def user_run_logs(request: Request, run_id: str, after: int = 0):
+        own_run(request, run_id)
+        return store.diagnostic_logs(run_id, after)
+
+    @app.get("/api/v2/runs/{run_id}/calls/{call_id}")
+    def user_run_call(request: Request, run_id: str, call_id: str):
+        own_run(request, run_id)
+        return store.diagnostic_call(run_id, call_id)
+
+    @app.get("/api/v2/runs/{run_id}/bundle")
+    def user_run_bundle(request: Request, run_id: str):
+        own_run(request, run_id)
+        detail = store.diagnostic_run(run_id, include_content=True, include_all_logs=True)
+        return Response(content=json.dumps(detail, ensure_ascii=False), media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="run-{run_id}.json"',
+                                 "Cache-Control": "no-store"})
+
     @app.get("/api/v2/developer/runs")
     def developer_runs(request: Request, status: str | None = None, page: int = 1):
         developer_reader(request)
@@ -582,7 +608,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v2/developer/runs/{run_id}/bundle")
     def developer_run_bundle(request: Request, run_id: str):
         developer_reader(request)
-        detail = store.diagnostic_run(run_id, include_content=True)
+        detail = store.diagnostic_run(run_id, include_content=True, include_all_logs=True)
         return Response(content=json.dumps(detail, ensure_ascii=False), media_type="application/json",
                         headers={"Content-Disposition": f'attachment; filename="run-{detail["run"]["id"]}.json"',
                                  "Cache-Control": "no-store"})
@@ -596,6 +622,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def developer_run_call(request: Request, run_id: str, call_id: str):
         developer_reader(request)
         return store.diagnostic_call(run_id, call_id)
+
+    @app.get("/api/v2/developer/runs/{run_id}/logs")
+    def developer_run_logs(request: Request, run_id: str, after: int = 0):
+        developer_reader(request)
+        return store.diagnostic_logs(run_id, after)
 
     @app.get("/api/v2/conversations/{conversation_id}/events")
     async def conversation_events(request: Request, conversation_id: str, after: int = 0):
