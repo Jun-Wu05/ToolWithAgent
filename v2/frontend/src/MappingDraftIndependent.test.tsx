@@ -5,14 +5,14 @@ import { api, type Conversation, type MappingDraft, type MappingView } from './a
 class FakeEventSource { onmessage = null; onerror = null; close() {} }
 const summary = { id: 'conv-1', title: '当前会话', created_at: '', updated_at: '' }
 const other = { ...summary, id: 'conv-2', title: '另一会话' }
-const artifact = { id: 'map-1', run_id: 'mapping-run', file_id: 'file-1', kind: 'field_mapping' as const, status: 'published', current: true, summary: { rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0 } }
+const artifact = { id: 'map-1', run_id: 'mapping-run', file_id: 'file-1', result_message_id: 'result-1', kind: 'field_mapping' as const, status: 'published', current: true, summary: { rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0 } }
 const initial = (): MappingDraft => ({ id: 'draft-1', conversation_id: 'conv-1', base_artifact_id: 'map-1', revision: 2, status: 'active', changed_count: 1, operation_count: 1, operations: [], base_current: true, apply_run_id: null, applied_artifact_id: null })
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(complete => { resolve = complete }); return { promise, resolve } }
 let current: MappingDraft, detail: Conversation
 const update = (draft: MappingDraft) => { current = draft; detail = { ...detail, drafts: [...(detail.drafts || []).filter(item => item.id !== draft.id), { ...draft }] }; return draft }
 const view = (modified: boolean): MappingView => ({ artifact_id: 'map-1', sub_rules: [{ id: '0', name: '登录', field_count: 1 }], sub_rule_id: '0', items: [{ source_path: 'src.ip', samples: ['1.1.1.1'], expanded_samples: [], standard_field: modified ? '目的地址' : '源地址', evidence: modified ? '用户选择' : '名称匹配', status: 'matched', group_status: 'matched', warning: '', user_modified: modified, draft_modified: modified, operation_key: 'source-key', sub_rule_id: '0', editable: true }], total: 1, page: 1, page_size: 50, sample_line_reference: 'log_entry' })
 beforeEach(() => {
-  current = initial(); detail = { ...summary, messages: [], files: [], runs: [], artifacts: [artifact], drafts: [{ ...current }] }
+  current = initial(); detail = { ...summary, messages: [{ id: 'result-1', actor: 'assistant', content: '映射结果已发布', run_id: 'mapping-run' }], files: [], runs: [], artifacts: [artifact], drafts: [{ ...current }] }
   sessionStorage.clear(); localStorage.clear(); vi.stubGlobal('EventSource', FakeEventSource)
   vi.spyOn(api, 'me').mockResolvedValue({ id: 'user-1', display_name: '用户一', role: 'user' })
   vi.spyOn(api, 'identities').mockResolvedValue({ items: [{ id: 'user-1', display_name: '用户一', role: 'user' }, { id: 'user-2', display_name: '用户二', role: 'user' }] })

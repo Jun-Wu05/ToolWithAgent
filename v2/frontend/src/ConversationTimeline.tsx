@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, type Artifact, type Conversation, type FieldChangeSummary, type FieldMappingArtifact, type FileRecord, type Message, type Run, type RunEvent, type Suggestion } from './api'
-import { businessName, phaseName } from './BusinessWorkspace'
+import { businessName, phaseName, pipelineStageName, pipelineErrorName } from './BusinessWorkspace'
 import { StatusText } from './VisualPrimitives'
 
 const statusName: Record<string, string> = {
@@ -131,13 +131,14 @@ export type StepLine = { label: string; detail: string; failed: boolean }
 export function dedupeStepLines(events: RunEvent[], run: Run): StepLine[] {
   const latestByScope = new Map<string, RunEvent>()
   for (const event of events) {
-    if (event.event_type === 'run_progress' && event.scope_id) latestByScope.set(event.scope_id, event)
+    if (event.event_type === 'run_progress' && event.scope_id) latestByScope.set(event.scope_id + ':' + (event.summary?.pipeline_stage || ''), event)
   }
   const lines: StepLine[] = [...latestByScope.values()].map(event => {
     const summary = event.summary || {}
-    const parts = [phaseName[summary.phase || ''] || '']
+    const parts = [pipelineStageName[summary.pipeline_stage || ''] || phaseName[summary.phase || ''] || '']
     if (summary.current_batch && summary.total_batches) parts.push(`第 ${summary.current_batch}/${summary.total_batches} 批`)
     if (summary.elapsed_seconds) parts.push(`${Math.round(summary.elapsed_seconds)} 秒`)
+    if (summary.error_code) parts.push(pipelineErrorName[summary.error_code] || summary.error_code)
     return {
       label: businessName(summary.operation || ''),
       detail: parts.filter(Boolean).join(' · '),
@@ -182,7 +183,7 @@ export function ConversationTimeline({ conversation, actions, renderers }: {
     paramsForm?: (message: Message, run: Run | undefined) => ReactNode
   }
 }) {
-  const { turns, unlinked } = buildTurns(conversation)
+  const { turns } = buildTurns(conversation)
   const renderArtifact = (artifact: Artifact) => artifact.kind === 'field_mapping' ? renderers.mappingSummary(artifact) : artifact.kind === 'log_classification' ? renderers.classificationCard(artifact) : renderers.businessCard(artifact)
   return <div className="timeline">
     {conversation.messages.length === 0 && conversation.files.length === 0 && <div className="empty-state compact"><h2>这段会话还没有内容</h2><p>发送消息或上传文件，工作台会在这里显示进展。</p></div>}
@@ -198,6 +199,5 @@ export function ConversationTimeline({ conversation, actions, renderers }: {
             : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{!isUser && <SuggestionChips message={message} actions={actions} />}{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
       </div>
     })}
-    {(unlinked.files.length > 0 || unlinked.artifacts.length > 0 || unlinked.fieldChanges.length > 0 || unlinked.runs.length > 0) && <details className="activity-section unlinked-inputs" aria-label="历史独立操作"><summary>历史独立操作 · {unlinked.files.length + unlinked.artifacts.length + unlinked.fieldChanges.length + unlinked.runs.length} 项（早于输入留痕，未关联具体输入）</summary>{unlinked.files.length > 0 && <section><h2>输入文件</h2>{unlinked.files.map(file => <FileRow key={file.id} file={file} actions={actions} />)}</section>}{unlinked.artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{unlinked.fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{unlinked.runs.length > 0 && <section><h2>执行记录</h2>{unlinked.runs.map(run => <button className="run-row" key={run.id} onClick={() => actions.onOpenRun(run.id)}><span className="run-label">{businessName(run.kind || run.type || '')}</span><StatusText status={run.status} className="run-status" /><span className="run-detail">执行详情 ›</span></button>)}</section>}</details>}
   </div>
 }

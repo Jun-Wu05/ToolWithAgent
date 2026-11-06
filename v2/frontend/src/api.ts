@@ -57,11 +57,12 @@ export type DiagnosticRun = {
   run: { id: string; task_id: string; kind: string; status: string; error_code: string | null; owner_name: string; conversation_title: string; queued_at: string | null; started_at: string | null; finished_at: string | null; prompt_version: string | null; standard_field_version: string | null; provider_config_revision: number | null }
   conclusion: { status: string; error_code: string | null; call_id: string | null; scope_id: string | null; evidence_call_id?: string | null; evidence_scope_id?: string | null; possible_cause?: string | null; category: string; reason?: string }
   evidence_status: string
-  timeline: { sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary: Record<string, unknown>; created_at: string }[]
+  timeline: { sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary: ProgressSummary & Record<string, unknown>; created_at: string }[]
   planned_steps?: { scope_id: string; operation: string | null; dependency_scope_ids: string[] }[]
   unexecuted_steps?: { scope_id: string; operation: string | null; dependency_scope_ids: string[]; reason: string }[]
   calls: { id: string; run_id: string; task_id: string; scope_id?: string; request_id?: string; provider: string; model: string; operation?: string; skill_id?: string; tool_id?: string; input_artifact_id?: string; input_artifact_version?: number; error_code: string | null; attempt?: number; duration_ms?: number; started_at?: string; finished_at?: string; request?: string; response?: string; request_truncated?: boolean; response_truncated?: boolean; prompt_version?: string; standard_field_version?: string; provider_config_revision?: number; params?: Record<string, unknown> }[]
   logs: { id: string; level: string; source: string; run_id?: string; task_id?: string; call_id?: string; scope_id?: string; request_id?: string; event_type?: string; error_code?: string | null; duration_ms?: number; created_at: string }[]
+  business_logs?: { items: { id: number; created_at: string; level: string; logger: string; step?: string | null; message: string; exception?: string | null }[]; next_cursor: number | null; collected: boolean }
   artifacts: { id: string; kind: string; version: number; status: string; sha256: string; created_at: string; source_artifact_ids: string[] }[]
 }
 export type AdminAuditEvent = { id: string; action: string; target_type: string; target_id: string; created_at: string; reason: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; actor_name: string }
@@ -73,7 +74,7 @@ export type AdminProvider = { provider: string; label: string; base_url: string;
 export type AdminProviderVersion = { revision: number; model: string; params: Record<string, unknown>; created_at: string; has_secret: boolean }
 export type AdminProviderTestResult = { ok: boolean; status_code: number | null; latency_ms: number; error?: string }
 export type AdminUser = { id: string; display_name: string; role: 'user' | 'developer' | 'admin'; active: boolean; created_at: string; conversations: number }
-export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]; current_batch?: number; total_batches?: number; elapsed_seconds?: number}
+export type ProgressSummary = {phase?: string; progress_status?: string; operation?: string; dependency_scope_ids?: string[]; pipeline_stage?: string; error_code?: string; current_batch?: number; total_batches?: number; elapsed_seconds?: number}
 export type RunEvent = {sequence: number; scope_type: string; scope_id: string; event_type: string; status: string; summary?: ProgressSummary; created_at?: string}
 export type Run = { id: string; task_id?: string; file_id?: string; status: string; kind?: string; type?: string; error_code?: string | null; error_message?: string | null; created_at?: string; updated_at?: string; message_id?: string | null; attempt?: number; queued_at?: string; started_at?: string | null; finished_at?: string | null; events?: RunEvent[] }
 export type FieldChangeSummary = { run_id: string; revision: number; status: string; apply_run_id: string | null; applied_artifact_id: string | null; undo_run_id: string | null; restored_artifact_id: string | null }
@@ -235,6 +236,10 @@ export const api = {
   diagnosticRun: (id: string) => request<DiagnosticRun>('/developer/runs/' + encodeURIComponent(id)),
   diagnosticCall: (runId: string, callId: string) => request<DiagnosticRun['calls'][number]>('/developer/runs/' + encodeURIComponent(runId) + '/calls/' + encodeURIComponent(callId)),
   diagnosticBundle: async (id: string): Promise<ArtifactDownload> => ({ name: 'run-' + id + '-diagnostics.json', blob: await (await responseFor('/developer/runs/' + encodeURIComponent(id) + '/bundle')).blob() }),
+  userDiagnosticRun: (id: string) => request<DiagnosticRun>('/runs/' + encodeURIComponent(id) + '/diagnostics'),
+  userDiagnosticCall: (runId: string, callId: string) => request<DiagnosticRun['calls'][number]>('/runs/' + encodeURIComponent(runId) + '/calls/' + encodeURIComponent(callId)),
+  diagnosticLogs: (runId: string, after = 0, user = false) => request<NonNullable<DiagnosticRun['business_logs']>>((user ? '/runs/' : '/developer/runs/') + encodeURIComponent(runId) + '/logs?after=' + after),
+  userDiagnosticBundle: async (id: string): Promise<ArtifactDownload> => ({ name: 'run-' + id + '-diagnostics.json', blob: await (await responseFor('/runs/' + encodeURIComponent(id) + '/bundle')).blob() }),
   adminCancelRun: (id: string, reason?: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || null }) }),
   adminForceStop: (id: string, reason: string) => request<{ id: string; status: string; error_code: string }>('/admin/runs/' + encodeURIComponent(id) + '/force-stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
   adminAuditEvents: (page: number) => request<AdminAuditPage>('/admin/audit-events?page=' + page),

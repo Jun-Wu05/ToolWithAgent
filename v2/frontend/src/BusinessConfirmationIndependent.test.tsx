@@ -94,18 +94,19 @@ it('keeps inactive files historical without execute entries but preserves owner 
   vi.mocked(api.artifactContent).mockResolvedValue({values:['本人历史真实值']})
   const download={name:'enumvalues_20261014_100000.json',blob:new Blob(['历史导出'])}
   vi.mocked(api.mappingDownload).mockResolvedValue(download)
-  render(<App />); await screen.findByText('history.txt')
-  const file=screen.getByText('history.txt').closest('.file-row') as HTMLElement
+  render(<App />); await screen.findByRole('heading',{name:'确认任务'})
+  fireEvent.click(screen.getByRole('tab',{name:'轨迹'})); await screen.findByText('history.txt')
+  const file=screen.getByText('history.txt').closest('li') as HTMLElement
   expect(file).toHaveTextContent('历史输入')
   expect(within(file).queryByRole('button',{name:'提取日志类型'})).not.toBeInTheDocument()
   expect(within(file).queryByRole('button',{name:'标准字段映射'})).not.toBeInTheDocument()
   expect(api.artifactContent).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole('button',{name:'查看产物'}))
+  fireEvent.click(screen.getByRole('button',{name:'结果与产物'}))
+  fireEvent.click(screen.getByRole('region',{name:'结果与产物'}).querySelector('.resource-artifact-list button')!)
   expect(await screen.findByText('本人历史真实值')).toBeInTheDocument()
   expect(api.artifactContent).toHaveBeenCalledExactlyOnceWith('history-enum')
   const drawer=screen.getByRole('complementary',{name:'资源工作区'})
   expect(within(drawer).queryByRole('button',{name:'开始处理'})).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button',{name:'关闭结果／产物页签'}))
   fireEvent.click(screen.getByRole('button',{name:'下载产物'}))
   await waitFor(() => expect(api.mappingDownload).toHaveBeenCalledExactlyOnceWith('history-enum'))
   expect(saveDownload).toHaveBeenCalledWith(download)

@@ -171,11 +171,14 @@ it('clears through the canonical message while waiting, explaining effects and p
 })
 it('keeps historical inputs readable without parse or mapping actions', async () => {
   vi.mocked(api.conversation).mockResolvedValue({...detail, files: [{id: 'old-input', name: 'history.log', active: false, parse_status: 'succeeded', mapping_eligible: true}], artifacts: [{...enumeration, current: false}], session_facts: {available_config_refs: [], enum_mapping_target_fields: [], referenceable_artifacts: []}})
-  render(<App />); await screen.findByText('history.log')
+  render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
+  fireEvent.click(screen.getByRole('tab', {name: '轨迹'}))
+  await screen.findByText('history.log')
   expect(screen.getByText(/历史输入/)).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: '提取日志类型'})).not.toBeInTheDocument()
   expect(screen.queryByRole('button', {name: '标准字段映射'})).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', {name: '查看产物'}))
+  fireEvent.click(screen.getByRole('button', {name: '结果与产物'}))
+  fireEvent.click(screen.getByRole('region', {name: '结果与产物'}).querySelector('.resource-artifact-list button')!)
   expect(await screen.findByText('仅本人查看的真实值')).toBeInTheDocument()
   expect(within(screen.getByRole('complementary', {name: '资源工作区'})).getByRole('button', {name: '下载产物'})).toBeInTheDocument()
 })
@@ -214,8 +217,9 @@ it('uses the existing confirmation flow for exhausted recovery', async () => {
 
 it('retains stale classification results for owner view and download after clear', async () => {
   vi.mocked(api.conversation).mockResolvedValue({...detail, messages: [], artifacts: [{id: 'classification-old', run_id: 'old-run', file_id: 'old-file', kind: 'log_classification', status: 'stale', summary: {log_types: [{name: '登录', count: 2}], coverage: {matched_lines: 2, total_lines: 2}, rule_summary: '历史规则'}, mapping_eligible: false, submission_eligible: false}]})
-  render(<App />); await screen.findByText('登录 · 2')
-  fireEvent.click(screen.getByRole('button', {name: '查看产物'}))
+  render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
+  fireEvent.click(screen.getByRole('button', {name: '结果与产物'}))
+  fireEvent.click(screen.getByRole('region', {name: '结果与产物'}).querySelector('.resource-artifact-list button')!)
   await waitFor(() => expect(api.artifactContent).toHaveBeenCalledWith('classification-old'))
   expect(within(screen.getByRole('complementary', {name: '资源工作区'})).getByRole('button', {name: '下载产物'})).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: '标准字段映射'})).not.toBeInTheDocument()
