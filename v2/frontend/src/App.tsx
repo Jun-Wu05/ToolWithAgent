@@ -187,7 +187,7 @@ export function App() {
   const setMappingId = (id: string | null) => { if (editingPendingRef.current && id !== mappingId) { setNotice('请先重试保存或取消当前字段修改。'); return false } if (id && !openResource('mapping')) return false; setMappingSelection(id); if (id) setFieldChangesSelection(null); return true }
   const setFieldChangesId = (id: string | null) => { if (editingPendingRef.current && id) { setNotice('请先重试保存或取消当前字段修改。'); return } if (id && !openResource('results')) return; setFieldChangesSelection(id) }
   useLayoutEffect(() => { if (contentRef.current) contentRef.current.scrollTop = viewScroll.current[workspaceTab] || 0; currentTab.current = workspaceTab }, [workspaceTab])
-  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setTraceTarget(null); setResourceTabs([]); setResourceOpen(false); setResourceWidth(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++artifactRequest.current; setSelectedResultId(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingSelection(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); mappingReceipt.current = null; }
+  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setTraceTarget(null); setDiagnosticRunId(null); setResourceTabs([]); setResourceOpen(false); setResourceWidth(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++artifactRequest.current; setSelectedResultId(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingSelection(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); mappingReceipt.current = null; }
   const refreshList = useCallback(async () => {
     const version = viewToken.current
     const result = await api.conversations()
@@ -562,6 +562,7 @@ export function App() {
     finally { setBusy(false) }
   }
   const openRun = async (runId: string) => {
+    setDiagnosticRunId(null)
     setTraceTarget(current => ({ id: runId, token: (current?.token || 0) + 1 }))
     changeWorkspaceTab('trace')
   }

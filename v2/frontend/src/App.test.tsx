@@ -7,7 +7,7 @@ vi.mock('./api', () => ({
   saveDownload: vi.fn(),
   api: {
     me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(), userTasks: vi.fn(), userRuns: vi.fn(),
-    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), artifactContent: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn()
+    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), artifactContent: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn(), userDiagnosticRun: vi.fn()
   }
 }))
 class FakeEventSource {
@@ -606,6 +606,29 @@ it('opens Run details in the trace without an execution side panel', async () =>
   await screen.findByRole('region', {name: '执行轨迹'})
   expect(screen.queryByLabelText('执行详情', {selector: 'aside'})).not.toBeInTheDocument()
   expect(screen.getByRole('tab', {name: '轨迹'})).toHaveAttribute('aria-selected', 'true')
+})
+
+it('closes Run diagnostics when switching to another conversation', async () => {
+  const other = { ...summary, id: 'conv-2', title: '另一个会话' }
+  vi.mocked(api.conversations).mockResolvedValue({ items: [summary, other] })
+  vi.mocked(api.conversation).mockImplementation(async id => ({
+    ...detail, id, title: id === summary.id ? summary.title : other.title,
+    runs: [{ id: id === summary.id ? 'run-a' : 'run-b', status: 'succeeded' }],
+  }))
+  vi.mocked(api.run).mockImplementation(async id => ({ id, status: 'succeeded' }))
+  vi.mocked(api.userDiagnosticRun).mockImplementation(() => new Promise<Awaited<ReturnType<typeof api.userDiagnosticRun>>>(() => {}))
+  renderApp()
+  await screen.findByRole('heading', { name: summary.title })
+  const trace = openFirstTrace()
+  fireEvent.click(await within(trace).findByRole('button', { name: '查看详细日志与模型调用' }))
+  await waitFor(() => expect(api.userDiagnosticRun).toHaveBeenCalledWith('run-a'))
+  fireEvent.click(screen.getByRole('button', { name: /另一个会话/ }))
+  await screen.findByRole('heading', { name: other.title })
+  fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
+  const secondTrace = await screen.findByRole('region', { name: '执行轨迹' })
+  fireEvent.click(within(secondTrace).getByRole('button', { name: '执行详情' }))
+  expect(await within(secondTrace).findByText('run-b')).toBeInTheDocument()
+  expect(screen.queryByText('run-a')).not.toBeInTheDocument()
 })
 
 it.each([true, false])('clears the previous field change when overview opens an exact mapping target (draft=%s)', async hasDraft => {

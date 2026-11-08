@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import sqlite3
 import threading
 import time
 import zipfile
@@ -205,7 +206,21 @@ class Worker:
                 stage_start = time.monotonic()
                 result = self.store.publish_business(self.worker_id, claim, artifacts, message,
                                                      suggestions=suggestion_catalog.mapping_done())
-                _DIAGNOSTICS.info("映射阶段 产物发布完成 run_id=%s duration_ms=%d artifacts=%d", claim["id"], round((time.monotonic() - stage_start) * 1000), len(artifacts))
+                if result:
+                    finished_at = time.time()
+                    duration_ms = round((time.monotonic() - stage_start) * 1000)
+                    publication_message = (f"映射阶段 产物发布完成 run_id={claim['id']} "
+                                           f"duration_ms={duration_ms} artifacts={len(artifacts)}")
+                    _DIAGNOSTICS.info(publication_message)
+                    try:
+                        self.store.record_run_log(self.worker_id, claim, {
+                            "created_at": finished_at, "level": "info", "logger": "v2.diagnostics",
+                            "step": claim["task_type"],
+                            "message": f"[run_id={claim['id']} step={claim['task_type']}] {publication_message}",
+                            "exception": None,
+                        }, completed=True)
+                    except Exception:
+                        pass  # 诊断写入不能改变已提交的业务结果
                 return result
             return self.store.publish(self.worker_id, claim, json.dumps(outcome, ensure_ascii=False).encode("utf-8"),
                 kind="field_mapping", metadata={"summary":summary}, message=message,
@@ -334,7 +349,13 @@ class Worker:
 
         def heartbeat():
             while not stop.wait(min(5, self.lease_seconds / 3)):
-                if not self.store.renew(self.worker_id, claim, lease_seconds=self.lease_seconds):
+                try:
+                    renewed = self.store.renew(self.worker_id, claim, lease_seconds=self.lease_seconds)
+                except sqlite3.OperationalError as exc:
+                    if "locked" in str(exc).lower():
+                        continue
+                    raise
+                if not renewed:
                     break
 
         keeper = threading.Thread(target=heartbeat, daemon=True)

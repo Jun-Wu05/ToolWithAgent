@@ -2043,12 +2043,18 @@ class Store:
             db.commit()
             return True
 
-    def record_run_log(self, worker_id, claim, record):
+    def record_run_log(self, worker_id, claim, record, completed=False):
         """Best-effort write of an already masked message bound to this Run."""
         with connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             if self._valid_claim(db, worker_id, claim) is None:
-                return False
+                if not completed:
+                    return False
+                row = db.execute("SELECT status,leader_epoch,finished_at FROM runs WHERE id=?", (claim["id"],)).fetchone()
+                if (row is None or row["status"] != "succeeded" or row["leader_epoch"] != claim["epoch"]
+                    or row["finished_at"] is None
+                    or not 0 <= record["created_at"] - datetime.fromisoformat(row["finished_at"]).timestamp() <= 60):
+                    return False
             db.execute("INSERT INTO run_logs(run_id,created_at,level,logger,step,message,exception) VALUES(?,?,?,?,?,?,?)",
                        (claim["id"], datetime.fromtimestamp(record["created_at"], timezone.utc).isoformat(),
                         record["level"], record["logger"], record.get("step"), record["message"], record.get("exception")))

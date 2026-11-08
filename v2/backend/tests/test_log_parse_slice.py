@@ -174,7 +174,7 @@ def test_business_bridge_uses_application_log_parse_step(tmp_path, monkeypatch):
     from application.adapters import log_parse
     from toolwithagent_v2.runtime.business_application import BusinessApplication
 
-    monkeypatch.setattr(log_parse, "_identify_log_format", lambda _: '{"format":"kv","feature_field":"kind"}')
+    monkeypatch.setattr(log_parse, "_identify_log_format", lambda _, progress=None: '{"format":"kv","feature_field":"kind"}')
     monkeypatch.setattr(log_parse, "_classify_log_features", lambda *args, **kwargs: json.dumps({
         "status": "SUCCESS", "log_format": "kv", "log_format_detail": "KV",
         "feature_field": "kind", "coverage": {"total_lines": 3, "matched_lines": 3},
@@ -197,7 +197,7 @@ def test_real_knowledge_submission_is_atomic_and_attributed(tmp_path, monkeypatc
     from application.adapters import log_parse
     from toolwithagent_v2.infrastructure.db import connect
 
-    monkeypatch.setattr(log_parse, "_identify_log_format", lambda _: '{"format":"kv","feature_field":"kind"}')
+    monkeypatch.setattr(log_parse, "_identify_log_format", lambda _, progress=None: '{"format":"kv","feature_field":"kind"}')
     monkeypatch.setattr(log_parse, "_classify_log_features", lambda *args, **kwargs: json.dumps({
         "status": "SUCCESS", "log_format": "kv", "log_format_detail": "KV",
         "feature_field": "kind", "coverage": {"total_lines": 3, "matched_lines": 3},
