@@ -156,6 +156,21 @@ def iter_rule_field_values(
     Missing/invalid rows remain in the iterator so profile scan counts retain
     their original meaning. Config samples have no original log line number.
     """
+    source, records = iter_rule_records(owner, raw_log_lines, classification, rule_position)
+    if source == "full-logs":
+        return source, ((number, (value := _lookup_member_value(record, target)) is not _MISSING, value)
+                        for number, record in records)
+    if config_samples is None:
+        config_samples = next((entry.get("result") or [] for entry in owner.get("normalize", [])
+                               if isinstance(entry, dict) and entry.get("index") == target), [])
+    return "config-sample", ((None, True, value) for value in config_samples)
+
+
+def iter_rule_records(
+    owner: dict[str, Any], raw_log_lines: list[str],
+    classification: Mapping[str, Any] | None = None, rule_position: int | None = None,
+) -> tuple[str, Iterator[tuple[int, Mapping[str, Any]]]]:
+    """Parse each relevant log line once for all fields of a sub-rule."""
     lines = [(number, str(line)) for number, line in enumerate(raw_log_lines or [], 1)
              if str(line).strip()]
     classification = dict(classification or {})
@@ -183,10 +198,9 @@ def iter_rule_field_values(
                 for number, line, match in matches:
                     try:
                         body = json.loads(match.group(body_group) or line)
-                        value = _lookup_member_value(body, target)
-                        yield number, value is not _MISSING, value
+                        yield number, body
                     except (json.JSONDecodeError, ValueError):
-                        yield number, False, None
+                        yield number, {}
             return "full-logs", json_values()
     elif parser_name in ("delimitWithKeyMap", "delimit"):
         from agent.tools.rule_generator.utils import extract_kv_pairs
@@ -194,12 +208,9 @@ def iter_rule_field_values(
         def kv_values():
             for number, line in member_lines:
                 pairs = dict(extract_kv_pairs(line, _parser_delimit(owner), str(parser.get("tab") or "=")))
-                yield number, target in pairs, pairs.get(target)
+                yield number, pairs
         return "full-logs", kv_values()
-    if config_samples is None:
-        config_samples = next((entry.get("result") or [] for entry in owner.get("normalize", [])
-                               if isinstance(entry, dict) and entry.get("index") == target), [])
-    return "config-sample", ((None, True, value) for value in config_samples)
+    return "config-sample", iter(())
 
 
 def build_value_profiles_from_logs(
@@ -207,20 +218,33 @@ def build_value_profiles_from_logs(
 ) -> dict[ProfileKey, FieldValueProfile]:
     """Scan each rule using the shared value reader; retain the 10-value policy."""
     profiles: dict[ProfileKey, FieldValueProfile] = {}
+    groups: dict[ProfileKey, list[tuple[ProfileKey, str, dict[str, Any], dict[str, Any]]]] = {}
     for key, display, owner, entry in iter_normalize_owners(sub_rules):
-        profile = FieldValueProfile(owner=display, field=key[-1])
-        position = key[-2] if len(key) > 1 else ""
-        source, rows = iter_rule_field_values(owner, key[-1], raw_log_lines, classification,
-                                            int(position) if position.isdigit() else None, entry.get("result") or [])
-        profile.source = source
-        for _number, present, value in rows:
-            profile.scanned_lines += 1
-            if present:
-                profile.hit_lines += 1
-                _accept_value(profile, value)
-        if source == "config-sample":
-            profile.hit_lines = profile.scanned_lines - profile.empty_count
-        profiles[key] = profile
+        groups.setdefault(key[:-1], []).append((key, display, owner, entry))
+    for path, members in groups.items():
+        # Legacy per-field loop overwrote duplicate normalize indexes with the last entry.
+        members = list({member[0]: member for member in members}.values())
+        position = path[-1] if path else ""
+        source, records = iter_rule_records(members[0][2], raw_log_lines, classification,
+                                            int(position) if position.isdigit() else None)
+        for key, display, _owner, _entry in members:
+            profiles[key] = FieldValueProfile(owner=display, field=key[-1], source=source)
+        if source == "full-logs":
+            for _number, record in records:
+                for key, _display, _owner, _entry in members:
+                    profile = profiles[key]
+                    profile.scanned_lines += 1
+                    value = _lookup_member_value(record, key[-1])
+                    if value is not _MISSING:
+                        profile.hit_lines += 1
+                        _accept_value(profile, value)
+        else:
+            for key, _display, _owner, entry in members:
+                profile = profiles[key]
+                for value in entry.get("result") or []:
+                    profile.scanned_lines += 1
+                    _accept_value(profile, value)
+                profile.hit_lines = profile.scanned_lines - profile.empty_count
     return profiles
 
 

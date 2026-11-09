@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -189,11 +190,13 @@ class FieldMappingAdapter:
             if isinstance(classification, dict) and classification:
                 from agent.tools.rule_generator import generate_sub_rules
 
+                started = time.monotonic()
                 sub_rules = generate_sub_rules(
                     classification,
                     all_logs_str="\n".join(str(line) for line in raw_log_lines),
                     rule_source_fields=rule_source_fields,
                 )
+                logger.info("映射阶段 子规则生成完成 duration_ms=%d rows=%d rules=%d", round((time.monotonic() - started) * 1000), len(raw_log_lines), len(sub_rules))
 
         # #189 确定性字段名命中：精确/同义词命中 8 个枚举目标的字段绕过 LLM
         # 字段判断，直接作为已匹配行；其余字段进入批处理主路径（行为不变）。
@@ -219,11 +222,13 @@ class FieldMappingAdapter:
             )
 
             if sub_rules:
+                started = time.monotonic()
                 enum_profiles_sub = build_value_profiles_from_logs(
                     sub_rules,
                     [str(line) for line in raw_log_lines],
                     classification if isinstance(classification, dict) else None,
                 )
+                logger.info("映射阶段 值画像完成 duration_ms=%d rows=%d fields=%d", round((time.monotonic() - started) * 1000), len(raw_log_lines), len(enum_profiles_sub))
             if isinstance(decoded_data, (dict, list)) and decoded_data:
                 enum_profiles_config = build_value_profiles_from_config(decoded_data)
             for profile in (*enum_profiles_sub.values(), *enum_profiles_config.values()):

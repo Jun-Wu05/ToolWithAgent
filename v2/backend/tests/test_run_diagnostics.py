@@ -56,6 +56,53 @@ def test_developer_reads_cross_user_diagnostics_without_write_access(tmp_path):
     assert client.get("/api/v2/developer/runs/nonexistent").status_code == 404
 
 
+def test_owner_reads_complete_paged_logs_and_model_content_without_cross_run_access(tmp_path):
+    client, store, run_id = setup(tmp_path)
+    claim = store.claim("worker-logs")
+    assert claim["id"] == run_id
+    for number in range(205):
+        assert store.record_run_log("worker-logs", claim, {
+            "created_at": 1793840400 + number, "level": "info", "logger": "pipeline",
+            "step": "log_parse", "message": f"阶段 {number}: 日志原文 sample={number}", "exception": None,
+        })
+    prompt = "业务日志和 Prompt 原文 " + "甲" * 5000
+    assert store.record_model_call("worker-logs", claim, {
+        "provider": "deepseek", "model": "model-a", "request": prompt + " api_key=secret-123",
+        "response": "模型输出 " + "乙" * 5000 + " Authorization: Bearer secret-456",
+    })
+    detail = client.get(f"/api/v2/runs/{run_id}/diagnostics")
+    assert detail.status_code == 200
+    assert len(detail.json()["business_logs"]["items"]) == 100
+    cursor = detail.json()["business_logs"]["next_cursor"]
+    page = client.get(f"/api/v2/runs/{run_id}/logs?after={cursor}").json()
+    assert len(page["items"]) == 100 and page["next_cursor"] is not None
+    final = client.get(f"/api/v2/runs/{run_id}/logs?after={page['next_cursor']}").json()
+    assert len(final["items"]) == 5 and final["next_cursor"] is None
+    call_id = detail.json()["calls"][0]["id"]
+    content = client.get(f"/api/v2/runs/{run_id}/calls/{call_id}").json()
+    assert prompt in content["request"] and len(content["response"]) > 5000
+    assert "secret-123" not in json.dumps(content) and "secret-456" not in json.dumps(content)
+    switch(client, "dev-other")
+    for suffix in ("diagnostics", "logs", f"calls/{call_id}", "bundle"):
+        assert client.get(f"/api/v2/runs/{run_id}/{suffix}").status_code == 404
+    assert client.get(f"/api/v2/developer/runs/{run_id}/logs").status_code == 200
+
+
+def test_publication_timing_log_survives_run_completion(tmp_path):
+    client, store, run_id = setup(tmp_path)
+    claim = store.claim("worker-publish")
+    assert claim["id"] == run_id
+    assert store.publish_business("worker-publish", claim, [])
+    record = {"created_at": time.time(), "level": "info", "logger": "v2.diagnostics",
+              "step": "field_mapping", "message": "映射阶段 产物发布完成 duration_ms=12", "exception": None}
+    assert not store.record_run_log("worker-publish", claim, record)
+    assert not store.record_run_log("worker-publish", {**claim, "epoch": claim["epoch"] + 1}, record,
+                                    completed=True)
+    assert store.record_run_log("worker-publish", claim, record, completed=True)
+    logs = client.get(f"/api/v2/runs/{run_id}/logs").json()["items"]
+    assert logs[-1]["message"] == record["message"]
+
+
 def test_diagnostic_bundle_only_contains_linked_allowlisted_evidence(tmp_path):
     client, store, run_id = setup(tmp_path)
     other_id = setup_another_run(client)

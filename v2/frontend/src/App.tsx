@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, saveDownload, type ClassificationArtifact, type Conversation, type ConversationSummary, type FieldMappingArtifact, type FileRecord, type Identity, type MappingInput, type MappingDraft, type MappingDraftSummary, type ApiError, type Artifact, type Message, type Run, type ProgressSummary, type Suggestion } from './api'
-import { TaskFacts, ExecutionTrace, type WorkspaceTab } from './WorkspaceViews'
+import { ExecutionTrace, type WorkspaceTab } from './WorkspaceViews'
 import { ConversationTimeline, type TimelineActions } from './ConversationTimeline'
 import { StatusText, TaskHintBar } from './VisualPrimitives'
 import { FieldChangesWorkspace } from './FieldChangesWorkspace'
@@ -8,6 +8,7 @@ import { MappingWorkspace } from './MappingWorkspace'
 import { MappingSummaryCard } from './ConversationMappingSummary'
 import { AdminConsole } from './AdminConsole'
 import { DeveloperConsole } from './DeveloperConsole'
+import { RunDiagnostics } from './RunDiagnostics'
 import { UserHistory } from './UserHistory'
 import { MappingDialog } from './MappingDialog'
 import { BusinessOperations, BusinessConfirmation, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
@@ -53,6 +54,7 @@ export function App() {
   const [visitedTabs, setVisitedTabs] = useState<WorkspaceTab[]>(['conversation'])
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('conversation')
   const [traceTarget, setTraceTarget] = useState<{ id: string; token: number } | null>(null)
+  const [diagnosticRunId, setDiagnosticRunId] = useState<string | null>(null)
   const [resourceTabs, setResourceTabs] = useState<('mapping' | 'results')[]>([])
   const [activeResource, setActiveResource] = useState<'mapping' | 'results'>('mapping')
   const [resourceOpen, setResourceOpen] = useState(false)
@@ -185,7 +187,7 @@ export function App() {
   const setMappingId = (id: string | null) => { if (editingPendingRef.current && id !== mappingId) { setNotice('请先重试保存或取消当前字段修改。'); return false } if (id && !openResource('mapping')) return false; setMappingSelection(id); if (id) setFieldChangesSelection(null); return true }
   const setFieldChangesId = (id: string | null) => { if (editingPendingRef.current && id) { setNotice('请先重试保存或取消当前字段修改。'); return } if (id && !openResource('results')) return; setFieldChangesSelection(id) }
   useLayoutEffect(() => { if (contentRef.current) contentRef.current.scrollTop = viewScroll.current[workspaceTab] || 0; currentTab.current = workspaceTab }, [workspaceTab])
-  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setTraceTarget(null); setResourceTabs([]); setResourceOpen(false); setResourceWidth(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++artifactRequest.current; setSelectedResultId(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingSelection(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); mappingReceipt.current = null; }
+  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setTraceTarget(null); setDiagnosticRunId(null); setResourceTabs([]); setResourceOpen(false); setResourceWidth(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++artifactRequest.current; setSelectedResultId(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingSelection(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); mappingReceipt.current = null; }
   const refreshList = useCallback(async () => {
     const version = viewToken.current
     const result = await api.conversations()
@@ -390,9 +392,10 @@ export function App() {
       } else throw caught
     }
   }
-  const send = async () => {
-    const content = draft.trim(), version = viewToken.current
+  const send = async (input?: string) => {
+    const content = (input ?? draft).trim(), version = viewToken.current
     if (!content || busy || clearBusy || pendingSend || pendingConfirmation || editingPendingRef.current) return
+    if (input) setNotice(`正在发送：${content}`)
     setBusy(true); setError('')
     try {
       const id = await ensureConversation(version)
@@ -402,7 +405,7 @@ export function App() {
       const pendingFields = conversation?.field_changes?.find(item => ['ready', 'applying'].includes(item.status)); if (pendingFields) { setFieldChangesId(pendingFields.run_id); setNotice('消息尚未发送，请先处理当前字段变更。'); return }
       const waiting = conversation?.runs.find(run => run.status === 'waiting_confirmation'); if (waiting) { setPendingConfirmation({id, content, version, run: waiting}); return }
       await sendContent(id, content, version)
-    } catch (caught) { if (isCurrent(version)) setError(caught instanceof Error ? caught.message : '消息发送失败。') }
+    } catch (caught) { if (isCurrent(version)) { if (input) setDraft(current => current || content); setError(caught instanceof Error ? caught.message : '消息发送失败。') } }
     finally { if (isCurrent(version)) setBusy(false) }
   }
   const resolveSend = async (choice: 'apply' | 'discard') => {
@@ -559,6 +562,7 @@ export function App() {
     finally { setBusy(false) }
   }
   const openRun = async (runId: string) => {
+    setDiagnosticRunId(null)
     setTraceTarget(current => ({ id: runId, token: (current?.token || 0) + 1 }))
     changeWorkspaceTab('trace')
   }
@@ -586,8 +590,7 @@ export function App() {
       const file = conversation?.files.find(item => item.id === suggestion.file_id)
       if (file) void parseLog(file)
     } else if (suggestion.id === 'field_mapping') {
-      if (suggestion.classification_artifact_id) setMappingSource({ id: suggestion.classification_artifact_id, kind: 'classification', label: '日志分类结果' })
-      else if (suggestion.file_id) setMappingSource({ id: suggestion.file_id, kind: 'file', label: conversation?.files.find(item => item.id === suggestion.file_id)?.name || '当前文件' })
+      void send('标准字段映射')
     } else if (suggestion.id === 'open_results' || suggestion.id === 'download') {
       const artifact = conversation?.artifacts?.find(item => item.id === suggestion.artifact_id) || conversation?.artifacts?.[(conversation.artifacts?.length || 1) - 1]
       if (!artifact) return
@@ -663,7 +666,7 @@ export function App() {
       </div>
     </aside>
     <main className="workspace">
-      <header className="workspace-header"><div className="workspace-title"><h1>{workspaceTab === 'tasks' ? '我的任务' : workspaceTab === 'runs' ? '我的执行' : conversation?.title || '工作台'}</h1>{conversation && !renaming && <button className="button-text rename-trigger" aria-label="重命名会话" onClick={() => { setTitleDraft(conversation.title); setRenaming(true) }}>✎ 重命名</button>}{renaming && conversation && <><input aria-label="会话名称" autoFocus className="rename-input" value={titleDraft} onChange={event => { setTitleDraft(event.target.value) }} onKeyDown={event => { if (event.key === 'Enter') void submitRename(); if (event.key === 'Escape') setRenaming(false) }} /><button className="button-text" onClick={() => void submitRename()}>保存</button><button className="button-text" onClick={() => setRenaming(false)}>取消</button></>}<p>{conversation ? '会话与执行状态' : '从一条消息或一个文件开始'}</p></div><div className="header-actions">{identity?.role === 'user' && activeId && <button className="button-text" onClick={() => void clearBusiness()} disabled={clearBusy || busy || loading}>{clearBusy ? '清空排队中…' : '清空业务数据（保留历史）'}</button>}{conversation && !resourceOpen && resourceTabs.length > 0 && <button className="button-secondary" onClick={() => { setResourceOpen(true); changeWorkspaceTab('conversation') }}>打开工作区</button>}<button className="icon-button" aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'} title={theme === 'light' ? '切换深色主题' : '切换浅色主题'} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '深色主题' : '浅色主题'}</button></div></header>
+      <header className="workspace-header"><div className="workspace-title"><h1>{workspaceTab === 'tasks' ? '我的任务' : workspaceTab === 'runs' ? '我的执行' : conversation?.title || '工作台'}</h1>{conversation && !renaming && <button className="button-text rename-trigger" aria-label="重命名会话" onClick={() => { setTitleDraft(conversation.title); setRenaming(true) }}>✎ 重命名</button>}{renaming && conversation && <><input aria-label="会话名称" autoFocus className="rename-input" value={titleDraft} onChange={event => { setTitleDraft(event.target.value) }} onKeyDown={event => { if (event.key === 'Enter') void submitRename(); if (event.key === 'Escape') setRenaming(false) }} /><button className="button-text" onClick={() => void submitRename()}>保存</button><button className="button-text" onClick={() => setRenaming(false)}>取消</button></>}<p>{conversation ? '会话与执行状态' : '从一条消息或一个文件开始'}</p></div><div className="header-actions">{conversation && <button className="button-text" onClick={() => { setSelectedResultId(null); openResource('results') }}>结果与产物</button>}{identity?.role === 'user' && activeId && <button className="button-text" onClick={() => void clearBusiness()} disabled={clearBusy || busy || loading}>{clearBusy ? '清空排队中…' : '清空业务数据（保留历史）'}</button>}{conversation && !resourceOpen && resourceTabs.length > 0 && <button className="button-secondary" onClick={() => { setResourceOpen(true); changeWorkspaceTab('conversation') }}>打开工作区</button>}<button className="icon-button" aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'} title={theme === 'light' ? '切换深色主题' : '切换浅色主题'} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '深色主题' : '浅色主题'}</button></div></header>
       <div className="workspace-tabs" role="tablist" aria-label="工作区视图" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role=tab]')]
@@ -682,15 +685,13 @@ export function App() {
         {(workspaceTab === 'tasks' || workspaceTab === 'runs') && <div className="workbench-pane"><UserHistory key={identity?.id + ':' + workspaceTab} kind={workspaceTab} onOpen={(conversationId, runId, messageId) => { void openHistory(conversationId, runId, messageId) }} /></div>}
         <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>从一句话或一个文件开始</h2><p>也可以从常见场景进入——点击填入话术，可自行修改或拼接多步。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button><div className="empty-templates">{SCENE_TEMPLATES.map(template => <button key={template.title} type="button" className="empty-template" onClick={() => setDraft(template.prompt)}><strong>{template.title}</strong><span>{template.hint}</span></button>)}</div></div> : <>
           <ConversationTimeline conversation={conversation} actions={timelineActions} renderers={timelineRenderers} />
-          <details className="activity-section task-facts-inline"><summary>任务信息</summary><TaskFacts conversation={conversation} drafts={liveDrafts} /></details>
           {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，历史结果仍可查看。请重新加载或上传主数据。</p>}
-          {identity?.role === 'user' && <details className="activity-section"><summary>枚举、威胁、填充与导出</summary><BusinessOperations key={identity.id + ':' + activeId} conversation={conversation} onDone={() => refreshActive(conversation.id)} /></details>}
           {identity?.role === 'user' && liveDrafts.length > 0 && <section className="activity-section"><h2>未应用的映射草稿</h2>{liveDrafts.map(item => <article className="result-card" key={item.id}><p>{item.changed_count} 处未应用修改{!item.base_current ? ' · 来源已过期' : ''}{item.status === 'applying' ? ' · 正在应用' : ''}</p><button className="button-secondary" onClick={() => { if (setMappingId(item.base_artifact_id)) setMappingDraftId(item.id) }}>恢复草稿</button></article>)}</section>}
         </>}</div>
-        {conversation && visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}><ExecutionTrace key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} targetId={traceTarget?.id} targetToken={traceTarget?.token} onRetry={id => void retryRun(id)} onStop={id => void stopRun(id)} canOperate={identity?.role === 'user'} busy={!!actionBusy} /></div>}
+        {conversation && visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}>{diagnosticRunId ? <RunDiagnostics key={diagnosticRunId} initialRunId={diagnosticRunId} userMode onClose={() => setDiagnosticRunId(null)} /> : <ExecutionTrace key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} onDetails={setDiagnosticRunId} targetId={traceTarget?.id} targetToken={traceTarget?.token} onRetry={id => void retryRun(id)} onStop={id => void stopRun(id)} canOperate={identity?.role === 'user'} busy={!!actionBusy} />}</div>}
       </div>
       {newReplies && workspaceTab === 'conversation' && <div className="new-replies-bar"><button className="button-secondary" onClick={() => { setNewReplies(false); stickToBottom.current = true; requestAnimationFrame(() => scrollConversationToEnd('smooth')) }}>有新回复 · 点击查看</button></div>}
-      <div className={"composer-region " + (workspaceTab !== "conversation" ? "is-compact" : "")}><TaskHintBar state={hintState} status={hintedRun?.status} title={hintedRun ? businessName(hintedRun.kind || '') : ''} description={latestProgress?.runId === hintedRun?.id ? progressLabel(latestProgress?.summary) : undefined}>
+      <div className={"composer-region " + (workspaceTab !== "conversation" ? "is-compact" : "")}><TaskHintBar state={hintState} status={hintedRun?.status} title={hintedRun ? businessName(hintedRun.kind || '') : ''} description={latestProgress && hintedRun && latestProgress.runId === hintedRun.id ? (hintedRun.status === 'running' && latestProgress.summary.phase === 'completed' ? '正在整理并发布结果' : progressLabel(latestProgress.summary)) : undefined}>
         {hintedRun && <button className="button-text" onClick={() => void openRun(hintedRun.id)}>{hintState === 'failed' ? '查看失败原因' : '查看执行详情'}</button>}
         {activeRun && hintedRun?.id === activeRun.id && identity?.role === 'user' && <button className="button-text" onClick={() => void stopRun(activeRun.id)} disabled={!!actionBusy}>停止</button>}
       </TaskHintBar>

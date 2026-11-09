@@ -54,10 +54,8 @@ it('renders input records as attachment and operation cards without fabricated s
   expect(operation).toHaveTextContent('分类特征字段 level')
   expect(screen.queryByText('提交日志类型提取')).not.toBeInTheDocument()
   expect(screen.getByText('解析结果卡 art-class')).toBeInTheDocument()
-  const unlinked = screen.getByLabelText('历史独立操作')
-  expect(unlinked).toHaveTextContent('3 项')
-  fireEvent.click(screen.getByText(/历史独立操作/))
-  expect(screen.getByText('业务结果卡 art-legacy')).toBeInTheDocument()
+  expect(screen.queryByLabelText('历史独立操作')).not.toBeInTheDocument()
+  expect(screen.queryByText('业务结果卡 art-legacy')).not.toBeInTheDocument()
 })
 
 it('summarizes submitted parameters across upload, mapping and operations', () => {

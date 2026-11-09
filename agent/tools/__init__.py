@@ -12,11 +12,11 @@ from agent.tools.pipeline.log_format_identifier import identify_log_format
 from agent.tools.pipeline.log_classifier import classify_log_features
 
 
-def identify_log_format_headless(logs_text: str) -> str:
+def identify_log_format_headless(logs_text: str, progress=None) -> str:
     """日志格式识别纯函数入口（无 @tool 装饰，供 Application 适配器调用）。"""
-    from agent.tools.pipeline.log_format_identifier import _do_identify_log_format
+    from agent.tools.pipeline.log_format_identifier import identify_log_format_with_progress
 
-    return _do_identify_log_format(logs_text)
+    return identify_log_format_with_progress(logs_text, progress)
 
 
 def classify_log_features_headless(
@@ -27,15 +27,16 @@ def classify_log_features_headless(
     format_info_json: str,
     header_end_marker: str,
     feature_field_explicit: bool = False,
+    progress=None,
 ) -> str:
     """日志特征分类纯函数入口（无 @tool 装饰，供 Application 适配器调用）。
 
     ``feature_field_explicit=True`` 表示字段来自用户显式指定，
     分类必须按日志体路径使用该字段，Step 2a 定位器不得改写或改道。
     """
-    from agent.tools.pipeline.log_classifier import _do_classify_log_features
+    from agent.tools.pipeline.log_classifier import classify_log_features_with_progress
 
-    return _do_classify_log_features(
+    return classify_log_features_with_progress(
         logs_text,
         log_format,
         format_detail,
@@ -43,6 +44,7 @@ def classify_log_features_headless(
         format_info_json,
         header_end_marker,
         feature_field_explicit=feature_field_explicit,
+        progress=progress,
     )
 
 

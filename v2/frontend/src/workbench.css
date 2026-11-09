@@ -70,6 +70,7 @@
 .diagnostic-list > button.selected { border-color: var(--primary); background:var(--tint-primary); font-weight: 700; }
 .diagnostic-list small { display: block; margin-top: .25rem; color: var(--muted-foreground); }
 .diagnostic-step { display: flex; flex-direction: column; gap: .35rem; padding: .7rem; border: 1px solid var(--border-subtle); border-radius: 6px; }
+.diagnostic-step pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow: auto; }
 .diagnostic-step > button { text-align: left; margin-left: 1rem; }
 .diagnostic-unexecuted { color: var(--muted-foreground); opacity: .75; }
 .diagnostic-detail { min-width: 0; max-height:calc(100dvh - 220px);overflow:auto;overflow-wrap: anywhere;padding:16px;border:1px solid var(--border-subtle);border-radius:6px;background:var(--surface-card); }

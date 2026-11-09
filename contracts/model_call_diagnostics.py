@@ -59,10 +59,9 @@ def reset_execution(token: Token) -> None:
 
 
 def redact_text(value: object, api_key: str | None = None) -> str | None:
-    """Bound text and remove known credential values and credential assignments."""
+    """Remove credential values while retaining the complete model payload."""
     if not isinstance(value, str):
         return None
-    value = value[:4096]
     if api_key:
         value = value.replace(api_key, "[REDACTED]")
     value = _credential_header.sub(lambda match: match.group(1) + "[REDACTED]", value)
@@ -105,8 +104,6 @@ def _message_text(messages: object) -> str | None:
         content = getattr(message, "content", None)
         if isinstance(content, str):
             parts.append(content)
-        if sum(map(len, parts)) >= 4096:
-            break
     return "\n".join(parts) if parts else None
 
 
@@ -124,8 +121,7 @@ def record_call(provider, model_id, api_key, started_at, start, request, respons
                  "status": "failed" if exc is not None else "succeeded", "error_code": code,
                  "http_status": status, "request": redact_text(request, api_key),
                  "response": redact_text(response, api_key), "params": params or {},
-                 "request_truncated": isinstance(request, str) and len(request) > 4096,
-                 "response_truncated": isinstance(response, str) and len(response) > 4096}
+                 "request_truncated": False, "response_truncated": False}
         event.update(_execution.get() or {})
         recorder(event)
     except Exception:

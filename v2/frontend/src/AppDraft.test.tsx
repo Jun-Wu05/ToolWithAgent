@@ -5,12 +5,12 @@ import { api, type MappingDraft, type Conversation, type Run } from './api'
 vi.mock('./api', () => ({ saveDownload: vi.fn(), api: Object.fromEntries(['me','identities','selectIdentity','conversations','createConversation','conversation','sendMessage','uploadFile','logParse','submitLogKnowledge','retryRun','cancelToken','cancelRun','run','eventsUrl','fieldMapping','mappingView','mappingDownload','createMappingDraft','mappingDraft','standardFields','saveMapping','confirmMapping','mappingCandidates','applyMappingDraft','discardMappingDraft'].map(name => [name, vi.fn()])) }))
 class FakeEventSource { onmessage = null; onerror = null; close() {} }
 const summary = { id: 'conv-1', title: '当前会话', created_at: '', updated_at: '' }
-const artifact = { id: 'map-1', run_id: 'r1', file_id: 'f1', kind: 'field_mapping' as const, status: 'published', current: true, summary: { rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0 } }
+const artifact = { id: 'map-1', run_id: 'r1', file_id: 'f1', result_message_id: 'result-1', kind: 'field_mapping' as const, status: 'published', current: true, summary: { rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0 } }
 const saved = (): MappingDraft => ({ id: 'draft-1', conversation_id: 'conv-1', base_artifact_id: 'map-1', revision: 2, status: 'active', changed_count: 1, operation_count: 1, operations: [], base_current: true, apply_run_id: null, applied_artifact_id: null })
 let current: MappingDraft, detail: Conversation
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(complete => { resolve = complete }); return { promise, resolve } }
 beforeEach(() => {
-  current = saved(); detail = { ...summary, messages: [], files: [], runs: [], artifacts: [artifact], drafts: [current] }
+  current = saved(); detail = { ...summary, messages: [{ id: 'result-1', actor: 'assistant', content: '映射结果已发布', run_id: 'r1' }], files: [], runs: [], artifacts: [artifact], drafts: [current] }
   vi.stubGlobal('EventSource', FakeEventSource); sessionStorage.clear(); localStorage.clear()
   vi.mocked(api.me).mockResolvedValue({ id: 'u1', display_name: '用户一', role: 'user' })
   vi.mocked(api.identities).mockResolvedValue({ items: [{ id: 'u1', display_name: '用户一', role: 'user' }, { id: 'u2', display_name: '用户二', role: 'user' }] })

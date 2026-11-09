@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import sqlite3
 import threading
 import time
 import zipfile
@@ -10,7 +11,7 @@ from xml.etree.ElementTree import ParseError
 from uuid import uuid4
 
 from openpyxl import load_workbook
-from application.log_privacy import private_business_logging
+from application.log_privacy import private_business_logging, bind_run_log_recorder, reset_run_log_recorder, bind_run_context, reset_run_context
 from agent.shared.logger import get_logger
 from openpyxl.utils.exceptions import InvalidFileException
 from contracts.model_call_diagnostics import bind_recorder, reset_recorder, set_scope, reset_scope
@@ -161,6 +162,7 @@ class Worker:
     def _run_field_mapping(self, claim):
         from toolwithagent_v2.runtime.mapping_projection import mapping_summary
         try:
+            stage_start = time.monotonic()
             if not self.store.mapping_is_current(claim):
                 return self.store.finish(self.worker_id, claim, "mapping_input_stale",
                                          message="主数据或分类结果已变化，请重新执行字段映射")
@@ -172,6 +174,7 @@ class Worker:
             if claim["input"].get("business_inputs"):
                 with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                     initial_session, _ = self.store.read_business_session(claim)
+            _DIAGNOSTICS.info("映射阶段 输入校验与会话恢复完成 run_id=%s duration_ms=%d", claim["id"], round((time.monotonic() - stage_start) * 1000))
             snapshot = {**claim["input"], "initial_session": initial_session, "_progress_sink": RunProgressSink(self.store, self.worker_id, claim)}
             with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                 outcome = asyncio.run(self.business_application.field_mapping(
@@ -180,7 +183,9 @@ class Worker:
                 return self.store.finish(self.worker_id, claim, outcome.get("error") or "field_mapping_failed",
                                          message="字段映射失败，请检查输入后重试",
                                          suggestions=suggestion_catalog.failed())
+            stage_start = time.monotonic()
             summary = mapping_summary(outcome)
+            _DIAGNOSTICS.info("映射阶段 摘要计算完成 run_id=%s duration_ms=%d fields=%d", claim["id"], round((time.monotonic() - stage_start) * 1000), summary["field_count"])
             message = (f"字段映射完成：{summary['rule_count']} 条子规则，{summary['field_count']} 个字段；"
                        f"映射成功 {summary['matched_count']}，未匹配 {summary['unmatched_count']}，解析异常 {summary['parse_error_count']}")
             if summary["uncertain_annotation_count"]:
@@ -198,12 +203,30 @@ class Worker:
                         artifacts.append({"kind": kind, "payload": model.model_validate(state[key]).artifact.model_dump(mode="json")})
                 for artifact in artifacts:
                     artifact["source_kinds"] = artifact_sources.get(artifact["kind"], [])
-                return self.store.publish_business(self.worker_id, claim, artifacts, message,
-                                                   suggestions=suggestion_catalog.mapping_done())
+                stage_start = time.monotonic()
+                result = self.store.publish_business(self.worker_id, claim, artifacts, message,
+                                                     suggestions=suggestion_catalog.mapping_done())
+                if result:
+                    finished_at = time.time()
+                    duration_ms = round((time.monotonic() - stage_start) * 1000)
+                    publication_message = (f"映射阶段 产物发布完成 run_id={claim['id']} "
+                                           f"duration_ms={duration_ms} artifacts={len(artifacts)}")
+                    _DIAGNOSTICS.info(publication_message)
+                    try:
+                        self.store.record_run_log(self.worker_id, claim, {
+                            "created_at": finished_at, "level": "info", "logger": "v2.diagnostics",
+                            "step": claim["task_type"],
+                            "message": f"[run_id={claim['id']} step={claim['task_type']}] {publication_message}",
+                            "exception": None,
+                        }, completed=True)
+                    except Exception:
+                        pass  # 诊断写入不能改变已提交的业务结果
+                return result
             return self.store.publish(self.worker_id, claim, json.dumps(outcome, ensure_ascii=False).encode("utf-8"),
                 kind="field_mapping", metadata={"summary":summary}, message=message,
                 suggestions=suggestion_catalog.mapping_done())
         except Exception:
+            _DIAGNOSTICS.exception("映射执行失败 run_id=%s", claim["id"])
             return self.store.finish(self.worker_id, claim, "field_mapping_failed",
                                      message="字段映射失败，请检查输入后重试",
                                      suggestions=suggestion_catalog.failed())
@@ -313,14 +336,26 @@ class Worker:
         stop = threading.Event()
         def record_call(event):
             self.store.record_model_call(self.worker_id, claim, event)
+            _DIAGNOSTICS.info("模型调用 run_id=%s operation=%s provider=%s model=%s duration_ms=%s\n请求:\n%s\n响应:\n%s",
+                              claim["id"], event.get("operation") or claim["task_type"], event.get("provider"),
+                              event.get("model"), event.get("duration_ms"), event.get("request") or "未采集",
+                              event.get("response") or "未采集")
             self._log_model_call_failure(claim, event)
 
         diagnostic_token = bind_recorder(record_call)
+        log_token = bind_run_log_recorder(lambda record: self.store.record_run_log(self.worker_id, claim, record))
+        context_token = bind_run_context(run_id=claim["id"], step=claim["task_type"])
         scope_token = set_scope(None)
 
         def heartbeat():
             while not stop.wait(min(5, self.lease_seconds / 3)):
-                if not self.store.renew(self.worker_id, claim, lease_seconds=self.lease_seconds):
+                try:
+                    renewed = self.store.renew(self.worker_id, claim, lease_seconds=self.lease_seconds)
+                except sqlite3.OperationalError as exc:
+                    if "locked" in str(exc).lower():
+                        continue
+                    raise
+                if not renewed:
                     break
 
         keeper = threading.Thread(target=heartbeat, daemon=True)
@@ -370,6 +405,8 @@ class Worker:
         finally:
             reset_scope(scope_token)
             reset_recorder(diagnostic_token)
+            reset_run_log_recorder(log_token)
+            reset_run_context(context_token)
             stop.set()
             keeper.join()
 

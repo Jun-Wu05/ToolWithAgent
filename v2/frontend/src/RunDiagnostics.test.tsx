@@ -11,6 +11,7 @@ const detail: DiagnosticRun = {
   timeline: [{ sequence: 1, scope_type: 'step', scope_id: 'step-1', event_type: 'run_progress', status: 'running', summary: { progress_status: 'failed' }, created_at: '2026-10-27T00:00:00Z' }],
   calls: [{ id: 'call-1', run_id: 'run-270', task_id: 'task-270', scope_id: 'step-1', request_id: 'request-1', provider: 'deepseek', model: 'model-a', error_code: 'model_timeout', attempt: 2, duration_ms: 30000 }],
   logs: [{ id: 'call-call-1', level: 'error', source: 'model_call', scope_id: 'step-1', request_id: 'request-1', error_code: 'model_timeout', duration_ms: 30000, created_at: '2026-10-27T00:00:00Z' }],
+  business_logs: { items: [{ id: 1, created_at: '2026-10-27T00:00:00Z', level: 'error', logger: 'pipeline', step: 'field_mapping', message: '映射阶段失败：模型超时' }], next_cursor: null, collected: true },
   artifacts: [{ id: 'artifact-1', kind: 'field_mapping', version: 1, status: 'current', sha256: 'sha', created_at: '2026-10-27T00:00:00Z', source_artifact_ids: [] }],
 }
 
@@ -39,6 +40,7 @@ describe('Run diagnostics', () => {
     vi.spyOn(api, 'diagnosticCall').mockResolvedValue(detail.calls[0])
     render(<RunDiagnostics />)
     fireEvent.click(await screen.findByRole('button', { name: 'run-270' }))
+    fireEvent.click(await screen.findByRole('tab', { name: '概览' }))
     expect(await screen.findByRole('heading', { name: '执行摘要' })).toBeInTheDocument()
     expect(screen.getByText(action)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '故障结论' })).not.toBeInTheDocument()
@@ -51,6 +53,8 @@ describe('Run diagnostics', () => {
     vi.spyOn(api, 'diagnosticBundle').mockResolvedValue({ name: 'run-270-diagnostics.json', blob: new Blob(['{}']) })
     render(<RunDiagnostics />)
     fireEvent.click(await screen.findByRole('button', { name: 'run-270' }))
+    expect(await screen.findByText('映射阶段失败：模型超时')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '概览' }))
     expect(await screen.findByRole('heading', { name: '故障结论' })).toBeInTheDocument()
     expect(api.diagnosticCall).not.toHaveBeenCalled()
     expect(screen.getAllByRole('tab')).toHaveLength(5)
@@ -73,6 +77,7 @@ describe('Run diagnostics', () => {
     vi.spyOn(api, 'diagnosticRun').mockResolvedValue({ ...detail, calls: [], evidence_status: '未采集', conclusion: { ...detail.conclusion, call_id: null, scope_id: null, category: 'field_mapping_failed', reason: '具体原因未采集' } })
     render(<RunDiagnostics />)
     fireEvent.click(await screen.findByRole('button', { name: 'run-270' }))
+    fireEvent.click(await screen.findByRole('tab', { name: '概览' }))
     expect(await screen.findByText(/具体原因未采集/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '输入与输出' }))
     expect(screen.getAllByText('未采集').length).toBeGreaterThan(0)
@@ -91,5 +96,17 @@ describe('Run diagnostics', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'run-270' }))
     fireEvent.click(await screen.findByRole('tab', { name: '执行时间线' }))
     expect(screen.getByText(/未执行 · Run 失败前未启动/)).toHaveClass('diagnostic-unexecuted')
+  })
+
+  it('lets an owner page readable logs without a global Run list', async () => {
+    const listSpy = vi.spyOn(api, 'diagnosticRuns')
+    vi.spyOn(api, 'userDiagnosticRun').mockResolvedValue({ ...detail, business_logs: { ...detail.business_logs!, next_cursor: 1 } })
+    vi.spyOn(api, 'diagnosticLogs').mockResolvedValue({ items: [{ id: 2, created_at: '2026-10-27T00:00:01Z', level: 'info', logger: 'pipeline', step: 'field_mapping', message: '映射阶段完成' }], next_cursor: null, collected: true })
+    render(<RunDiagnostics initialRunId="run-270" userMode />)
+    expect(await screen.findByText('映射阶段失败：模型超时')).toBeInTheDocument()
+    expect(listSpy).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '加载更多日志' }))
+    expect(await screen.findByText('映射阶段完成')).toBeInTheDocument()
+    expect(api.diagnosticLogs).toHaveBeenCalledWith('run-270', 1, true)
   })
 })

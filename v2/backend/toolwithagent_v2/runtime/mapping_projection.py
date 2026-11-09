@@ -3,7 +3,7 @@ import hashlib
 import json
 from application.threat_report import event_type_determination
 from contracts.planner_models import EventAnnotationRow
-from application.standard_enum_mapping import iter_rule_field_values
+from application.standard_enum_mapping import _lookup_member_value, _MISSING, iter_rule_records
 from agent.tools.rule_generator.utils import value_to_str
 from agent.tools.rule_generator.field_mapping import EXCLUDED_FIELD_INDICES, MAPPING_EXCLUDED_STANDARD_FIELDS
 
@@ -18,23 +18,25 @@ def operation_key(rule_id, source_path):
 def collect_samples(config, lines, classification):
     samples = {}
     for position, rule in enumerate(config):
-        fields = {}
-        for entry in rule.get('normalize', []):
-            index = str(entry.get('index') or '')
-            if not index:
-                continue
-            source, values = iter_rule_field_values(rule, index, lines, classification, position, entry.get("result") or [])
-            seen, rows = set(), []
-            for number, present, raw in values:
-                if not present or raw is None or raw == '':
+        entries = {str(entry.get('index')): entry for entry in rule.get('normalize', []) if entry.get('index')}
+        fields = {index: [] for index in entries}
+        seen = {index: set() for index in entries}
+        source, records = iter_rule_records(rule, lines, classification, position)
+        if source == 'config-sample':
+            records = ((None, {index: value}) for index, entry in entries.items() for value in entry.get('result') or [])
+        for number, record in records:
+            for index in entries:
+                if len(fields[index]) == 20:
+                    continue
+                raw = _lookup_member_value(record, index)
+                if raw is _MISSING or raw is None or raw == '':
                     continue
                 value = value_to_str(raw)
-                if value and value not in seen:
-                    seen.add(value)
-                    rows.append({'value': value, 'line_number': number, 'source': source})
-                    if len(rows) == 20:
-                        break
-            fields[index] = rows
+                if value and value not in seen[index]:
+                    seen[index].add(value)
+                    fields[index].append({'value': value, 'line_number': number, 'source': source})
+            if all(len(rows) == 20 for rows in fields.values()):
+                break
         samples[str(position)] = fields
     return samples
 

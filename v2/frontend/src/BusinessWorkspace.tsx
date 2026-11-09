@@ -91,13 +91,17 @@ export function ArtifactValues({artifact, content}: {artifact: Artifact; content
 }
 
 export const phaseName: Record<string, string> = {planning: '规划任务', retrieval: '检索依据', model_call: '业务分析', validation: '校验结果', writeback: '写入结果', execution: '执行步骤', completed: '步骤完成'}
+export const pipelineStageName: Record<string, string> = {format_identification: '格式识别', feature_location: '特征定位', kv_feature_identifier: 'KV 特征生成', classification: '日志分类', sample_fill: '样本填充'}
+export const pipelineErrorName: Record<string, string> = {format_invalid: '格式识别结果无效', feature_location_failed: '特征定位失败', kv_feature_identifier_failed: 'KV 特征生成失败', classification_failed: '日志分类失败', sample_fill_failed: '样本填充失败'}
 const progressName: Record<string, string> = {running: '进行中', success: '已完成', failed: '失败'}
 export function progressLabel(summary?: ProgressSummary) {
   if (!summary || !phaseName[summary.phase || '']) return ''
-  const base = `${businessName(summary.operation || '')}：${phaseName[summary.phase || '']} ${progressName[summary.progress_status || ''] || ''}`.trimEnd()
+  const stage = pipelineStageName[summary.pipeline_stage || ''] || phaseName[summary.phase || '']
+  const base = `${businessName(summary.operation || '')}：${stage} ${progressName[summary.progress_status || ''] || ''}`.trimEnd()
   const batch = summary.current_batch && summary.total_batches ? ` 第 ${summary.current_batch}/${summary.total_batches} 批` : ''
   const elapsed = summary.elapsed_seconds ? ` · 已耗时 ${Math.round(summary.elapsed_seconds)} 秒` : ''
-  return base + batch + elapsed
+  const reason = summary.error_code ? ` · ${pipelineErrorName[summary.error_code] || summary.error_code}` : ''
+  return base + batch + elapsed + reason
 }
 export function RunProgress({run}: {run: Run}) {
   const events = (run.events || []).filter(item => item.event_type === 'run_progress' && progressLabel(item.summary))

@@ -10,7 +10,7 @@ from io import StringIO
 
 import httpx
 
-from application.log_privacy import private_business_logging
+from application.log_privacy import private_business_logging, bind_run_log_recorder, reset_run_log_recorder
 
 
 class Capture:
@@ -54,13 +54,13 @@ def test_scope_context_and_whitelisted_extras_survive_masking():
                 extra={"error_category": "model_rate_limited", "attempt": 2, "payload": "SECRET-EXTRA"},
             )
         text = capture.text()
-        assert "[V2_APPLICATION] business event" in text
+        assert "SECRET-MESSAGE SECRET-ARGS" in text
         assert "run_id=run-abc12345" in text and "step=log_parse" in text
         assert "error_category=model_rate_limited" in text and "attempt=2" in text
-        assert "SECRET" not in text
+        assert "SECRET-EXTRA" not in text
 
 
-def test_exception_type_preserved_without_message_or_traceback():
+def test_exception_type_and_traceback_remain_readable():
     with Capture("privacy-diagnostics-2") as capture:
         with private_business_logging():
             try:
@@ -69,7 +69,7 @@ def test_exception_type_preserved_without_message_or_traceback():
                 capture.logger.exception("SECRET-MESSAGE")
         text = capture.text()
         assert "exc_type=ValueError" in text
-        assert "SECRET" not in text and "Traceback" not in text
+        assert "SECRET-MESSAGE" in text and "SECRET-EXCEPTION" in text and "Traceback" in text
 
 
 def test_extra_values_sanitized_long_strings_truncated_non_scalars_dropped():
@@ -92,7 +92,23 @@ def test_nested_scope_merges_context():
                 capture.logger.error("SECRET")
         text = capture.text()
         assert "run_id=run-outer" in text and "step=field_mapping" in text
-        assert "SECRET" not in text
+        assert "SECRET" in text
+
+
+def test_run_recorder_keeps_full_message_and_masks_only_credentials():
+    records = []
+    token = bind_run_log_recorder(records.append)
+    try:
+        with Capture("privacy-full") as capture:
+            with private_business_logging(run_id="run-full", step="field_mapping"):
+                capture.logger.info("业务日志 %s api_key=real-secret", "甲" * 5000)
+        assert "甲" * 5000 in capture.text()
+        assert "real-secret" not in capture.text()
+        assert records[0]["run_id"] == "run-full"
+        assert "甲" * 5000 in records[0]["message"]
+        assert "real-secret" not in records[0]["message"]
+    finally:
+        reset_run_log_recorder(token)
 
 
 def test_diagnostics_channel_exempt_from_masking_inside_scope():
@@ -132,14 +148,14 @@ def test_classifier_failure_categories_are_distinguishable(monkeypatch):
 
         json.loads(run_case(raise_api))
         assert "error_category=model_api_failed" in capture.text()
-        assert "secret-provider" not in capture.text() and "SECRET" not in capture.text()
+        assert "SECRET-PROSE-429" in capture.text()
 
         def raise_llm(*args, **kwargs):
             raise RuntimeError("SECRET-LLM-PROSE")
 
         json.loads(run_case(raise_llm))
         assert "error_category=model_call_failed" in capture.text()
-        assert "SECRET" not in capture.text()
+        assert "SECRET-LLM-PROSE" in capture.text()
 
         # 2) 正则校验失败：日志头 KV feature_identifier 生成抛 ValueError。
         monkeypatch.setattr(
@@ -156,7 +172,7 @@ def test_classifier_failure_categories_are_distinguishable(monkeypatch):
             "status": "SUCCESS", "classification_details": [], "feature_count": 0}, format_detail="kv+日志头"))
         assert parsed["fail_reason"] == "feature_identifier 生成失败"
         assert "error_category=feature_regex_invalid" in capture.text()
-        assert "SECRET" not in capture.text()
+        assert "SECRET-REGEX" in capture.text()
 
     # 3) 输出解析失败：LLM 返回非法 JSON 走兜底。
     from agent.tools.pipeline.common.llm_postprocessor import postprocess_llm_classification
@@ -168,7 +184,7 @@ def test_classifier_failure_categories_are_distinguishable(monkeypatch):
             )
         assert fallback.get("status") in {"PARTIAL", "FAILED", "SUCCESS"}
         assert "error_category=model_output_invalid" in capture.text()
-        assert "SECRET" not in capture.text()
+        assert "LLM returned invalid JSON" in capture.text()
 
 
 def test_executor_failure_extras_and_exc_type_survive_privacy_scope():
@@ -195,7 +211,7 @@ def test_executor_failure_extras_and_exc_type_survive_privacy_scope():
         assert "error_category=adapter_failed" in text
         assert "step_id=log-parse" in text and "operation=log_parse" in text
         assert "exc_type=TimeoutError" in text and "run_id=run-exec" in text
-        assert "SECRET" not in text
+        assert "SECRET-TIMEOUT" in text
 
 
 def test_log_parse_adapter_reports_classifier_fail_reason():

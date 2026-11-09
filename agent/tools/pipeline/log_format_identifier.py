@@ -22,6 +22,8 @@ from agent.tools.pipeline.llm_client import (
     _call_llm_direct,
     normalize_log_format,
 )
+from agent.tools.pipeline.progress_events import emit_pipeline, observe_pipeline
+from contracts.progress import PipelineErrorCode, PipelineStage, ProgressStatus
 
 logger = get_logger("log_parser_pipeline")
 
@@ -379,6 +381,25 @@ def _do_identify_log_format(logs_str: str) -> str:
             {"format": "unknown", "error": str(e), "confidence": 0},
             ensure_ascii=False,
         )
+
+
+def identify_log_format_with_progress(logs_str: str, progress=None) -> str:
+    """Optional headless stage reporting; the Chainlit tool keeps its old call shape."""
+    with observe_pipeline(progress):
+        emit_pipeline(PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.RUNNING)
+        try:
+            result = _do_identify_log_format(logs_str)
+            parsed = json.loads(result)
+        except Exception:
+            emit_pipeline(PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.FAILED,
+                          PipelineErrorCode.FORMAT_INVALID)
+            raise
+        if not isinstance(parsed, dict) or parsed.get("status") in {"FAILED", "UNSUPPORTED"}:
+            emit_pipeline(PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.FAILED,
+                          PipelineErrorCode.FORMAT_INVALID)
+        else:
+            emit_pipeline(PipelineStage.FORMAT_IDENTIFICATION, ProgressStatus.SUCCESS)
+        return result
 
 
 @tool(

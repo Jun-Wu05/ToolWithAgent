@@ -44,6 +44,8 @@ from agent.tools.pipeline.llm_client import (
     _call_llm_direct,
     normalize_log_format,
 )
+from agent.tools.pipeline.progress_events import emit_pipeline
+from contracts.progress import PipelineErrorCode, PipelineStage, ProgressStatus
 
 logger = get_logger("log_parser_pipeline")
 
@@ -338,8 +340,11 @@ def _generate_kv_feature_identifier(
     Raises:
         ValueError: 所有重试均失败时抛出。
     """
+    emit_pipeline(PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.RUNNING)
     all_lines = [l.strip() for l in logs_str.strip().split("\n") if l.strip()]
     if not all_lines:
+        emit_pipeline(PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.FAILED,
+                      PipelineErrorCode.KV_FEATURE_IDENTIFIER_FAILED)
         raise ValueError("日志内容为空，无法生成 feature_identifier")
 
     # 校验契约限定在"参与 KV 结构"的行：混入批次的少数异构行（如管道格式）
@@ -432,6 +437,7 @@ def _generate_kv_feature_identifier(
                 f"(尝试 {attempt}/{max_attempts}); regex_length={len(regex_str)}, "
                 f"body_length={body_length}"
             )
+            emit_pipeline(PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.SUCCESS)
             return regex_str
         else:
             last_error = err_msg
@@ -441,6 +447,8 @@ def _generate_kv_feature_identifier(
                 f"验证失败: {err_msg}; regex_length={len(regex_str)}"
             )
 
+    emit_pipeline(PipelineStage.KV_FEATURE_IDENTIFIER, ProgressStatus.FAILED,
+                  PipelineErrorCode.KV_FEATURE_IDENTIFIER_FAILED)
     raise ValueError(
         f"kv_body_regex_generation_failed; attempts={max_attempts}; "
         f"reason={last_error}"

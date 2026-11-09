@@ -1,7 +1,7 @@
 """进度契约：V2 只保存白名单进度，批次计数与操作标识来自真实事件。"""
 import asyncio
 
-from contracts.progress import ProgressEvent, ProgressPhase, ProgressStatus
+from contracts.progress import PipelineErrorCode, PipelineStage, ProgressEvent, ProgressPhase, ProgressStatus
 
 from toolwithagent_v2.infrastructure.store import Store
 from toolwithagent_v2.runtime.progress import RunProgressSink
@@ -70,3 +70,29 @@ def test_record_progress_stores_only_whitelist(tmp_path):
     summary = store.get_run("dev-user", claim["id"])["events"][-1]["summary"]
     assert summary["current_batch"] == 1
     assert "raw_detail" not in summary
+
+
+def test_pipeline_stage_and_error_survive_without_body(tmp_path):
+    store, conversation_id = setup(tmp_path)
+    claim = running_claim(store, conversation_id)
+    summary = publish(
+        store, claim, message_code="log_parse_kv_feature_identifier_failed",
+        pipeline_stage=PipelineStage.KV_FEATURE_IDENTIFIER,
+        error_code=PipelineErrorCode.KV_FEATURE_IDENTIFIER_FAILED,
+    )
+    assert summary["operation"] == "log_parse"
+    assert summary["pipeline_stage"] == "kv_feature_identifier"
+    assert summary["error_code"] == "kv_feature_identifier_failed"
+    store.record_progress("worker-a", claim, "step-x", {"pipeline_stage": "kv_feature_identifier", "raw_log": "secret body"})
+    assert "raw_log" not in store.get_run("dev-user", claim["id"])["events"][-1]["summary"]
+
+
+def test_failed_run_keeps_readable_reason_and_masks_secret(tmp_path):
+    store, conversation_id = setup(tmp_path)
+    claim = running_claim(store, conversation_id)
+    store.finish("worker-a", claim, "log_parse_failed",
+                 "KV 特征生成失败；Authorization: Bearer top-secret")
+    run = store.get_run("dev-user", claim["id"])
+    assert "KV 特征生成失败" in run["error_message"]
+    assert "top-secret" not in run["error_message"]
+    assert store.diagnostic_run(claim["id"])["conclusion"]["reason"] == run["error_message"]

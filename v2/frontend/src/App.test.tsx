@@ -7,7 +7,7 @@ vi.mock('./api', () => ({
   saveDownload: vi.fn(),
   api: {
     me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(), userTasks: vi.fn(), userRuns: vi.fn(),
-    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), artifactContent: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn()
+    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), artifactContent: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn(), userDiagnosticRun: vi.fn()
   }
 }))
 class FakeEventSource {
@@ -19,6 +19,33 @@ class FakeEventSource {
 }
 const summary = { id: 'conv-1', title: '日志任务', created_at: '2026-09-23T01:00:00Z', updated_at: '2026-09-23T01:00:00Z' }
 const detail = { ...summary, messages: [], files: [], runs: [] }
+const baseConversation = api.conversation
+const linkRecentFixture = (conversation: Conversation): Conversation => {
+  const messages = [...conversation.messages]
+  const artifacts = (conversation.artifacts || []).map(artifact => {
+    const id = ('result_message_id' in artifact && artifact.result_message_id) || `fixture-result-${artifact.id}`
+    if (!messages.some(message => message.id === id)) messages.push({ id, actor: 'assistant', content: '结果已发布', run_id: artifact.run_id })
+    return { ...artifact, result_message_id: id }
+  })
+  for (const file of conversation.files) {
+    if (file.active === false || messages.some(message => message.kind === 'file' && message.payload?.file_id === file.id)) continue
+    messages.push({ id: `fixture-file-${file.id}`, actor: 'user', kind: 'file', content: '', payload: { file_id: file.id, name: file.name } })
+  }
+  for (const change of conversation.field_changes || []) {
+    if (!messages.some(message => message.run_id === change.run_id)) messages.push({ id: `fixture-change-${change.run_id}`, actor: 'assistant', content: '字段变更', run_id: change.run_id })
+  }
+  return { ...conversation, messages, artifacts }
+}
+const renderApp = () => {
+  vi.spyOn(api, 'conversation').mockImplementation(async id => linkRecentFixture(await baseConversation(id)))
+  return render(<App />)
+}
+const openFirstTrace = () => {
+  fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
+  const trace = screen.getByRole('region', { name: '执行轨迹' })
+  fireEvent.click(within(trace).getAllByRole('button', { name: '执行详情' })[0])
+  return trace
+}
 beforeEach(() => {
   vi.stubGlobal('EventSource', FakeEventSource)
   localStorage.clear(); sessionStorage.clear(); FakeEventSource.instances = []
@@ -46,14 +73,14 @@ beforeEach(() => {
   vi.mocked(api.cancelRun).mockResolvedValue({ id: 'r2', status: 'cancelled' })
   vi.mocked(api.eventsUrl).mockImplementation((id, after) => '/events/' + id + '?after=' + after)
 })
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); api.conversation = baseConversation; vi.resetAllMocks(); vi.unstubAllGlobals() })
 describe('V2 workbench', () => {
   it('shows only the supplied recent conversation Run statuses', async () => {
     vi.mocked(api.conversations).mockResolvedValue({ items: [
       { ...summary, latest_run_status: 'running' },
       { ...summary, id: 'conv-empty', title: '空会话', latest_run_status: null },
     ] })
-    render(<App />)
+    renderApp()
     const running = (await screen.findByText('日志任务', { selector: '.recent-name' })).closest('button')!
     expect(running.querySelector('.status-text')).toHaveTextContent('运行中')
     expect(running.querySelector('.status-dot')).toHaveClass('tone-info')
@@ -63,7 +90,7 @@ describe('V2 workbench', () => {
 
   it('fills the composer from empty-state scene templates (#435)', async () => {
     vi.mocked(api.conversations).mockResolvedValue({ items: [] })
-    render(<App />)
+    renderApp()
     expect(await screen.findByRole('heading', { name: '从一句话或一个文件开始' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /提取字段枚举值/ }))
     expect(screen.getByRole('textbox', { name: '消息内容' })).toHaveValue('提取【字段名】的枚举值')
@@ -78,7 +105,7 @@ describe('V2 workbench', () => {
       conversation_title: second.title, message_id: 'message-2', created_at: '2026-10-28T00:00:00Z', updated_at: '2026-10-28T00:00:00Z',
     }] })
     vi.mocked(api.run).mockResolvedValue({ id: 'run-2', task_id: 'task-2', kind: 'user_request', status: 'failed', message_id: 'message-2' })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '未发送的草稿' } })
     fireEvent.click(screen.getByText('历史记录'))
@@ -90,7 +117,7 @@ describe('V2 workbench', () => {
     expect(screen.getByRole('tab', { name: '轨迹' })).toHaveAttribute('aria-selected', 'true')
   })
   it('restores the selected conversation and persists the theme', async () => {
-    render(<App />)
+    renderApp()
     expect(await screen.findByRole('heading', { name: '日志任务' })).toBeInTheDocument()
     expect(api.conversation).toHaveBeenCalledWith('conv-1')
     fireEvent.click(screen.getByRole('button', { name: '切换深色主题' }))
@@ -98,7 +125,7 @@ describe('V2 workbench', () => {
     expect(document.documentElement.dataset.theme).toBe('dark')
   })
   it('sends text and uploads a file to the current conversation', async () => {
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '检查日志' } })
     fireEvent.click(screen.getByRole('button', { name: '发送' }))
@@ -107,21 +134,34 @@ describe('V2 workbench', () => {
     fireEvent.change(input, { target: { files: [new File(['line'], 'log.txt', { type: 'text/plain' })] } })
     await waitFor(() => expect(api.uploadFile).toHaveBeenCalledWith('conv-1', expect.objectContaining({ name: 'log.txt' })))
   })
+  it('submits the mapping suggestion through the same message endpoint as typed text', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, messages: [{ id: 'suggestion-1', actor: 'assistant', kind: 'text', content: '分类完成', payload: { suggestions: [{ type: 'action', id: 'field_mapping', label: '标准字段映射' }] } }] })
+    let resolveSend: (value: Awaited<ReturnType<typeof api.sendMessage>>) => void = () => {}
+    vi.mocked(api.sendMessage).mockImplementation(() => new Promise(resolve => { resolveSend = resolve }))
+    renderApp()
+    const suggestion = await screen.findByRole('button', { name: '标准字段映射' })
+    fireEvent.click(suggestion)
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('conv-1', '标准字段映射'))
+    expect(screen.getByText('正在发送：标准字段映射')).toBeInTheDocument()
+    fireEvent.click(suggestion)
+    expect(api.sendMessage).toHaveBeenCalledTimes(1)
+    await act(async () => resolveSend({ id: 'sent-1', content: '标准字段映射', actor: 'user' }))
+  })
   it('shows the persisted user author and file validation state', async () => {
     vi.mocked(api.conversation).mockResolvedValue({
       ...detail,
       messages: [{ id: 'm1', actor: 'user', content: '检查日志' }],
       files: [{ id: 'f1', name: 'log.txt', parse_status: 'succeeded' }],
     })
-    render(<App />)
-    expect(await screen.findByText('你')).toBeInTheDocument()
+    renderApp()
+    expect((await screen.findAllByText('你')).length).toBeGreaterThan(0)
     expect(screen.getByText('已完成')).toBeInTheDocument()
   })
   it('starts log extraction from a validated file with an explicit feature field', async () => {
     vi.mocked(api.conversation).mockResolvedValue({
       ...detail, files: [{ id: 'f1', name: 'events.log', parse_status: 'succeeded' }]
     })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     fireEvent.change(screen.getByRole('textbox', { name: 'events.log 分类特征字段' }), { target: { value: 'kind' } })
     fireEvent.click(screen.getByRole('button', { name: '提取日志类型' }))
@@ -134,7 +174,7 @@ describe('V2 workbench', () => {
         summary: { log_types: [{ name: '登录事件', count: 3 }], coverage: { matched_lines: 3, total_lines: 4 }, rule_summary: '按 kind 区分' },
         submission_eligible: true }]
     })
-    render(<App />)
+    renderApp()
     await screen.findByText('登录事件 · 3')
     expect(screen.getByText('覆盖率：3 / 4')).toBeInTheDocument()
     // #435 Phase 2：正式产物在时间线以紧凑台账行呈现。
@@ -151,7 +191,7 @@ describe('V2 workbench', () => {
         summary: { log_types: [], coverage: { matched_lines: 1, total_lines: 3 }, rule_summary: '' },
         submission_eligible: false }]
     })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '停止' }))
@@ -165,7 +205,7 @@ describe('V2 workbench', () => {
         summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' },
         submission_eligible: true }]
     })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     expect(screen.queryByRole('button', { name: '提取日志类型' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
@@ -181,9 +221,9 @@ describe('V2 workbench', () => {
         submission_eligible: true, submission_status: 'cancelled' }]
     })
     vi.mocked(api.retryRun).mockResolvedValue({ id: 'r4', status: 'queued' })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
-    fireEvent.click(screen.getByText('执行详情 ›'))
+    openFirstTrace()
     expect(screen.getByRole('region', { name: '执行轨迹' })).toHaveTextContent('已取消')
     fireEvent.click(screen.getByRole('button', { name: '重新执行' }))
     await waitFor(() => expect(api.retryRun).toHaveBeenCalledWith('r3'))
@@ -192,9 +232,9 @@ describe('V2 workbench', () => {
     vi.mocked(api.conversation)
       .mockResolvedValueOnce({ ...detail, runs: [{ id: 'run-1', status: 'queued' }] })
       .mockResolvedValue({ ...detail, runs: [{ id: 'run-1', status: 'succeeded' }] })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
-    fireEvent.click(screen.getByText('执行详情 ›'))
+    openFirstTrace()
     const trace = screen.getByRole('region', { name: '执行轨迹' })
     expect(trace).toHaveTextContent('排队中')
     FakeEventSource.instances.at(-1)?.onmessage?.(new MessageEvent('message', { data: JSON.stringify({ sequence: 5 }) }))
@@ -211,7 +251,7 @@ describe('V2 workbench', () => {
       if (first) { first = false; return Promise.resolve(detail) }
       return oldRefresh
     })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     FakeEventSource.instances.at(-1)?.onmessage?.(new MessageEvent('message', { data: JSON.stringify({ sequence: 6 }) }))
     fireEvent.click(screen.getByRole('button', { name: /第二会话/ }))
@@ -221,7 +261,7 @@ describe('V2 workbench', () => {
     expect(screen.queryByText('旧会话秘密')).not.toBeInTheDocument()
   })
   it('refreshes persisted detail after an SSE message', async () => {
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     const before = vi.mocked(api.conversation).mock.calls.length
     FakeEventSource.instances.at(-1)?.onmessage?.(new MessageEvent('message', { data: JSON.stringify({ sequence: 4 }) }))
@@ -238,9 +278,9 @@ describe('V2 workbench', () => {
       .mockResolvedValueOnce(queued)
       .mockImplementationOnce(() => oldRefresh)
       .mockImplementationOnce(() => newRefresh)
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
-    fireEvent.click(screen.getByText('执行详情 ›'))
+    openFirstTrace()
     const trace = screen.getByRole('region', { name: '执行轨迹' })
     const source = FakeEventSource.instances.at(-1)
     source?.onmessage?.(new MessageEvent('message', { data: JSON.stringify({ sequence: 7 }) }))
@@ -256,10 +296,9 @@ describe('V2 workbench', () => {
 
 describe('field mapping workflow', () => {
   it('requires product and vendor, preserves values on error and submits the explicit file', async () => {
-    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: 'input.b64', mapping_eligible: true }] })
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: 'input.b64', mapping_eligible: true }], messages: [{ id: 'upload-1', actor: 'user', kind: 'file', content: '上传了主数据', payload: { file_id: 'f1', name: 'input.b64', role: 'primary' } }] })
     vi.mocked(api.fieldMapping).mockRejectedValue(new Error('主数据已变化，请重新选择输入。'))
-    render(<App />)
-    fireEvent.click(await screen.findByText(/历史独立操作/))
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '标准字段映射' }))
     const start = screen.getByRole('button', { name: '开始映射' })
     expect(start).toBeDisabled()
@@ -273,7 +312,7 @@ describe('field mapping workflow', () => {
   it('hides mapping writes from developer and from ineligible inputs', async () => {
     vi.mocked(api.me).mockResolvedValue({ id: 'observer', display_name: '只读身份', role: 'developer' })
     vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: 'input.log', mapping_eligible: true }] })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     expect(screen.queryByRole('button', { name: '标准字段映射' })).not.toBeInTheDocument()
   })
@@ -285,7 +324,7 @@ const mappedArtifact: FieldMappingArtifact = { id: 'map-1', run_id: 'rm1', file_
 const mappingDetail: Conversation = { ...detail, artifacts: [mappedArtifact] }
 it('closes the right workspace when its last resource tab is closed', async () => {
   vi.mocked(api.conversation).mockResolvedValue(mappingDetail)
-  render(<App />)
+  renderApp()
   fireEvent.click(await screen.findByRole('button', { name: '查看完整结果' }))
   expect(screen.getByRole('complementary', { name: '资源工作区' })).toBeVisible()
   expect(screen.getByRole('tab', { name: '字段映射' })).toHaveAttribute('aria-selected', 'true')
@@ -299,10 +338,10 @@ it('opens message Run details in trace and restores the mapping workspace on ret
   const run = { id: 'rm1', kind: 'field_mapping', status: 'succeeded', message_id: 'm1' }
   vi.mocked(api.conversation).mockResolvedValue({ ...mappingDetail, messages: [{ id: 'm1', actor: 'assistant', kind: 'text', content: '映射待审查', run_id: 'rm1' }], runs: [run] })
   vi.mocked(api.run).mockResolvedValue(run)
-  render(<App />)
+  renderApp()
   fireEvent.click(await screen.findByRole('button', { name: '查看完整结果' }))
   fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '未发送的内容' } })
-  fireEvent.click(screen.getByRole('button', { name: '查看本次执行' }))
+  fireEvent.click(screen.getAllByRole('button', { name: '查看本次执行' })[0])
   await waitFor(() => expect(api.run).toHaveBeenCalledWith('rm1'))
   expect(screen.getByRole('tab', { name: '轨迹' })).toHaveAttribute('aria-selected', 'true')
   expect(screen.queryByRole('complementary', { name: '资源工作区' })).not.toBeInTheDocument()
@@ -319,14 +358,15 @@ describe('mapping integration boundaries', () => {
   it('submits the eligible classification, retains an idempotency key on retry and shows queue state', async () => {
     const classified: Conversation = { ...detail, artifacts: [{ id: 'class-1', kind: 'log_classification', run_id: 'rc1', file_id: 'f1', status: 'published', mapping_eligible: true, submission_eligible: false,
       summary: { log_types: [], coverage: { matched_lines: 2, total_lines: 2 }, rule_summary: '分类完成' } }] }
-    vi.mocked(api.conversation).mockResolvedValueOnce(classified).mockResolvedValue({ ...classified, runs: [{ id: 'rm1', status: 'queued', kind: 'field_mapping' }] })
+    vi.mocked(api.conversation).mockResolvedValue(classified)
     vi.mocked(api.fieldMapping).mockRejectedValueOnce(new Error('网络连接中断')).mockResolvedValue({ task: { id: 'tm1', status: 'queued' }, run: { id: 'rm1', status: 'queued' } })
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '标准字段映射' }))
     fillSource()
     fireEvent.change(screen.getByRole('textbox', { name: '数据源（可选）' }), { target: { value: '测试数据源' } })
     fireEvent.click(screen.getByRole('button', { name: '开始映射' }))
     await screen.findByText('网络连接中断')
+    vi.mocked(baseConversation).mockResolvedValue({ ...classified, runs: [{ id: 'rm1', status: 'queued', kind: 'field_mapping' }] })
     fireEvent.click(screen.getByRole('button', { name: '开始映射' }))
     await screen.findByText('标准字段映射已排队。')
     const hint = await screen.findByRole('status', { name: '当前任务提示' })
@@ -339,13 +379,13 @@ describe('mapping integration boundaries', () => {
   })
   it('honors server eligibility rather than filename or file validation heuristics', async () => {
     vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'old', name: 'old.log', parse_status: 'succeeded', mapping_eligible: false }, { id: 'pending', name: 'new.log', parse_status: 'queued', mapping_eligible: false }] })
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     expect(screen.queryByRole('button', { name: '标准字段映射' })).not.toBeInTheDocument()
   })
   it('enlarges only the middle region, keeps composer/theme/navigation and returns focus to the card', async () => {
     vi.mocked(api.conversation).mockResolvedValue({ ...mappingDetail, runs: [{ id: 'rm1', status: 'running', kind: 'field_mapping' }] })
-    render(<App />)
+    renderApp()
     const open = await screen.findByRole('button', { name: '查看完整结果' })
     expect(screen.queryByText('敏感样例')).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '尚未发送的内容' } })
@@ -366,7 +406,7 @@ describe('mapping integration boundaries', () => {
   })
   it('keeps stale artifacts readable and downloadable while showing their status', async () => {
     vi.mocked(api.conversation).mockResolvedValue({ ...detail, artifacts: [{ ...mappedArtifact, status: 'stale', current: false }] })
-    render(<App />)
+    renderApp()
     await screen.findByText('结果已过期，可查看和下载历史配置。')
     fireEvent.click(screen.getByRole('button', { name: '下载配置' }))
     await waitFor(() => expect(saveDownload).toHaveBeenCalledWith(expect.objectContaining({ name: 'mappedconfig_Base64.txt' })))
@@ -380,7 +420,7 @@ describe('mapping integration boundaries', () => {
     vi.mocked(api.conversation).mockImplementation(id => Promise.resolve(id === 'conv-1' ? mappingDetail : { ...detail, ...second }))
     let resolveOld: (view: Awaited<ReturnType<typeof api.mappingView>>) => void = () => {}
     vi.mocked(api.mappingView).mockImplementation(() => new Promise(resolve => { resolveOld = resolve }))
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '查看完整结果' }))
     fireEvent.click(screen.getByRole('button', { name: /第二会话/ }))
     await screen.findByRole('heading', { name: '第二会话' })
@@ -400,7 +440,7 @@ describe('mapping integration boundaries', () => {
     vi.mocked(api.selectIdentity).mockImplementation(() => { selected = true; return Promise.resolve(other) })
     let resolveOld: (result: Awaited<ReturnType<typeof api.fieldMapping>>) => void = () => {}
     vi.mocked(api.fieldMapping).mockImplementation(() => new Promise(resolve => { resolveOld = resolve }))
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '标准字段映射' }))
     fillSource()
     fireEvent.click(screen.getByRole('button', { name: '开始映射' }))
@@ -417,7 +457,7 @@ describe('mapping integration boundaries', () => {
     vi.mocked(api.conversation).mockImplementation(id => Promise.resolve(id === 'conv-1' ? mappingDetail : { ...detail, ...second }))
     let resolveOld: (result: Awaited<ReturnType<typeof api.mappingDownload>>) => void = () => {}
     vi.mocked(api.mappingDownload).mockImplementation(() => new Promise(resolve => { resolveOld = resolve }))
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '下载配置' }))
     fireEvent.click(screen.getByRole('button', { name: /第二会话/ }))
     await screen.findByRole('heading', { name: '第二会话' })
@@ -440,7 +480,7 @@ describe('mapping view identity fence', () => {
     vi.mocked(api.selectIdentity).mockImplementation(() => { selected = true; return Promise.resolve(other) })
     let resolveOld: (result: Awaited<ReturnType<typeof api.mappingView>>) => void = () => {}
     vi.mocked(api.mappingView).mockImplementation(() => new Promise(resolve => { resolveOld = resolve }))
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '查看完整结果' }))
     await screen.findByText('正在加载字段…')
     fireEvent.change(screen.getByLabelText('开发身份切换'), { target: { value: 'dev' } })
@@ -459,7 +499,7 @@ describe('mapping view identity fence', () => {
     vi.mocked(api.conversation).mockImplementation(id => Promise.resolve(id === 'conv-1' ? { ...detail, files: [{ id: 'f1', name: 'events.log', mapping_eligible: true }] } : { ...detail, ...second }))
     let rejectOld: (error: Error) => void = () => {}
     vi.mocked(api.fieldMapping).mockImplementation(() => new Promise((_, reject) => { rejectOld = reject }))
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '标准字段映射' }))
     fillSource()
     fireEvent.click(screen.getByRole('button', { name: '开始映射' }))
@@ -478,7 +518,7 @@ describe('mapping safe summary', () => {
     vi.mocked(api.mappingView).mockResolvedValue({ artifact_id: 'map-1', sub_rules: [{ id: '0', name: '子规则', field_count: 0 }], sub_rule_id: '0', items: [], total: 0, page: 1, page_size: 50, sample_line_reference: 'log_entry',
       event_annotations: [{ rule_name: '私人子规则', event_name: '私人事件名称', event_level: 'unknown', threat_source_field: '私人来源字段', threat_types: [], status: 'uncertain' }],
       warnings: [{ code: 'threat_chain_warning', message: '⚠️ 私人业务警告：威胁类型未生成。' }] })
-    render(<App />)
+    renderApp()
     await screen.findByText('待人工确认：1 条事件名称标注。')
     expect(screen.getByText('威胁类型处理有提醒，请查看结果。')).toBeInTheDocument()
     await waitFor(() => expect(api.mappingView).toHaveBeenCalled())
@@ -498,14 +538,14 @@ describe('Quiet Precision workspace', () => {
     vi.mocked(api.me).mockResolvedValue({ id: 'dev-admin', display_name: '管理员', role: 'admin' })
     vi.mocked(api.conversation).mockResolvedValue(detail)
     vi.mocked(api.adminOverview).mockResolvedValue({ runs: { queued: 1, running: 0, waiting_confirmation: 0, cancelling: 0, succeeded: 0, failed: 0, cancelled: 0 }, users: 3, conversations: 1, worker: { lease_owner: null, lease_expires_at: null, epoch: 0 } })
-    render(<App />)
+    renderApp()
     expect(await screen.findByRole('heading', { name: '管理台' })).toBeInTheDocument()
     expect(await screen.findByRole('navigation', { name: '管理导航' })).toBeInTheDocument()
     expect(screen.queryByRole('tablist', { name: '工作区视图' })).not.toBeInTheDocument()
     expect(api.adminOverview).toHaveBeenCalled()
   })
   it('keeps unsent text across the conversation and trace views', async () => {
-    render(<App />)
+    renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     const input = screen.getByRole('textbox', { name: '消息内容' })
     fireEvent.change(input, { target: { value: '保留这条需求' } })
@@ -516,7 +556,7 @@ describe('Quiet Precision workspace', () => {
   })
   it('keeps the mapping editor and filters mounted across trace and resource tabs', async () => {
     vi.mocked(api.conversation).mockResolvedValue(mappingDetail)
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '查看完整结果' }))
     const search = await screen.findByLabelText('搜索字段或样例')
     fireEvent.change(search, { target: { value: 'src_ip' } })
@@ -532,7 +572,7 @@ describe('Quiet Precision workspace', () => {
   it('renders the conversation mapping summary with real rows and the draft change table', async () => {
     vi.mocked(api.conversation).mockResolvedValue({ ...mappingDetail, drafts: [{ id: 'draft-1', conversation_id: 'conv-1', base_artifact_id: 'map-1', revision: 1, status: 'active', changed_count: 1, apply_run_id: null, applied_artifact_id: null, base_current: true }] })
     vi.mocked(api.mappingDraft).mockResolvedValue({ id: 'draft-1', conversation_id: 'conv-1', base_artifact_id: 'map-1', revision: 1, status: 'active', changed_count: 1, operation_count: 1, base_current: true, apply_run_id: null, applied_artifact_id: null, operations: [{ operation_key: 'row-0', proposal: { sub_rule_id: '0', source_path: 'src_ip', standard_field: '源地址', linked_sub_rule_ids: [] }, changes: [{ sub_rule_id: '0', source_path: 'src_ip', standard_field: '源地址' }] }] })
-    render(<App />)
+    renderApp()
     expect(await screen.findByRole('table', { name: '字段映射摘要（当前子规则）' })).toBeInTheDocument()
     expect(screen.getByText('1 处修改已保存为草稿，尚未应用。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '展开修改明细' }))
@@ -543,14 +583,14 @@ describe('Quiet Precision workspace', () => {
 })
 
 
-it('keeps task facts in the conversation and preserves unsent text when changing conversations', async () => {
+it('keeps the conversation uncluttered and preserves unsent text when changing conversations', async () => {
   vi.mocked(api.conversations).mockResolvedValue({items: [summary, {...summary, id: 'conv-2', title: '另一个会话'}]})
   vi.mocked(api.conversation).mockImplementation(async id => ({...detail, id, title: id === 'conv-1' ? summary.title : '另一个会话'}))
-  render(<App />)
+  renderApp()
   await screen.findByRole('heading', {name: '日志任务'})
   fireEvent.change(screen.getByRole('textbox', {name: '消息内容'}), {target: {value: '保留草稿'}})
-  fireEvent.click(screen.getByText('任务信息', {selector: 'summary'}))
-  expect(screen.getByText('未应用草稿')).toBeInTheDocument()
+  expect(screen.queryByText('任务信息', {selector: 'summary'})).not.toBeInTheDocument()
+  expect(screen.queryByText('历史独立操作')).not.toBeInTheDocument()
   expect(screen.getByRole('textbox', {name: '消息内容'})).toHaveValue('保留草稿')
   fireEvent.click(screen.getByRole('button', {name: /另一个会话/}))
   await screen.findByRole('heading', {name: '另一个会话'})
@@ -560,12 +600,35 @@ it('keeps task facts in the conversation and preserves unsent text when changing
 it('opens Run details in the trace without an execution side panel', async () => {
   vi.mocked(api.conversation).mockResolvedValue({...detail, runs: [{id: 'run', status: 'succeeded'}]})
   vi.mocked(api.run).mockResolvedValue({id: 'run', status: 'succeeded'})
-  render(<App />)
+  renderApp()
   await screen.findByRole('heading', {name: '日志任务'})
-  fireEvent.click(screen.getByRole('button', {name: /执行详情/}))
+  openFirstTrace()
   await screen.findByRole('region', {name: '执行轨迹'})
   expect(screen.queryByLabelText('执行详情', {selector: 'aside'})).not.toBeInTheDocument()
   expect(screen.getByRole('tab', {name: '轨迹'})).toHaveAttribute('aria-selected', 'true')
+})
+
+it('closes Run diagnostics when switching to another conversation', async () => {
+  const other = { ...summary, id: 'conv-2', title: '另一个会话' }
+  vi.mocked(api.conversations).mockResolvedValue({ items: [summary, other] })
+  vi.mocked(api.conversation).mockImplementation(async id => ({
+    ...detail, id, title: id === summary.id ? summary.title : other.title,
+    runs: [{ id: id === summary.id ? 'run-a' : 'run-b', status: 'succeeded' }],
+  }))
+  vi.mocked(api.run).mockImplementation(async id => ({ id, status: 'succeeded' }))
+  vi.mocked(api.userDiagnosticRun).mockImplementation(() => new Promise<Awaited<ReturnType<typeof api.userDiagnosticRun>>>(() => {}))
+  renderApp()
+  await screen.findByRole('heading', { name: summary.title })
+  const trace = openFirstTrace()
+  fireEvent.click(await within(trace).findByRole('button', { name: '查看详细日志与模型调用' }))
+  await waitFor(() => expect(api.userDiagnosticRun).toHaveBeenCalledWith('run-a'))
+  fireEvent.click(screen.getByRole('button', { name: /另一个会话/ }))
+  await screen.findByRole('heading', { name: other.title })
+  fireEvent.click(screen.getByRole('tab', { name: '轨迹' }))
+  const secondTrace = await screen.findByRole('region', { name: '执行轨迹' })
+  fireEvent.click(within(secondTrace).getByRole('button', { name: '执行详情' }))
+  expect(await within(secondTrace).findByText('run-b')).toBeInTheDocument()
+  expect(screen.queryByText('run-a')).not.toBeInTheDocument()
 })
 
 it.each([true, false])('clears the previous field change when overview opens an exact mapping target (draft=%s)', async hasDraft => {
@@ -574,7 +637,7 @@ it.each([true, false])('clears the previous field change when overview opens an 
   const draft = { id: 'draft-1', conversation_id: 'conv-1', base_artifact_id: mapping.id, revision: 0, status: 'active' as const, changed_count: 1, apply_run_id: null, applied_artifact_id: null, base_current: true }
   vi.mocked(api.conversation).mockResolvedValue({...detail, field_changes: [field], artifacts: [mapping], drafts: hasDraft ? [draft] : []})
   vi.mocked(api.fieldPreview).mockResolvedValue({...field, task_id: 'field-task', current: true, selected_group_ids: [], groups: []})
-  render(<App />)
+  renderApp()
   await screen.findByRole('heading', {name: '日志任务'})
   fireEvent.click(screen.getByRole('button', {name: '查看变更'}))
   await screen.findByRole('region', {name: '字段变更预览'})
@@ -590,7 +653,7 @@ it('shows an artifact opened after a field change preview', async () => {
   const artifact: FieldMappingArtifact = { id: 'map-1', run_id: 'mapping-run', file_id: 'f1', kind: 'field_mapping', status: 'published', current: true, summary: {rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0} }
   vi.mocked(api.conversation).mockResolvedValue({...detail, field_changes: [field], artifacts: [artifact], runs: [{id: 'mapping-run', status: 'succeeded', kind: 'field_mapping'}]})
   vi.mocked(api.fieldPreview).mockResolvedValue({...field, task_id: 'field-task', current: true, selected_group_ids: [], groups: []})
-  render(<App />)
+  renderApp()
   await screen.findByRole('heading', {name: '日志任务'})
   fireEvent.click(screen.getByRole('button', {name: '查看变更'}))
   await screen.findByRole('region', {name: '字段变更预览'})

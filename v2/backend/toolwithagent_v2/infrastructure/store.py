@@ -731,7 +731,7 @@ class Store:
         return {"id": row["id"], "name": row["original_name"], "media_type": row["media_type"], "size": row["size"], "sha256": row["sha256"], "parse_status": row["parse_status"], "role": row["role"], "active": bool(row["is_active"]), "created_at": row["created_at"]}
 
     def _run(self, row):
-        return {"id": row["id"], "task_id": row["task_id"], "kind": row["task_type"], "message_id": json.loads(row["input_snapshot_json"]).get("message_id"), "file_id": json.loads(row["input_snapshot_json"]).get("file_id"), "status": row["status"], "attempt": row["attempt"], "queued_at": row["queued_at"], "started_at": row["started_at"], "finished_at": row["finished_at"], "error_code": row["error_code"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+        return {"id": row["id"], "task_id": row["task_id"], "kind": row["task_type"], "message_id": json.loads(row["input_snapshot_json"]).get("message_id"), "file_id": json.loads(row["input_snapshot_json"]).get("file_id"), "status": row["status"], "attempt": row["attempt"], "queued_at": row["queued_at"], "started_at": row["started_at"], "finished_at": row["finished_at"], "error_code": row["error_code"], "error_message": row["error_message"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     def get_run(self, owner_id, run_id):
         with connect(self.path) as db:
@@ -744,7 +744,7 @@ class Store:
                 event.pop("summary_json")
             return result
 
-    def diagnostic_run(self, run_id, include_content=False):
+    def diagnostic_run(self, run_id, include_content=False, include_all_logs=False):
         """Project one Run's linked evidence without reading unrelated conversations."""
         with connect(self.path) as db:
             row = db.execute(
@@ -842,16 +842,21 @@ class Store:
                           "possible_cause": possible_call["error_code"] if possible_call else None,
                           "category": (run["error_code"] or "未采集") if run["status"] == "failed" else run["status"]}
             if run["status"] == "failed":
-                conclusion["reason"] = "具体原因未采集"
+                conclusion["reason"] = run["error_message"] or "具体原因未采集"
             unexecuted = [{**step, "reason": (
                 "Run 失败前未启动；具体阻断原因未采集" if run["status"] == "failed"
                 else "Run 取消前未启动；具体原因未采集" if run["status"] == "cancelled"
                 else "步骤尚未启动；具体原因未采集")}
                           for step in planned if isinstance(step, dict)
                           and step.get("scope_id") not in observed_scopes]
-            return {"run": run, "conclusion": conclusion, "evidence_status": "已采集" if calls else "未采集",
+            business_logs = self.diagnostic_logs(run_id)
+            if include_all_logs:
+                business_logs = {"items": [dict(item) for item in db.execute(
+                    "SELECT id,created_at,level,logger,step,message,exception FROM run_logs WHERE run_id=? ORDER BY id", (run_id,))],
+                    "next_cursor": None, "collected": business_logs["collected"]}
+            return {"run": run, "conclusion": conclusion, "evidence_status": "已采集" if calls or business_logs["collected"] else "未采集",
                     "timeline": timeline, "planned_steps": planned, "unexecuted_steps": unexecuted,
-                    "calls": calls, "logs": logs, "artifacts": artifacts}
+                    "calls": calls, "logs": logs, "business_logs": business_logs, "artifacts": artifacts}
 
     def diagnostic_call(self, run_id, call_id):
         detail = self.diagnostic_run(run_id, include_content=True)
@@ -859,6 +864,17 @@ class Store:
             if call["id"] == call_id:
                 return call
         raise LookupError("model_call_not_found")
+
+    def diagnostic_logs(self, run_id, after=0, limit=100):
+        """Page real Run messages in execution order; old Runs remain uncollected."""
+        limit = max(1, min(int(limit), 200))
+        with connect(self.path) as db:
+            if db.execute("SELECT 1 FROM runs WHERE id=?", (run_id,)).fetchone() is None:
+                raise LookupError("run_not_found")
+            rows = db.execute("SELECT id,created_at,level,logger,step,message,exception FROM run_logs WHERE run_id=? AND id>? ORDER BY id LIMIT ?", (run_id, max(0, after), limit + 1)).fetchall()
+            items = [dict(row) for row in rows[:limit]]
+            return {"items": items, "next_cursor": items[-1]["id"] if len(rows) > limit else None,
+                    "collected": bool(db.execute("SELECT 1 FROM run_logs WHERE run_id=? LIMIT 1", (run_id,)).fetchone())}
 
     def events(self, owner_id, conversation_id, after):
         with connect(self.path) as db:
@@ -937,6 +953,9 @@ class Store:
             if message:
                 self._assistant_message(db, row["conversation_id"], message, row["id"], suggestions)
             self._record_state(db, row, "failed" if error_code else "succeeded", error_code)
+            if error_code and message:
+                db.execute("UPDATE runs SET error_message=? WHERE id=?",
+                           (redact_text(str(message)), row["id"]))
             db.commit()
             return True
 
@@ -2021,5 +2040,23 @@ class Store:
                 (uid(), claim["id"], str(event.get("provider") or "")[:80], str(event.get("model") or "")[:160],
                  error_code, json.dumps(summary, ensure_ascii=False, separators=(",", ":")), now()),
             )
+            db.commit()
+            return True
+
+    def record_run_log(self, worker_id, claim, record, completed=False):
+        """Best-effort write of an already masked message bound to this Run."""
+        with connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if self._valid_claim(db, worker_id, claim) is None:
+                if not completed:
+                    return False
+                row = db.execute("SELECT status,leader_epoch,finished_at FROM runs WHERE id=?", (claim["id"],)).fetchone()
+                if (row is None or row["status"] != "succeeded" or row["leader_epoch"] != claim["epoch"]
+                    or row["finished_at"] is None
+                    or not 0 <= record["created_at"] - datetime.fromisoformat(row["finished_at"]).timestamp() <= 60):
+                    return False
+            db.execute("INSERT INTO run_logs(run_id,created_at,level,logger,step,message,exception) VALUES(?,?,?,?,?,?,?)",
+                       (claim["id"], datetime.fromtimestamp(record["created_at"], timezone.utc).isoformat(),
+                        record["level"], record["logger"], record.get("step"), record["message"], record.get("exception")))
             db.commit()
             return True
