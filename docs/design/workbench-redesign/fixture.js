@@ -1,0 +1,25 @@
+// Sanitized event order from accepted Run a946359d. Times are UTC+8.
+// Summaries are human-readable projections of stored event_type/phase/operation/batch.
+window.fixtureEvents = [
+  ['14:13:26','run','标准字段映射','Run a946359d · 已排队','已排队'],
+  ['14:13:26','','开始执行','run_started','运行中'],
+  ['14:13:26','','步骤进展','execution · 规划执行','运行中'],
+  ['14:13:26','','步骤进展','field_mapping · execution','运行中'],
+  ['14:13:27','','检索候选字段','retrieval · 批次 1/2','运行中'],
+  ['14:13:27','','检索候选字段','retrieval · 批次 2/2','运行中'],
+  ['14:13:29','','检索完成','retrieval · 批次 2/2','已完成'],
+  ['14:13:30','','模型调用','model_call · 批次 2/2','运行中'],
+  ['14:13:32','','检索完成','retrieval · 批次 1/2','已完成'],
+  ['14:13:32','','模型调用','model_call · 批次 1/2','运行中'],
+  ['14:13:33','','模型调用完成','model_call · 批次 2/2','已完成'],
+  ['14:13:36','','模型调用完成','model_call · 批次 1/2','已完成'],
+  ['14:13:36','','验证映射','validation','运行中'],
+  ['14:14:07','','写回结果','writeback','运行中'],
+  ['14:14:07','','步骤完成','field_mapping · completed','已完成'],
+  ['14:14:07','','阶段完成','completed','已完成'],
+  ['14:14:10','','步骤进展','execution · add_fields 规划','运行中'],
+  ['14:14:11','','追加字段','add_fields · execution','运行中'],
+  ['14:14:11','','追加字段完成','add_fields · completed','已完成'],
+  ['14:14:11','','阶段完成','completed','已完成'],
+  ['14:14:11','','执行完成','run_succeeded · 45 秒','已完成'],
+];

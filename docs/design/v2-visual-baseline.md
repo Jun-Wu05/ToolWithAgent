@@ -1,5 +1,7 @@
 # V2 视觉基线规格（现行实现与新体验方向）
 
+> 2026-11 工作台重设计的本地评审稿与首版 Token 见 [工作台设计与实现规格](workbench-redesign/README.md)。本文件下方旧数值表仅供历史对照；新工作台以评审稿中的图稿与 Token 为实施对照。
+
 > 状态：2026-10-30 新体验方向已确认；下方数值表保留现行 Quiet Precision 实现基线，不能当作新界面的最终色票。
 > 新体验规格：[Issue #427](https://github.com/Jun-Wu05/ToolWithAgent/issues/427)；静态方向与两张设计图见[已确认的静态方向](https://github.com/Jun-Wu05/ToolWithAgent/blob/5055cf859fa04ee1082e243e5e579170434496a9/docs/design/v2-experience-static-direction.md)。
 > 2026-10-30 已确认的布局决策：[会话与右侧工作区布局决策](v2-conversation-workspace-layout.md)；记录“对话 / 轨迹”视图、右侧资源页签、开合与拖动。
