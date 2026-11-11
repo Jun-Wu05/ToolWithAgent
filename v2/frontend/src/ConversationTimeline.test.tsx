@@ -80,7 +80,7 @@ it('merges duplicate progress scopes and appends the real failure reason', () =>
   expect(lines[2]).toEqual({ label: '失败原因', detail: '请填写产品和厂商。', failed: true })
 })
 
-it('aligns agent replies with an avatar and exposes the parameter form slot on the failing turn', () => {
+it('aligns agent replies with one role cue and exposes the parameter form slot on the failing turn', () => {
   const conversation: Conversation = {
     ...base,
     messages: [
@@ -94,9 +94,20 @@ it('aligns agent replies with an avatar and exposes the parameter form slot on t
   const view = render(<ConversationTimeline conversation={conversation} actions={actions} renderers={withParams} />)
   const replyTurn = view.container.querySelector('.chat-row')!
   expect(replyTurn.id).toBe('message-m-reply')
-  expect(replyTurn.querySelector('.chat-avatar')).not.toBeNull()
+  expect(replyTurn.querySelector('.chat-role')).toBeNull()
   expect(replyTurn.textContent).toContain('参数补充表单')
   expect(view.container.querySelectorAll('.chat-row-user')).toHaveLength(0)
+})
+
+it('keeps assistant identity accessible without a visual role column', () => {
+  const conversation: Conversation = { ...base, messages: [
+    { id: 'one', actor: 'assistant', content: '文件校验完成。' },
+    { id: 'two', actor: 'assistant', content: '正在处理字段映射。' },
+  ], files: [], runs: [] }
+  const view = render(<ConversationTimeline conversation={conversation} actions={noopActions} renderers={renderers} />)
+  expect(view.container.querySelector('.chat-role')).toBeNull()
+  expect(view.container.querySelectorAll('.message-head strong')).toHaveLength(2)
+  expect(view.container.querySelector('.chat-avatar')).toBeNull()
 })
 
 it('renders suggestion chips on assistant messages and forwards clicks (#435)', () => {

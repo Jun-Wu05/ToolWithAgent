@@ -190,8 +190,7 @@ export function ConversationTimeline({ conversation, actions, renderers }: {
     {turns.map(({ message, artifacts, fieldChanges, runs }) => {
       const turnRun = message.run_id ? runs.find(run => run.id === message.run_id) || conversation.runs.find(run => run.id === message.run_id) : undefined
       const isUser = message.actor === 'user'
-      return <div className={'chat-row' + (isUser && message.kind === 'text' ? ' chat-row-user' : '')} key={message.id} id={'message-' + message.id}>
-        {!isUser && <span className="chat-avatar" aria-hidden="true">T</span>}
+      return <div className={'chat-row' + (isUser ? ' chat-row-user' : '')} key={message.id} id={'message-' + message.id}>
         {message.kind === 'file'
           ? <FileMessageCard message={message} conversation={conversation} actions={actions} />
           : message.kind === 'operation'
