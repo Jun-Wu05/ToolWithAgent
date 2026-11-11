@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, saveDownload, type ClassificationArtifact, type Conversation, type ConversationSummary, type FieldMappingArtifact, type FileRecord, type Identity, type MappingInput, type MappingDraft, type MappingDraftSummary, type ApiError, type Artifact, type Message, type Run, type ProgressSummary, type Suggestion } from './api'
-import { ExecutionTrace, type WorkspaceTab } from './WorkspaceViews'
+import { type WorkspaceTab } from './WorkspaceViews'
+import { TrajectoryLedger } from './TrajectoryLedger'
 import { ConversationTimeline, type TimelineActions } from './ConversationTimeline'
 import { StatusText, TaskHintBar } from './VisualPrimitives'
 import { FieldChangesWorkspace } from './FieldChangesWorkspace'
@@ -681,17 +682,17 @@ export function App() {
       {notice && <div role="status" className="feedback notice"><span>{notice}</span><button aria-label="关闭提示" onClick={() => setNotice('')}>关闭</button></div>}
       <div className="conversation-layout" ref={layoutRef}>
       <div className="conversation-main">
-      <div className="conversation-content" ref={contentRef} onScroll={onConversationScroll}>
+      <div className={'conversation-content' + (workspaceTab === 'trace' ? ' trace-view' : '')} ref={contentRef} onScroll={onConversationScroll}>
         {(workspaceTab === 'tasks' || workspaceTab === 'runs') && <div className="workbench-pane"><UserHistory key={identity?.id + ':' + workspaceTab} kind={workspaceTab} onOpen={(conversationId, runId, messageId) => { void openHistory(conversationId, runId, messageId) }} /></div>}
         <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>从一句话或一个文件开始</h2><p>也可以从常见场景进入——点击填入话术，可自行修改或拼接多步。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button><div className="empty-templates">{SCENE_TEMPLATES.map(template => <button key={template.title} type="button" className="empty-template" onClick={() => setDraft(template.prompt)}><strong>{template.title}</strong><span>{template.hint}</span></button>)}</div></div> : <>
           <ConversationTimeline conversation={conversation} actions={timelineActions} renderers={timelineRenderers} />
           {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，历史结果仍可查看。请重新加载或上传主数据。</p>}
           {identity?.role === 'user' && liveDrafts.length > 0 && <section className="activity-section"><h2>未应用的映射草稿</h2>{liveDrafts.map(item => <article className="result-card" key={item.id}><p>{item.changed_count} 处未应用修改{!item.base_current ? ' · 来源已过期' : ''}{item.status === 'applying' ? ' · 正在应用' : ''}</p><button className="button-secondary" onClick={() => { if (setMappingId(item.base_artifact_id)) setMappingDraftId(item.id) }}>恢复草稿</button></article>)}</section>}
         </>}</div>
-        {conversation && visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}>{diagnosticRunId ? <RunDiagnostics key={diagnosticRunId} initialRunId={diagnosticRunId} userMode onClose={() => setDiagnosticRunId(null)} /> : <ExecutionTrace key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} onDetails={setDiagnosticRunId} targetId={traceTarget?.id} targetToken={traceTarget?.token} onRetry={id => void retryRun(id)} onStop={id => void stopRun(id)} canOperate={identity?.role === 'user'} busy={!!actionBusy} />}</div>}
+        {conversation && visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}>{diagnosticRunId ? <RunDiagnostics key={diagnosticRunId} initialRunId={diagnosticRunId} userMode onClose={() => setDiagnosticRunId(null)} /> : <TrajectoryLedger key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} onDetails={setDiagnosticRunId} targetId={traceTarget?.id} targetToken={traceTarget?.token} onRetry={id => void retryRun(id)} onStop={id => void stopRun(id)} canOperate={identity?.role === 'user'} busy={!!actionBusy} />}</div>}
       </div>
       {newReplies && workspaceTab === 'conversation' && <div className="new-replies-bar"><button className="button-secondary" onClick={() => { setNewReplies(false); stickToBottom.current = true; requestAnimationFrame(() => scrollConversationToEnd('smooth')) }}>有新回复 · 点击查看</button></div>}
-      <div className={"composer-region " + (workspaceTab !== "conversation" ? "is-compact" : "")}><TaskHintBar state={hintState} status={hintedRun?.status} title={hintedRun ? businessName(hintedRun.kind || '') : ''} description={latestProgress && hintedRun && latestProgress.runId === hintedRun.id ? (hintedRun.status === 'running' && latestProgress.summary.phase === 'completed' ? '正在整理并发布结果' : progressLabel(latestProgress.summary)) : undefined}>
+      <div className="composer-region" hidden={workspaceTab !== "conversation"}><TaskHintBar state={hintState} status={hintedRun?.status} title={hintedRun ? businessName(hintedRun.kind || '') : ''} description={latestProgress && hintedRun && latestProgress.runId === hintedRun.id ? (hintedRun.status === 'running' && latestProgress.summary.phase === 'completed' ? '正在整理并发布结果' : progressLabel(latestProgress.summary)) : undefined}>
         {hintedRun && <button className="button-text" onClick={() => void openRun(hintedRun.id)}>{hintState === 'failed' ? '查看失败原因' : '查看执行详情'}</button>}
         {activeRun && hintedRun?.id === activeRun.id && identity?.role === 'user' && <button className="button-text" onClick={() => void stopRun(activeRun.id)} disabled={!!actionBusy}>停止</button>}
       </TaskHintBar>
