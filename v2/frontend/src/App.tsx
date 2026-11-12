@@ -612,12 +612,16 @@ export function App() {
   const classificationCard = (artifact: ClassificationArtifact) => {
     const identityKey = identity?.id + ':' + activeId + ':' + artifact.id
     return <LogClassificationCard key={identityKey} artifact={artifact} identityKey={identityKey} actions={<>
-      <div className="mapping-actions"><button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button><button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button></div>
+      <div className="lcr-actions-row">
+        <button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>
+        <button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button>
+        {identity?.role === 'user' && artifact.mapping_eligible && <details><summary className="button-secondary">导出解析规则</summary><BusinessOperations key={identityKey + ':ops'} conversation={conversation!} source={artifact} onDone={() => refreshActive(conversation!.id)} /></details>}
+        {identity?.role === 'user' && artifact.submission_eligible && (!artifact.submission_status || artifact.submission_status === 'error') && <button className="button-secondary" onClick={() => void submitKnowledge(artifact)} disabled={!!actionBusy}>{actionBusy === artifact.id ? '提交中…' : '申请加入知识库'}</button>}
+        {identity?.role === 'user' && artifact.mapping_eligible && <button className="button-secondary" onClick={() => setMappingSource({ id: artifact.id, kind: 'classification', label: '日志分类结果' })} disabled={!!actionBusy}>标准字段映射</button>}
+      </div>
       {downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}
-      {identity?.role === 'user' && artifact.mapping_eligible && <details><summary>导出解析规则</summary><BusinessOperations key={identityKey + ':ops'} conversation={conversation!} source={artifact} onDone={() => refreshActive(conversation!.id)} /></details>}
       {artifact.submission_status && <p role="status">申请状态：{{ created: '待审核', pending_duplicate: '已有待审核申请', already_approved: '已批准', stale: '结果已过期', error: '提交失败' }[artifact.submission_status] || statusName[artifact.submission_status] || artifact.submission_status}{artifact.application_id ? '（申请编号 ' + artifact.application_id + '）' : ''}</p>}
-      {identity?.role === 'user' && artifact.submission_eligible && (!artifact.submission_status || artifact.submission_status === 'error') && <button className="button-secondary" onClick={() => void submitKnowledge(artifact)} disabled={!!actionBusy}>{actionBusy === artifact.id ? '提交中…' : '申请加入知识库'}</button>}
-      {identity?.role === 'user' && artifact.mapping_eligible && <><button className="button-secondary" onClick={() => setMappingSource({ id: artifact.id, kind: 'classification', label: '日志分类结果' })} disabled={!!actionBusy}>标准字段映射</button>{mappingForm({ id: artifact.id, kind: 'classification', label: '日志分类结果' })}</>}
+      {identity?.role === 'user' && artifact.mapping_eligible && mappingForm({ id: artifact.id, kind: 'classification', label: '日志分类结果' })}
     </>} />
   }
   const timelineActions: TimelineActions = {

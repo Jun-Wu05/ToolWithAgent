@@ -189,6 +189,12 @@ describe('V2 workbench', () => {
     expect(screen.getByText('日志类型提取完成').closest('article')).toHaveClass('ledger-row')
     expect(screen.getByRole('button', { name: '查看产物' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '下载产物' })).toBeInTheDocument()
+    // 批准图稿按钮行：全部操作按钮同属单行容器，不竖排分行。
+    const actionsRow = screen.getByRole('button', { name: '查看产物' }).closest('.lcr-actions-row')
+    expect(actionsRow).not.toBeNull()
+    for (const name of ['下载产物', '导出解析规则', '申请加入知识库', '标准字段映射']) {
+      expect(screen.getByText(name).closest('.lcr-actions-row')).toBe(actionsRow)
+    }
     expect(screen.queryByText('raw secret')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '申请加入知识库' }))
     await waitFor(() => expect(api.submitLogKnowledge).toHaveBeenCalledWith('a1'))

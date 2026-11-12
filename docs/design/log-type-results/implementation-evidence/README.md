@@ -33,10 +33,11 @@
 
 ## 3. 视觉验收（真实 App，SSE 长连接，CDP 精确视口）
 
-- 服务：worktree 内 `uvicorn`（127.0.0.1:8100）+ `vite`（127.0.0.1:5173），数据目录 `tmp/acceptance-data`。
+- 服务：worktree 内 `uvicorn`（127.0.0.1:8100）+ worker 进程 + `vite`（127.0.0.1:5173），数据目录 `tmp/acceptance-data`。
 - 数据：离线种子脚本 `tmp/seed_acceptance.py`（FixtureBusiness，不经 LLM），内容取自批准图稿固定样例（auth/traffic/threat/system、未匹配 2 行、JSON 变体同源）。
 - 截图浏览器：Chrome headless（CDP），`--force-device-scale-factor=1`，视口 1440×900 / 390×844。
-- 文件：`app-01…04`（全页）、`side-by-side-01…03`（批准图稿卡片 vs 生产卡片，左右合成）、`style-probe-1440.json`（计算样式探针）。
+- 文件：`app-01…04`（全页）、`app-05-export-rules-open.png`（「导出解析规则」展开态）、`side-by-side-01…03`（批准图稿卡片 vs 生产卡片，左右合成）、`style-probe-1440.json`（计算样式探针）。
+- 按钮行（用户验收反馈后修复）：底部操作按钮对齐图稿改为单行排布——`查看产物 / 下载产物 / 导出解析规则 / 申请加入知识库 / 标准字段映射` 同属 `.lcr-actions-row`（flex-wrap，窄屏自动换行）；展开「导出解析规则」时表单经 `flex-basis:100%` 换行到按钮行下方全宽显示（app-05 与程序化布局检查：同行按钮 top 一致、表单区独立于按钮行）。App 测试含五按钮同容器的防回归断言。
 
 ### 计算样式探针（1440×900，JSON 变体会话）
 

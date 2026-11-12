@@ -60,6 +60,10 @@
 .lcr-unmatched-icon { flex: none; }
 
 .lcr-actions { margin-top: 14px; }
+/* 批准图稿底部按钮行：单行排布，窄屏自动换行；展开「导出解析规则」时表单全宽换到行下方。 */
+.lcr-actions-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.lcr-actions-row summary.button-secondary { cursor: pointer; }
+.lcr-actions-row details[open] { flex-basis: 100%; order: 10; }
 .lcr-empty { padding: 32px !important; text-align: center; color: var(--muted-foreground); }
 
 @container (max-width: 600px) {
