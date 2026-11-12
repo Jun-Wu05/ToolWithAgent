@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Artifact, type Confirmation, type Conversation, type OperationInput, type Run, type ProgressSummary } from './api'
+import { LogClassificationResult } from './LogClassificationResult'
 
 export const businessName = (kind: string) => ({log_classification: '日志类型提取', log_parse: '日志类型提取', file_ingest: '文件校验', file_upload: '上传文件', enum_extract: '枚举提取', fill: '填充值映射', remove_mapping: '取消值映射', export: '规则导出', enum_values: '枚举提取', threat_mapping: '威胁类型映射', field_mapping: '标准字段映射', config_export: '规则导出', business: '业务处理', business_operation: '业务处理', user_request: '业务任务', business_clear: '清空业务数据', mapping_draft_apply: '应用映射修改', field_change_apply: '应用字段变更', field_change_undo: '撤销字段变更', log_knowledge_submit: '日志知识申请'}[kind] || '业务处理')
 export function BusinessOperations({conversation, source, onDone}: {conversation: Conversation; source?: Artifact; onDone: () => Promise<void>}) {
@@ -85,6 +86,7 @@ export function BusinessConfirmation({run, onResolved, beforeSend = false, onBac
 }
 
 export function ArtifactValues({artifact, content}: {artifact: Artifact; content: Record<string, unknown>}) {
+  if (artifact.kind === 'log_classification') return <LogClassificationResult key={artifact.id} content={content} />
   if (artifact.kind === 'enum_values' && Array.isArray(content.values)) return <section aria-label="枚举值"><p>提取字段：{typeof content.field === 'string' ? content.field : '未指定'}</p><ul>{content.values.map((value, index) => <li key={index}>{String(value)}</li>)}</ul>{typeof content.regex === 'string' && <details><summary>提取正则</summary><pre className="artifact-content">{content.regex}</pre></details>}</section>
   if (artifact.kind === 'threat_mapping' && Array.isArray(content.mappings)) return <div className="mapping-table-region"><table className="artifact-values"><thead><tr><th>原始值</th><th>标准威胁类型</th><th>映射方式</th></tr></thead><tbody>{content.mappings.map((row, index) => <tr key={index}><td>{String(row.original_value ?? '')}</td><td>{String(row.mapped_value ?? '')}</td><td>{row.mapping_type === 'REGULAR' ? '正则' : '相等'}</td></tr>)}</tbody></table></div>
   return <pre className="artifact-content">{artifact.kind === 'config_export' && typeof content.content === 'string' ? content.content : JSON.stringify(content, null, 2)}</pre>

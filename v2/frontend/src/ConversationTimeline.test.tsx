@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { buildTurns, ConversationTimeline, dedupeStepLines, operationParamText } from './ConversationTimeline'
 import type { Conversation, Run } from './api'
@@ -43,6 +43,25 @@ it('builds turns from stable links and isolates unlinked history', () => {
   expect(unlinked.artifacts.map(artifact => artifact.id)).toEqual(['art-legacy'])
   expect(unlinked.fieldChanges.map(change => change.run_id)).toEqual(['run-ghost'])
   expect(unlinked.runs.map(run => run.id)).toEqual(['run-legacy'])
+})
+
+it('attaches artifacts without result_message_id through their run completion message', () => {
+  // 真实后端的 log_classification 明细不携带 result_message_id；run_id 是稳定关联。
+  const conversation: Conversation = {
+    ...linkedConversation,
+    artifacts: [
+      { id: 'art-live', run_id: 'run-parse', file_id: 'f1', kind: 'log_classification', status: 'published' } as never,
+      { id: 'art-orphan', run_id: 'run-legacy', file_id: 'f-old', kind: 'log_classification', status: 'stale' } as never,
+    ],
+  }
+  const { turns, unlinked } = buildTurns(conversation)
+  expect(turns[2].artifacts.map(artifact => artifact.id)).toEqual(['art-live'])
+  // run-legacy 没有带 run_id 的消息，保持 unlinked，不猜相邻轮次。
+  expect(unlinked.artifacts.map(artifact => artifact.id)).toEqual(['art-orphan'])
+  render(<ConversationTimeline conversation={conversation} actions={noopActions} renderers={renderers} />)
+  expect(screen.getByText('解析结果卡 art-live')).toBeInTheDocument()
+  expect(screen.queryByText('解析结果卡 art-orphan')).not.toBeInTheDocument()
+  cleanup()
 })
 
 it('renders input records as attachment and operation cards without fabricated speech', () => {

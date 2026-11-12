@@ -29,7 +29,10 @@ export function buildTurns(conversation: Conversation): { turns: Turn[]; unlinke
   const linkedFileIds = new Set(messages.flatMap(message => (message.kind === 'file' && message.payload?.file_id) ? [String(message.payload.file_id)] : []))
   const linkedRunIds = new Set(messages.flatMap(message => message.run_id ? [message.run_id] : []))
   for (const artifact of conversation.artifacts || []) {
-    const turn = 'result_message_id' in artifact && artifact.result_message_id ? byId.get(artifact.result_message_id) : undefined
+    // 优先显式 result_message_id；log_classification 等明细不总携带该字段，
+    // 回退用产物 run_id 关联同 Run 的完成消息（同为稳定标识，不按时间猜测）。
+    const turn = ('result_message_id' in artifact && artifact.result_message_id ? byId.get(artifact.result_message_id) : undefined)
+      || byRunId.get(artifact.run_id)
     if (turn) turn.artifacts.push(artifact)
   }
   for (const change of conversation.field_changes || []) {

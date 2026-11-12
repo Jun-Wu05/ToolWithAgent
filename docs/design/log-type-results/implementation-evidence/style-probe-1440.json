@@ -1,0 +1,38 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "columns": [
+    {
+      "label": "日志类型",
+      "px": 219,
+      "percent": "23.0"
+    },
+    {
+      "label": "类型说明",
+      "px": 172,
+      "percent": "18.0"
+    },
+    {
+      "label": "样例日志",
+      "px": 563,
+      "percent": "59.0"
+    }
+  ],
+  "theadHeight": 36,
+  "tableFont": "13px",
+  "previewFont": "12px",
+  "previewLineHeight": "21px",
+  "previewClamp": "2",
+  "toggleFont": "13px",
+  "toggleCodeFont": "ui-monospace, \"Cascadia Code\", \"SF Mono\", Consolas, monospace",
+  "summaryGrid": "158.531px 297.281px 198.172px 218px",
+  "summaryBackground": "rgb(245, 247, 249)",
+  "wrapRadius": "6px",
+  "wrapBorder": "oklch(0.92408 0.0075 260.732)",
+  "tokenBorder": null,
+  "bodyOverflowX": false,
+  "markPresent": true,
+  "cardInTimeline": true
+}
