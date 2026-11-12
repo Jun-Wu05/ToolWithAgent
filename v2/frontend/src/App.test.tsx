@@ -192,7 +192,7 @@ describe('V2 workbench', () => {
     // 批准图稿按钮行：全部操作按钮同属单行容器，不竖排分行。
     const actionsRow = screen.getByRole('button', { name: '查看产物' }).closest('.lcr-actions-row')
     expect(actionsRow).not.toBeNull()
-    for (const name of ['下载产物', '导出解析规则', '申请加入知识库', '标准字段映射']) {
+    for (const name of ['下载产物', '导出入口规则', '申请加入知识库', '标准字段映射', '提取字段枚举值']) {
       expect(screen.getByText(name).closest('.lcr-actions-row')).toBe(actionsRow)
     }
     expect(screen.queryByText('raw secret')).not.toBeInTheDocument()

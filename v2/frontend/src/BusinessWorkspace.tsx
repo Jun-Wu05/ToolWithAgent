@@ -6,7 +6,8 @@ export const businessName = (kind: string) => ({log_classification: '日志类�
 export function BusinessOperations({conversation, source, onDone}: {conversation: Conversation; source?: Artifact; onDone: () => Promise<void>}) {
   const facts = conversation.session_facts
   const [kind, setKind] = useState<OperationInput['step']['type']>(source?.kind === 'enum_values' ? 'threat_mapping' : source?.kind === 'threat_mapping' ? 'fill' : source?.kind === 'field_mapping' || source?.kind === 'log_classification' ? 'export' : 'enum_extract')
-  const [rulePart, setRulePart] = useState<'entry_rules' | 'sub_rules'>('sub_rules')
+  // 分类导出本轮固定入口规则；子规则导出待标准字段映射后续轮次再开放。
+  const rulePart: 'entry_rules' | 'sub_rules' = source?.kind === 'log_classification' ? 'entry_rules' : 'sub_rules'
   const [field, setField] = useState('')
   const [configId, setConfigId] = useState(source?.kind === 'field_mapping' ? source.id : '')
   const [sourceId, setSourceId] = useState(source?.kind === 'enum_values' || source?.kind === 'threat_mapping' ? source.id : '')
@@ -43,7 +44,7 @@ export function BusinessOperations({conversation, source, onDone}: {conversation
     void api.operation(conversation.id, input, receipt.current.key).then(async () => { if (live.current) {await onDone(); if (live.current) receipt.current = null} }).catch(caught => {if (live.current) setError(caught instanceof Error ? caught.message : '操作未能启动，请重试。')}).finally(() => {if (live.current) setBusy(false)})
   }}>
     <label>处理方式<select value={kind} onChange={event => {setKind(event.target.value as typeof kind); setField('')}} disabled={busy}>{!source && <option value="enum_extract">提取枚举</option>}{(!source || source.kind === 'enum_values') && <option value="threat_mapping">映射威胁类型</option>}{(!source || source.kind === 'field_mapping' || source.kind === 'threat_mapping') && <option value="fill">填充值映射</option>}{(!source || source.kind === 'field_mapping') && <><option value="remove_mapping">取消值映射</option><option value="export">导出规则</option></>}{source?.kind === 'log_classification' && <option value="export">导出规则</option>}</select></label>
-    {source?.kind === 'log_classification' && <label>规则内容<select value={rulePart} onChange={event => setRulePart(event.target.value as typeof rulePart)} disabled={busy}><option value="sub_rules">子规则</option><option value="entry_rules">入口规则</option></select></label>}
+    {/* 分类导出本轮只出入口规则；子规则导出待标准字段映射后续轮次再开放。 */}
     {needConfig && <label>目标配置<select aria-label="目标配置" value={configId} onChange={event => {setConfigId(event.target.value); setField('')}} disabled={busy || source?.kind === 'field_mapping'}><option value="">请选择当前配置</option>{configs.map(item => <option key={item.id} value={item.id}>{item.kind === 'field_mapping' && item.config_ref === 'session.decoded_config' ? '上传规则' : '日志生成配置'}（{item.id}）</option>)}{facts?.available_config_refs.filter(ref => !configs.some(item => item.kind === 'field_mapping' && item.config_ref === ref)).map(ref => <option key={ref} value={ref}>{ref === 'session.decoded_config' ? '上传规则' : '日志生成配置'}</option>)}</select></label>}
     {kind === 'fill' && <label>映射来源<select value={fillKind} onChange={event => {setFillKind(event.target.value as typeof fillKind); setField('')}} disabled={busy || source?.kind === 'threat_mapping'}><option value="enum">枚举映射附件</option><option value="threat">威胁映射结果</option></select></label>}
     {kind === 'threat_mapping' && <label>值来源<select value={direct ? 'direct' : 'artifact'} onChange={event => setDirect(event.target.value === 'direct')} disabled={busy || source?.kind === 'enum_values'}><option value="artifact">枚举结果</option><option value="direct">直接输入原始值</option></select></label>}

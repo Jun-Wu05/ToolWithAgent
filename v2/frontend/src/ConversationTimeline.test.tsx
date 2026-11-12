@@ -45,6 +45,24 @@ it('builds turns from stable links and isolates unlinked history', () => {
   expect(unlinked.runs.map(run => run.id)).toEqual(['run-legacy'])
 })
 
+it('suppresses suggestion chips on the classification result message whose card owns all actions', () => {
+  const resultMessage = { id: 'm-result', actor: 'assistant', content: '日志类型提取完成', run_id: 'run-parse', payload: { suggestions: [{ type: 'action', id: 'field_mapping', label: '标准字段映射' }, { type: 'prompt', id: 'enum_extract', label: '提取字段枚举值', text: '提取【字段名】的枚举值' }] } }
+  const plainReply = { id: 'm-plain', actor: 'assistant', content: '文件校验完成', payload: { suggestions: [{ type: 'action', id: 'log_parse', label: '日志类型提取' }] } }
+  const conversation: Conversation = {
+    ...linkedConversation,
+    messages: [...linkedConversation.messages, resultMessage, plainReply],
+    artifacts: [
+      { id: 'art-live', run_id: 'run-parse', file_id: 'f1', kind: 'log_classification', status: 'published' } as never,
+    ],
+  }
+  render(<ConversationTimeline conversation={conversation} actions={{ ...noopActions, onSuggestion: vi.fn() }} renderers={renderers} />)
+  // 分类结果消息的 chips 被卡片按钮行取代：仅保留普通助手消息的 chips。
+  expect(screen.getAllByRole('group', { name: '下一步建议' }).length).toBe(1)
+  expect(screen.getByRole('button', { name: '日志类型提取' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '提取字段枚举值' })).not.toBeInTheDocument()
+  cleanup()
+})
+
 it('attaches artifacts without result_message_id through their run completion message', () => {
   // 真实后端的 log_classification 明细不携带 result_message_id；run_id 是稳定关联。
   const conversation: Conversation = {
