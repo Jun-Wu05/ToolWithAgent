@@ -1,0 +1,80 @@
+/* 日志类型结果表 log-type-results-v1：样式全部限定在 .lcr 命名空间，颜色引用全局 tokens。 */
+
+.lcr { container-type: inline-size; }
+.lcr-intro { font-size: 13px; color: var(--muted-foreground); margin: 0 0 18px; }
+.lcr-invalid { font-size: 12px; color: var(--warning); margin: 0 0 10px; }
+
+.lcr-summary { display: grid; grid-template-columns: 1fr 1.2fr 1.2fr 1.1fr; gap: 16px; padding: 14px 18px; background: var(--surface-base); border-radius: 6px; margin-bottom: 22px; }
+.lcr-summary-json { grid-template-columns: .8fr 1.5fr 1fr 1.1fr; }
+.lcr-fact { min-width: 0; }
+.lcr-fact-label { display: block; color: var(--muted-foreground); font-size: 12px; margin-bottom: 5px; }
+.lcr-fact-value { font-size: 14px; display: flex; gap: 7px; align-items: center; min-height: 23px; flex-wrap: wrap; }
+.lcr-fact-value code { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+.lcr-fact-value small { font-size: 12px; color: var(--muted-foreground); }
+.lcr-token { display: inline-block; min-width: 24px; text-align: center; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-card); }
+
+.lcr-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.lcr-table-title { display: flex; align-items: baseline; gap: 9px; }
+.lcr-table-title h4 { font-size: 15px; font-weight: 600; margin: 0; }
+.lcr-count, .lcr-coverage-count, .lcr-footer-count, .lcr-page-info { font-size: 12px; color: var(--muted-foreground); }
+.lcr-search { display: flex; align-items: center; border: 1px solid var(--border); border-radius: 6px; gap: 7px; padding: 6px 10px; color: var(--muted-foreground); width: 236px; }
+.lcr-search input { border: 0; outline: none; width: 100%; min-width: 0; font-size: 12px; background: none; color: inherit; }
+.lcr-search input::placeholder { color: var(--muted-foreground); }
+
+.lcr-table-wrap { border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; }
+.lcr-table { border-collapse: collapse; width: 100%; table-layout: fixed; text-align: left; font-size: 13px; }
+.lcr-table thead { background: var(--surface-base); color: var(--muted-foreground); font-size: 12px; }
+.lcr-table th { font-weight: 500; height: 36px; padding: 8px 14px; }
+.lcr-table th:first-child { width: 23%; }
+.lcr-table th:nth-child(2) { width: 18%; }
+.lcr-table td { padding: 12px 14px; border-top: 1px solid var(--border-subtle); vertical-align: top; }
+.lcr-data-row:hover, .lcr-data-row.is-open { background: var(--surface-base); }
+.lcr-toggle { display: flex; align-items: center; gap: 8px; padding: 0; text-align: left; min-height: 23px; width: 100%; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; background: none; border: 0; color: inherit; }
+.lcr-toggle code { font-family: var(--font-mono); }
+.lcr-chevron { width: 13px; height: 13px; color: var(--muted-foreground); font-size: 11px; line-height: 1; flex: none; }
+.lcr-preview { font-family: var(--font-mono); font-size: 12px; line-height: 1.75; word-break: break-all; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted-foreground); }
+.lcr-nosample { font-size: 12px; color: var(--muted-foreground); }
+.lcr-meaning { line-height: 23px; }
+.lcr mark { background: var(--tint-primary); color: var(--primary); font-weight: 600; }
+
+.lcr-detail-row td { padding: 0 14px 14px 35px; background: var(--surface-base); border-top: 0; }
+.lcr-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 1px 0 7px; font-size: 12px; font-weight: 600; }
+.lcr-detail-tools { display: flex; gap: 12px; font-weight: 400; }
+.lcr-format-error { margin: 0 0 6px; font-size: 12px; color: var(--warning); }
+.lcr-sample-full { margin: 0; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 12px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 210px; overflow: auto; color: var(--foreground); }
+.lcr-sample-full.lcr-nowrap { white-space: pre; overflow-wrap: normal; }
+.lcr-unmatched { margin-top: 8px; }
+.lcr-detail-meta { display: flex; gap: 24px; flex-wrap: wrap; font-size: 12px; margin: 10px 0; color: var(--muted-foreground); }
+.lcr-detail-meta code { color: var(--foreground); font-family: var(--font-mono); font-size: 12px; }
+.lcr-detail-meta strong { font-weight: 400; color: var(--foreground); }
+.lcr-rule-info summary { cursor: pointer; color: var(--primary); font-size: 12px; }
+.lcr-rule-info p { font-size: 12px; color: var(--muted-foreground); margin: 8px 0 0; line-height: 1.8; }
+
+.lcr-footer { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-top: 9px; color: var(--muted-foreground); font-size: 12px; }
+.lcr-footer-actions { display: flex; gap: 12px; align-items: center; }
+.lcr-footer button { font-size: 12px; color: var(--primary); padding: 0; background: none; border: 0; }
+.lcr-footer button:disabled { cursor: default; opacity: .6; }
+
+.lcr-unmatched-bar { margin-top: 17px; border-radius: 6px; padding: 10px 12px; background: var(--tint-warning); color: var(--warning); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.lcr-unmatched-bar button { font-size: 12px; color: var(--warning); margin-left: auto; padding: 0; white-space: nowrap; background: none; border: 0; }
+.lcr-unmatched-icon { flex: none; }
+
+.lcr-actions { margin-top: 14px; }
+/* 批准图稿底部按钮行：单行排布，窄屏自动换行；展开「导出解析规则」时表单全宽换到行下方。 */
+.lcr-actions-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.lcr-actions-row summary.button-secondary { cursor: pointer; }
+.lcr-actions-row details[open] { flex-basis: 100%; order: 10; }
+.lcr-empty { padding: 32px !important; text-align: center; color: var(--muted-foreground); }
+
+@container (max-width: 600px) {
+  .lcr-summary { grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px; }
+  .lcr-toolbar { align-items: stretch; flex-direction: column; }
+  .lcr-search { width: 100%; }
+  .lcr-table th:first-child { width: 38%; }
+  .lcr-table th:nth-child(2), .lcr-meaning { display: none; }
+  .lcr-table td, .lcr-table th { padding: 10px; }
+  .lcr-detail-row td { padding-left: 12px; }
+  .lcr-detail-meta { display: grid; gap: 8px; }
+  .lcr-unmatched-bar { align-items: flex-start; flex-wrap: wrap; }
+  .lcr-unmatched-bar button { margin-left: 24px; }
+}

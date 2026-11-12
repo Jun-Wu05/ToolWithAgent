@@ -169,21 +169,87 @@ describe('V2 workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '提取日志类型' }))
     await waitFor(() => expect(api.logParse).toHaveBeenCalledWith('conv-1', 'f1', 'kind'))
   })
-  it('shows a safe result and submits eligible knowledge explicitly', async () => {
+  it('shows the classification table from artifact content and submits eligible knowledge explicitly', async () => {
     vi.mocked(api.conversation).mockResolvedValue({
       ...detail,
-      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published',
+      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published', mapping_eligible: true,
         summary: { log_types: [{ name: '登录事件', count: 3 }], coverage: { matched_lines: 3, total_lines: 4 }, rule_summary: '按 kind 区分' },
         submission_eligible: true }]
     })
+    vi.mocked(api.artifactContent).mockResolvedValue({ classification: {
+      status: 'SUCCESS', log_format: 'KV', feature_field: 'kind',
+      classification_details: [{ logtype: '登录事件', meaning: '登录', count: 3, real_samples: 'kind=login|user=admin|result=success' }],
+      analysis: { delimit: '|', tab: '=' },
+      coverage: { total_lines: 4, matched_lines: 3, unmatched_lines: 1, unmatched_samples: [] },
+    }, total_lines: 4, submission_eligible: true })
     renderApp()
-    await screen.findByText('登录事件 · 3')
-    expect(screen.getByText('覆盖率：3 / 4')).toBeInTheDocument()
+    await screen.findByRole('button', { name: '登录事件' })
+    expect(screen.getByText('（覆盖 3/4 行）')).toBeInTheDocument()
     // #435 Phase 2：正式产物在时间线以紧凑台账行呈现。
     expect(screen.getByText('日志类型提取完成').closest('article')).toHaveClass('ledger-row')
+    expect(screen.getByRole('button', { name: '查看产物' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下载产物' })).toBeInTheDocument()
+    // 批准图稿按钮行：全部操作按钮同属单行容器，不竖排分行。
+    const actionsRow = screen.getByRole('button', { name: '查看产物' }).closest('.lcr-actions-row')
+    expect(actionsRow).not.toBeNull()
+    for (const name of ['下载产物', '导出入口规则', '申请加入知识库', '标准字段映射', '提取字段枚举值']) {
+      expect(screen.getByText(name).closest('.lcr-actions-row')).toBe(actionsRow)
+    }
     expect(screen.queryByText('raw secret')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '申请加入知识库' }))
     await waitFor(() => expect(api.submitLogKnowledge).toHaveBeenCalledWith('a1'))
+  })
+  it('keeps the conversation usable and retries a failed classification read', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail,
+      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published',
+        summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' }, submission_eligible: false }]
+    })
+    vi.mocked(api.artifactContent).mockRejectedValueOnce(new Error('结果不可读'))
+    renderApp()
+    expect(await screen.findByText(/结果不可读/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
+    vi.mocked(api.artifactContent).mockResolvedValueOnce({ classification: { status: 'SUCCESS', log_format: 'KV', feature_field: 'kind', classification_details: [{ logtype: '登录事件', sample: 'kind=login' }], analysis: {}, coverage: {} } })
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByRole('button', { name: '登录事件' })).toBeInTheDocument()
+  })
+  it('marks a stale classification artifact as historical while keeping view and download', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail,
+      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'stale',
+        summary: { log_types: [], coverage: { matched_lines: 1, total_lines: 2 }, rule_summary: '' }, submission_eligible: false }]
+    })
+    vi.mocked(api.artifactContent).mockResolvedValue({ classification: { status: 'SUCCESS', log_format: 'KV', feature_field: 'kind', classification_details: [{ logtype: '历史类型', sample: 'kind=old' }], analysis: {}, coverage: {} } })
+    renderApp()
+    expect(await screen.findByText('历史结果，可查看和下载。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '历史类型' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看产物' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下载产物' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
+  })
+  it('discards a classification read completed after switching identity', async () => {
+    const user = { id: 'u1', display_name: '测试用户', role: 'user' }
+    const other = { id: 'u2', display_name: '另一用户', role: 'user' }
+    const second = { ...summary, id: 'conv-2', title: '另一身份会话' }
+    const firstDetail = { ...detail, artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification' as const, status: 'published', summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' }, submission_eligible: false }] }
+    const secondDetail = { ...detail, ...second, artifacts: [{ id: 'a2', run_id: 'r3', file_id: 'f1', kind: 'log_classification' as const, status: 'published', summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' }, submission_eligible: false }] }
+    let selected = false
+    vi.mocked(api.identities).mockResolvedValue({ items: [user, other] })
+    vi.mocked(api.me).mockImplementation(() => Promise.resolve(selected ? other : user))
+    vi.mocked(api.conversations).mockImplementation(() => Promise.resolve({ items: [selected ? second : summary] }))
+    vi.mocked(api.conversation).mockImplementation(id => Promise.resolve(id === 'conv-1' ? firstDetail : secondDetail))
+    vi.mocked(api.selectIdentity).mockImplementation(() => { selected = true; return Promise.resolve(other) })
+    let resolveOld!: (value: Record<string, unknown>) => void
+    vi.mocked(api.artifactContent).mockImplementation(id => id === 'a1'
+      ? new Promise(resolve => { resolveOld = resolve })
+      : Promise.resolve({ classification: { status: 'SUCCESS', log_format: 'JSON', feature_field: 'event.type', classification_details: [{ logtype: '新身份类型', sample: '{"event":{"type":"新身份类型"}}' }], analysis: {}, coverage: {} } }))
+    renderApp()
+    expect(await screen.findByText('正在读取分类明细…')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('开发身份切换'), { target: { value: 'u2' } })
+    await screen.findByRole('button', { name: '新身份类型' })
+    await act(async () => resolveOld({ classification: { status: 'SUCCESS', log_format: 'KV', feature_field: 'kind', classification_details: [{ logtype: '旧身份类型', sample: 'kind=old' }], analysis: {}, coverage: {} } }))
+    expect(screen.queryByRole('button', { name: '旧身份类型' })).not.toBeInTheDocument()
   })
   it('hides submission for an ineligible result and confirms stop before cancelling', async () => {
     vi.stubGlobal('confirm', vi.fn(() => true))

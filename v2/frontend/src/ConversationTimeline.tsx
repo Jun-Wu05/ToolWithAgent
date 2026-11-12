@@ -29,7 +29,10 @@ export function buildTurns(conversation: Conversation): { turns: Turn[]; unlinke
   const linkedFileIds = new Set(messages.flatMap(message => (message.kind === 'file' && message.payload?.file_id) ? [String(message.payload.file_id)] : []))
   const linkedRunIds = new Set(messages.flatMap(message => message.run_id ? [message.run_id] : []))
   for (const artifact of conversation.artifacts || []) {
-    const turn = 'result_message_id' in artifact && artifact.result_message_id ? byId.get(artifact.result_message_id) : undefined
+    // 优先显式 result_message_id；log_classification 等明细不总携带该字段，
+    // 回退用产物 run_id 关联同 Run 的完成消息（同为稳定标识，不按时间猜测）。
+    const turn = ('result_message_id' in artifact && artifact.result_message_id ? byId.get(artifact.result_message_id) : undefined)
+      || byRunId.get(artifact.run_id)
     if (turn) turn.artifacts.push(artifact)
   }
   for (const change of conversation.field_changes || []) {
@@ -195,7 +198,7 @@ export function ConversationTimeline({ conversation, actions, renderers }: {
           ? <FileMessageCard message={message} conversation={conversation} actions={actions} />
           : message.kind === 'operation'
             ? <OperationCard message={message} runs={runs} actions={actions} />
-            : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{!isUser && <SuggestionChips message={message} actions={actions} />}{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
+            : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{!isUser && !artifacts.some(artifact => artifact.kind === 'log_classification') && <SuggestionChips message={message} actions={actions} />}{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
       </div>
     })}
   </div>

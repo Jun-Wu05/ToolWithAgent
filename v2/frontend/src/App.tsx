@@ -13,6 +13,7 @@ import { RunDiagnostics } from './RunDiagnostics'
 import { UserHistory } from './UserHistory'
 import { MappingDialog } from './MappingDialog'
 import { BusinessOperations, BusinessConfirmation, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
+import { LogClassificationCard } from './LogClassificationResult'
 
 const statusName: Record<string, string> = {
   queued: '排队中', pending: '排队中', running: '运行中', succeeded: '已完成',
@@ -608,7 +609,22 @@ export function App() {
   const liveDrafts = unresolvedDrafts(conversation?.drafts)
   const fieldChange = conversation?.field_changes?.find(item => item.run_id === fieldChangesId)
   const mappingArtifact = conversation?.artifacts?.find((artifact): artifact is FieldMappingArtifact => artifact.kind === 'field_mapping' && artifact.id === mappingId)
-  const classificationCard = (artifact: ClassificationArtifact) => <article className="result-card ledger-row"><div className="result-heading"><strong>日志类型提取完成</strong><span>{readableTime(artifact.created_at)}</span></div><p>覆盖率：{artifact.summary.coverage.matched_lines} / {artifact.summary.coverage.total_lines}</p><div className="result-types">{artifact.summary.log_types.map((item, index) => <span key={item.name + index}>{item.name} · {item.count}</span>)}</div><p className="rule-summary">解析规则：{artifact.summary.rule_summary}</p>{artifact.status === 'stale' && <p className="mapping-warning">历史结果，可查看和下载。</p>}<div className="mapping-actions"><button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button><button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button></div>{downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}{identity?.role === 'user' && artifact.mapping_eligible && <details><summary>导出解析规则</summary><BusinessOperations key={identity.id + ':' + activeId + ':' + artifact.id} conversation={conversation!} source={artifact} onDone={() => refreshActive(conversation!.id)} /></details>}{artifact.submission_status && <p role="status">申请状态：{{ created: '待审核', pending_duplicate: '已有待审核申请', already_approved: '已批准', stale: '结果已过期', error: '提交失败' }[artifact.submission_status] || statusName[artifact.submission_status] || artifact.submission_status}{artifact.application_id ? '（申请编号 ' + artifact.application_id + '）' : ''}</p>}{identity?.role === 'user' && artifact.submission_eligible && (!artifact.submission_status || artifact.submission_status === 'error') && <button className="button-secondary" onClick={() => void submitKnowledge(artifact)} disabled={!!actionBusy}>{actionBusy === artifact.id ? '提交中…' : '申请加入知识库'}</button>}{identity?.role === 'user' && artifact.mapping_eligible && <><button className="button-secondary" onClick={() => setMappingSource({ id: artifact.id, kind: 'classification', label: '日志分类结果' })} disabled={!!actionBusy}>标准字段映射</button>{mappingForm({ id: artifact.id, kind: 'classification', label: '日志分类结果' })}</>}</article>
+  const classificationCard = (artifact: ClassificationArtifact) => {
+    const identityKey = identity?.id + ':' + activeId + ':' + artifact.id
+    return <LogClassificationCard key={identityKey} artifact={artifact} identityKey={identityKey} actions={<>
+      <div className="lcr-actions-row">
+        <button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>
+        <button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button>
+        {identity?.role === 'user' && artifact.mapping_eligible && <details><summary className="button-secondary">导出入口规则</summary><BusinessOperations key={identityKey + ':ops'} conversation={conversation!} source={artifact} onDone={() => refreshActive(conversation!.id)} /></details>}
+        {identity?.role === 'user' && artifact.submission_eligible && (!artifact.submission_status || artifact.submission_status === 'error') && <button className="button-secondary" onClick={() => void submitKnowledge(artifact)} disabled={!!actionBusy}>{actionBusy === artifact.id ? '提交中…' : '申请加入知识库'}</button>}
+        {identity?.role === 'user' && artifact.mapping_eligible && <button className="button-secondary" onClick={() => setMappingSource({ id: artifact.id, kind: 'classification', label: '日志分类结果' })} disabled={!!actionBusy}>标准字段映射</button>}
+        <button className="button-secondary" onClick={() => setDraft('提取【字段名】的枚举值')}>提取字段枚举值</button>
+      </div>
+      {downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}
+      {artifact.submission_status && <p role="status">申请状态：{{ created: '待审核', pending_duplicate: '已有待审核申请', already_approved: '已批准', stale: '结果已过期', error: '提交失败' }[artifact.submission_status] || statusName[artifact.submission_status] || artifact.submission_status}{artifact.application_id ? '（申请编号 ' + artifact.application_id + '）' : ''}</p>}
+      {identity?.role === 'user' && artifact.mapping_eligible && mappingForm({ id: artifact.id, kind: 'classification', label: '日志分类结果' })}
+    </>} />
+  }
   const timelineActions: TimelineActions = {
     onOpenRun: id => { void openRun(id) },
     onParseLog: file => { void parseLog(file) },
