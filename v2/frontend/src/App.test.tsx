@@ -7,7 +7,7 @@ vi.mock('./api', () => ({
   saveDownload: vi.fn(),
   api: {
     me: vi.fn(), identities: vi.fn(), selectIdentity: vi.fn(), conversations: vi.fn(), createConversation: vi.fn(), userTasks: vi.fn(), userRuns: vi.fn(),
-    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), artifactContent: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn(), userDiagnosticRun: vi.fn()
+    conversation: vi.fn(), sendMessage: vi.fn(), uploadFile: vi.fn(), logParse: vi.fn(), submitLogKnowledge: vi.fn(), retryRun: vi.fn(), cancelToken: vi.fn(), cancelRun: vi.fn(), run: vi.fn(), eventsUrl: vi.fn(), fieldMapping: vi.fn(), mappingView: vi.fn(), mappingDownload: vi.fn(), artifactContent: vi.fn(), operation: vi.fn(), createMappingDraft: vi.fn(), mappingDraft: vi.fn(), standardFields: vi.fn(), saveMapping: vi.fn(), confirmMapping: vi.fn(), mappingCandidates: vi.fn(), applyMappingDraft: vi.fn(), discardMappingDraft: vi.fn(), adminOverview: vi.fn(), adminRuns: vi.fn(), adminCancelRun: vi.fn(), adminForceStop: vi.fn(), adminAuditEvents: vi.fn(), fieldPreview: vi.fn(), diagnosticRuns: vi.fn(), diagnosticRun: vi.fn(), diagnosticCall: vi.fn(), diagnosticBundle: vi.fn(), userDiagnosticRun: vi.fn()
   }
 }))
 class FakeEventSource {
@@ -199,6 +199,74 @@ describe('V2 workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '申请加入知识库' }))
     await waitFor(() => expect(api.submitLogKnowledge).toHaveBeenCalledWith('a1'))
   })
+  it('exports entry rules directly to a downloaded file without the inline form', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail,
+      artifacts: [
+        { id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published', mapping_eligible: true,
+          summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' }, submission_eligible: false },
+        { id: 'map1', run_id: 'rm1', file_id: 'f1', kind: 'field_mapping', status: 'published', current: true,
+          summary: { rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0 } },
+        { id: 'cfg1', run_id: 'export-run', kind: 'config_export', status: 'published', current: true },
+      ]
+    })
+    vi.mocked(api.operation).mockResolvedValue({ task: { id: 'export-task', status: 'queued' }, run: { id: 'export-run', status: 'queued' } })
+    vi.mocked(api.run).mockImplementation(async id => id === 'export-run' ? { id, status: 'succeeded' } : { id, status: 'queued' })
+    vi.mocked(api.mappingDownload).mockResolvedValue({ name: 'entry_rules.txt', blob: new Blob(['entry rules text']) })
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: '导出入口规则' }))
+    await waitFor(() => expect(saveDownload).toHaveBeenCalledWith({ name: 'entry_rules.txt', blob: expect.any(Blob) }))
+    expect(api.operation).toHaveBeenCalledWith('conv-1', expect.objectContaining({
+      step: expect.objectContaining({ type: 'export', source_ref: 'session.log_classification.entry_rules' }),
+      source_artifact_id: 'a1',
+    }), expect.any(String))
+    expect(api.mappingDownload).toHaveBeenCalledWith('cfg1')
+    // 展开式导出表单已移除：点击即排队并自动下载。
+    expect(screen.queryByRole('button', { name: '开始处理' })).not.toBeInTheDocument()
+    expect(screen.queryByText('规则内容')).not.toBeInTheDocument()
+  })
+  it('surfaces an entry-rules export failure inline and keeps the card usable', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail,
+      artifacts: [
+        { id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published', mapping_eligible: true,
+          summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' }, submission_eligible: false },
+        { id: 'map1', run_id: 'rm1', file_id: 'f1', kind: 'field_mapping', status: 'published', current: true,
+          summary: { rule_count: 1, field_count: 1, matched_count: 1, unmatched_count: 0, parse_error_count: 0 } },
+      ]
+    })
+    // 卡片内容读取成功，避免读取错误 alert 干扰导出错误断言。
+    vi.mocked(api.artifactContent).mockResolvedValue({ classification: {
+      status: 'SUCCESS', log_format: 'KV', feature_field: 'kind',
+      classification_details: [{ logtype: '登录事件', sample: 'kind=login' }],
+      analysis: {}, coverage: {},
+    }, total_lines: 0, submission_eligible: false })
+    vi.mocked(api.operation).mockResolvedValue({ task: { id: 'export-task', status: 'queued' }, run: { id: 'export-run', status: 'queued' } })
+    vi.mocked(api.run).mockResolvedValue({ id: 'export-run', status: 'failed', error_message: '规则导出失败：来源已过期' })
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: '导出入口规则' }))
+    expect(await screen.findByText('规则导出失败：来源已过期')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: '导出入口规则' })).toBeEnabled())
+    expect(api.mappingDownload).not.toHaveBeenCalled()
+  })
+  it('guides to field mapping instead of queueing a doomed export when the session lacks mapping', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({
+      ...detail,
+      artifacts: [{ id: 'a1', run_id: 'r2', file_id: 'f1', kind: 'log_classification', status: 'published', mapping_eligible: true,
+        summary: { log_types: [], coverage: { matched_lines: 0, total_lines: 0 }, rule_summary: '' }, submission_eligible: false }]
+    })
+    // 卡片内容读取成功，避免读取错误 alert 干扰。
+    vi.mocked(api.artifactContent).mockResolvedValue({ classification: {
+      status: 'SUCCESS', log_format: 'KV', feature_field: 'kind',
+      classification_details: [{ logtype: '登录事件', sample: 'kind=login' }],
+      analysis: {}, coverage: {},
+    }, total_lines: 0, submission_eligible: false })
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: '导出入口规则' }))
+    expect(await screen.findByText('导出入口规则需要数据源产品/厂商：请先完成「标准字段映射」后重试。')).toBeInTheDocument()
+    expect(api.operation).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole('button', { name: '导出入口规则' })).toBeEnabled())
+  })
   it('keeps the conversation usable and retries a failed classification read', async () => {
     vi.mocked(api.conversation).mockResolvedValue({
       ...detail,
@@ -277,6 +345,7 @@ describe('V2 workbench', () => {
     await screen.findByRole('heading', { name: '日志任务' })
     expect(screen.queryByRole('button', { name: '提取日志类型' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '导出入口规则' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Run 诊断' }))
     expect(await screen.findByRole('heading', { name: '开发台' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新会话' })).not.toBeInTheDocument()

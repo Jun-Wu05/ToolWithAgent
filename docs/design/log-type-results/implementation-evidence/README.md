@@ -4,6 +4,15 @@
 实施 worktree：`D:\Agent\agent_design\twa-v2-log-type-results`，分支 `codex/v2-log-type-results`。
 批准视觉版本：`log-type-results-v1`，四个批准文件 SHA-256 已逐一核验一致（见 HANDOFF §4）。
 
+## 0. 导出入口规则一键直出（#444 验收反馈二轮）
+
+> 本节对应分支 `codex/v2-export-rules-direct`（基线 `d036eb52`，PR #445 合并点）。
+
+- 交互：点击「导出入口规则」→ 按钮转「导出中…」→ 排队既有 export 操作（`session.log_classification.entry_rules`）→ run 完成后自动下载生成的规则 TXT；展开式表单（规则内容选择 + 开始处理）从结果卡移除。
+- 前置指引：规则 TXT 文件头要求数据源产品/厂商元数据（`application/adapters/shared.py::require_rule_source_fields`），该元数据由标准字段映射带入（`store.read_business_session` 从映射 run 快照恢复）。无映射产物的会话点击导出时直接显示「导出入口规则需要数据源产品/厂商：请先完成「标准字段映射」后重试。」，不发起注定失败的导出（真实浏览器验证：指引出现、operations 请求 0 次、无 busy 瞬态）。`export-01-buttons.png`（按钮行）/ `export-02-guidance.png`（指引态）。
+- 失败路径（App 测试覆盖）：run 失败时错误就地显示、按钮恢复可用、不触发下载；幂等 receipt 防重复提交。
+- 子规则导出按钮本轮不加（用户决定，延后到标准字段映射后续轮次）；前置指引逻辑对将来的子规则入口同样适用。
+
 ## 1. 改动面
 
 | 文件 | 性质 |

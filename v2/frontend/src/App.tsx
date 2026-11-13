@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { api, saveDownload, type ClassificationArtifact, type Conversation, type ConversationSummary, type FieldMappingArtifact, type FileRecord, type Identity, type MappingInput, type MappingDraft, type MappingDraftSummary, type ApiError, type Artifact, type Message, type Run, type ProgressSummary, type Suggestion } from './api'
+import { api, saveDownload, type ClassificationArtifact, type Conversation, type ConversationSummary, type FieldMappingArtifact, type FileRecord, type Identity, type MappingInput, type MappingDraft, type MappingDraftSummary, type ApiError, type Artifact, type Message, type OperationInput, type Run, type ProgressSummary, type Suggestion } from './api'
 import { type WorkspaceTab } from './WorkspaceViews'
 import { TrajectoryLedger } from './TrajectoryLedger'
 import { ConversationTimeline, type TimelineActions } from './ConversationTimeline'
@@ -12,7 +12,7 @@ import { DeveloperConsole } from './DeveloperConsole'
 import { RunDiagnostics } from './RunDiagnostics'
 import { UserHistory } from './UserHistory'
 import { MappingDialog } from './MappingDialog'
-import { BusinessOperations, BusinessConfirmation, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
+import { BusinessConfirmation, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
 import { LogClassificationCard } from './LogClassificationResult'
 
 const statusName: Record<string, string> = {
@@ -128,6 +128,7 @@ export function App() {
   const applyReceipts = useRef(new Map<string, { revision: number; key: string }>())
   const [downloadId, setDownloadId] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<{ id: string; message: string } | null>(null)
+  const [exportError, setExportError] = useState<{ id: string; message: string } | null>(null)
   const mappingReceipt = useRef<{ payload: string; key: string } | null>(null)
   const [featureFields, setFeatureFields] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
@@ -189,7 +190,7 @@ export function App() {
   const setMappingId = (id: string | null) => { if (editingPendingRef.current && id !== mappingId) { setNotice('请先重试保存或取消当前字段修改。'); return false } if (id && !openResource('mapping')) return false; setMappingSelection(id); if (id) setFieldChangesSelection(null); return true }
   const setFieldChangesId = (id: string | null) => { if (editingPendingRef.current && id) { setNotice('请先重试保存或取消当前字段修改。'); return } if (id && !openResource('results')) return; setFieldChangesSelection(id) }
   useLayoutEffect(() => { if (contentRef.current) contentRef.current.scrollTop = viewScroll.current[workspaceTab] || 0; currentTab.current = workspaceTab }, [workspaceTab])
-  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setTraceTarget(null); setDiagnosticRunId(null); setResourceTabs([]); setResourceOpen(false); setResourceWidth(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++artifactRequest.current; setSelectedResultId(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingSelection(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); mappingReceipt.current = null; }
+  const resetMapping = () => { changeWorkspaceTab('conversation'); setVisitedTabs(['conversation']); setTraceTarget(null); setDiagnosticRunId(null); setResourceTabs([]); setResourceOpen(false); setResourceWidth(null); viewScroll.current = {}; setFieldChangesId(null); clearReceipt.current = null; setClearBusy(false); setClearError(''); setLatestProgress(null); ++artifactRequest.current; setSelectedResultId(null); setArtifactContent(null); setArtifactError(''); setArtifactLoading(false); setPendingConfirmation(null); setMappingDraftId(undefined); setEditingPending(false); editingPendingRef.current = false; setPendingSend(null); setResolutionError(''); setResolutionConflict(false); setMappingSelection(null); setMappingSource(null); setDownloadId(null); setDownloadError(null); setExportError(null); mappingReceipt.current = null; }
   const refreshList = useCallback(async () => {
     const version = viewToken.current
     const result = await api.conversations()
@@ -504,6 +505,43 @@ export function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : '日志知识申请未能启动。') }
     finally { setActionBusy(null) }
   }
+  // 导出入口规则一键直出：排队既有 export 操作 → 等完成 → 自动下载规则 TXT（#444 验收反馈）。
+  // 规则文件头要求数据源产品/厂商，元数据由标准字段映射带入；未映射的会话直接指引，不发注定失败的导出。
+  const exportReceipt = useRef<{payload: string; key: string} | null>(null)
+  const exportEntryRules = async (artifact: ClassificationArtifact) => {
+    if (!activeId || identity?.role !== 'user' || actionBusy) return
+    const hasMapping = (conversation?.artifacts || []).some(item => item.kind === 'field_mapping' && 'current' in item && item.current)
+    if (!hasMapping) {
+      setExportError({id: artifact.id, message: '导出入口规则需要数据源产品/厂商：请先完成「标准字段映射」后重试。'})
+      return
+    }
+    const version = viewToken.current, id = activeId
+    const input: OperationInput = {step: {step_id: 'operation', type: 'export', source_ref: 'session.log_classification.entry_rules'}, source_artifact_id: artifact.id}
+    const payload = JSON.stringify([id, input])
+    if (exportReceipt.current?.payload !== payload) exportReceipt.current = {payload, key: crypto.randomUUID()}
+    setActionBusy('export:' + artifact.id); setExportError(null)
+    try {
+      const queued = await api.operation(id, input, exportReceipt.current.key)
+      if (!isCurrent(version, id)) return
+      let run = await api.run(queued.run.id)
+      while (!['succeeded', 'failed', 'cancelled'].includes(run.status)) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        if (!isCurrent(version, id)) return
+        run = await api.run(queued.run.id)
+      }
+      if (run.status !== 'succeeded') throw new Error(run.error_message || '规则导出未完成，请重试。')
+      const detail = await api.conversation(id)
+      if (!isCurrent(version, id)) return
+      const produced = (detail.artifacts || []).find(item => item.kind === 'config_export' && item.run_id === queued.run.id)
+      if (!produced) throw new Error('未找到导出的规则产物，请到结果与产物中查看。')
+      const file = await api.mappingDownload(produced.id)
+      if (isCurrent(version, id)) saveDownload(file)
+    } catch (caught) {
+      if (isCurrent(version, id)) setExportError({id: artifact.id, message: caught instanceof Error ? caught.message : '规则导出失败，请重试。'})
+    } finally {
+      if (isCurrent(version, id)) setActionBusy(null)
+    }
+  }
   const startMapping = async (fields: SourceFields) => {
     if (!activeId || !mappingSource || actionBusy || identity?.role !== 'user') return
     const version = viewToken.current
@@ -615,12 +653,13 @@ export function App() {
       <div className="lcr-actions-row">
         <button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>
         <button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button>
-        {identity?.role === 'user' && artifact.mapping_eligible && <details><summary className="button-secondary">导出入口规则</summary><BusinessOperations key={identityKey + ':ops'} conversation={conversation!} source={artifact} onDone={() => refreshActive(conversation!.id)} /></details>}
+        {identity?.role === 'user' && artifact.mapping_eligible && <button className="button-secondary" onClick={() => void exportEntryRules(artifact)} disabled={!!actionBusy}>{actionBusy === 'export:' + artifact.id ? '导出中…' : '导出入口规则'}</button>}
         {identity?.role === 'user' && artifact.submission_eligible && (!artifact.submission_status || artifact.submission_status === 'error') && <button className="button-secondary" onClick={() => void submitKnowledge(artifact)} disabled={!!actionBusy}>{actionBusy === artifact.id ? '提交中…' : '申请加入知识库'}</button>}
         {identity?.role === 'user' && artifact.mapping_eligible && <button className="button-secondary" onClick={() => setMappingSource({ id: artifact.id, kind: 'classification', label: '日志分类结果' })} disabled={!!actionBusy}>标准字段映射</button>}
         <button className="button-secondary" onClick={() => setDraft('提取【字段名】的枚举值')}>提取字段枚举值</button>
       </div>
       {downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}
+      {exportError?.id === artifact.id && <p className="mapping-error" role="alert">{exportError.message}</p>}
       {artifact.submission_status && <p role="status">申请状态：{{ created: '待审核', pending_duplicate: '已有待审核申请', already_approved: '已批准', stale: '结果已过期', error: '提交失败' }[artifact.submission_status] || statusName[artifact.submission_status] || artifact.submission_status}{artifact.application_id ? '（申请编号 ' + artifact.application_id + '）' : ''}</p>}
       {identity?.role === 'user' && artifact.mapping_eligible && mappingForm({ id: artifact.id, kind: 'classification', label: '日志分类结果' })}
     </>} />
