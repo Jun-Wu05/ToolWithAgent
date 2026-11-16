@@ -312,7 +312,7 @@ class Worker:
             with private_business_logging(run_id=claim["id"], step=claim["task_type"]):
                 from toolwithagent_v2.runtime.postprocessing import BusinessSession
                 attach_enum(BusinessSession(), self.store.root / claim["input"]["storage_key"], self.store.root / "staging")
-            return self.store.finish(self.worker_id, claim)
+            return self.store.finish(self.worker_id, claim, message="已读取枚举映射表，请检查预览后开始填充。")
         except Exception:
             return self.store.finish(self.worker_id, claim, "enum_attachment_invalid", "枚举映射附件未完整通过校验，请检查工作表。")
 

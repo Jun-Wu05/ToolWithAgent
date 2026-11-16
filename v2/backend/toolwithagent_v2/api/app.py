@@ -333,6 +333,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def artifact_content(request: Request, artifact_id: str):
         return store.artifact_content(principal(request)["id"], artifact_id)
 
+    @app.get("/api/v2/files/{file_id}/enum-preview")
+    def enum_attachment_preview(request: Request, file_id: str, sheet: str | None = None, q: str = "", page: int = 1, size: int = 50, sort: str | None = None):
+        return store.enum_attachment_preview(principal(request)["id"], file_id, sheet, q, page, size, sort)
+
     @app.get("/api/v2/artifacts/{artifact_id}/mapping-view")
     def mapping_view(request: Request, artifact_id: str, sub_rule: str | None = None, page: int = 1, q: str = "", status: str | None = None, draft_id: str | None = None):
         return store.mapping_view(principal(request)["id"], artifact_id, sub_rule, page, q, status,draft_id)

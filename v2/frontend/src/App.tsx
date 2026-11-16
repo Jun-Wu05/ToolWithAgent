@@ -12,8 +12,9 @@ import { DeveloperConsole } from './DeveloperConsole'
 import { RunDiagnostics } from './RunDiagnostics'
 import { UserHistory } from './UserHistory'
 import { MappingDialog } from './MappingDialog'
-import { BusinessConfirmation, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
+import { BusinessConfirmation, BusinessOperations, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
 import { LogClassificationCard } from './LogClassificationResult'
+import { EnumResultCard } from './EnumResultTable'
 
 const statusName: Record<string, string> = {
   queued: '排队中', pending: '排队中', running: '运行中', succeeded: '已完成',
@@ -117,6 +118,7 @@ export function App() {
   const [busy, setBusy] = useState(false)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [mappingSource, setMappingSource] = useState<MappingSource | null>(null)
+  const [fillFrom, setFillFrom] = useState<string | null>(null)
   const [fieldChangesId, setFieldChangesSelection] = useState<string | null>(null)
   const [mappingId, setMappingSelection] = useState<string | null>(null)
   const [mappingDraftId, setMappingDraftId] = useState<string | undefined>()
@@ -642,7 +644,7 @@ export function App() {
       if (message.run_id) void openRun(message.run_id)
     }
   }
-  const businessCard = (artifact: Artifact) => <article className="result-card ledger-row" key={artifact.id}><strong>{businessName(artifact.kind)}结果</strong>{(artifact.kind === 'enum_values' || artifact.kind === 'threat_mapping' || artifact.kind === 'config_export') && <p>{artifact.item_count ?? (typeof artifact.summary?.item_count === 'number' ? artifact.summary.item_count : 0)} 项</p>}{'current' in artifact && !artifact.current && <p className="mapping-warning">历史结果，可查看和下载。</p>}<div className="mapping-actions"><button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>{artifact.kind === 'field_mapping' && <button className="button-secondary" onClick={() => {if (setMappingId(artifact.id)) setMappingDraftId(undefined); setSelectedResultId(null)}}>查看结果</button>}<button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button></div>{downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}</article>
+  const businessCard = (artifact: Artifact) => artifact.kind === 'enum_values' || artifact.kind === 'threat_mapping' ? <EnumResultCard key={identity?.id + ':' + activeId + ':' + artifact.id} artifact={artifact} identityKey={identity?.id + ':' + activeId} onOpen={() => void openArtifact(artifact)} onDownload={() => void downloadMapping(artifact.id)} downloading={!!downloadId} error={downloadError?.id === artifact.id ? downloadError.message : undefined} /> : <article className="result-card ledger-row" key={artifact.id}><strong>{businessName(artifact.kind)}结果</strong>{artifact.kind === 'config_export' && <p>{artifact.item_count ?? (typeof artifact.summary?.item_count === 'number' ? artifact.summary.item_count : 0)} 项</p>}{'current' in artifact && !artifact.current && <p className="mapping-warning">历史结果，可查看和下载。</p>}<div className="mapping-actions"><button className="button-secondary" onClick={() => void openArtifact(artifact)}>查看产物</button>{artifact.kind === 'field_mapping' && <button className="button-secondary" onClick={() => {if (setMappingId(artifact.id)) setMappingDraftId(undefined); setSelectedResultId(null)}}>查看结果</button>}<button className="button-secondary" onClick={() => void downloadMapping(artifact.id)} disabled={!!downloadId}>下载产物</button></div>{downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}</article>
   const mappingSummary = (artifact: FieldMappingArtifact) => { const draft = conversation?.drafts?.find(item => item.base_artifact_id === artifact.id && ['active', 'applying'].includes(item.status)); return <MappingSummaryCard key={identity?.id + ':' + activeId + ':' + artifact.id} artifact={artifact} editable={identity?.role === 'user'} draftId={draft?.id} draftSummary={draft} onDraftChange={draftChanged} onPendingChange={pendingChanged} onOpenFull={() => { if (setMappingId(artifact.id)) { setMappingDraftId(undefined); resourceTrigger.current = document.getElementById('mapping-' + artifact.id)?.querySelector('button') || null } }} onOpenDrawer={() => void openArtifact(artifact)} onDownload={() => void downloadMapping(artifact.id)} downloading={downloadId === artifact.id} downloadError={downloadError?.id === artifact.id ? downloadError.message : ''} /> }
   const liveDrafts = unresolvedDrafts(conversation?.drafts)
   const fieldChange = conversation?.field_changes?.find(item => item.run_id === fieldChangesId)
@@ -674,6 +676,10 @@ export function App() {
     mappingForm,
     onOpenFieldChanges: runId => { if (openResource('results')) setFieldChangesId(runId) },
     onSuggestion: applySuggestion,
+    onStartFill: fileId => setFillFrom(current => current === fileId ? null : fileId),
+    fillForm: fileId => conversation && fillFrom === fileId
+      ? <div className="params-form-card" role="group" aria-label="填充值映射参数"><span className="params-form-tag">选择目标配置与字段后开始填充</span><BusinessOperations conversation={conversation} preset="fill" onDone={async () => { setFillFrom(null); if (activeId) await selectConversation(activeId) }} onCancel={() => setFillFrom(null)} /></div>
+      : null,
     canOperate: identity?.role === 'user',
   }
   const paramPrompt = (() => {

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { api, type Artifact, type Conversation, type FieldChangeSummary, type FieldMappingArtifact, type FileRecord, type Message, type Run, type RunEvent, type Suggestion } from './api'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { api, type Artifact, type Conversation, type EnumPreview, type FieldChangeSummary, type FieldMappingArtifact, type FileRecord, type Message, type Run, type RunEvent, type Suggestion } from './api'
 import { businessName, phaseName, pipelineStageName, pipelineErrorName } from './BusinessWorkspace'
 import { StatusText } from './VisualPrimitives'
 
@@ -83,6 +83,8 @@ export type TimelineActions = {
   mappingForm: (source: { id: string; kind: 'file' | 'classification'; label: string }) => ReactNode
   onOpenFieldChanges: (runId: string) => void
   onSuggestion?: (suggestion: Suggestion, message: Message) => void
+  onStartFill?: (fileId: string) => void
+  fillForm?: (fileId: string) => ReactNode
   canOperate: boolean
 }
 
@@ -122,6 +124,46 @@ function FileMessageCard({ message, conversation, actions }: { message: Message;
   const live = conversation.files.find(file => file.id === fileId)
   const file: FileRecord = live || { id: fileId, name: String(message.payload?.name || '附件'), size: typeof message.payload?.size === 'number' ? message.payload.size : undefined, role: message.payload?.role as FileRecord['role'], parse_status: 'queued' }
   return <article className="message from-user file-message" aria-label={'输入附件：' + file.name}><div className="message-head"><strong>你</strong><time>{readableTime(message.created_at)}</time></div><FileRow file={file} actions={actions} /></article>
+}
+
+/** 上传枚举附件的只读预览：服务端分页/搜索/排序，历史附件不提供当前填充入口。 */
+function EnumPreviewCard({ fileId, actions }: { fileId: string; actions: TimelineActions }) {
+  const [result, setResult] = useState<EnumPreview | null>(null)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
+  const [sheet, setSheet] = useState('')
+  const [query, setQuery] = useState('')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [open, setOpen] = useState(false)
+  const [sort, setSort] = useState('')
+  const sequence = useRef(0)
+  useEffect(() => { const timer = setTimeout(() => setSearch(query), 300); return () => clearTimeout(timer) }, [query])
+  useEffect(() => {
+    const request = ++sequence.current
+    api.enumPreview(fileId, { sheet: sheet || undefined, q: open ? search : '', page: open ? page : 1, size: open ? 50 : 5, sort: sort || undefined })
+      .then(value => { if (request === sequence.current) { setResult(value); setError('') } })
+      .catch(() => { if (request === sequence.current) setError('结果读取失败') })
+  }, [fileId, sheet, search, page, open, sort, retry])
+  if (error) return <section className="result-card"><p role="alert">{error} <button className="button-text" onClick={() => setRetry(retry + 1)}>重试</button></p></section>
+  if (!result) return <section className="result-card" role="status">正在读取枚举映射预览…</section>
+  if (!result.sheets.length) return <section className="result-card">未读取到有效映射规则</section>
+  const view = result.sheet
+  const lastPage = Math.max(1, Math.ceil(view.total / view.size))
+  const columns = ['目标字段', '原始值', '映射值', '匹配方式']
+  const toggleSort = (column: string) => { setSort(sort === column ? '-' + column : sort === '-' + column ? '' : column); setPage(1) }
+  const resetSelection = (name: string) => { setSheet(name); setPage(1); setQuery(''); setSort('') }
+  return <>
+  <section className="result-card enum-result" aria-label="枚举映射预览">
+    <div className="enum-result-heading"><strong>枚举映射预览</strong><span>{result.current ? '● 待填充' : '历史预览'}</span></div>
+    <p className="enum-result-meta">附件：{result.name} · 本次上传 {result.sheets.length} 个工作表 · 共 {result.sheets.reduce((total, item) => total + item.count, 0)} 条规则</p>
+    <div role="tablist" aria-label="工作表">{result.sheets.map(item => <button type="button" role="tab" aria-selected={view.name === item.name} key={item.name} className="button-text" onClick={() => resetSelection(item.name)}>{item.name} {item.count}</button>)}</div>
+    {open && <input aria-label="搜索全部映射" placeholder="搜索全部映射" value={query} onChange={event => { setQuery(event.target.value); setPage(1) }} />}
+    <div className="enum-result-scroll"><table><thead><tr>{columns.map(name => <th key={name} scope="col" aria-sort={sort === name ? 'ascending' : sort === '-' + name ? 'descending' : 'none'}><button type="button" onClick={() => toggleSort(name)} aria-label={'按' + name + '排序'}>{name}{sort === name ? ' ↑' : sort === '-' + name ? ' ↓' : ''}</button></th>)}</tr></thead><tbody>{view.rows.map((row, index) => <tr key={(view.page - 1) * view.size + index}><td>{row['目标字段']}</td><td>{row['原始值']}</td><td>{row['映射值']}</td><td>{row.mappingType === 'REGULAR' ? '正则' : '相等'}</td></tr>)}</tbody></table></div>
+    <div className="enum-result-footer"><span>{open ? `共 ${view.total} 条` : `显示前 ${view.rows.length} 条，共 ${view.total} 条`}</span><div>{open && lastPage > 1 && <><button className="button-text" disabled={view.page <= 1} onClick={() => setPage(page - 1)}>上一页</button><span>{view.page} / {lastPage}</span><button className="button-text" disabled={view.page >= lastPage} onClick={() => setPage(page + 1)}>下一页</button></>}{(view.total > 5 || result.sheets.some(item => item.count > 5)) && <button className="button-text" onClick={() => { setOpen(!open); setPage(1) }}>{open ? '收起' : '查看全部'}</button>}{result.current && actions.canOperate && actions.onStartFill && <button className="button-secondary" onClick={() => actions.onStartFill?.(fileId)}>开始填充</button>}</div></div>
+  </section>
+  {result.current && actions.fillForm && actions.fillForm(fileId)}
+  </>
 }
 
 function FieldChangeCard({ change, actions }: { change: FieldChangeSummary; actions: TimelineActions }) {
@@ -198,7 +240,7 @@ export function ConversationTimeline({ conversation, actions, renderers }: {
           ? <FileMessageCard message={message} conversation={conversation} actions={actions} />
           : message.kind === 'operation'
             ? <OperationCard message={message} runs={runs} actions={actions} />
-            : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{!isUser && !artifacts.some(artifact => artifact.kind === 'log_classification') && <SuggestionChips message={message} actions={actions} />}{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
+            : <div className={'chat-body'}><article className={'message ' + (isUser ? 'from-user' : '')}><div className="message-head"><strong>{isUser ? '你' : 'ToolWithAgent'}</strong><time>{readableTime(message.created_at)}</time></div><p>{message.content}</p>{!isUser && turnRun?.kind === 'file_ingest' && turnRun.status === 'succeeded' && conversation.files.some(file => file.id === turnRun.file_id && file.role === 'enum_mapping') && <EnumPreviewCard key={turnRun.file_id} fileId={turnRun.file_id!} actions={actions} />}{!isUser && !artifacts.some(artifact => artifact.kind === 'log_classification') && <SuggestionChips message={message} actions={actions} />}{artifacts.map(artifact => <div className="timeline-attached" key={artifact.id}>{renderArtifact(artifact)}</div>)}{fieldChanges.map(change => <div className="timeline-attached" key={change.run_id}><FieldChangeCard change={change} actions={actions} /></div>)}{turnRun && <div className="chat-run-row"><RunDisclosure run={turnRun} /><button className="button-text" onClick={() => actions.onOpenRun(turnRun.id)}>查看本次执行</button></div>}</article>{!isUser && renderers.paramsForm?.(message, turnRun)}</div>}
       </div>
     })}
   </div>

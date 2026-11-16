@@ -3,6 +3,9 @@ export type ConversationSummary = { id: string; title: string; created_at: strin
 export type Message = { id: string; actor: string; kind?: string; content: string; created_at?: string; run_id?: string | null; payload?: Record<string, unknown> }
 export type Suggestion = { type: 'action' | 'prompt'; id: string; label: string; file_id?: string | null; classification_artifact_id?: string | null; artifact_id?: string | null; run_id?: string | null; text?: string }
 export type FileRecord = { id: string; name: string; size?: number; role?: 'primary' | 'enum_mapping'; active?: boolean; parse_status?: string; mapping_eligible?: boolean; created_at?: string }
+export type EnumPreviewRow = { '目标字段': string; '原始值': string; '映射值': string; mappingType: string }
+export type EnumPreviewQuery = { sheet?: string; q?: string; page?: number; size?: number; sort?: string }
+export type EnumPreview = { file_id: string; name: string; current: boolean; sheets: { name: string; count: number }[]; sheet: { name: string; page: number; size: number; total: number; rows: EnumPreviewRow[] } }
 export type ClassificationArtifact = {
   id: string
   version?: number
@@ -217,6 +220,13 @@ export const api = {
   applyFields: (id: string, revision: number, key: string, token?: string) => request<{run: Run}>('/runs/' + encodeURIComponent(id) + '/field-change-apply', {method: 'POST', headers: {'Content-Type': 'application/json', 'If-Match': String(revision), 'Idempotency-Key': key}, body: JSON.stringify({token})}),
   undoFields: (id: string, key: string) => request<{run: Run}>('/artifacts/' + encodeURIComponent(id) + '/undo', {method: 'POST', headers: {'Idempotency-Key': key}}),
   artifactContent: (id: string) => request<Record<string, unknown>>('/artifacts/' + encodeURIComponent(id) + '/content'),
+  enumPreview: (id: string, query: EnumPreviewQuery = {}) => {
+    const params = new URLSearchParams({ page: String(query.page ?? 1), size: String(query.size ?? 50) })
+    if (query.sheet !== undefined) params.set('sheet', query.sheet)
+    if (query.q) params.set('q', query.q)
+    if (query.sort) params.set('sort', query.sort)
+    return request<EnumPreview>('/files/' + encodeURIComponent(id) + '/enum-preview?' + params)
+  },
   operation: (id: string, input: OperationInput, key: string) => request<{task: {id: string; status: string}; run: Run}>('/conversations/' + encodeURIComponent(id) + '/operations', {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': key}, body: JSON.stringify(input)}),
   confirmationToken: (id: string) => request<Confirmation>('/runs/' + encodeURIComponent(id) + '/confirmation-token', {method: 'POST'}),
   confirmRun: (id: string, confirmation: Confirmation, key: string) => request<Run>('/runs/' + encodeURIComponent(id) + '/confirm', {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': key}, body: JSON.stringify({token: confirmation.token, checkpoint_revision: confirmation.checkpoint_revision})}),
