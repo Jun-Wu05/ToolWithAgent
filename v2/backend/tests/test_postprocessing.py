@@ -78,6 +78,77 @@ def current(store,conversation,kind):
     return next(item for item in reversed(store.get_conversation("dev-user",conversation)["artifacts"]) if item["kind"]==kind and item.get("current",True))
 
 
+def test_enum_preview_is_owned_and_keeps_historical_upload(tmp_path):
+    client,store,conversation,worker=setup(tmp_path)
+    first=upload(client,conversation,"first.xlsx",excel("允许"),"enum_mapping")
+    assert worker.once()
+    first_id=first["file"]["id"]
+    preview=client.get(f"/api/v2/files/{first_id}/enum-preview").json()
+    assert preview["current"] is True
+    assert preview["sheets"]==[{"name":"事件结果","count":1}]
+    assert preview["sheet"]["name"]=="事件结果" and preview["sheet"]["total"]==1
+    assert preview["sheet"]["rows"][0]["映射值"]=="允许"
+    second=upload(client,conversation,"second.xlsx",excel("成功"),"enum_mapping")
+    assert worker.once()
+    historical=client.get(f"/api/v2/files/{first_id}/enum-preview").json()
+    assert historical["current"] is False
+    assert historical["sheet"]["rows"][0]["映射值"]=="允许"
+    assert client.get(f"/api/v2/files/{second['file']['id']}/enum-preview").json()["sheet"]["rows"][0]["映射值"]=="成功"
+    other=client.post("/api/v2/conversations",json={}).json()["id"]
+    assert client.get(f"/api/v2/files/{other}/enum-preview").status_code==404
+
+
+def test_enum_preview_multi_sheet_pagination_search_and_sort(tmp_path):
+    workbook=Workbook(); first=workbook.active; first.title="事件结果"
+    first.append(["mappingType","orgValue","mappingValue"])
+    for index in range(12): first.append(["EQUAL",f"value{index}",f"值{index}"])
+    second=workbook.create_sheet("事件级别")
+    second.append(["mappingType","orgValue","mappingValue"])
+    for index in range(6): second.append(["EQUAL",f"level{index}",f"级{index}"])
+    second.append(["REGULAR","error.*","错误"])
+    out=BytesIO(); workbook.save(out); workbook.close()
+    client,store,conversation,worker=setup(tmp_path)
+    attachment=upload(client,conversation,"multi.xlsx",out.getvalue(),"enum_mapping")
+    assert worker.once()
+    base=f"/api/v2/files/{attachment['file']['id']}/enum-preview"
+    overview=client.get(base).json()
+    assert [item["name"] for item in overview["sheets"]]==["事件结果","事件级别"]
+    assert [item["count"] for item in overview["sheets"]]==[12,7]
+    assert overview["sheet"]["name"]=="事件结果"
+    explicit=client.get(base,params={"sheet":"事件级别"}).json()
+    assert explicit["sheet"]["name"]=="事件级别" and explicit["sheet"]["total"]==7
+    assert explicit["sheet"]["rows"][-1]["mappingType"]=="REGULAR"
+    page_two=client.get(base,params={"size":5,"page":2}).json()["sheet"]
+    assert [row["原始值"] for row in page_two["rows"]]==[f"value{index}" for index in range(5,10)]
+    searched=client.get(base,params={"q":"值1"}).json()["sheet"]
+    assert {row["原始值"] for row in searched["rows"]}=={"value1","value10","value11"}
+    assert searched["total"]==3
+    descending=client.get(base,params={"sort":"-原始值"}).json()["sheet"]["rows"]
+    assert descending[0]["原始值"]=="value9"
+    ordered_by_type=client.get(base,params={"sheet":"事件级别","sort":"匹配方式"}).json()["sheet"]["rows"]
+    assert ordered_by_type[0]["mappingType"]=="REGULAR"
+    capped=client.get(base,params={"size":500}).json()["sheet"]
+    assert capped["size"]==200
+    fallback=client.get(base,params={"sheet":"不存在"}).json()
+    assert fallback["sheet"]["name"]=="事件结果"
+
+
+def test_enum_preview_rejects_unvalidated_files_and_empty_sheet_uploads(tmp_path):
+    client,store,conversation,worker=setup(tmp_path)
+    broken=upload(client,conversation,"broken.xlsx",b"not-an-excel-workbook","enum_mapping")
+    assert worker.once()
+    assert client.get(f"/api/v2/files/{broken['file']['id']}/enum-preview").status_code==404
+    # 空 Sheet 在工作簿校验阶段即被拒绝（read_enum_mappings_from_excel 抛错），预览不暴露失败附件。
+    workbook=Workbook(); workbook.active.title="空表"
+    workbook.active.append(["mappingType","orgValue","mappingValue"])
+    out=BytesIO(); workbook.save(out); workbook.close()
+    empty=upload(client,conversation,"empty.xlsx",out.getvalue(),"enum_mapping")
+    assert worker.once()
+    files=store.get_conversation("dev-user",conversation)["files"]
+    assert {item["parse_status"] for item in files}=={"failed"}
+    assert client.get(f"/api/v2/files/{empty['file']['id']}/enum-preview").status_code==404
+
+
 def test_rules_attachment_fill_restart_export_root_and_latest_draft(tmp_path):
     client,store,conversation,worker=setup(tmp_path); rules(client,conversation,worker)
     primary=store.get_conversation("dev-user",conversation)["files"][0]["id"]

@@ -36,16 +36,14 @@ it('uploads an enum attachment with its explicit role and reports natural-langua
   fireEvent.change(screen.getByLabelText('消息内容'), {target: {value: '处理日志'}}); fireEvent.click(screen.getByRole('button', {name: '发送'}))
   expect(await screen.findByText('消息已创建业务任务，执行结果将在会话中显示。')).toBeInTheDocument()
 })
-it('embeds results in their message and only loads owner content after a click', async () => {
+it('embeds the inline enum table in its message and keeps owner content scoped to the card', async () => {
   render(<App />); await screen.findByText('已提取枚举')
-  expect(api.artifactContent).not.toHaveBeenCalled()
-  expect(screen.getByText('2 项')).toBeInTheDocument()
-  expect(screen.queryByText(/仅本人查看的真实值/)).not.toBeInTheDocument()
+  await waitFor(() => expect(api.artifactContent).toHaveBeenCalledWith('enum-1'))
+  expect(await screen.findByText('仅本人查看的真实值')).toBeInTheDocument()
+  expect(screen.getByText('显示前 1 条，共 1 条')).toBeInTheDocument()
   const message = screen.getByText('已提取枚举').closest('article')!
   fireEvent.click(within(message).getByRole('button', {name: '查看产物'}))
-  expect(await screen.findByText(/仅本人查看的真实值/)).toBeInTheDocument()
-  expect(api.artifactContent).toHaveBeenCalledWith('enum-1')
-  expect(screen.getAllByRole('complementary').filter(item => item.getAttribute('aria-label') === '资源工作区')).toHaveLength(1)
+  await waitFor(() => expect(screen.getAllByRole('complementary').filter(item => item.getAttribute('aria-label') === '资源工作区')).toHaveLength(1))
 })
 it('pins the exact enum card ID and safe source reference', async () => {
   render(<BusinessOperations conversation={detail} source={enumeration} onDone={vi.fn(async () => {})} />)
@@ -59,6 +57,24 @@ it('fills the explicit config from attachment facts without inspecting sensitive
   fireEvent.click(screen.getByRole('button', {name: '开始处理'}))
   await waitFor(() => expect(api.operation).toHaveBeenCalledWith('c1', {step: {step_id: 'operation', type: 'fill', fill_kind: 'enum', target_fields: ['事件结果'], config_ref: 'session.decoded_config', source_ref: 'session.enum_mapping_table'}, config_artifact_id: 'config-1'}, expect.any(String)))
   expect(api.artifactContent).not.toHaveBeenCalled()
+})
+it('starts the fill form from the upload preview with the enum source preselected and can collapse it', async () => {
+  const onCancel = vi.fn()
+  render(<BusinessOperations conversation={detail} preset="fill" onDone={vi.fn(async () => {})} onCancel={onCancel} />)
+  expect(screen.getByLabelText('处理方式')).toHaveValue('fill')
+  expect(screen.getByLabelText('映射来源')).toHaveValue('enum')
+  fireEvent.change(screen.getByLabelText('目标配置'), {target: {value: 'config-1'}})
+  fireEvent.change(screen.getByLabelText('目标字段'), {target: {value: '事件结果'}})
+  fireEvent.click(screen.getByRole('button', {name: '开始处理'}))
+  await waitFor(() => expect(api.operation).toHaveBeenCalledWith('c1', {step: {step_id: 'operation', type: 'fill', fill_kind: 'enum', target_fields: ['事件结果'], config_ref: 'session.decoded_config', source_ref: 'session.enum_mapping_table'}, config_artifact_id: 'config-1'}, expect.any(String)))
+  fireEvent.click(screen.getByRole('button', {name: '收起'}))
+  expect(onCancel).toHaveBeenCalledTimes(1)
+})
+it('explains why the preset fill form cannot start when no configuration exists', () => {
+  const bare: Conversation = {...detail, artifacts: [enumeration], session_facts: {...detail.session_facts!, available_config_refs: []}}
+  render(<BusinessOperations conversation={bare} preset="fill" onDone={vi.fn(async () => {})} />)
+  expect(screen.getByRole('alert')).toHaveTextContent('尚无可用目标配置：请先上传解析规则或完成标准字段映射，再开始填充。')
+  expect(screen.getByRole('button', {name: '开始处理'})).toBeDisabled()
 })
 it('preserves input and idempotency receipt across failed operation retries', async () => {
   vi.mocked(api.operation).mockRejectedValueOnce(new Error('暂不可用'))
