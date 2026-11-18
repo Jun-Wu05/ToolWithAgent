@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Artifact, type Confirmation, type Conversation, type OperationInput, type Run, type ProgressSummary } from './api'
 import { LogClassificationResult } from './LogClassificationResult'
+import { EnumResultTable } from './EnumResultTable'
 
 export const businessName = (kind: string) => ({log_classification: '日志类型提取', log_parse: '日志类型提取', file_ingest: '文件校验', file_upload: '上传文件', enum_extract: '枚举提取', fill: '填充值映射', remove_mapping: '取消值映射', export: '规则导出', enum_values: '枚举提取', threat_mapping: '威胁类型映射', field_mapping: '标准字段映射', config_export: '规则导出', business: '业务处理', business_operation: '业务处理', user_request: '业务任务', business_clear: '清空业务数据', mapping_draft_apply: '应用映射修改', field_change_apply: '应用字段变更', field_change_undo: '撤销字段变更', log_knowledge_submit: '日志知识申请'}[kind] || '业务处理')
-export function BusinessOperations({conversation, source, onDone}: {conversation: Conversation; source?: Artifact; onDone: () => Promise<void>}) {
+export function BusinessOperations({conversation, source, preset, onDone, onCancel}: {conversation: Conversation; source?: Artifact; preset?: 'fill'; onDone: () => Promise<void>; onCancel?: () => void}) {
   const facts = conversation.session_facts
-  const [kind, setKind] = useState<OperationInput['step']['type']>(source?.kind === 'enum_values' ? 'threat_mapping' : source?.kind === 'threat_mapping' ? 'fill' : source?.kind === 'field_mapping' || source?.kind === 'log_classification' ? 'export' : 'enum_extract')
+  const [kind, setKind] = useState<OperationInput['step']['type']>(preset === 'fill' ? 'fill' : source?.kind === 'enum_values' ? 'threat_mapping' : source?.kind === 'threat_mapping' ? 'fill' : source?.kind === 'field_mapping' || source?.kind === 'log_classification' ? 'export' : 'enum_extract')
   // 分类导出本轮固定入口规则；子规则导出待标准字段映射后续轮次再开放。
   const rulePart: 'entry_rules' | 'sub_rules' = source?.kind === 'log_classification' ? 'entry_rules' : 'sub_rules'
   const [field, setField] = useState('')
@@ -26,6 +27,7 @@ export function BusinessOperations({conversation, source, onDone}: {conversation
   const reference = facts?.referenceable_artifacts.find(item => item.artifact_type === selected?.kind)
   const configRef = config?.kind === 'field_mapping' ? config.config_ref : facts?.available_config_refs.includes(configId) ? configId : undefined
   const needConfig = ['fill', 'remove_mapping', 'export'].includes(kind) && source?.kind !== 'log_classification'
+  const hasConfigChoice = configs.length > 0 || (facts?.available_config_refs?.length || 0) > 0
   const targets = fillKind === 'enum' ? facts?.enum_mapping_target_fields || [] : reference?.target_bindings.filter(item => item.config_ref === configRef && item.target_field === '威胁类型').map(item => item.target_field) || []
   const valid = !!facts && (!source || (source.kind === 'log_classification' ? source.mapping_eligible : 'current' in source && source.current)) && (!needConfig || !!configRef) && (kind !== 'enum_extract' || (!!facts.has_logs && !!field)) && (kind !== 'remove_mapping' || !!field) && (kind !== 'fill' || (targets.includes(field) && (fillKind === 'enum' || selected?.kind === 'threat_mapping'))) && (kind !== 'threat_mapping' || (direct ? !!values.trim() : selected?.kind === 'enum_values' && !!reference))
   return <form className="mapping-form" aria-label="后处理操作" onSubmit={event => {
@@ -52,7 +54,8 @@ export function BusinessOperations({conversation, source, onDone}: {conversation
     {['enum_extract', 'remove_mapping'].includes(kind) && <label>目标字段<input aria-label="目标字段" value={field} onChange={event => setField(event.target.value)} disabled={busy} placeholder="填写明确字段名称" required /></label>}
     {kind === 'fill' && <label>目标字段<select aria-label="目标字段" value={field} onChange={event => setField(event.target.value)} disabled={busy}><option value="">请选择字段</option>{targets.map(item => <option key={item} value={item}>{item}</option>)}</select></label>}
     {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，请重新加载或重新上传主数据。</p>}
-    {error && <p className="mapping-error" role="alert">{error}</p>}<button className="button-secondary" disabled={busy || !valid}>{busy ? '启动中…' : '开始处理'}</button>
+    {preset === 'fill' && needConfig && !hasConfigChoice && <p className="mapping-warning" role="alert">尚无可用目标配置：请先上传解析规则或完成标准字段映射，再开始填充。</p>}
+    {error && <p className="mapping-error" role="alert">{error}</p>}{onCancel && <button type="button" className="button-text" onClick={onCancel} disabled={busy}>收起</button>}<button className="button-secondary" disabled={busy || !valid}>{busy ? '启动中…' : '开始处理'}</button>
   </form>
 }
 
@@ -88,8 +91,7 @@ export function BusinessConfirmation({run, onResolved, beforeSend = false, onBac
 
 export function ArtifactValues({artifact, content}: {artifact: Artifact; content: Record<string, unknown>}) {
   if (artifact.kind === 'log_classification') return <LogClassificationResult key={artifact.id} content={content} />
-  if (artifact.kind === 'enum_values' && Array.isArray(content.values)) return <section aria-label="枚举值"><p>提取字段：{typeof content.field === 'string' ? content.field : '未指定'}</p><ul>{content.values.map((value, index) => <li key={index}>{String(value)}</li>)}</ul>{typeof content.regex === 'string' && <details><summary>提取正则</summary><pre className="artifact-content">{content.regex}</pre></details>}</section>
-  if (artifact.kind === 'threat_mapping' && Array.isArray(content.mappings)) return <div className="mapping-table-region"><table className="artifact-values"><thead><tr><th>原始值</th><th>标准威胁类型</th><th>映射方式</th></tr></thead><tbody>{content.mappings.map((row, index) => <tr key={index}><td>{String(row.original_value ?? '')}</td><td>{String(row.mapped_value ?? '')}</td><td>{row.mapping_type === 'REGULAR' ? '正则' : '相等'}</td></tr>)}</tbody></table></div>
+  if (artifact.kind === 'enum_values' || artifact.kind === 'threat_mapping') return <EnumResultTable kind={artifact.kind} content={content} />
   return <pre className="artifact-content">{artifact.kind === 'config_export' && typeof content.content === 'string' ? content.content : JSON.stringify(content, null, 2)}</pre>
 }
 

@@ -1,7 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, expect, it, vi } from 'vitest'
 import { buildTurns, ConversationTimeline, dedupeStepLines, operationParamText } from './ConversationTimeline'
-import type { Conversation, Run } from './api'
+import { api } from './api'
+import type { Conversation, EnumPreview, Run } from './api'
+
+vi.mock('./api', () => ({ api: { enumPreview: vi.fn() } }))
 
 const base = { id: 'c1', title: '会话', created_at: '', updated_at: '' }
 const noopActions = {
@@ -178,4 +181,71 @@ it('renders no chips without suggestions or without a handler', () => {
   }
   const view = render(<ConversationTimeline conversation={conversation} actions={noopActions} renderers={renderers} />)
   expect(view.container.querySelector('.suggestion-chips')).toBeNull()
+})
+
+const previewRow = (field: string, original: string, mapped: string, mappingType = 'EQUAL') => ({ '目标字段': field, '原始值': original, '映射值': mapped, mappingType })
+const previewConversation: Conversation = {
+  ...base,
+  messages: [
+    { id: 'm-upload', actor: 'user', kind: 'file', content: '上传了枚举映射附件「enum.xlsx」', payload: { action: 'file_upload', file_id: 'f-enum', name: 'enum.xlsx', role: 'enum_mapping' } },
+    { id: 'm-receipt', actor: 'assistant', kind: 'text', content: '已读取枚举映射表，请检查预览后开始填充。', run_id: 'run-enum' },
+  ],
+  files: [{ id: 'f-enum', name: 'enum.xlsx', role: 'enum_mapping', parse_status: 'succeeded' }],
+  runs: [{ id: 'run-enum', status: 'succeeded', kind: 'file_ingest', message_id: 'm-upload', file_id: 'f-enum' }],
+  artifacts: [], field_changes: [],
+}
+const previewResult = (current: boolean, rows = [previewRow('事件结果', 'success', '成功'), previewRow('事件结果', 'fail', '失败')]): EnumPreview => ({
+  file_id: 'f-enum', name: 'enum.xlsx', current,
+  sheets: [{ name: '事件结果', count: 12 }, { name: '事件级别', count: 6 }],
+  sheet: { name: '事件结果', page: 1, size: 5, total: 12, rows },
+})
+afterEach(() => { cleanup(); vi.mocked(api.enumPreview).mockReset() })
+
+it('attaches the bounded enum preview to the validation run with sheet tabs and a fill entry', async () => {
+  vi.mocked(api.enumPreview).mockResolvedValue(previewResult(true))
+  const onStartFill = vi.fn()
+  const fillForm = vi.fn(() => <p>填充表单</p>)
+  render(<ConversationTimeline conversation={previewConversation} actions={{ ...noopActions, onStartFill, fillForm }} renderers={renderers} />)
+  await screen.findByLabelText('枚举映射预览')
+  expect(api.enumPreview).toHaveBeenCalledWith('f-enum', { sheet: undefined, q: '', page: 1, size: 5, sort: undefined })
+  expect(screen.getByText('● 待填充')).toBeInTheDocument()
+  expect(screen.getByText(/附件：enum.xlsx · 本次上传 2 个工作表 · 共 18 条规则/)).toBeInTheDocument()
+  expect(screen.getByRole('tab', { name: /事件结果 12/ })).toBeInTheDocument()
+  expect(screen.getByRole('tab', { name: /事件级别 6/ })).toBeInTheDocument()
+  expect(screen.getByText('success')).toBeInTheDocument()
+  expect(screen.getByText(/显示前 2 条，共 12 条/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '开始填充' }))
+  expect(onStartFill).toHaveBeenCalledWith('f-enum')
+  expect(fillForm).toHaveBeenCalledWith('f-enum')
+  fireEvent.click(screen.getByRole('tab', { name: /事件级别 6/ }))
+  await waitFor(() => expect(api.enumPreview).toHaveBeenCalledWith('f-enum', expect.objectContaining({ sheet: '事件级别', page: 1, size: 5, sort: undefined })))
+  fireEvent.click(screen.getByRole('button', { name: '查看全部' }))
+  await waitFor(() => expect(api.enumPreview).toHaveBeenCalledWith('f-enum', expect.objectContaining({ sheet: '事件级别', page: 1, size: 50 })))
+})
+
+it('searches and sorts through the server and keeps history read-only without a fill entry', async () => {
+  vi.mocked(api.enumPreview).mockResolvedValue(previewResult(false))
+  const fillForm = vi.fn(() => <p>填充表单</p>)
+  render(<ConversationTimeline conversation={previewConversation} actions={{ ...noopActions, onStartFill: vi.fn(), fillForm }} renderers={renderers} />)
+  await screen.findByText('历史预览')
+  // 历史附件只读：不渲染开始填充，App 层也不会为其挂载填充表单（fillFrom 仅由点击设置）。
+  expect(screen.queryByRole('button', { name: '开始填充' })).not.toBeInTheDocument()
+  expect(fillForm).not.toHaveBeenCalledWith('f-enum')
+  fireEvent.click(screen.getByRole('button', { name: '查看全部' }))
+  await waitFor(() => expect(api.enumPreview).toHaveBeenCalledWith('f-enum', expect.objectContaining({ size: 50 })))
+  fireEvent.change(await screen.findByLabelText('搜索全部映射'), { target: { value: 'success' } })
+  await waitFor(() => expect(api.enumPreview).toHaveBeenCalledWith('f-enum', expect.objectContaining({ q: 'success', size: 50 })))
+  fireEvent.click(screen.getByRole('button', { name: '按原始值排序' }))
+  await waitFor(() => expect(api.enumPreview).toHaveBeenCalledWith('f-enum', expect.objectContaining({ sort: '原始值' })))
+  fireEvent.click(screen.getByRole('button', { name: '按原始值排序' }))
+  await waitFor(() => expect(api.enumPreview).toHaveBeenCalledWith('f-enum', expect.objectContaining({ sort: '-原始值' })))
+})
+
+it('shows a retry path when the preview read fails', async () => {
+  vi.mocked(api.enumPreview).mockRejectedValueOnce(new Error('network'))
+  render(<ConversationTimeline conversation={previewConversation} actions={noopActions} renderers={renderers} />)
+  expect(await screen.findByRole('alert')).toHaveTextContent('结果读取失败')
+  vi.mocked(api.enumPreview).mockResolvedValue(previewResult(true))
+  fireEvent.click(screen.getByRole('button', { name: '重试' }))
+  await screen.findByLabelText('枚举映射预览')
 })

@@ -1818,6 +1818,40 @@ class Store:
                 raise LookupError("artifact_not_found")
         return json.loads(self._read_blob(row))
 
+    def enum_attachment_preview(self, owner_id, file_id, sheet=None, q="", page=1, size=50, sort=None):
+        """只读本人已校验附件的原始工作簿；有界分页，内容固定绑定上传 Blob。"""
+        from tempfile import TemporaryDirectory
+        from agent.tools import read_enum_mappings_from_excel, flatten_enum_mappings
+        page = max(1, int(page or 1))
+        size = max(1, min(int(size or 50), 200))
+        with connect(self.path) as db:
+            row = db.execute("SELECT f.* FROM files f WHERE f.id=? AND f.owner_id=? AND f.role='enum_mapping' AND f.parse_status='succeeded'", (file_id, owner_id)).fetchone()
+            if row is None:
+                raise LookupError("file_not_found")
+            latest = db.execute("SELECT id FROM files WHERE conversation_id=? AND role='enum_mapping' AND parse_status='succeeded' AND is_active=1 ORDER BY created_at DESC,id DESC LIMIT 1", (row["conversation_id"],)).fetchone()
+        content = self._read_blob(row, "uploads")
+        # Blob 无扩展名，openpyxl 按扩展名识别格式；与 attach_enum 相同经 staging 临时副本读取。
+        with TemporaryDirectory(dir=self.root / "staging", prefix="enum-preview-") as folder:
+            source = Path(folder) / "attachment.xlsx"
+            source.write_bytes(content)
+            workbook = read_enum_mappings_from_excel(str(source))
+        sheets = [{"name": name, "count": len(rows)} for name, rows in workbook.items()]
+        names = [item["name"] for item in sheets]
+        selected = sheet if sheet in names else (names[0] if names else "")
+        rows: list = flatten_enum_mappings({selected: workbook[selected]}) if selected else []
+        needle = str(q or "").strip().lower()
+        if needle:
+            rows = [item for item in rows if any(needle in str(item[key]).lower() for key in ("目标字段", "原始值", "映射值"))]
+        if sort:
+            desc = sort.startswith("-")
+            column = sort[1:] if desc else sort
+            if column in ("目标字段", "原始值", "映射值"):
+                rows = sorted(rows, key=lambda item: str(item[column]), reverse=desc)
+            elif column == "匹配方式":
+                rows = sorted(rows, key=lambda item: "正则" if item["mappingType"] == "REGULAR" else "相等", reverse=desc)
+        return {"file_id": file_id, "name": row["original_name"], "current": bool(latest and latest["id"] == file_id and row["is_active"]), "sheets": sheets,
+                "sheet": {"name": selected, "page": page, "size": size, "total": len(rows), "rows": rows[(page - 1) * size: page * size]}}
+
     def artifact_download(self, owner_id, artifact_id):
         from contracts.download_naming import download_filename
         from io import BytesIO

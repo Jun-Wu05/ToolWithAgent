@@ -1,0 +1,18 @@
+.enum-result { color: var(--foreground); }
+.enum-result div[role='tablist'] { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+.enum-result-heading, .enum-result-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.enum-result-heading strong { font-size: 16px; }
+.enum-result-heading span { color: var(--success, #2f8f22); }
+.enum-result-meta { color: var(--muted-foreground); margin: 8px 0 16px; }
+.enum-result input { width: 100%; margin-bottom: 12px; }
+.enum-result-scroll { max-width: 100%; overflow-x: auto; }
+.enum-result table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.enum-result th { background: var(--surface-inset); text-align: left; }
+.enum-result th, .enum-result td { padding: 8px 12px; min-height: 36px; border-bottom: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
+.enum-result th button { border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+.enum-result th button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.enum-result-footer { margin-top: 16px; color: var(--muted-foreground); flex-wrap: wrap; }
+.enum-result-footer > div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.enum-result details { border-top: 1px solid var(--border-subtle); margin-top: 16px; padding-top: 12px; }
+.enum-result pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.enum-result-card .mapping-actions { margin-top: 12px; }
