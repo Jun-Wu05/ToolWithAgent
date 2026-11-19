@@ -14,9 +14,11 @@ from application.file_input import simple_decode
 from toolwithagent_v2.runtime.postprocessing import BusinessSession, freeze_session
 from application.adapters.composition import create_default_adapters
 from application.adapters.log_knowledge_submit import LogKnowledgeSubmitAdapter
+from application.clarification import compose_clarification
 from application.log_knowledge_submission import build_submission_snapshot
 from application.progress import NullProgressSink
 from application.request_runtime import run_deterministic_plan
+from application.session_projection import build_session_facts
 from contracts.planner_models import DeterministicPlan, FieldMappingStep, LogKnowledgeSubmitStep, LogParseStep, StepStatus
 
 
@@ -118,13 +120,14 @@ def raw_log_lines(path: Path, media_type: str, *, limit: int | None = None) -> l
 class BusinessApplication:
     """Invoke one existing typed step per durable V2 run."""
 
-    def __init__(self, knowledge_db_path: Path, *, team_factory=None, adapters_factory=None, planner=None):
+    def __init__(self, knowledge_db_path: Path, *, team_factory=None, adapters_factory=None, planner=None, clarification_runner=None):
         from agent.tools.log_pattern_store import LogKnowledgeRepository
 
         self.repository = LogKnowledgeRepository(knowledge_db_path)
         self.team_factory = team_factory
         self.adapters_factory = adapters_factory
         self.planner = planner
+        self.clarification_runner = clarification_runner
 
     async def parse(self, path: Path, snapshot: dict) -> dict:
         lines = raw_log_lines(path, snapshot["media_type"])
@@ -297,6 +300,12 @@ class BusinessApplication:
                     session_facts_digest=state_digest(initial), frozen_plan=frozen.model_dump(mode="json"),
                     staging_state=freeze_session(session)),
                     "confirmation": {"question": result.question, "choices": list(result.choices), "operations": [step.type for step in result.steps]}}
+            if result.decision == "clarification" and result.question:
+                # 与 V1 render_decision 对齐（#226）：会话事实富化追问，任何失败回退原文案。
+                enriched = await compose_clarification(
+                    "clarification", build_session_facts(session), result.reason_code,
+                    result.choices, "", runner=self.clarification_runner)
+                return {"message": enriched or result.question}
             return {"message": result.question or result.answer or "请补充明确的业务要求。"}
         if result.status != StepStatus.SUCCESS:
             failed = next(item for item in result.results if item.status != StepStatus.SUCCESS)

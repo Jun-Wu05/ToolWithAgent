@@ -578,3 +578,58 @@ def test_clear_rolls_back_if_final_worker_fence_is_lost(tmp_path, monkeypatch):
     detail = store.get_conversation("dev-user", conversation)
     assert detail["session_facts"]["has_decoded_config"] and all(item["active"] for item in detail["files"])
     assert not any(message["content"].startswith("业务数据已清空") for message in detail["messages"])
+
+
+def assistant_contents(store, conversation):
+    return [message["content"] for message in store.get_conversation("dev-user", conversation)["messages"] if message["actor"] == "assistant"]
+
+
+def test_clarification_decision_prefers_enriched_text(tmp_path):
+    """澄清决策优先展示会话事实富化追问，对齐 V1 render_decision（#226）。"""
+    class ClarifyPlanner:
+        async def plan(self, **kwargs):
+            return PlanDecision.model_validate({"decision": "clarification", "plan_id": "clarify",
+                "reason_code": "missing_target_field", "question": "请说明目标字段？", "choices": ["alarm", "status"]})
+    client, store, conversation, worker = setup(tmp_path, ClarifyPlanner())
+    upload(client, conversation, "logs.txt", b"alarm=attack\n")
+    assert worker.once()
+    worker.business_application.clarification_runner = lambda prompt: "请补充要提取枚举值的目标字段名称。"
+    run = client.post(f"/api/v2/conversations/{conversation}/messages", json={"content": "提取"}).json()["run"]["id"]
+    assert worker.once()
+    assert store.get_run("dev-user", run)["status"] == "succeeded"
+    assert "请补充要提取枚举值的目标字段名称。" in assistant_contents(store, conversation)
+
+
+def test_clarification_enrichment_falls_back_to_raw_question(tmp_path):
+    """富化生成失败时回退 Planner 原始问题，不改变消息结构。"""
+    class ClarifyPlanner:
+        async def plan(self, **kwargs):
+            return PlanDecision.model_validate({"decision": "clarification", "plan_id": "clarify",
+                "reason_code": "missing_target_field", "question": "请说明目标字段？"})
+    client, store, conversation, worker = setup(tmp_path, ClarifyPlanner())
+    upload(client, conversation, "logs.txt", b"alarm=attack\n")
+    assert worker.once()
+    worker.business_application.clarification_runner = lambda prompt: None
+    run = client.post(f"/api/v2/conversations/{conversation}/messages", json={"content": "提取"}).json()["run"]["id"]
+    assert worker.once()
+    assert store.get_run("dev-user", run)["status"] == "succeeded"
+    contents = assistant_contents(store, conversation)
+    assert "请说明目标字段？" in contents and "请补充明确的业务要求。" not in contents
+
+
+def test_guidance_answer_bypasses_enrichment(tmp_path):
+    """帮助作答不经富化通道，runner 不被调用，行为与基线一致。"""
+    class GuidancePlanner:
+        async def plan(self, **kwargs):
+            return PlanDecision.model_validate({"decision": "guidance", "plan_id": "guide",
+                "answer": "支持日志类型提取、字段映射与导出。"})
+    client, store, conversation, worker = setup(tmp_path, GuidancePlanner())
+    upload(client, conversation, "logs.txt", b"alarm=attack\n")
+    assert worker.once()
+    calls = []
+    worker.business_application.clarification_runner = lambda prompt: (calls.append(prompt), "不应出现的富化文案")[1]
+    run = client.post(f"/api/v2/conversations/{conversation}/messages", json={"content": "能做什么"}).json()["run"]["id"]
+    assert worker.once()
+    assert store.get_run("dev-user", run)["status"] == "succeeded"
+    assert calls == [] and "支持日志类型提取、字段映射与导出。" in assistant_contents(store, conversation)
+    assert "不应出现的富化文案" not in assistant_contents(store, conversation)
