@@ -2,7 +2,19 @@
 
 V2 API、Worker、前端与原 Chainlit 入口并行运行。默认端口为 API `8100`、React `5173`；SQLite、上传文件和 Python 环境只放在当前 worktree 的 `tmp/` 中。当前支持主数据与枚举映射附件校验、日志类型提取、日志知识申请、字段映射、枚举提取、威胁类型映射、枚举/威胁填充、取消映射与兼容导出；成功产物可跨刷新/重启和后续轮次复用。业务通过既有 Application 执行；自然指令创建 Task/Run，方案确认恢复冻结计划而不重新规划，Run 同时支持持久进度、取消和重跑。字段映射结果默认显示对话摘要，可原位放大为编辑器，按子规则搜索、筛选、分页、自动保存 Draft，确认占用替换和精确路径联动，并原子应用为新版本或下载正式结果。
 
-## 本地启动（PowerShell）
+## 本地启动
+
+### 一键启动（推荐）
+
+从本 worktree 根目录执行一条命令（任意 shell，无需先激活 venv）：
+
+```powershell
+python v2/dev.py
+```
+
+启动器自动完成：首次幂等 bootstrap（创建 `tmp/venv`、`pip install -e v2/backend[test]`、前端 `npm install`，依赖声明变化时自动重装）→ 预检 8100/5173 端口占用 → 统一设置 `V2_DATA_DIR`/`V2_MODE`/`V2_WORKER_CONCURRENCY` 与 `PYTHONPATH` → 先起 API 并等待 `/health/live` 就绪（首次启动在此执行 Alembic migration）→ 再起 Worker 与前端（`--strictPort` 防端口漂移破坏 CORS 契约）。三个进程的日志加 `[api]`/`[worker]`/`[web]` 前缀合并输出到当前终端；Ctrl+C 或任一进程意外退出时终止全部进程树。依赖变更后强制重装用 `python v2/dev.py --reinstall`。
+
+### 手动启动（PowerShell，备选）
 
 以下命令均从本 worktree 根目录执行：
 
