@@ -1674,7 +1674,8 @@ class Store:
         file, classification = self._current_mapping_input(db, conversation_id)
         snapshot = {key: file[key] for key in ("sha256", "storage_key", "media_type", "original_name")} if file else {}
         snapshot["file_id"] = file["id"] if file else None
-        attachments = [dict(row) for row in db.execute("SELECT id,sha256,storage_key,media_type,original_name FROM files WHERE conversation_id=? AND role='enum_mapping' AND is_active=1 AND parse_status='succeeded' AND created_at>=? ORDER BY created_at,id", (conversation_id, file["created_at"] if file else "9999"))]
+        # 附件与主数据上传顺序解耦（#453，对齐 #400/#401）：主数据替换保留附件，仅显式清空置 is_active=0。
+        attachments = [dict(row) for row in db.execute("SELECT id,sha256,storage_key,media_type,original_name FROM files WHERE conversation_id=? AND role='enum_mapping' AND is_active=1 AND parse_status='succeeded' ORDER BY created_at,id", (conversation_id,))]
         snapshot["classification_anchor"] = classification["id"] if classification else None
         refs = {}
         if file:

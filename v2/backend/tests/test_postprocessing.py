@@ -181,6 +181,33 @@ def test_rules_attachment_fill_restart_export_root_and_latest_draft(tmp_path):
     assert next(item for item in restarted.get_conversation("dev-user",conversation)["files"] if item["id"]==primary)["mapping_eligible"]
 
 
+def test_attachment_before_primary_still_fills(tmp_path):
+    # #453：先传附件再传主数据也必须可用——附件不得被主数据上传时间过滤。
+    client,store,conversation,worker=setup(tmp_path)
+    upload(client,conversation,"enum.xlsx",excel(),"enum_mapping"); assert worker.once()
+    rules(client,conversation,worker)
+    run=operation(client,conversation,"fill",fill_kind="enum",target_fields=["事件结果"],source_ref="session.enum_mapping_table",config_ref="session.decoded_config")
+    assert worker.once(); assert store.get_run("dev-user",run)["status"]=="succeeded"
+    mapped=current(store,conversation,"field_mapping")
+    exported=json.loads(base64.b64decode(client.get(f"/api/v2/artifacts/{mapped['id']}/download").content))
+    assert exported["rules"][0]["normalize"][1]["mappings"][0]["mappingValue"]=="允许"
+
+
+def test_new_primary_keeps_enum_attachments(tmp_path):
+    # #453：主数据替换保留附件（对齐 #400/#401），换传新解析规则后附件仍参与填充。
+    client,store,conversation,worker=setup(tmp_path); rules(client,conversation,worker)
+    upload(client,conversation,"enum.xlsx",excel(),"enum_mapping"); assert worker.once()
+    operation(client,conversation,"fill",fill_kind="enum",target_fields=["事件结果"],source_ref="session.enum_mapping_table",config_ref="session.decoded_config"); assert worker.once()
+    replacement={"meta":"新根结构","rules":[{"name":"rule","normalize":[
+        {"index":"status","field":"事件结果","result":["allow"]}]}]}
+    upload(client,conversation,"rules2.b64",base64.b64encode(json.dumps(replacement,ensure_ascii=False).encode())); assert worker.once()
+    run=operation(client,conversation,"fill",fill_kind="enum",target_fields=["事件结果"],source_ref="session.enum_mapping_table",config_ref="session.decoded_config")
+    assert worker.once(); assert store.get_run("dev-user",run)["status"]=="succeeded"
+    mapped=current(store,conversation,"field_mapping")
+    exported=json.loads(base64.b64decode(client.get(f"/api/v2/artifacts/{mapped['id']}/download").content))
+    assert exported["rules"][0]["normalize"][0]["mappings"][0]["mappingValue"]=="允许"
+
+
 def test_same_sheet_replacement_requires_refill_and_failed_export_keeps_old(tmp_path):
     client,store,conversation,worker=setup(tmp_path); rules(client,conversation,worker)
     upload(client,conversation,"enum.xlsx",excel(),"enum_mapping"); assert worker.once()
@@ -375,7 +402,8 @@ def test_remove_mapping_latest_configuration_and_primary_replacement(tmp_path):
     upload(client,conversation,"replacement.txt",b"new=value"); assert worker.once()
     detail=store.get_conversation("dev-user",conversation)
     assert not next(item for item in detail["artifacts"] if item["id"]==latest["id"])["current"]
-    assert detail["session_facts"]["available_config_refs"]==[] and detail["session_facts"]["enum_mapping_target_fields"]==[]
+    # #453：主数据替换保留枚举附件（对齐 #400/#401），仅显式清空才清除——目标字段仍可见。
+    assert detail["session_facts"]["available_config_refs"]==[] and detail["session_facts"]["enum_mapping_target_fields"]==["事件结果"]
     assert client.get(f"/api/v2/artifacts/{latest['id']}/download").status_code==200
 
 
