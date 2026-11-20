@@ -105,6 +105,7 @@ export function App() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [draft, setDraft] = useState('')
+  const draftRef = useRef('')
   const [theme, setTheme] = useState<'light' | 'dark'>(readTheme)
   const [latestProgress, setLatestProgress] = useState<{runId: string; summary: ProgressSummary} | null>(null)
   const artifactRequest = useRef(0)
@@ -118,6 +119,7 @@ export function App() {
   const [pendingConfirmation, setPendingConfirmation] = useState<{id: string; content: string; version: number; run: Run} | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [mappingSource, setMappingSource] = useState<MappingSource | null>(null)
   const [fillFrom, setFillFrom] = useState<string | null>(null)
@@ -381,7 +383,7 @@ export function App() {
       const sent = await api.sendMessage(id, content)
       if (!isCurrent(version, id)) return
       if (sent.run) setNotice('消息已创建业务任务，执行结果将在会话中显示。')
-      setDraft(''); setPendingSend(null); setPendingConfirmation(null); setResolutionError('')
+      setDraft(''); draftRef.current = ''; setPendingSend(null); setPendingConfirmation(null); setResolutionError('')
       await refreshActive(id)
       if (isCurrent(version, id) && workspaceTab === 'conversation') { setNewReplies(false); stickToBottom.current = true; requestAnimationFrame(() => scrollConversationToEnd()) }
     } catch (caught) {
@@ -400,19 +402,34 @@ export function App() {
     }
   }
   const send = async (input?: string) => {
-    const content = (input ?? draft).trim(), version = viewToken.current
-    if (!content || busy || clearBusy || pendingSend || pendingConfirmation || editingPendingRef.current) return
+    let content = (input ?? draftRef.current).trim()
+    const version = viewToken.current
+    if (!content || busy || clearBusy || uploading || pendingSend || pendingConfirmation || editingPendingRef.current) return
     if (input) setNotice(`正在发送：${content}`)
-    setBusy(true); setError('')
+    setError('')
     try {
+      // #457：发送即携带——暂存文件自动「上传→等校验完成」再发消息；期间 busy 未置位，输入区保持可编辑，
+      // 发送内容取等待后的最新草稿（draftRef），等待期间补打的内容不丢。
+      let fresh: Conversation | null = null
+      if (pendingFiles.length) {
+        const staged = await uploadStaged(version)
+        if (!staged) return
+        fresh = staged.detail
+        if (!input) {
+          content = draftRef.current.trim()
+          if (!content) return
+        }
+      }
+      setBusy(true)
       const id = await ensureConversation(version)
       if (!id || !isCurrent(version, id)) return
-      const remaining = unresolvedDrafts(conversation?.drafts)
+      const source = fresh ?? conversation
+      const remaining = unresolvedDrafts(source?.drafts)
       if (remaining.length) { setPendingSend({ id, content, version, drafts: remaining }); setResolutionError(''); return }
-      const pendingFields = conversation?.field_changes?.find(item => ['ready', 'applying'].includes(item.status)); if (pendingFields) { setFieldChangesId(pendingFields.run_id); setNotice('消息尚未发送，请先处理当前字段变更。'); return }
-      const waiting = conversation?.runs.find(run => run.status === 'waiting_confirmation'); if (waiting) { setPendingConfirmation({id, content, version, run: waiting}); return }
+      const pendingFields = source?.field_changes?.find(item => ['ready', 'applying'].includes(item.status)); if (pendingFields) { setFieldChangesId(pendingFields.run_id); setNotice('消息尚未发送，请先处理当前字段变更。'); return }
+      const waiting = source?.runs.find(run => run.status === 'waiting_confirmation'); if (waiting) { setPendingConfirmation({id, content, version, run: waiting}); return }
       await sendContent(id, content, version)
-    } catch (caught) { if (isCurrent(version)) { if (input) setDraft(current => current || content); setError(caught instanceof Error ? caught.message : '消息发送失败。') } }
+    } catch (caught) { if (isCurrent(version)) { if (input) { setDraft(current => current || content); draftRef.current = draftRef.current || content } setError(caught instanceof Error ? caught.message : '消息发送失败。') } }
     finally { if (isCurrent(version)) setBusy(false) }
   }
   const resolveSend = async (choice: 'apply' | 'discard') => {
@@ -480,22 +497,41 @@ export function App() {
     setPendingFiles(current => [...current, ...Array.from(selected, file => ({ file, role: uploadRoleFor(file) }))])
     if (fileInput.current) fileInput.current.value = ''
   }
-  const uploadPending = async () => {
-    if (clearBusy || !pendingFiles.length) return
-    const version = viewToken.current
-    setBusy(true); setError('')
+  // #457：发送即携带——上传暂存并等待全部文件校验完成（_freeze_business 在消息创建时冻结附件，
+  // 未等到 succeeded 就发送会丢附件），返回最新会话；失败/超时返回 null 且不回滚已成功文件。
+  const uploadStaged = async (version: number): Promise<{ id: string; detail: Conversation } | null> => {
+    setUploading(true); setError('')
     try {
       const id = await ensureConversation(version)
-      if (!id || !isCurrent(version, id)) return
+      if (!id || !isCurrent(version, id)) return null
+      const uploadedIds: string[] = []
       for (const item of [...pendingFiles]) {
-        await api.uploadFile(id, item.file, item.role)
+        const result = await api.uploadFile(id, item.file, item.role)
+        uploadedIds.push(result.file.id)
         setPendingFiles(current => current.filter(entry => entry !== item))
-        if (!isCurrent(version, id)) return
+        if (!isCurrent(version, id)) return null
       }
-      setNotice('文件已上传，正在校验。')
-      await refreshActive(id)
-    } catch (caught) { if (isCurrent(version)) setError(caught instanceof Error ? caught.message : '上传失败，请检查文件后重试。') }
-    finally { if (isCurrent(version)) setBusy(false) }
+      const deadline = Date.now() + 30000
+      while (Date.now() < deadline) {
+        const detail = await api.conversation(id)
+        if (!isCurrent(version, id)) return null
+        const files = detail.files.filter(file => uploadedIds.includes(file.id))
+        if (files.length === uploadedIds.length) {
+          const failed = files.filter(file => file.parse_status === 'failed')
+          if (failed.length) { setError(`文件校验未通过：${failed.map(file => file.name).join('、')}，请处理后重试。`); return null }
+          if (files.every(file => file.parse_status === 'succeeded')) { setConversation(detail); return { id, detail } }
+        }
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      setError('文件校验超时，请稍后重试。')
+      return null
+    } catch (caught) { if (isCurrent(version)) setError(caught instanceof Error ? caught.message : '上传失败，请检查文件后重试。'); return null }
+    finally { setUploading(false) }
+  }
+  const uploadPending = async () => {
+    if (clearBusy || uploading || busy || !pendingFiles.length) return
+    const staged = await uploadStaged(viewToken.current)
+    if (staged) setNotice('文件已上传并完成校验。')
   }
   const parseLog = async (file: FileRecord) => {
     if (!activeId || actionBusy || file.active === false) return
@@ -637,7 +673,7 @@ export function App() {
   }
   const locate = (messageId?: string | null) => { if (messageId) { changeWorkspaceTab('conversation'); requestAnimationFrame(() => document.getElementById('message-' + messageId)?.scrollIntoView?.({block: 'center'})) } }
   const applySuggestion = (suggestion: Suggestion, message: Message) => {
-    if (suggestion.type === 'prompt') { setDraft(suggestion.text || ''); return }
+    if (suggestion.type === 'prompt') { setDraft(suggestion.text || ''); draftRef.current = suggestion.text || ''; return }
     if (suggestion.id === 'log_parse') {
       const file = conversation?.files.find(item => item.id === suggestion.file_id)
       if (file) void parseLog(file)
@@ -668,7 +704,7 @@ export function App() {
         {identity?.role === 'user' && artifact.mapping_eligible && <button className="button-secondary" onClick={() => void exportEntryRules(artifact)} disabled={!!actionBusy}>{actionBusy === 'export:' + artifact.id ? '导出中…' : '导出入口规则'}</button>}
         {identity?.role === 'user' && artifact.submission_eligible && (!artifact.submission_status || artifact.submission_status === 'error') && <button className="button-secondary" onClick={() => void submitKnowledge(artifact)} disabled={!!actionBusy}>{actionBusy === artifact.id ? '提交中…' : '申请加入知识库'}</button>}
         {identity?.role === 'user' && artifact.mapping_eligible && <button className="button-secondary" onClick={() => setMappingSource({ id: artifact.id, kind: 'classification', label: '日志分类结果' })} disabled={!!actionBusy}>标准字段映射</button>}
-        <button className="button-secondary" onClick={() => setDraft('提取【字段名】的枚举值')}>提取字段枚举值</button>
+        <button className="button-secondary" onClick={() => { setDraft('提取【字段名】的枚举值'); draftRef.current = '提取【字段名】的枚举值' }}>提取字段枚举值</button>
       </div>
       {downloadError?.id === artifact.id && <p className="mapping-error" role="alert">{downloadError.message}</p>}
       {exportError?.id === artifact.id && <p className="mapping-error" role="alert">{exportError.message}</p>}
@@ -755,7 +791,7 @@ export function App() {
       <div className="conversation-main">
       <div className={'conversation-content' + (workspaceTab === 'trace' ? ' trace-view' : '')} ref={contentRef} onScroll={onConversationScroll}>
         {(workspaceTab === 'tasks' || workspaceTab === 'runs') && <div className="workbench-pane"><UserHistory key={identity?.id + ':' + workspaceTab} kind={workspaceTab} onOpen={(conversationId, runId, messageId) => { void openHistory(conversationId, runId, messageId) }} /></div>}
-        <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>从一句话或一个文件开始</h2><p>也可以从常见场景进入——点击填入话术，可自行修改或拼接多步。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button><div className="empty-templates">{SCENE_TEMPLATES.map(template => <button key={template.title} type="button" className="empty-template" onClick={() => setDraft(template.prompt)}><strong>{template.title}</strong><span>{template.hint}</span></button>)}</div></div> : <>
+        <div className="workbench-pane conversation-pane" hidden={workspaceTab !== 'conversation'}>{loading ? <div className="empty-state"><h2>正在加载工作台…</h2></div> : !conversation ? <div className="empty-state"><h2>从一句话或一个文件开始</h2><p>也可以从常见场景进入——点击填入话术，可自行修改或拼接多步。</p><button className="button-primary" onClick={() => fileInput.current?.click()}>上传文件</button><div className="empty-templates">{SCENE_TEMPLATES.map(template => <button key={template.title} type="button" className="empty-template" onClick={() => { setDraft(template.prompt); draftRef.current = template.prompt }}><strong>{template.title}</strong><span>{template.hint}</span></button>)}</div></div> : <>
           <ConversationTimeline conversation={conversation} actions={timelineActions} renderers={timelineRenderers} />
           {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，历史结果仍可查看。请重新加载或上传主数据。</p>}
           {identity?.role === 'user' && liveDrafts.length > 0 && <section className="activity-section"><h2>未应用的映射草稿</h2>{liveDrafts.map(item => <article className="result-card" key={item.id}><p>{item.changed_count} 处未应用修改{!item.base_current ? ' · 来源已过期' : ''}{item.status === 'applying' ? ' · 正在应用' : ''}</p><button className="button-secondary" onClick={() => { if (setMappingId(item.base_artifact_id)) setMappingDraftId(item.id) }}>恢复草稿</button></article>)}</section>}
@@ -768,7 +804,7 @@ export function App() {
         {activeRun && hintedRun?.id === activeRun.id && identity?.role === 'user' && <button className="button-text" onClick={() => void stopRun(activeRun.id)} disabled={!!actionBusy}>停止</button>}
       </TaskHintBar>
         {waitingRun && !pendingConfirmation && identity?.role === 'user' && <BusinessConfirmation key={identity.id + ':' + activeId + ':' + waitingRun.id} run={waitingRun} onBack={() => {void openRun(waitingRun.id)}} onResolved={() => refreshActive(activeId!)} />}
-        {editingPending && <p className="mapping-hint composer-draft-hint" role="status">请先完成草稿保存或确认，再发送消息。</p>}{pendingFiles.length > 0 && <div className="upload-staging" aria-label="待上传文件">{pendingFiles.map((item, index) => <div className="upload-staging-row" key={item.file.name + ':' + index}><strong className="upload-staging-name">{item.file.name}</strong><label>用途<select aria-label={item.file.name + ' 用途'} value={item.role} onChange={event => setPendingFiles(current => current.map((entry, position) => position === index ? { ...entry, role: event.target.value as 'primary' | 'enum_mapping' } : entry))} disabled={busy || clearBusy || loading}><option value="primary">日志或规则主数据</option><option value="enum_mapping">枚举映射附件</option></select></label><button type="button" className="button-text" aria-label={'移除 ' + item.file.name} onClick={() => setPendingFiles(current => current.filter((_, position) => position !== index))} disabled={busy || clearBusy}>移除</button></div>)}<div className="upload-staging-actions"><button className="button-secondary" onClick={() => void uploadPending()} disabled={busy || clearBusy || loading}>{busy ? '上传中…' : '上传 ' + pendingFiles.length + ' 份'}</button><button className="button-text" onClick={() => setPendingFiles([])} disabled={busy || clearBusy || loading}>清空待传</button><span className="composer-hint">xlsx 默认按枚举映射附件上传，可逐份调整用途</span></div></div>}<div className="composer"><textarea aria-label="消息内容" placeholder="描述要处理的日志、字段或规则…" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} rows={2} disabled={busy || clearBusy || loading || !!pendingSend || !!pendingConfirmation} /><div className="composer-toolbar"><div><input ref={fileInput} type="file" multiple hidden aria-label="选择文件" onChange={event => stageFiles(event.target.files)} /><button className="attach-button" onClick={() => fileInput.current?.click()} disabled={busy || clearBusy || loading}>＋ 添加文件</button><span className="composer-hint">Enter 发送 · Shift+Enter 换行</span></div><button className="button-primary send-button" onClick={() => void send()} disabled={!draft.trim() || busy || clearBusy || loading || editingPending || !!pendingSend || !!pendingConfirmation}>{busy ? '处理中…' : '发送'}</button></div></div>
+        {editingPending && <p className="mapping-hint composer-draft-hint" role="status">请先完成草稿保存或确认，再发送消息。</p>}{pendingFiles.length > 0 && <div className="upload-staging" aria-label="待上传文件">{pendingFiles.map((item, index) => <div className="upload-staging-row" key={item.file.name + ':' + index}><strong className="upload-staging-name">{item.file.name}</strong><label>用途<select aria-label={item.file.name + ' 用途'} value={item.role} onChange={event => setPendingFiles(current => current.map((entry, position) => position === index ? { ...entry, role: event.target.value as 'primary' | 'enum_mapping' } : entry))} disabled={busy || uploading || clearBusy || loading}><option value="primary">日志或规则主数据</option><option value="enum_mapping">枚举映射附件</option></select></label><button type="button" className="button-text" aria-label={'移除 ' + item.file.name} onClick={() => setPendingFiles(current => current.filter((_, position) => position !== index))} disabled={busy || uploading || clearBusy}>移除</button></div>)}<div className="upload-staging-actions"><button className="button-secondary" onClick={() => void uploadPending()} disabled={busy || uploading || clearBusy || loading}>{busy || uploading ? '上传中…' : '上传 ' + pendingFiles.length + ' 份'}</button><button className="button-text" onClick={() => setPendingFiles([])} disabled={busy || uploading || clearBusy || loading}>清空待传</button><span className="composer-hint">xlsx 默认按枚举映射附件上传，可逐份调整用途</span></div></div>}<div className="composer"><textarea aria-label="消息内容" placeholder="描述要处理的日志、字段或规则…" value={draft} onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} rows={2} disabled={busy || clearBusy || loading || !!pendingSend || !!pendingConfirmation} /><div className="composer-toolbar"><div><input ref={fileInput} type="file" multiple hidden aria-label="选择文件" onChange={event => stageFiles(event.target.files)} /><button className="attach-button" onClick={() => fileInput.current?.click()} disabled={busy || uploading || clearBusy || loading}>＋ 添加文件</button><span className="composer-hint">Enter 发送 · Shift+Enter 换行</span></div><button className="button-primary send-button" onClick={() => void send()} disabled={!draft.trim() || busy || uploading || clearBusy || loading || editingPending || !!pendingSend || !!pendingConfirmation}>{busy ? '处理中…' : uploading ? '上传校验中…' : '发送'}</button></div></div>
       </div>
       </div>
       {resourceTabs.length > 0 && <>
