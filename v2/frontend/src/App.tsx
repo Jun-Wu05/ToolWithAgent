@@ -32,6 +32,8 @@ const SCENE_TEMPLATES: { title: string; hint: string; prompt: string }[] = [
 const runningStatus = new Set(['queued', 'pending', 'running'])
 const readTheme = () => localStorage.getItem('twa-v2-theme') === 'dark' ? 'dark' : 'light'
 const readableTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+// #454：暂存清单默认用途——xlsx 默认枚举映射附件，其余默认主数据，行内可改。
+const uploadRoleFor = (file: File): 'primary' | 'enum_mapping' => file.name.toLowerCase().endsWith('.xlsx') ? 'enum_mapping' : 'primary'
 
 type MappingSource = { id: string; kind: 'file' | 'classification'; label: string }
 type SourceFields = Pick<MappingInput, 'product' | 'log_vendor' | 'data_source'>
@@ -112,7 +114,7 @@ export function App() {
   const clearReceipt = useRef<{id: string; key: string} | null>(null)
   const [clearBusy, setClearBusy] = useState(false)
   const [clearError, setClearError] = useState('')
-  const [uploadRole, setUploadRole] = useState<'primary' | 'enum_mapping'>('primary')
+  const [pendingFiles, setPendingFiles] = useState<{ file: File; role: 'primary' | 'enum_mapping' }[]>([])
   const [pendingConfirmation, setPendingConfirmation] = useState<{id: string; content: string; version: number; run: Run} | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -472,20 +474,28 @@ export function App() {
     } catch (caught) {if (isCurrent(version, id)) setClearError(caught instanceof Error ? caught.message : '清空未能启动，业务数据和未发送文本已保留。')}
     finally {if (isCurrent(version, id)) setClearBusy(false)}
   }
-  const upload = async (file: File) => {
-    if (clearBusy) return
+  // #454：多文件暂存清单——一次选多份，按扩展名默认分派用途，确认后逐份上传。
+  const stageFiles = (selected: FileList | null) => {
+    if (!selected?.length) return
+    setPendingFiles(current => [...current, ...Array.from(selected, file => ({ file, role: uploadRoleFor(file) }))])
+    if (fileInput.current) fileInput.current.value = ''
+  }
+  const uploadPending = async () => {
+    if (clearBusy || !pendingFiles.length) return
     const version = viewToken.current
     setBusy(true); setError('')
     try {
       const id = await ensureConversation(version)
       if (!id || !isCurrent(version, id)) return
-      if (uploadRole === 'enum_mapping') await api.uploadFile(id, file, uploadRole)
-      else await api.uploadFile(id, file)
-      if (!isCurrent(version, id)) return
+      for (const item of [...pendingFiles]) {
+        await api.uploadFile(id, item.file, item.role)
+        setPendingFiles(current => current.filter(entry => entry !== item))
+        if (!isCurrent(version, id)) return
+      }
       setNotice('文件已上传，正在校验。')
       await refreshActive(id)
     } catch (caught) { if (isCurrent(version)) setError(caught instanceof Error ? caught.message : '上传失败，请检查文件后重试。') }
-    finally { if (isCurrent(version)) { setBusy(false); if (fileInput.current) fileInput.current.value = '' } }
+    finally { if (isCurrent(version)) setBusy(false) }
   }
   const parseLog = async (file: FileRecord) => {
     if (!activeId || actionBusy || file.active === false) return
@@ -758,7 +768,7 @@ export function App() {
         {activeRun && hintedRun?.id === activeRun.id && identity?.role === 'user' && <button className="button-text" onClick={() => void stopRun(activeRun.id)} disabled={!!actionBusy}>停止</button>}
       </TaskHintBar>
         {waitingRun && !pendingConfirmation && identity?.role === 'user' && <BusinessConfirmation key={identity.id + ':' + activeId + ':' + waitingRun.id} run={waitingRun} onBack={() => {void openRun(waitingRun.id)}} onResolved={() => refreshActive(activeId!)} />}
-        {editingPending && <p className="mapping-hint composer-draft-hint" role="status">请先完成草稿保存或确认，再发送消息。</p>}<div className="composer"><textarea aria-label="消息内容" placeholder="描述要处理的日志、字段或规则…" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} rows={2} disabled={busy || clearBusy || loading || !!pendingSend || !!pendingConfirmation} /><div className="composer-toolbar"><div><label>上传用途<select aria-label="上传用途" value={uploadRole} onChange={event => setUploadRole(event.target.value as typeof uploadRole)} disabled={busy || clearBusy || loading}><option value="primary">日志或规则主数据</option><option value="enum_mapping">枚举映射附件</option></select></label><input accept={uploadRole === 'enum_mapping' ? '.xlsx' : undefined} ref={fileInput} type="file" hidden aria-label="选择文件" onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file) }} /><button className="attach-button" onClick={() => fileInput.current?.click()} disabled={busy || clearBusy || loading}>＋ 添加文件</button><span className="composer-hint">Enter 发送 · Shift+Enter 换行</span></div><button className="button-primary send-button" onClick={() => void send()} disabled={!draft.trim() || busy || clearBusy || loading || editingPending || !!pendingSend || !!pendingConfirmation}>{busy ? '处理中…' : '发送'}</button></div></div>
+        {editingPending && <p className="mapping-hint composer-draft-hint" role="status">请先完成草稿保存或确认，再发送消息。</p>}{pendingFiles.length > 0 && <div className="upload-staging" aria-label="待上传文件">{pendingFiles.map((item, index) => <div className="upload-staging-row" key={item.file.name + ':' + index}><strong className="upload-staging-name">{item.file.name}</strong><label>用途<select aria-label={item.file.name + ' 用途'} value={item.role} onChange={event => setPendingFiles(current => current.map((entry, position) => position === index ? { ...entry, role: event.target.value as 'primary' | 'enum_mapping' } : entry))} disabled={busy || clearBusy || loading}><option value="primary">日志或规则主数据</option><option value="enum_mapping">枚举映射附件</option></select></label><button type="button" className="button-text" aria-label={'移除 ' + item.file.name} onClick={() => setPendingFiles(current => current.filter((_, position) => position !== index))} disabled={busy || clearBusy}>移除</button></div>)}<div className="upload-staging-actions"><button className="button-secondary" onClick={() => void uploadPending()} disabled={busy || clearBusy || loading}>{busy ? '上传中…' : '上传 ' + pendingFiles.length + ' 份'}</button><button className="button-text" onClick={() => setPendingFiles([])} disabled={busy || clearBusy || loading}>清空待传</button><span className="composer-hint">xlsx 默认按枚举映射附件上传，可逐份调整用途</span></div></div>}<div className="composer"><textarea aria-label="消息内容" placeholder="描述要处理的日志、字段或规则…" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} rows={2} disabled={busy || clearBusy || loading || !!pendingSend || !!pendingConfirmation} /><div className="composer-toolbar"><div><input ref={fileInput} type="file" multiple hidden aria-label="选择文件" onChange={event => stageFiles(event.target.files)} /><button className="attach-button" onClick={() => fileInput.current?.click()} disabled={busy || clearBusy || loading}>＋ 添加文件</button><span className="composer-hint">Enter 发送 · Shift+Enter 换行</span></div><button className="button-primary send-button" onClick={() => void send()} disabled={!draft.trim() || busy || clearBusy || loading || editingPending || !!pendingSend || !!pendingConfirmation}>{busy ? '处理中…' : '发送'}</button></div></div>
       </div>
       </div>
       {resourceTabs.length > 0 && <>
