@@ -127,6 +127,7 @@ describe('V2 workbench', () => {
     expect(document.documentElement.dataset.theme).toBe('dark')
   })
   it('sends text and uploads a file to the current conversation', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: 'log.txt', parse_status: 'succeeded' }] })
     renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '检查日志' } })
@@ -136,22 +137,30 @@ describe('V2 workbench', () => {
     fireEvent.change(input, { target: { files: [new File(['line'], 'log.txt', { type: 'text/plain' })] } })
     fireEvent.click(screen.getByRole('button', { name: '上传 1 份' }))
     await waitFor(() => expect(api.uploadFile).toHaveBeenCalledWith('conv-1', expect.objectContaining({ name: 'log.txt' }), 'primary'))
+    expect(await screen.findByText('文件已上传并完成校验。')).toBeInTheDocument()
   })
   it('stages multiple selections with default roles per extension and uploads them in order (#454)', async () => {
+    vi.mocked(api.uploadFile).mockImplementation(async (_id: string, file: File) => ({ file: { id: file.name === '威胁字段映射.xlsx' ? 'f-map' : 'f-rules', name: file.name }, task: { id: 't1', status: 'queued' }, run: { id: 'r1', status: 'queued' } }))
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [
+      { id: 'f-map', name: '威胁字段映射.xlsx', parse_status: 'succeeded' },
+      { id: 'f-rules', name: 'parser.txt', parse_status: 'succeeded' },
+    ] })
     renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['map'], '威胁字段映射.xlsx'), new File(['rules'], 'parser.txt', { type: 'text/plain' })] } })
-    expect(screen.getByText('威胁字段映射.xlsx')).toBeInTheDocument()
-    expect(screen.getByText('parser.txt')).toBeInTheDocument()
+    const staging = screen.getByLabelText('待上传文件')
+    expect(within(staging).getByText('威胁字段映射.xlsx')).toBeInTheDocument()
+    expect(within(staging).getByText('parser.txt')).toBeInTheDocument()
     expect((screen.getByLabelText('威胁字段映射.xlsx 用途') as HTMLSelectElement).value).toBe('enum_mapping')
     expect((screen.getByLabelText('parser.txt 用途') as HTMLSelectElement).value).toBe('primary')
     fireEvent.click(screen.getByRole('button', { name: '上传 2 份' }))
     await waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(2))
     expect(api.uploadFile).toHaveBeenNthCalledWith(1, 'conv-1', expect.objectContaining({ name: '威胁字段映射.xlsx' }), 'enum_mapping')
     expect(api.uploadFile).toHaveBeenNthCalledWith(2, 'conv-1', expect.objectContaining({ name: 'parser.txt' }), 'primary')
-    expect(await screen.findByText('文件已上传，正在校验。')).toBeInTheDocument()
+    expect(await screen.findByText('文件已上传并完成校验。')).toBeInTheDocument()
   })
   it('allows adjusting a staged role and removing entries before batch upload (#454)', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: '原始日志.xlsx', parse_status: 'succeeded' }] })
     renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['table'], '原始日志.xlsx'), new File(['raw'], 'events.log', { type: 'text/plain' })] } })
@@ -160,6 +169,49 @@ describe('V2 workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '上传 1 份' }))
     await waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1))
     expect(api.uploadFile).toHaveBeenCalledWith('conv-1', expect.objectContaining({ name: '原始日志.xlsx' }), 'primary')
+  })
+  it('sends staged files together with the message after their validation completes (#457)', async () => {
+    vi.mocked(api.uploadFile).mockImplementation(async (_id: string, file: File) => ({ file: { id: file.name === '威胁字段映射.xlsx' ? 'f-map' : 'f-rules', name: file.name }, task: { id: 't1', status: 'queued' }, run: { id: 'r1', status: 'queued' } }))
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [
+      { id: 'f-map', name: '威胁字段映射.xlsx', parse_status: 'succeeded' },
+      { id: 'f-rules', name: 'parser.txt', parse_status: 'succeeded' },
+    ] })
+    renderApp()
+    await screen.findByRole('heading', { name: '日志任务' })
+    fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['map'], '威胁字段映射.xlsx'), new File(['rules'], 'parser.txt', { type: 'text/plain' })] } })
+    fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '枚举值填充' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('conv-1', '枚举值填充'))
+    expect(api.uploadFile).toHaveBeenCalledTimes(2)
+    const uploadOrder = vi.mocked(api.uploadFile).mock.invocationCallOrder[0]
+    const sendOrder = vi.mocked(api.sendMessage).mock.invocationCallOrder[0]
+    expect(sendOrder).toBeGreaterThan(uploadOrder)
+  })
+  it('keeps the composer editable during staged upload and sends the latest draft (#457)', async () => {
+    let releaseUpload!: (value: { file: { id: string; name: string }; task: { id: string; status: string }; run: { id: string; status: string } }) => void
+    vi.mocked(api.uploadFile).mockImplementation(() => new Promise(resolve => { releaseUpload = resolve }))
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: 'rules.b64', parse_status: 'succeeded' }] })
+    renderApp()
+    await screen.findByRole('heading', { name: '日志任务' })
+    fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['rules'], 'rules.b64')] } })
+    fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '枚举值' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('textbox', { name: '消息内容' })).not.toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '枚举值填充' } })
+    await act(async () => releaseUpload({ file: { id: 'f1', name: 'rules.b64' }, task: { id: 't1', status: 'queued' }, run: { id: 'r1', status: 'queued' } }))
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('conv-1', '枚举值填充'))
+  })
+  it('blocks the send and reports when a staged file fails validation (#457)', async () => {
+    vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: 'enum.xlsx', parse_status: 'failed' }] })
+    renderApp()
+    await screen.findByRole('heading', { name: '日志任务' })
+    fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['x'], 'enum.xlsx')] } })
+    fireEvent.change(screen.getByRole('textbox', { name: '消息内容' }), { target: { value: '枚举值填充' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(await screen.findByText('文件校验未通过：enum.xlsx，请处理后重试。')).toBeInTheDocument()
+    expect(api.sendMessage).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: '消息内容' })).not.toBeDisabled()
   })
   it('submits the mapping suggestion through the same message endpoint as typed text', async () => {
     vi.mocked(api.conversation).mockResolvedValue({ ...detail, messages: [{ id: 'suggestion-1', actor: 'assistant', kind: 'text', content: '分类完成', payload: { suggestions: [{ type: 'action', id: 'field_mapping', label: '标准字段映射' }] } }] })

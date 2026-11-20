@@ -28,6 +28,7 @@ beforeEach(() => {
 })
 afterEach(() => {cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals()})
 it('uploads an enum attachment with its xlsx-defaulted role and reports natural-language task semantics', async () => {
+  vi.mocked(api.conversation).mockResolvedValue({...detail, files: [{id: 'f1', name: 'enum.xlsx', parse_status: 'succeeded'}]})
   render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
   fireEvent.change(screen.getByLabelText('选择文件'), {target: {files: [new File(['x'], 'enum.xlsx')]}})
   expect((screen.getByLabelText('enum.xlsx 用途') as HTMLSelectElement).value).toBe('enum_mapping')
