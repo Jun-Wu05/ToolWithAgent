@@ -492,9 +492,12 @@ export function App() {
     finally {if (isCurrent(version, id)) setClearBusy(false)}
   }
   // #454：多文件暂存清单——一次选多份，按扩展名默认分派用途，确认后逐份上传。
+  // #459：selected 是 input 的 live FileList，必须先物化再清空 value——
+  // updater 延迟求值时（fiber 有 pending 更新，如挂载 initialize 之后）原引用已被清空，状态会静默丢失。
   const stageFiles = (selected: FileList | null) => {
     if (!selected?.length) return
-    setPendingFiles(current => [...current, ...Array.from(selected, file => ({ file, role: uploadRoleFor(file) }))])
+    const picked = Array.from(selected, file => ({ file, role: uploadRoleFor(file) }))
+    setPendingFiles(current => [...current, ...picked])
     if (fileInput.current) fileInput.current.value = ''
   }
   // #457：发送即携带——上传暂存并等待全部文件校验完成（_freeze_business 在消息创建时冻结附件，
