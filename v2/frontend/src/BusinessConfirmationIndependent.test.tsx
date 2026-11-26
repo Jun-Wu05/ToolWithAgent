@@ -18,7 +18,6 @@ let publish: (value: {id:string; status:string}) => void
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); Events.instances=[]
   vi.stubGlobal('EventSource', Events)
-  vi.stubGlobal('confirm', vi.fn(() => true))
   vi.mocked(api.me).mockResolvedValue(owner)
   vi.mocked(api.identities).mockResolvedValue({items:[owner,other]})
   vi.mocked(api.conversations).mockResolvedValue({items:[summary]})
@@ -81,6 +80,7 @@ it('clears a waiting plan directly while preserving text and ordinary send confi
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   vi.mocked(api.conversation).mockResolvedValue({...detail,runs:[{id:'r1',status:'cancelled'}]})
   fireEvent.click(screen.getByRole('button',{name:'清空业务数据（保留历史）'}))
+  fireEvent.click(within(await screen.findByRole('dialog',{name:'清空业务数据'})).getByRole('button',{name:'清空'}))
   await waitFor(() => expect(api.sendMessage).toHaveBeenCalledExactlyOnceWith('c1','清空数据',expect.any(String)))
   await screen.findByText('清空业务数据已排队，历史结果和未发送文本会保留。')
   expect(screen.getByLabelText('消息内容')).toHaveValue('未发送的下一轮')
@@ -117,6 +117,7 @@ it('ignores a prior identity clear response without changing new input or feedba
   vi.mocked(api.sendMessage).mockReturnValueOnce(new Promise(resolve => {reply=resolve}))
   render(<App />); await screen.findByRole('heading',{name:'确认任务'})
   fireEvent.click(screen.getByRole('button',{name:'清空业务数据（保留历史）'}))
+  fireEvent.click(within(await screen.findByRole('dialog',{name:'清空业务数据'})).getByRole('button',{name:'清空'}))
   await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('c1','清空数据',expect.any(String)))
   const next={...summary,id:'c2',title:'新身份会话'}
   vi.mocked(api.selectIdentity).mockResolvedValue(other)

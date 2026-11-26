@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type AdminKnowledgeDetail, type AdminProvider, type AdminProviderVersion, type AdminProviderTestResult, type AdminUser, type Identity } from './api'
 import { StatusText } from './VisualPrimitives'
 import { MappingDialog } from './MappingDialog'
+import { ConfirmDialog } from './ConfirmDialog'
 import { RunDiagnostics } from './RunDiagnostics'
 
 const runKindName: Record<string, string> = { file_validation: '文件校验', field_change_apply: '应用字段变更', field_change_undo: '撤销字段变更', business_clear: '清空业务数据', user_request: '业务任务', business_operation: '业务处理', mapping_draft_apply: '应用映射修改', field_mapping: '标准字段映射', log_parse: '日志类型提取', log_knowledge_submit: '日志知识申请' }
@@ -49,6 +50,7 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
   const [actionError, setActionError] = useState('')
   const [stopTarget, setStopTarget] = useState<string | null>(null)
   const [stopReason, setStopReason] = useState('')
+  const [confirmRequest, setConfirmRequest] = useState<null | { kind: 'delete-knowledge'; applicationId: number } | { kind: 'deactivate-user'; user: AdminUser }>(null)
   const [knowledgeStatus, setKnowledgeStatus] = useState('')
   const [knowledgePage, setKnowledgePage] = useState(1)
   const [openKnowledge, setOpenKnowledge] = useState<number | null>(null)
@@ -257,7 +259,7 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
               <div className="mapping-actions">
                 <button className="button-text" data-dialog-cancel onClick={() => { setOpenKnowledge(null); setReviewReason(''); setReplacementRequired(false) }} disabled={!!actionBusy}>关闭</button>
                 {knowledgeDetail.status === 'pending' && <><button className="button-text" onClick={() => void reviewAction('approve', knowledgeDetail.application_id)} disabled={!!actionBusy || (replacementRequired && !reviewReason.trim())}>{actionBusy === 'k' + knowledgeDetail.application_id ? '处理中…' : replacementRequired ? '确认替代并批准' : '批准'}</button><button className="button-text" onClick={() => void reviewAction('reject', knowledgeDetail.application_id)} disabled={!!actionBusy || !reviewReason.trim()}>拒绝</button></>}
-                {knowledgeDetail.status === 'rejected' && <button className="button-text" onClick={() => { if (window.confirm('删除已拒绝申请将级联清理样例，且不可恢复。确认删除？')) void reviewAction('delete', knowledgeDetail.application_id) }} disabled={!!actionBusy}>删除</button>}
+                {knowledgeDetail.status === 'rejected' && <button className="button-text" onClick={() => setConfirmRequest({ kind: 'delete-knowledge', applicationId: knowledgeDetail.application_id })} disabled={!!actionBusy}>删除</button>}
               </div>
             </div>}
           </MappingDialog>}
@@ -291,7 +293,7 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
           {users.loading && <p role="status">正在读取用户列表…</p>}
           {users.error && <div className="mapping-error" role="alert"><span>{users.error}</span><button className="button-secondary" onClick={users.reload}>重试加载</button></div>}
           {users.data && <div className="workbench-table-scroll"><table className="workbench-artifacts admin-users-table"><caption className="sr-only">用户列表</caption><thead><tr><th scope="col">用户</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">活跃会话</th><th scope="col">操作</th></tr></thead><tbody>
-            {users.data.items.map(user => <tr key={user.id}><td>{user.display_name}<small className="mono">{user.id}</small></td><td>{({ user: '用户', developer: '开发者', admin: '管理员' } as Record<string, string>)[user.role] || user.role}</td><td>{user.active ? '启用' : '已停用'}</td><td>{user.conversations}</td><td className="admin-run-actions">{identity.id !== user.id && user.active && <><button className="button-secondary" onClick={() => { setUserTarget({ user, action: 'role' }); setUserRole(user.role); setUserReason(''); setActionError('') }} disabled={!!actionBusy}>变更角色</button><button className="button-secondary" onClick={() => { if (window.confirm(`停用 ${user.display_name} 后其下一请求将被拒绝，进行中的执行不中断。确认停用？`)) void deactivateUser(user) }} disabled={!!actionBusy}>停用</button></>}{identity.id === user.id && <span className="mapping-hint">当前登录</span>}{!user.active && <button className="button-secondary" onClick={() => { void (async () => { setActionBusy('u' + user.id); setActionError(''); try { await api.adminSetUserActive(user.id, true); users.reload() } catch (caught) { setActionError(caught instanceof Error ? caught.message : '启用失败，请重试。') } finally { setActionBusy(null) } })() }} disabled={!!actionBusy}>重新启用</button>}</td></tr>)}
+            {users.data.items.map(user => <tr key={user.id}><td>{user.display_name}<small className="mono">{user.id}</small></td><td>{({ user: '用户', developer: '开发者', admin: '管理员' } as Record<string, string>)[user.role] || user.role}</td><td>{user.active ? '启用' : '已停用'}</td><td>{user.conversations}</td><td className="admin-run-actions">{identity.id !== user.id && user.active && <><button className="button-secondary" onClick={() => { setUserTarget({ user, action: 'role' }); setUserRole(user.role); setUserReason(''); setActionError('') }} disabled={!!actionBusy}>变更角色</button><button className="button-secondary" onClick={() => setConfirmRequest({ kind: 'deactivate-user', user })} disabled={!!actionBusy}>停用</button></>}{identity.id === user.id && <span className="mapping-hint">当前登录</span>}{!user.active && <button className="button-secondary" onClick={() => { void (async () => { setActionBusy('u' + user.id); setActionError(''); try { await api.adminSetUserActive(user.id, true); users.reload() } catch (caught) { setActionError(caught instanceof Error ? caught.message : '启用失败，请重试。') } finally { setActionBusy(null) } })() }} disabled={!!actionBusy}>重新启用</button>}</td></tr>)}
           </tbody></table></div>}
           {userTarget && <MappingDialog title={'变更角色 · ' + userTarget.user.display_name} onClose={() => { setUserTarget(null); setUserRole(''); setUserReason('') }}>
             <p>角色从下一请求起生效，不会中断该用户进行中的执行。</p>
@@ -308,6 +310,8 @@ export function AdminConsole({ identity, identities, onSwitchIdentity, theme, on
         {actionError && <p className="mapping-error" role="alert">{actionError}</p>}
         <div className="mapping-actions"><button className="button-text" data-dialog-cancel onClick={() => { setStopTarget(null); setStopReason('') }} disabled={!!actionBusy}>取消</button><button className="button-text" onClick={() => void confirmStop()} disabled={!stopReason.trim() || !!actionBusy}>确认强停</button></div>
       </MappingDialog>}
+      {confirmRequest?.kind === 'delete-knowledge' && <ConfirmDialog title="删除已拒绝申请" message="删除已拒绝申请将级联清理样例，且不可恢复。确认删除？" confirmLabel="删除" onConfirm={() => { const applicationId = confirmRequest.applicationId; setConfirmRequest(null); void reviewAction('delete', applicationId) }} onCancel={() => setConfirmRequest(null)} />}
+      {confirmRequest?.kind === 'deactivate-user' && <ConfirmDialog title="停用用户" message={`停用 ${confirmRequest.user.display_name} 后其下一请求将被拒绝，进行中的执行不中断。确认停用？`} confirmLabel="停用" onConfirm={() => { const target = confirmRequest.user; setConfirmRequest(null); void deactivateUser(target) }} onCancel={() => setConfirmRequest(null)} />}
     </main>
   </div>
 }

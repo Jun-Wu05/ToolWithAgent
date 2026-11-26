@@ -397,7 +397,6 @@ describe('V2 workbench', () => {
     expect(screen.queryByRole('button', { name: '旧身份类型' })).not.toBeInTheDocument()
   })
   it('hides submission for an ineligible result and confirms stop before cancelling', async () => {
-    vi.stubGlobal('confirm', vi.fn(() => true))
     vi.mocked(api.conversation).mockResolvedValue({
       ...detail, runs: [{ id: 'r2', status: 'running', kind: 'log_parse' }],
       artifacts: [{ id: 'a1', run_id: 'r1', file_id: 'f1', kind: 'log_classification', status: 'published',
@@ -408,6 +407,8 @@ describe('V2 workbench', () => {
     await screen.findByRole('heading', { name: '日志任务' })
     expect(screen.queryByRole('button', { name: '申请加入知识库' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '停止' }))
+    expect(api.cancelRun).not.toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByRole('dialog', { name: '停止执行' })).getByRole('button', { name: '停止执行' }))
     await waitFor(() => expect(api.cancelRun).toHaveBeenCalledWith('r2', 'cancel-token'))
   })
   it('does not show user write actions to Developer', async () => {
