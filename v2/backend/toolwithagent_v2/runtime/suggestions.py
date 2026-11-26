@@ -29,31 +29,27 @@ def classification_done():
 
 
 def mapping_done():
-    """字段映射完成：看结果、下载、一句话改映射。"""
+    """字段映射完成（#465 三层分工）：查看/下载是卡片固有按钮，chips 只留下一轮 prompt。"""
     return [
-        {"type": "action", "id": "open_results", "label": "查看映射结果", "artifact_id": None},
-        {"type": "action", "id": "download", "label": "下载产物", "artifact_id": None},
         {"type": "prompt", "id": "mapping_edit", "label": "修改映射（多步可一句话）",
          "text": "给当前映射增加【字段a】，删除【字段b】"},
     ]
 
 
 def business_done(operations=None):
-    """业务操作完成：建议跟随本轮操作语义（#461），不再一律指向标准字段映射。"""
+    """业务操作完成（#465 三层分工）：chips 只做锚定本轮的下一轮 prompt，不再重复卡片操作。"""
     operations = operations or []
     if any(op in ("enum_fill", "threat_fill") for op in operations):
         return [
-            {"type": "action", "id": "open_results", "label": "查看填充结果"},
-            {"type": "action", "id": "download", "label": "下载配置"},
+            {"type": "prompt", "id": "export_config", "label": "导出当前解析规则",
+             "text": "导出当前解析规则"},
         ]
     if "export" in operations:
         return [
-            {"type": "action", "id": "download", "label": "下载产物"},
             {"type": "prompt", "id": "continue_mapping", "label": "继续标准字段映射",
              "text": "对当前结果进行标准字段映射"},
         ]
     return [
-        {"type": "action", "id": "open_results", "label": "查看结果"},
         {"type": "prompt", "id": "continue_mapping", "label": "继续标准字段映射",
          "text": "对当前结果进行标准字段映射"},
     ]

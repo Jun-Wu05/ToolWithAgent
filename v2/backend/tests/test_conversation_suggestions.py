@@ -54,12 +54,12 @@ def test_mapping_done_and_failed_suggestions(tmp_path):
     assert enqueue(client, conversation, file_id, key="suggest-ok").status_code == 201
     assert worker.once()
     detail = client.get(f"/api/v2/conversations/{conversation}").json()
-    artifact = mappings(store, conversation)[0]
     done = next(m["payload"]["suggestions"] for m in detail["messages"]
                 if m["actor"] == "assistant" and m["payload"].get("suggestions")
                 and any(s["id"] == "mapping_edit" for s in m["payload"]["suggestions"]))
-    open_results = next(item for item in done if item["id"] == "open_results")
-    assert open_results["artifact_id"] == artifact["id"]
+    # #465 三层分工：映射完成的查看/下载由产物卡承载，chips 只留下一轮 prompt。
+    assert [item["id"] for item in done] == ["mapping_edit"]
+    assert all(item["type"] == "prompt" for item in done)
 
     business.fail = True
     failed_run = enqueue(client, conversation, file_id, key="suggest-fail").json()["run"]["id"]

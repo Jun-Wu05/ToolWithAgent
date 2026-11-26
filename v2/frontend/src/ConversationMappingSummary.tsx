@@ -58,6 +58,8 @@ export function MappingSummaryCard({ artifact, draftId, draftSummary, editable =
     return () => { active = false }
   }, [artifactId, draftId, editing, changesOpen, reload])
   useEffect(() => {
+    // #465 三层分工：填充卡自足承载操作，不再加载映射编辑表格。
+    if (artifact.operation) return
     const controller = new AbortController()
     let active = true
     setViewError('')
@@ -65,7 +67,7 @@ export function MappingSummaryCard({ artifact, draftId, draftSummary, editable =
       if (active) setView(result)
     }).catch(caught => { if (active) setViewError(caught instanceof Error ? caught.message : '结果加载失败，请重试。') })
     return () => { active = false; controller.abort() }
-  }, [artifactId, viewRetry, draftIdentity, draftRevision])
+  }, [artifactId, viewRetry, draftIdentity, draftRevision, artifact.operation])
   const changeRows: ChangeRow[] = (mappingDraft?.operations || []).flatMap(operation => operation.changes.map(change => ({
     key: operation.operation_key + ':' + change.sub_rule_id + ':' + change.source_path,
     sub_rule_id: change.sub_rule_id, source_path: change.source_path, after: change.standard_field || '',
@@ -140,10 +142,18 @@ export function MappingSummaryCard({ artifact, draftId, draftSummary, editable =
   const changeView = changesExpanded ? changeRows : changeRows.slice(0, summaryLimit)
   // #461：卡片标题与摘要跟随输入意图——填充产物（operation 元数据）不再冒充「标准字段映射」。
   const fillTitle = artifact.operation === 'enum_fill' ? '枚举值填充完成' : artifact.operation === 'threat_fill' ? '威胁类型填充完成' : null
+  // #465 三层分工：填充卡自足承载操作——无映射表格、无行内编辑、无草稿区、无后续处理入口，
+  // 只留标题 + 目标字段摘要 + 下载配置 / 在结果工作区打开。
+  if (fillTitle) return <article className="result-card mapping-summary-card" id={'mapping-' + artifact.id}>
+    <div className="result-heading"><strong>{fillTitle}</strong><span>{readableTime(artifact.created_at)}</span></div>
+    <p>{artifact.target_fields?.length ? <>目标字段 {artifact.target_fields.join('、')} · </> : null}填充已写入当前配置。</p>
+    {!artifact.current && <p className="mapping-warning">结果已过期，可查看和下载历史配置。</p>}
+    <div className="mapping-actions"><button className="button-secondary" onClick={onDownload} disabled={downloading}>{downloading ? '下载中…' : '下载配置'}</button>{onOpenDrawer && <button className="button-secondary" onClick={onOpenDrawer}>在结果工作区打开</button>}</div>
+    {downloadError && <p className="mapping-error" role="alert">{downloadError}</p>}
+  </article>
   return <article className="result-card mapping-summary-card" id={'mapping-' + artifact.id}>
-    <div className="result-heading"><strong>{fillTitle || '标准字段映射完成'}</strong><span>{readableTime(artifact.created_at)}</span></div>
-    {fillTitle ? <p>{artifact.target_fields?.length ? <>目标字段 {artifact.target_fields.join('、')} · </> : null}填充已写入当前配置，可查看完整结果或下载。</p>
-      : <p>{artifact.summary.rule_count} 条子规则，{artifact.summary.field_count} 个字段 · 映射成功 {artifact.summary.matched_count} · 未匹配 {artifact.summary.unmatched_count} · 解析异常 {artifact.summary.parse_error_count}</p>}
+    <div className="result-heading"><strong>标准字段映射完成</strong><span>{readableTime(artifact.created_at)}</span></div>
+    <p>{artifact.summary.rule_count} 条子规则，{artifact.summary.field_count} 个字段 · 映射成功 {artifact.summary.matched_count} · 未匹配 {artifact.summary.unmatched_count} · 解析异常 {artifact.summary.parse_error_count}</p>
     {(artifact.summary.uncertain_annotation_count || 0) > 0 && <p className="mapping-warning">待人工确认：{artifact.summary.uncertain_annotation_count} 条事件名称标注。</p>}
     {artifact.summary.warning_codes?.includes('threat_chain_warning') && <p className="mapping-warning">威胁类型处理有提醒，请查看结果。</p>}
     {!artifact.current && <p className="mapping-warning">结果已过期，可查看和下载历史配置。</p>}
