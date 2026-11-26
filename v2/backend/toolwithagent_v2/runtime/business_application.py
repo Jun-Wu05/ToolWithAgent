@@ -348,7 +348,8 @@ class BusinessApplication:
                 operations.append(operation)
                 fill_operation = fill_operation or operation
                 fill_targets.extend(step.target_fields)
-                step_summaries.append(f"{'枚举值填充' if step.fill_kind == 'enum' else '威胁类型填充'}已完成：目标字段 {'、'.join(step.target_fields)}")
+                # #465 三层分工：气泡只做一句话确认，目标字段细节由卡片摘要承载。
+                step_summaries.append("枚举值填充已完成" if step.fill_kind == "enum" else "威胁类型填充已完成")
             elif getattr(step, "type", None) == "export":
                 operations.append("export")
                 step_summaries.append("规则配置已导出")

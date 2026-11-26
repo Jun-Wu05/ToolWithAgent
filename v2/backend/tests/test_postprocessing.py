@@ -209,7 +209,7 @@ def test_new_primary_keeps_enum_attachments(tmp_path):
 
 
 def test_fill_artifact_carries_operation_semantics(tmp_path):
-    # #461：填充产物/完成话术/建议跟随输入意图——不再渲染成「标准字段映射」。
+    # #461/#465：填充产物/话术/建议跟随输入意图，三层分工——气泡一句话、chips 纯 prompt。
     client,store,conversation,worker=setup(tmp_path); rules(client,conversation,worker)
     upload(client,conversation,"enum.xlsx",excel(),"enum_mapping"); assert worker.once()
     run=operation(client,conversation,"fill",fill_kind="enum",target_fields=["事件结果"],source_ref="session.enum_mapping_table",config_ref="session.decoded_config")
@@ -217,13 +217,16 @@ def test_fill_artifact_carries_operation_semantics(tmp_path):
     detail=client.get(f"/api/v2/conversations/{conversation}").json()
     artifact=next(item for item in detail["artifacts"] if item["kind"]=="field_mapping")
     assert artifact["operation"]=="enum_fill" and artifact["target_fields"]==["事件结果"]
+    # 气泡只做一句话确认（#465）：细节（目标字段）归卡片摘要。
     reply=next(message for message in detail["messages"] if message["actor"]=="assistant" and "枚举值填充已完成" in message["content"])
-    assert "fill" not in reply["content"]
-    labels=[item["label"] for message in detail["messages"] for item in (message.get("payload") or {}).get("suggestions",[])]
-    assert "查看填充结果" in labels and "继续标准字段映射" not in labels
+    assert reply["content"].strip()=="枚举值填充已完成"
+    # chips 纯 prompt（#465）：填充回复自身只携带锚定本轮的下一轮建议，无查看/下载重复。
+    chips=(reply.get("payload") or {}).get("suggestions",[])
+    assert [item["label"] for item in chips]==["导出当前解析规则"] and all(item["type"]=="prompt" for item in chips)
     # 无语义回退（保守建议不变）与真实映射任务产物不带 operation。
     from toolwithagent_v2.runtime import suggestions as suggestion_catalog
-    assert [item["label"] for item in suggestion_catalog.business_done(None)][-1]=="继续标准字段映射"
+    assert [item["label"] for item in suggestion_catalog.business_done(None)]==["继续标准字段映射"]
+    assert all(item["type"]=="prompt" for item in suggestion_catalog.mapping_done())
 
 
 def test_same_sheet_replacement_requires_refill_and_failed_export_keeps_old(tmp_path):
