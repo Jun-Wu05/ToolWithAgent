@@ -30,6 +30,7 @@ export type FieldMappingArtifact = {
   id: string; run_id: string; file_id: string; kind: 'field_mapping'; status: string; current: boolean
   version?: number; source_artifact_ids?: string[]
   source_artifact_id?: string; created_at?: string; config_ref?: string; message_id?: string | null; result_message_id?: string | null
+  operation?: 'enum_fill' | 'threat_fill' | null; target_fields?: string[]
   summary: { rule_count: number; field_count: number; matched_count: number; unmatched_count: number; parse_error_count: number; uncertain_annotation_count?: number; warning_codes?: MappingWarning['code'][] }
 }
 export type MappingInput = { file_id?: string; classification_artifact_id?: string; product: string; log_vendor: string; data_source?: string }

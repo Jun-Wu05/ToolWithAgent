@@ -208,6 +208,24 @@ def test_new_primary_keeps_enum_attachments(tmp_path):
     assert exported["rules"][0]["normalize"][0]["mappings"][0]["mappingValue"]=="允许"
 
 
+def test_fill_artifact_carries_operation_semantics(tmp_path):
+    # #461：填充产物/完成话术/建议跟随输入意图——不再渲染成「标准字段映射」。
+    client,store,conversation,worker=setup(tmp_path); rules(client,conversation,worker)
+    upload(client,conversation,"enum.xlsx",excel(),"enum_mapping"); assert worker.once()
+    run=operation(client,conversation,"fill",fill_kind="enum",target_fields=["事件结果"],source_ref="session.enum_mapping_table",config_ref="session.decoded_config")
+    assert worker.once(); assert store.get_run("dev-user",run)["status"]=="succeeded"
+    detail=client.get(f"/api/v2/conversations/{conversation}").json()
+    artifact=next(item for item in detail["artifacts"] if item["kind"]=="field_mapping")
+    assert artifact["operation"]=="enum_fill" and artifact["target_fields"]==["事件结果"]
+    reply=next(message for message in detail["messages"] if message["actor"]=="assistant" and "枚举值填充已完成" in message["content"])
+    assert "fill" not in reply["content"]
+    labels=[item["label"] for message in detail["messages"] for item in (message.get("payload") or {}).get("suggestions",[])]
+    assert "查看填充结果" in labels and "继续标准字段映射" not in labels
+    # 无语义回退（保守建议不变）与真实映射任务产物不带 operation。
+    from toolwithagent_v2.runtime import suggestions as suggestion_catalog
+    assert [item["label"] for item in suggestion_catalog.business_done(None)][-1]=="继续标准字段映射"
+
+
 def test_same_sheet_replacement_requires_refill_and_failed_export_keeps_old(tmp_path):
     client,store,conversation,worker=setup(tmp_path); rules(client,conversation,worker)
     upload(client,conversation,"enum.xlsx",excel(),"enum_mapping"); assert worker.once()

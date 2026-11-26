@@ -338,10 +338,39 @@ class BusinessApplication:
         executed_plan = plan if continuation is not None or "plan" in snapshot else captured.get("plan")
         source = next((step.config_ref for step in reversed(executed_plan.steps) if hasattr(step, "config_ref")), None) if executed_plan else None
         source = source or ("session.mapped_sub_rules" if session.mapped_sub_rules else "session.decoded_config")
+        # #461：从执行计划提取操作语义——产物 metadata、完成话术与建议跟随输入意图，不再冒充字段映射。
+        operations, step_summaries = [], []
+        fill_operation = None
+        fill_targets: list[str] = []
+        for step in (executed_plan.steps if executed_plan else ()):
+            if getattr(step, "type", None) == "fill":
+                operation = "enum_fill" if step.fill_kind == "enum" else "threat_fill"
+                operations.append(operation)
+                fill_operation = fill_operation or operation
+                fill_targets.extend(step.target_fields)
+                step_summaries.append(f"{'枚举值填充' if step.fill_kind == 'enum' else '威胁类型填充'}已完成：目标字段 {'、'.join(step.target_fields)}")
+            elif getattr(step, "type", None) == "export":
+                operations.append("export")
+                step_summaries.append("规则配置已导出")
+            elif getattr(step, "type", None) == "remove_mapping":
+                operations.append("remove_mapping")
+                step_summaries.append(f"已移除字段映射：{'、'.join(step.target_fields)}")
+            elif getattr(step, "type", None) == "field_mapping":
+                operations.append("field_mapping")
+                step_summaries.append("标准字段映射已完成")
+            elif getattr(step, "type", None) == "log_parse":
+                operations.append("log_parse")
+                step_summaries.append("日志类型提取已完成")
+            elif getattr(step, "type", None) == "enum_extract":
+                operations.append("enum_extract")
+                step_summaries.append("字段枚举值已提取")
         config_changed = (session.mapped_sub_rules != initial.get("mapped_sub_rules") or session.decoded_data != initial.get("decoded_data"))
         if config_changed and (session.decoded_data if source == "session.decoded_config" else session.mapped_sub_rules):
             payload = config_payload(session, source, base)
-            artifacts.append({"kind": "field_mapping", "payload": payload})
+            published = {"kind": "field_mapping", "payload": payload}
+            if fill_operation:
+                published["metadata"] = {"operation": fill_operation, "target_fields": sorted(set(fill_targets))}
+            artifacts.append(published)
         reported_kinds = {getattr(item.artifact, "artifact_type", None) for item in result.results}
         # 执行器已按冻结计划校验成功前缀；同内容的新提交也必须获得本轮产物身份。
         from contracts.planner_models import StepResult
@@ -358,4 +387,4 @@ class BusinessApplication:
         for artifact in artifacts:
             artifact["source_kinds"] = sources.get(artifact["kind"], [])
         artifacts.append({"kind": "business_state", "payload": freeze_session(session)})
-        return {"artifacts": artifacts, "message": "操作完成：" + "、".join(item.operation_type for item in result.results)}
+        return {"artifacts": artifacts, "message": "；".join(step_summaries) if step_summaries else "操作已完成", "operations": operations}

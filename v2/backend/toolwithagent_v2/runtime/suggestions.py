@@ -38,8 +38,20 @@ def mapping_done():
     ]
 
 
-def business_done():
-    """业务操作完成（枚举/威胁/导出）：单步结果看产物即可。"""
+def business_done(operations=None):
+    """业务操作完成：建议跟随本轮操作语义（#461），不再一律指向标准字段映射。"""
+    operations = operations or []
+    if any(op in ("enum_fill", "threat_fill") for op in operations):
+        return [
+            {"type": "action", "id": "open_results", "label": "查看填充结果"},
+            {"type": "action", "id": "download", "label": "下载配置"},
+        ]
+    if "export" in operations:
+        return [
+            {"type": "action", "id": "download", "label": "下载产物"},
+            {"type": "prompt", "id": "continue_mapping", "label": "继续标准字段映射",
+             "text": "对当前结果进行标准字段映射"},
+        ]
     return [
         {"type": "action", "id": "open_results", "label": "查看结果"},
         {"type": "prompt", "id": "continue_mapping", "label": "继续标准字段映射",

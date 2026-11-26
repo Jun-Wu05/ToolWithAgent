@@ -702,9 +702,11 @@ class Store:
         for row in mapping_rows:
             snapshot = json.loads(row["input_snapshot_json"])
             current = row["id"] == latest_mapping_id and self._mapping_is_current_db(db, {"conversation_id":conversation_id, "input":snapshot})
+            meta = json.loads(row["metadata_json"])
             result.append({"id":row["id"], "run_id":row["run_id"], "file_id":snapshot["file_id"],
                 "kind":row["kind"], "status":"published" if current else "stale", "current":current,
-                "source_artifact_id":snapshot.get("source_artifact_id"), "message_id": snapshot.get("message_id"), "result_message_id": json.loads(row["metadata_json"]).get("result_message_id"), "config_ref": json.loads(row["metadata_json"]).get("config_ref", "session.mapped_sub_rules"), "summary":json.loads(row["metadata_json"]).get("summary",{}),
+                "source_artifact_id":snapshot.get("source_artifact_id"), "message_id": snapshot.get("message_id"), "result_message_id": meta.get("result_message_id"), "config_ref": meta.get("config_ref", "session.mapped_sub_rules"), "summary":meta.get("summary",{}),
+                "operation": meta.get("operation"), "target_fields": meta.get("target_fields"),
                 "created_at":row["created_at"]})
         for row in db.execute("SELECT a.*,r.input_snapshot_json FROM artifacts a JOIN runs r ON r.id=a.run_id WHERE a.conversation_id=? AND a.kind IN ('enum_values','threat_mapping','config_export') AND a.status IN ('published','stale') ORDER BY a.created_at,a.id", (conversation_id,)):
             metadata = json.loads(row["metadata_json"])
@@ -1964,6 +1966,8 @@ class Store:
                         from toolwithagent_v2.runtime.mapping_projection import mapping_summary
                         summary = mapping_summary(payload)
                     metadata = {"summary": summary, "submission_eligible": bool(payload.get("submission_eligible")), "config_ref": payload.get("configuration_source", "session.mapped_sub_rules") if kind == "field_mapping" else None, "field_change_run_id": payload.get("field_change_run_id"), "undo_of": payload.get("undo_of"), "source_field": payload.get("field", payload.get("source_field")), "message_id": claim["input"].get("message_id"), "result_message_id": result_message_id}
+                    # #461：业务侧经 artifacts 条目携带的操作语义（operation/target_fields）合并进产物 metadata。
+                    metadata.update({key: value for key, value in (artifact.get("metadata") or {}).items() if value is not None})
                     db.execute("INSERT INTO artifacts(id,conversation_id,task_id,run_id,kind,version,status,storage_key,sha256,metadata_json,created_at,size) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (artifact_id, row["conversation_id"], row["task_id"], row["id"], kind, version, "published", key, sha, json.dumps(metadata, ensure_ascii=False), now(), len(content)))
                     for source in claim["input"].get("business_inputs", {}).get("refs", {}).values():
                         if kind == "config_export" and "field_mapping" in created and source["kind"] == "field_mapping":

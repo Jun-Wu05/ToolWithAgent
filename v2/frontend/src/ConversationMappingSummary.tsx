@@ -138,9 +138,12 @@ export function MappingSummaryCard({ artifact, draftId, draftSummary, editable =
   const draftStateText = !draftStateSource ? '' : draftStateSource.status === 'applying' ? '修改正在应用，可查看执行进度。' : draftStateSource.status === 'applied' ? '修改已应用为新版本。' : draftStateSource.changed_count ? `${draftStateSource.changed_count} 处修改已保存为草稿，尚未应用。` : '草稿与正式结果一致，没有待应用的修改。'
   const rows = view ? (expanded ? view.items : view.items.slice(0, summaryLimit)) : []
   const changeView = changesExpanded ? changeRows : changeRows.slice(0, summaryLimit)
+  // #461：卡片标题与摘要跟随输入意图——填充产物（operation 元数据）不再冒充「标准字段映射」。
+  const fillTitle = artifact.operation === 'enum_fill' ? '枚举值填充完成' : artifact.operation === 'threat_fill' ? '威胁类型填充完成' : null
   return <article className="result-card mapping-summary-card" id={'mapping-' + artifact.id}>
-    <div className="result-heading"><strong>标准字段映射完成</strong><span>{readableTime(artifact.created_at)}</span></div>
-    <p>{artifact.summary.rule_count} 条子规则，{artifact.summary.field_count} 个字段 · 映射成功 {artifact.summary.matched_count} · 未匹配 {artifact.summary.unmatched_count} · 解析异常 {artifact.summary.parse_error_count}</p>
+    <div className="result-heading"><strong>{fillTitle || '标准字段映射完成'}</strong><span>{readableTime(artifact.created_at)}</span></div>
+    {fillTitle ? <p>{artifact.target_fields?.length ? <>目标字段 {artifact.target_fields.join('、')} · </> : null}填充已写入当前配置，可查看完整结果或下载。</p>
+      : <p>{artifact.summary.rule_count} 条子规则，{artifact.summary.field_count} 个字段 · 映射成功 {artifact.summary.matched_count} · 未匹配 {artifact.summary.unmatched_count} · 解析异常 {artifact.summary.parse_error_count}</p>}
     {(artifact.summary.uncertain_annotation_count || 0) > 0 && <p className="mapping-warning">待人工确认：{artifact.summary.uncertain_annotation_count} 条事件名称标注。</p>}
     {artifact.summary.warning_codes?.includes('threat_chain_warning') && <p className="mapping-warning">威胁类型处理有提醒，请查看结果。</p>}
     {!artifact.current && <p className="mapping-warning">结果已过期，可查看和下载历史配置。</p>}

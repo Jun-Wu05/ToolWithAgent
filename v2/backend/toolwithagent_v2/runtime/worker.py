@@ -264,7 +264,7 @@ class Worker:
                 return self.store.wait_for_confirmation(self.worker_id, claim, outcome["continuation"], kind="business_plan", payload=outcome["confirmation"]) is not None
             if "artifacts" in outcome:
                 return self.store.publish_business(self.worker_id, claim, outcome["artifacts"], outcome.get("message"),
-                                                   suggestions=suggestion_catalog.business_done())
+                                                   suggestions=suggestion_catalog.business_done(outcome.get("operations")))
             return self.store.finish(self.worker_id, claim, outcome.get("error"), outcome.get("message"),
                                      suggestions=suggestion_catalog.failed() if outcome.get("error") else None)
         except (ValueError, LookupError):
