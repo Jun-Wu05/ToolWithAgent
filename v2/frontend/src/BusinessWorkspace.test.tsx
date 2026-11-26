@@ -175,15 +175,16 @@ it.each(['fill', 'export'] as const)('handles initial uploaded config %s before 
 })
 
 it('clears through the canonical message while waiting, explaining effects and preserving unsent text', async () => {
-  const confirm = vi.fn(() => true); vi.stubGlobal('confirm', confirm)
   const waiting: Conversation = {...detail, runs: [{id: 'waiting', status: 'waiting_confirmation'}], drafts: [{id: 'draft-1', conversation_id: 'c1', base_artifact_id: 'config-1', revision: 1, status: 'active', changed_count: 1, base_current: true, apply_run_id: null, applied_artifact_id: null}]}
   vi.mocked(api.conversation).mockResolvedValue(waiting)
   vi.mocked(api.sendMessage).mockResolvedValue({id: 'clear-message', actor: 'user', content: '清空数据', task: {id: 'clear-task', status: 'queued'}, run: {id: 'clear-run', kind: 'business_clear', status: 'queued'}})
   render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
   fireEvent.change(screen.getByLabelText('消息内容'), {target: {value: '稍后再导出'}})
   fireEvent.click(screen.getByRole('button', {name: '清空业务数据（保留历史）'}))
+  const confirmDialog = await screen.findByRole('dialog', {name: '清空业务数据'})
+  expect(within(confirmDialog).getByText(/取消活动执行和待确认事项、丢弃未应用草稿/)).toBeInTheDocument()
+  fireEvent.click(within(confirmDialog).getByRole('button', {name: '清空'}))
   await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('c1', '清空数据', expect.any(String)))
-  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('取消活动执行和待确认事项、丢弃未应用草稿'))
   expect(await screen.findByText('清空业务数据已排队，历史结果和未发送文本会保留。')).toBeInTheDocument()
   expect(screen.getByLabelText('消息内容')).toHaveValue('稍后再导出')
 })
@@ -201,16 +202,16 @@ it('keeps historical inputs readable without parse or mapping actions', async ()
   expect(within(screen.getByRole('complementary', {name: '资源工作区'})).getByRole('button', {name: '下载产物'})).toBeInTheDocument()
 })
 it('keeps unsent text and current inputs when clear fails', async () => {
-  vi.stubGlobal('confirm', vi.fn(() => true)); vi.mocked(api.sendMessage).mockRejectedValue(new Error('清空请求失败'))
+  vi.mocked(api.sendMessage).mockRejectedValue(new Error('清空请求失败'))
   render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
   fireEvent.change(screen.getByLabelText('消息内容'), {target: {value: '待发送内容'}})
   fireEvent.click(screen.getByRole('button', {name: '清空业务数据（保留历史）'}))
+  fireEvent.click(within(await screen.findByRole('dialog', {name: '清空业务数据'})).getByRole('button', {name: '清空'}))
   await screen.findByText('清空请求失败')
   expect(screen.getByLabelText('消息内容')).toHaveValue('待发送内容')
   expect(screen.getByText('已提取枚举')).toBeInTheDocument()
 })
 it('ignores a clear completion from a previous conversation', async () => {
-  vi.stubGlobal('confirm', vi.fn(() => true))
   let queued!: (message: Awaited<ReturnType<typeof api.sendMessage>>) => void
   vi.mocked(api.sendMessage).mockReturnValueOnce(new Promise(resolve => {queued = resolve}))
   const other = {...summary, id: 'c2', title: '新的清空边界'}
@@ -218,6 +219,7 @@ it('ignores a clear completion from a previous conversation', async () => {
   vi.mocked(api.conversation).mockImplementation(async id => id === 'c1' ? detail : {...other, messages: [], files: [], runs: []})
   render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
   fireEvent.click(screen.getByRole('button', {name: '清空业务数据（保留历史）'}))
+  fireEvent.click(within(await screen.findByRole('dialog', {name: '清空业务数据'})).getByRole('button', {name: '清空'}))
   fireEvent.click(screen.getByRole('button', {name: '新的清空边界'})); await screen.findByRole('heading', {name: '新的清空边界'})
   fireEvent.change(screen.getByLabelText('消息内容'), {target: {value: '新会话内容'}})
   await act(async () => queued({id: 'clear-message', actor: 'user', content: '清空数据', run: {id: 'clear-run', status: 'queued'}}))
@@ -244,14 +246,17 @@ it('retains stale classification results for owner view and download after clear
 })
 
 it('reuses a clear receipt on retry and uses a fresh receipt for a later explicit clear', async () => {
-  vi.stubGlobal('confirm', vi.fn(() => true))
   vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error('清空网络失败'))
   render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
-  fireEvent.click(screen.getByRole('button', {name: '清空业务数据（保留历史）'})); await screen.findByText('清空网络失败')
-  fireEvent.click(screen.getByRole('button', {name: '清空业务数据（保留历史）'})); await screen.findByText('清空业务数据已排队，历史结果和未发送文本会保留。')
+  const confirmThroughDialog = async () => {
+    fireEvent.click(screen.getByRole('button', {name: '清空业务数据（保留历史）'}))
+    fireEvent.click(within(await screen.findByRole('dialog', {name: '清空业务数据'})).getByRole('button', {name: '清空'}))
+  }
+  await confirmThroughDialog(); await screen.findByText('清空网络失败')
+  await confirmThroughDialog(); await screen.findByText('清空业务数据已排队，历史结果和未发送文本会保留。')
   await waitFor(() => expect(screen.getByRole('button', {name: '清空业务数据（保留历史）'})).not.toBeDisabled())
   expect(vi.mocked(api.sendMessage).mock.calls[0][2]).toBe(vi.mocked(api.sendMessage).mock.calls[1][2])
-  fireEvent.click(screen.getByRole('button', {name: '清空业务数据（保留历史）'})); await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(3))
+  await confirmThroughDialog(); await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(3))
   expect(vi.mocked(api.sendMessage).mock.calls[2][2]).not.toBe(vi.mocked(api.sendMessage).mock.calls[1][2])
 })
 

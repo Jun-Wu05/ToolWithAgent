@@ -12,6 +12,7 @@ import { DeveloperConsole } from './DeveloperConsole'
 import { RunDiagnostics } from './RunDiagnostics'
 import { UserHistory } from './UserHistory'
 import { MappingDialog } from './MappingDialog'
+import { ConfirmDialog } from './ConfirmDialog'
 import { BusinessConfirmation, BusinessOperations, businessName, ArtifactValues, progressLabel } from './BusinessWorkspace'
 import { LogClassificationCard } from './LogClassificationResult'
 import { EnumResultCard } from './EnumResultTable'
@@ -115,6 +116,8 @@ export function App() {
   const clearReceipt = useRef<{id: string; key: string} | null>(null)
   const [clearBusy, setClearBusy] = useState(false)
   const [clearError, setClearError] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmStop, setConfirmStop] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<{ file: File; role: 'primary' | 'enum_mapping' }[]>([])
   const [pendingConfirmation, setPendingConfirmation] = useState<{id: string; content: string; version: number; run: Run} | null>(null)
   const [navOpen, setNavOpen] = useState(false)
@@ -474,9 +477,13 @@ export function App() {
     setPendingSend(null); setResolutionError(''); setResolutionConflict(false)
     if (next) { setMappingId(next.base_artifact_id); setMappingDraftId(next.id) }
   }
+  // #470：确认文案收进 ConfirmDialog；触发器只开弹窗，用户确认后才执行。
+  const requestClearBusiness = () => {
+    if (!activeId || identity?.role !== 'user' || clearBusy || busy) return
+    setConfirmClear(true)
+  }
   const clearBusiness = async () => {
     if (!activeId || identity?.role !== 'user' || clearBusy || busy) return
-    if (!window.confirm('清空当前业务数据将取消活动执行和待确认事项、丢弃未应用草稿。历史文件与结果仍可查看和下载，未发送文本会保留。确认清空？')) return
     const version = viewToken.current, id = activeId
     if (clearReceipt.current?.id !== id) clearReceipt.current = {id, key: crypto.randomUUID()}
     setClearBusy(true); setClearError('')
@@ -629,8 +636,12 @@ export function App() {
     catch (caught) { setError(caught instanceof Error ? caught.message : '重新执行失败。') }
     finally { setActionBusy(null) }
   }
+  const requestStopRun = (runId: string) => {
+    if (!activeId || actionBusy) return
+    setConfirmStop(runId)
+  }
   const stopRun = async (runId: string) => {
-    if (!activeId || actionBusy || !window.confirm('确认停止这次执行？已完成的正式结果会保留。')) return
+    if (!activeId || actionBusy) return
     setActionBusy(runId); setError('')
     try {
       const { token } = await api.cancelToken(runId)
@@ -777,7 +788,7 @@ export function App() {
       </div>
     </aside>
     <main className="workspace">
-      <header className="workspace-header"><div className="workspace-title"><h1>{workspaceTab === 'tasks' ? '我的任务' : workspaceTab === 'runs' ? '我的执行' : conversation?.title || '工作台'}</h1>{conversation && !renaming && <button className="button-text rename-trigger" aria-label="重命名会话" onClick={() => { setTitleDraft(conversation.title); setRenaming(true) }}>✎ 重命名</button>}{renaming && conversation && <><input aria-label="会话名称" autoFocus className="rename-input" value={titleDraft} onChange={event => { setTitleDraft(event.target.value) }} onKeyDown={event => { if (event.key === 'Enter') void submitRename(); if (event.key === 'Escape') setRenaming(false) }} /><button className="button-text" onClick={() => void submitRename()}>保存</button><button className="button-text" onClick={() => setRenaming(false)}>取消</button></>}<p>{conversation ? '会话与执行状态' : '从一条消息或一个文件开始'}</p></div><div className="header-actions">{conversation && <button className="button-text" onClick={() => { setSelectedResultId(null); openResource('results') }}>结果与产物</button>}{identity?.role === 'user' && activeId && <button className="button-text" onClick={() => void clearBusiness()} disabled={clearBusy || busy || loading}>{clearBusy ? '清空排队中…' : '清空业务数据（保留历史）'}</button>}{conversation && !resourceOpen && resourceTabs.length > 0 && <button className="button-secondary" onClick={() => { setResourceOpen(true); changeWorkspaceTab('conversation') }}>打开工作区</button>}<button className="icon-button" aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'} title={theme === 'light' ? '切换深色主题' : '切换浅色主题'} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '深色主题' : '浅色主题'}</button></div></header>
+      <header className="workspace-header"><div className="workspace-title"><h1>{workspaceTab === 'tasks' ? '我的任务' : workspaceTab === 'runs' ? '我的执行' : conversation?.title || '工作台'}</h1>{conversation && !renaming && <button className="button-text rename-trigger" aria-label="重命名会话" onClick={() => { setTitleDraft(conversation.title); setRenaming(true) }}>✎ 重命名</button>}{renaming && conversation && <><input aria-label="会话名称" autoFocus className="rename-input" value={titleDraft} onChange={event => { setTitleDraft(event.target.value) }} onKeyDown={event => { if (event.key === 'Enter') void submitRename(); if (event.key === 'Escape') setRenaming(false) }} /><button className="button-text" onClick={() => void submitRename()}>保存</button><button className="button-text" onClick={() => setRenaming(false)}>取消</button></>}<p>{conversation ? '会话与执行状态' : '从一条消息或一个文件开始'}</p></div><div className="header-actions">{conversation && <button className="button-text" onClick={() => { setSelectedResultId(null); openResource('results') }}>结果与产物</button>}{identity?.role === 'user' && activeId && <button className="button-text" onClick={requestClearBusiness} disabled={clearBusy || busy || loading}>{clearBusy ? '清空排队中…' : '清空业务数据（保留历史）'}</button>}{conversation && !resourceOpen && resourceTabs.length > 0 && <button className="button-secondary" onClick={() => { setResourceOpen(true); changeWorkspaceTab('conversation') }}>打开工作区</button>}<button className="icon-button" aria-label={theme === 'light' ? '切换深色主题' : '切换浅色主题'} title={theme === 'light' ? '切换深色主题' : '切换浅色主题'} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '深色主题' : '浅色主题'}</button></div></header>
       <div className="workspace-tabs" role="tablist" aria-label="工作区视图" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role=tab]')]
@@ -799,12 +810,12 @@ export function App() {
           {conversation.session_facts_error && <p className="mapping-error" role="alert">当前业务输入不可用，历史结果仍可查看。请重新加载或上传主数据。</p>}
           {identity?.role === 'user' && liveDrafts.length > 0 && <section className="activity-section"><h2>未应用的映射草稿</h2>{liveDrafts.map(item => <article className="result-card" key={item.id}><p>{item.changed_count} 处未应用修改{!item.base_current ? ' · 来源已过期' : ''}{item.status === 'applying' ? ' · 正在应用' : ''}</p><button className="button-secondary" onClick={() => { if (setMappingId(item.base_artifact_id)) setMappingDraftId(item.id) }}>恢复草稿</button></article>)}</section>}
         </>}</div>
-        {conversation && visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}>{diagnosticRunId ? <RunDiagnostics key={diagnosticRunId} initialRunId={diagnosticRunId} userMode onClose={() => setDiagnosticRunId(null)} /> : <TrajectoryLedger key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} onDetails={setDiagnosticRunId} targetId={traceTarget?.id} targetToken={traceTarget?.token} onRetry={id => void retryRun(id)} onStop={id => void stopRun(id)} canOperate={identity?.role === 'user'} busy={!!actionBusy} />}</div>}
+        {conversation && visitedTabs.includes('trace') && <div className="workbench-pane" hidden={workspaceTab !== 'trace'}>{diagnosticRunId ? <RunDiagnostics key={diagnosticRunId} initialRunId={diagnosticRunId} userMode onClose={() => setDiagnosticRunId(null)} /> : <TrajectoryLedger key={identity?.id + ':' + activeId} conversation={conversation} onOpen={openResult} onDetails={setDiagnosticRunId} targetId={traceTarget?.id} targetToken={traceTarget?.token} onRetry={id => void retryRun(id)} onStop={requestStopRun} canOperate={identity?.role === 'user'} busy={!!actionBusy} />}</div>}
       </div>
       {newReplies && workspaceTab === 'conversation' && <div className="new-replies-bar"><button className="button-secondary" onClick={() => { setNewReplies(false); stickToBottom.current = true; requestAnimationFrame(() => scrollConversationToEnd('smooth')) }}>有新回复 · 点击查看</button></div>}
       <div className="composer-region" hidden={workspaceTab !== "conversation"}><TaskHintBar state={hintState} status={hintedRun?.status} title={hintedRun ? businessName(hintedRun.kind || '') : ''} description={latestProgress && hintedRun && latestProgress.runId === hintedRun.id ? (hintedRun.status === 'running' && latestProgress.summary.phase === 'completed' ? '正在整理并发布结果' : progressLabel(latestProgress.summary)) : undefined}>
         {hintedRun && <button className="button-text" onClick={() => void openRun(hintedRun.id)}>{hintState === 'failed' ? '查看失败原因' : '查看执行详情'}</button>}
-        {activeRun && hintedRun?.id === activeRun.id && identity?.role === 'user' && <button className="button-text" onClick={() => void stopRun(activeRun.id)} disabled={!!actionBusy}>停止</button>}
+        {activeRun && hintedRun?.id === activeRun.id && identity?.role === 'user' && <button className="button-text" onClick={() => requestStopRun(activeRun.id)} disabled={!!actionBusy}>停止</button>}
       </TaskHintBar>
         {waitingRun && !pendingConfirmation && identity?.role === 'user' && <BusinessConfirmation key={identity.id + ':' + activeId + ':' + waitingRun.id} run={waitingRun} onBack={() => {void openRun(waitingRun.id)}} onResolved={() => refreshActive(activeId!)} />}
         {editingPending && <p className="mapping-hint composer-draft-hint" role="status">请先完成草稿保存或确认，再发送消息。</p>}{pendingFiles.length > 0 && <div className="upload-staging" aria-label="待上传文件">{pendingFiles.map((item, index) => <div className="upload-staging-row" key={item.file.name + ':' + index}><strong className="upload-staging-name">{item.file.name}</strong><label>用途<select aria-label={item.file.name + ' 用途'} value={item.role} onChange={event => setPendingFiles(current => current.map((entry, position) => position === index ? { ...entry, role: event.target.value as 'primary' | 'enum_mapping' } : entry))} disabled={busy || uploading || clearBusy || loading}><option value="primary">日志或规则主数据</option><option value="enum_mapping">枚举映射附件</option></select></label><button type="button" className="button-text" aria-label={'移除 ' + item.file.name} onClick={() => setPendingFiles(current => current.filter((_, position) => position !== index))} disabled={busy || uploading || clearBusy}>移除</button></div>)}<div className="upload-staging-actions"><button className="button-secondary" onClick={() => void uploadPending()} disabled={busy || uploading || clearBusy || loading}>{busy || uploading ? '上传中…' : '上传 ' + pendingFiles.length + ' 份'}</button><button className="button-text" onClick={() => setPendingFiles([])} disabled={busy || uploading || clearBusy || loading}>清空待传</button><span className="composer-hint">xlsx 默认按枚举映射附件上传，可逐份调整用途</span></div></div>}<div className="composer"><textarea aria-label="消息内容" placeholder="描述要处理的日志、字段或规则…" value={draft} onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} rows={2} disabled={busy || clearBusy || loading || !!pendingSend || !!pendingConfirmation} /><div className="composer-toolbar"><div><input ref={fileInput} type="file" multiple hidden aria-label="选择文件" onChange={event => stageFiles(event.target.files)} /><button className="attach-button" onClick={() => fileInput.current?.click()} disabled={busy || uploading || clearBusy || loading}>＋ 添加文件</button><span className="composer-hint">Enter 发送 · Shift+Enter 换行</span></div><button className="button-primary send-button" onClick={() => void send()} disabled={!draft.trim() || busy || uploading || clearBusy || loading || editingPending || !!pendingSend || !!pendingConfirmation}>{busy ? '处理中…' : uploading ? '上传校验中…' : '发送'}</button></div></div>
@@ -823,5 +834,8 @@ export function App() {
     {pendingConfirmation && <MappingDialog title="发送前处理执行方案" onClose={() => setPendingConfirmation(null)}><BusinessConfirmation key={identity?.id + ':' + activeId + ':' + pendingConfirmation.run.id + ':send'} run={pendingConfirmation.run} beforeSend onBack={() => setPendingConfirmation(null)} onResolved={async () => {const pending = pendingConfirmation; if (!isCurrent(pending.version, pending.id)) return; await refreshActive(pending.id); if (isCurrent(pending.version, pending.id)) await sendContent(pending.id, pending.content, pending.version)}} /></MappingDialog>}
 
     {pendingSend && <MappingDialog title="发送前处理映射草稿" onClose={returnToEditing}><p>消息尚未发送。请处理{pendingSend.drafts.length > 1 ? '当前草稿，再逐个处理其余草稿' : '未应用的修改'}。</p>{pendingSend.drafts[0] && <p>{pendingSend.drafts[0].changed_count} 处修改{!pendingSend.drafts[0].base_current ? '，来源已过期，只能丢弃或返回查看' : ''}。</p>}{resolutionError && <p role="alert" className="mapping-error">{resolutionError}</p>}<div className="mapping-actions"><button className="button-text" data-dialog-cancel onClick={returnToEditing} disabled={busy}>返回编辑</button>{pendingSend.drafts.length ? <><button className="button-text" onClick={() => void resolveSend('apply')} disabled={busy || resolutionConflict || !pendingSend.drafts[0].base_current}>应用后发送</button><button className="button-text" onClick={() => void resolveSend('discard')} disabled={busy || resolutionConflict || pendingSend.drafts[0].status === 'applying'}>丢弃后发送</button></> : <button className="button-text" onClick={() => { const pending = pendingSend; setPendingSend(null); setBusy(true); void sendContent(pending.id, pending.content, pending.version).catch(caught => { if (isCurrent(pending.version, pending.id)) setError(caught instanceof Error ? caught.message : '消息发送失败。') }).finally(() => { if (isCurrent(pending.version, pending.id)) setBusy(false) }) }}>继续发送</button>}<button className="button-text" onClick={() => void reloadResolution()} disabled={busy}>重新加载草稿状态</button></div></MappingDialog>}
+
+    {confirmClear && <ConfirmDialog title="清空业务数据" message="清空当前业务数据将取消活动执行和待确认事项、丢弃未应用草稿。历史文件与结果仍可查看和下载，未发送文本会保留。确认清空？" confirmLabel="清空" onConfirm={() => { setConfirmClear(false); void clearBusiness() }} onCancel={() => setConfirmClear(false)} />}
+    {confirmStop && <ConfirmDialog title="停止执行" message="确认停止这次执行？已完成的正式结果会保留。" confirmLabel="停止执行" onConfirm={() => { const runId = confirmStop; setConfirmStop(null); void stopRun(runId) }} onCancel={() => setConfirmStop(null)} />}
   </div>
 }
