@@ -136,10 +136,10 @@ describe('V2 workbench', () => {
     const input = screen.getByLabelText('选择文件')
     fireEvent.change(input, { target: { files: [new File(['line'], 'log.txt', { type: 'text/plain' })] } })
     fireEvent.click(screen.getByRole('button', { name: '上传 1 份' }))
-    await waitFor(() => expect(api.uploadFile).toHaveBeenCalledWith('conv-1', expect.objectContaining({ name: 'log.txt' }), 'primary'))
+    await waitFor(() => expect(api.uploadFile).toHaveBeenCalledWith('conv-1', expect.objectContaining({ name: 'log.txt' }), 'auto'))
     expect(await screen.findByText('文件已上传并完成校验。')).toBeInTheDocument()
   })
-  it('stages multiple selections with default roles per extension and uploads them in order (#454)', async () => {
+  it('stages multiple selections defaulting to auto sniffing and uploads them in order (#454, #471)', async () => {
     vi.mocked(api.uploadFile).mockImplementation(async (_id: string, file: File) => ({ file: { id: file.name === '威胁字段映射.xlsx' ? 'f-map' : 'f-rules', name: file.name }, task: { id: 't1', status: 'queued' }, run: { id: 'r1', status: 'queued' } }))
     vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [
       { id: 'f-map', name: '威胁字段映射.xlsx', parse_status: 'succeeded' },
@@ -151,19 +151,21 @@ describe('V2 workbench', () => {
     const staging = screen.getByLabelText('待上传文件')
     expect(within(staging).getByText('威胁字段映射.xlsx')).toBeInTheDocument()
     expect(within(staging).getByText('parser.txt')).toBeInTheDocument()
-    expect((screen.getByLabelText('威胁字段映射.xlsx 用途') as HTMLSelectElement).value).toBe('enum_mapping')
-    expect((screen.getByLabelText('parser.txt 用途') as HTMLSelectElement).value).toBe('primary')
+    expect(within(staging).getAllByRole('option', { name: '自动识别' })).toHaveLength(2)
+    expect((screen.getByLabelText('威胁字段映射.xlsx 用途') as HTMLSelectElement).value).toBe('auto')
+    expect((screen.getByLabelText('parser.txt 用途') as HTMLSelectElement).value).toBe('auto')
     fireEvent.click(screen.getByRole('button', { name: '上传 2 份' }))
     await waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(2))
-    expect(api.uploadFile).toHaveBeenNthCalledWith(1, 'conv-1', expect.objectContaining({ name: '威胁字段映射.xlsx' }), 'enum_mapping')
-    expect(api.uploadFile).toHaveBeenNthCalledWith(2, 'conv-1', expect.objectContaining({ name: 'parser.txt' }), 'primary')
+    expect(api.uploadFile).toHaveBeenNthCalledWith(1, 'conv-1', expect.objectContaining({ name: '威胁字段映射.xlsx' }), 'auto')
+    expect(api.uploadFile).toHaveBeenNthCalledWith(2, 'conv-1', expect.objectContaining({ name: 'parser.txt' }), 'auto')
     expect(await screen.findByText('文件已上传并完成校验。')).toBeInTheDocument()
   })
-  it('allows adjusting a staged role and removing entries before batch upload (#454)', async () => {
+  it('keeps an explicit primary selection over auto sniffing and removes entries before batch upload (#454, #471)', async () => {
     vi.mocked(api.conversation).mockResolvedValue({ ...detail, files: [{ id: 'f1', name: '原始日志.xlsx', parse_status: 'succeeded' }] })
     renderApp()
     await screen.findByRole('heading', { name: '日志任务' })
     fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['table'], '原始日志.xlsx'), new File(['raw'], 'events.log', { type: 'text/plain' })] } })
+    expect((screen.getByLabelText('原始日志.xlsx 用途') as HTMLSelectElement).value).toBe('auto')
     fireEvent.change(screen.getByLabelText('原始日志.xlsx 用途'), { target: { value: 'primary' } })
     fireEvent.click(screen.getByRole('button', { name: '移除 events.log' }))
     fireEvent.click(screen.getByRole('button', { name: '上传 1 份' }))

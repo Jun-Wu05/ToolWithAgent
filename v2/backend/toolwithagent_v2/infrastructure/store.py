@@ -153,7 +153,7 @@ class Store:
         return result
 
     def upload(self, owner_id, conversation_id, upload, idempotency_key=None, role="primary"):
-        if role not in {"primary", "enum_mapping"}:
+        if role not in {"primary", "enum_mapping", "auto"}:
             raise ValueError("invalid_upload_role")
         with connect(self.path) as db:
             self.owns(db, conversation_id, owner_id)
@@ -180,6 +180,9 @@ class Store:
             if size == 0:
                 raise ValueError("empty_file")
             sha = digest.hexdigest()
+            # #471：auto 只在 xlsx 上嗅探——映射表自动归附件，数据类回退主数据；显式角色不经此路径。
+            if role == "auto":
+                role = "enum_mapping" if suffix == ".xlsx" and self._looks_like_enum_mapping(stage) else "primary"
             request_hash = hashlib.sha256(json.dumps([conversation_id, original, media, sha, role], separators=(",", ":")).encode()).hexdigest()
             key = f"uploads/{sha[:2]}/{sha}"
             final = self.root / key
@@ -217,6 +220,30 @@ class Store:
             return result
         finally:
             stage.unlink(missing_ok=True)
+
+    def _looks_like_enum_mapping(self, path) -> bool:
+        """#471：auto 嗅探双关判定——必需列表头（mappingType/orgValue/mappingValue 或 匹配方式/原始值/映射值）
+        且全簿通过枚举映射解析；任意一关不过都按主数据处理。openpyxl 按扩展名识别格式，
+        与 attach_enum/枚举预览相同经 staging 临时副本读取。"""
+        try:
+            from tempfile import TemporaryDirectory
+            from openpyxl import load_workbook
+            from agent.tools import read_enum_mappings_from_excel
+            with TemporaryDirectory(dir=self.root / "staging", prefix="enum-sniff-") as folder:
+                source = Path(folder) / "attachment.xlsx"
+                source.write_bytes(Path(path).read_bytes())
+                workbook = load_workbook(source, read_only=True, data_only=True)
+                try:
+                    for sheet in workbook.worksheets:
+                        header = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                        cells = [str(cell).strip().lower() for cell in header or () if cell is not None]
+                        if {"mappingtype", "orgvalue", "mappingvalue"} <= set(cells) or {"匹配方式", "原始值", "映射值"} <= set(cells):
+                            return bool(read_enum_mappings_from_excel(str(source)))
+                finally:
+                    workbook.close()
+        except Exception:
+            return False
+        return False
 
     def _enqueue_task(self, db, owner_id, conversation_id, kind, snapshot):
         timestamp = now()
