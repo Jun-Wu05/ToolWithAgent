@@ -99,6 +99,71 @@ def test_upload_validation_and_no_path_leak(tmp_path):
     assert response.status_code == 413
 
 
+def _xlsx_bytes(sheet_name, header, rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = sheet_name
+    sheet.append(header)
+    for row in rows:
+        sheet.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+MAPPING_XLSX = _xlsx_bytes("threat_type", ["mappingType", "orgValue", "mappingValue"], [["EQUAL", "sql注入", "SQL注入"]])
+CHINESE_HEADER_XLSX = _xlsx_bytes("威胁类型", ["匹配方式", "原始值", "映射值"], [["EQUAL", "sql注入", "SQL注入"]])
+DATA_XLSX = _xlsx_bytes("登录日志", ["时间", "事件", "结果"], [["2026-11-26 10:00", "登录", "成功"]])
+
+
+def test_upload_role_auto_sniffs_mapping_table_into_enum_attachment(tmp_path):
+    client, store = setup(tmp_path)
+    conversation = client.post("/api/v2/conversations", json={}).json()
+    url = f"/api/v2/conversations/{conversation['id']}"
+    headers = {"Idempotency-Key": "auto-map"}
+    first = client.post(url + "/files", files={"file": ("映射表.xlsx", MAPPING_XLSX)}, data={"role": "auto"}, headers=headers)
+    assert first.status_code == 201
+    assert first.json()["file"]["role"] == "enum_mapping"
+    with connect(store.path) as db:
+        assert db.execute("SELECT role FROM files").fetchone()[0] == "enum_mapping"
+    # #471：同 key 重放命中同一回执——嗅探结果稳定，解析出的角色参与请求哈希。
+    repeated = client.post(url + "/files", files={"file": ("映射表.xlsx", MAPPING_XLSX)}, data={"role": "auto"}, headers=headers)
+    assert repeated.json() == first.json()
+
+
+def test_upload_role_auto_recognizes_chinese_header_mapping_table(tmp_path):
+    client, _ = setup(tmp_path)
+    conversation = client.post("/api/v2/conversations", json={}).json()
+    response = client.post(f"/api/v2/conversations/{conversation['id']}/files", files={"file": ("映射表.xlsx", CHINESE_HEADER_XLSX)}, data={"role": "auto"})
+    assert response.json()["file"]["role"] == "enum_mapping"
+
+
+def test_upload_role_auto_routes_data_xlsx_and_non_xlsx_to_primary(tmp_path):
+    client, _ = setup(tmp_path)
+    conversation = client.post("/api/v2/conversations", json={}).json()
+    url = f"/api/v2/conversations/{conversation['id']}"
+    data = client.post(url + "/files", files={"file": ("日志数据.xlsx", DATA_XLSX)}, data={"role": "auto"})
+    assert data.status_code == 201
+    assert data.json()["file"]["role"] == "primary"
+    csv = client.post(url + "/files", files={"file": ("events.csv", b"time,event\n1,login")}, data={"role": "auto"})
+    assert csv.json()["file"]["role"] == "primary"
+    txt = client.post(url + "/files", files={"file": ("parser.txt", b"rules")}, data={"role": "auto"})
+    assert txt.json()["file"]["role"] == "primary"
+
+
+def test_upload_explicit_roles_keep_precedence_over_sniffing(tmp_path):
+    client, _ = setup(tmp_path)
+    conversation = client.post("/api/v2/conversations", json={}).json()
+    url = f"/api/v2/conversations/{conversation['id']}"
+    primary = client.post(url + "/files", files={"file": ("映射表.xlsx", MAPPING_XLSX)}, data={"role": "primary"})
+    assert primary.json()["file"]["role"] == "primary"
+    explicit = client.post(url + "/files", files={"file": ("映射表2.xlsx", MAPPING_XLSX)}, data={"role": "enum_mapping"})
+    assert explicit.json()["file"]["role"] == "enum_mapping"
+    bad = client.post(url + "/files", files={"file": ("a.csv", b"a,b")}, data={"role": "unknown"})
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "invalid_upload_role"
+
+
 def test_production_has_no_dev_routes(tmp_path):
     client = TestClient(create_app(Settings(data_dir=tmp_path / "prod", development=False)))
     assert client.get("/api/v2/dev/identities").status_code == 404

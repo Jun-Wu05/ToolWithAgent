@@ -27,13 +27,13 @@ beforeEach(() => {
   vi.mocked(api.run).mockResolvedValue({id: 'r2', status: 'succeeded'})
 })
 afterEach(() => {cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals()})
-it('uploads an enum attachment with its xlsx-defaulted role and reports natural-language task semantics', async () => {
+it('uploads a staged file with the auto sniffing role and reports natural-language task semantics (#471)', async () => {
   vi.mocked(api.conversation).mockResolvedValue({...detail, files: [{id: 'f1', name: 'enum.xlsx', parse_status: 'succeeded'}]})
   render(<App />); await screen.findByRole('heading', {name: '后处理任务'})
   fireEvent.change(screen.getByLabelText('选择文件'), {target: {files: [new File(['x'], 'enum.xlsx')]}})
-  expect((screen.getByLabelText('enum.xlsx 用途') as HTMLSelectElement).value).toBe('enum_mapping')
+  expect((screen.getByLabelText('enum.xlsx 用途') as HTMLSelectElement).value).toBe('auto')
   fireEvent.click(screen.getByRole('button', {name: '上传 1 份'}))
-  await waitFor(() => expect(api.uploadFile).toHaveBeenCalledWith('c1', expect.objectContaining({name: 'enum.xlsx'}), 'enum_mapping'))
+  await waitFor(() => expect(api.uploadFile).toHaveBeenCalledWith('c1', expect.objectContaining({name: 'enum.xlsx'}), 'auto'))
   await waitFor(() => expect(screen.getByLabelText('消息内容')).not.toBeDisabled())
   fireEvent.change(screen.getByLabelText('消息内容'), {target: {value: '处理日志'}}); fireEvent.click(screen.getByRole('button', {name: '发送'}))
   expect(await screen.findByText('消息已创建业务任务，执行结果将在会话中显示。')).toBeInTheDocument()
